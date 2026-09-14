@@ -183,6 +183,36 @@ test('AI analysis creates a developer job with owner origin and refuses missing 
   assert.match(replies.at(-1).text, /需要配置开发和项目负责人/);
 });
 
+test('ordinary members may chat and investigate read-only source but cannot create executable work', async (t) => {
+  let intent = 'implementation';
+  const { send, app, replies } = await setup(t, () => decision({ action: 'create_task', intent,
+    instruction: intent === 'analysis' ? '只读排查登录接口，不修改文件' : '修改登录接口并运行测试' }));
+  for (const denied of ['implementation', 'planning', 'verification', 'audit']) {
+    intent = denied;
+    await send(message(`deny-${denied}`, '请开始执行', { sender_id: 'ordinary-member' }));
+    assert.match(replies.at(-1).text, /只有真人管理员/);
+  }
+  assert.equal((await app.store.read()).jobs.length, 0);
+  intent = 'analysis';
+  await send(message('allow-analysis', '只读帮我排查登录接口', { sender_id: 'ordinary-member' }));
+  const jobs = (await app.store.read()).jobs;
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].taskIntent, 'analysis');
+  assert.equal(jobs[0].senderId, 'ordinary-member');
+});
+
+test('ordinary task creator cannot resume an existing implementation job', async (t) => {
+  let jobId;
+  const { send, app, replies } = await setup(t, () => decision({ action: 'clarify', jobId, instruction: '继续修改登录接口' }));
+  const { job } = await app.store.createJob({ chatId: 'group', projectId: 'demo', stage: 'developer', agentProfile: 'owner',
+    originProfile: 'owner', senderId: 'ordinary-member', workflow: 'single_developer', taskIntent: 'implementation',
+    instruction: '修改登录接口', status: 'awaiting_clarification' });
+  jobId = job.id;
+  await send(message('deny-implementation-clarify', '补充后继续执行', { sender_id: 'ordinary-member' }));
+  assert.match(replies.at(-1).text, /只有真人管理员/);
+  assert.equal((await app.store.getJob(job.id)).status, 'awaiting_clarification');
+});
+
 test('new result contract prevents failed QA/audit from awaiting approval and sends evidence', async (t) => {
   const { app, context, replies } = await setup(t, () => decision());
   const { job } = await app.store.createJob({ chatId: 'group', projectId: 'demo', stage: 'qa', workflow: 'qa_audit', instruction: '测试登录', status: 'running' });

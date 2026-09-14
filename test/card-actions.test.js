@@ -23,9 +23,9 @@ async function setup(t, autoCleanup = true) {
   const context = { store, cards, feishu, projects: { ownerOpenIdsByProfile: { owner: ['admin'], pm: ['admin-pm'] } },
     agents: { agents: { owner_intake: { profile: 'owner' }, pm: { profile: 'pm' } } } };
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
-  const create = async (status = 'awaiting_clarification') => {
+  const create = async (status = 'awaiting_clarification', taskIntent = 'implementation') => {
     const { job } = await store.createJob({ stage: 'owner_intake', agentProfile: 'owner', originProfile: 'owner', senderId: 'creator',
-      chatId: 'group', projectId: 'demo', projectName: 'demo', workflow: 'full_delivery', instruction: '原始要求', status });
+      chatId: 'group', projectId: 'demo', projectName: 'demo', workflow: 'full_delivery', taskIntent, instruction: '原始要求', status });
     const key = `job:${job.id}:first`;
     const messageId = await cards.upsert(key, jobCard(job), { chatId: 'group', replyTo: null, profile: 'owner' },
       { terminal: !['queued', 'running'].includes(status), immediate: true });
@@ -52,7 +52,7 @@ test('waiting card has bounded form and state-specific buttons, no callbacks on 
 
 test('clarification is atomic, duplicate event retries do not rerun, old card cannot cancel new attempt', async (t) => {
   const { context, create, store } = await setup(t);
-  const { job, event } = await create();
+  const { job, event } = await create('awaiting_clarification', 'analysis');
   const submit = event('clarify', { action_name: `clarify_${jobActionVersion(job)}`, form_value: JSON.stringify({ clarification: '允许只读分析路径 D:/demo' }) });
   assert.equal((await handleCardAction(context, submit)).ok, true);
   assert.equal((await handleCardAction(context, submit)).ok, true);
@@ -60,6 +60,17 @@ test('clarification is atomic, duplicate event retries do not rerun, old card ca
   assert.equal(updated.status, 'queued');
   assert.equal(updated.events.filter((e) => e.type === 'clarification_received').length, 1);
   assert.equal((await handleCardAction(context, event('cancel'))).ok, false);
+  assert.equal((await store.getJob(job.id)).status, 'queued');
+});
+
+test('ordinary creator cannot continue implementation from a clarification card; administrator can', async (t) => {
+  const { context, create, store } = await setup(t);
+  const { job, event } = await create('awaiting_clarification', 'implementation');
+  const submit = (operatorId) => event('clarify', { operator_id: operatorId,
+    action_name: `clarify_${jobActionVersion(job)}`, form_value: JSON.stringify({ clarification: '继续修改登录接口' }) });
+  assert.equal((await handleCardAction(context, submit('creator'))).ok, false);
+  assert.equal((await store.getJob(job.id)).status, 'awaiting_clarification');
+  assert.equal((await handleCardAction(context, submit('admin'))).ok, true);
   assert.equal((await store.getJob(job.id)).status, 'queued');
 });
 

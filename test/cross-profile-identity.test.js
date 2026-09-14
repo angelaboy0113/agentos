@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { isTaskCreator, isAdministrator, validateHumanIdentities } from '../src/control-plane/authorization.js';
+import { canContinueTask, canCreateTask, isTaskCreator, isAdministrator, validateHumanIdentities } from '../src/control-plane/authorization.js';
 import { loadProjects, saveProjects } from '../src/control-plane/config.js';
 import { JsonStore } from '../src/shared/store.js';
 import { LiveCards } from '../src/control-plane/live-cards.js';
@@ -23,6 +23,13 @@ test('verified cross-profile creator mapping is not an administrator grant; ambi
   assert.equal(isTaskCreator({}, job, { profile: 'dev', senderId: 'alice-dev' }), false);
   assert.equal(isTaskCreator({}, {}, {}), false);
   assert.equal(isAdministrator(projects, { profile: 'dev', senderId: 'alice-dev' }), false);
+  assert.equal(canCreateTask(projects, { profile: 'dev', senderId: 'alice-dev' }, 'analysis'), true);
+  for (const intent of ['implementation', 'planning', 'verification', 'audit']) {
+    assert.equal(canCreateTask(projects, { profile: 'dev', senderId: 'alice-dev' }, intent), false);
+  }
+  assert.equal(canContinueTask(projects, { taskIntent: 'analysis' }, { profile: 'dev', senderId: 'alice-dev' }), true);
+  assert.equal(canContinueTask(projects, { taskIntent: 'implementation' }, { profile: 'dev', senderId: 'alice-dev' }), false);
+  assert.equal(canCreateTask(projects, { profile: 'dev', senderId: 'boss-dev' }, 'implementation'), true);
   const ambiguous = { ...projects, humanIdentities: { ...projects.humanIdentities, other: { owner: 'alice-owner', dev: 'stranger' } } };
   assert.throws(() => validateHumanIdentities(ambiguous.humanIdentities), /Ambiguous/);
   assert.equal(isTaskCreator(ambiguous, job, { profile: 'dev', senderId: 'stranger' }), false);

@@ -20,6 +20,17 @@ export function isAdministrator(projects, actor) {
   return (scoped ?? projects.ownerOpenIds ?? []).includes(actor.senderId);
 }
 
+// Non-administrators may chat and create only the explicitly read-only analysis workflow.
+// This gate is enforced after AI intent classification and before any Job is persisted.
+export function canCreateTask(projects, actor, intent) {
+  return intent === 'analysis' || isAdministrator(projects, actor);
+}
+
+// Clarification resumes execution, so non-admins may continue only read-only analysis Jobs.
+export function canContinueTask(projects, job, actor) {
+  return job?.taskIntent === 'analysis' || isAdministrator(projects, actor);
+}
+
 export function isTaskCreator(projects, record, actor) {
   if (!record?.senderId || !actor?.senderId) return false;
   const origin = record.originProfile ?? record.agentProfile ?? record.profile;

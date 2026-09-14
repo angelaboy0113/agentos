@@ -1,6 +1,6 @@
 import { jobActionVersion, jobCard } from './message-cards.js';
 import { nextStage } from '../shared/protocol.js';
-import { isAdministrator, isTaskCreator } from './authorization.js';
+import { canContinueTask, isAdministrator, isTaskCreator } from './authorization.js';
 import { handleResultPage } from './result-page-actions.js';
 
 const parse = (value) => typeof value === 'string' ? JSON.parse(value || '{}') : value ?? {};
@@ -54,6 +54,9 @@ export async function handleCardAction(context, event) {
       const approved = await store.approve(job.id, event.operator_id, routing, effectKey, guard);
       result = { ...approved, message: '已确认，下一阶段已排队。' };
     } else {
+      if (!canContinueTask(projects, job, { profile, senderId: event.operator_id })) {
+        throw new Error('只有真人管理员可以补充并继续非只读任务；普通成员只能继续自己的只读源码排查。');
+      }
       const instruction = String(parse(event.form_value).clarification ?? '').trim();
       if (!instruction || instruction.length > 1000) throw new Error('请填写 1–1000 字的补充信息。');
       const updated = await store.resumeClarification(job.id, { instruction }, effectKey, guard);

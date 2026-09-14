@@ -3,7 +3,7 @@ import { CodexConversationEngine, validateDecision } from './codex-conversation.
 import { saveProjects } from './config.js';
 import { conversationCard } from './message-cards.js';
 import path from 'node:path';
-import { isAdministrator, isTaskCreator } from './authorization.js';
+import { canContinueTask, canCreateTask, isAdministrator, isTaskCreator } from './authorization.js';
 import { conversationTerminalMention } from './requester-mention.js';
 export { isAdministrator } from './authorization.js';
 
@@ -292,6 +292,9 @@ export class ConversationService {
     if (!projectId || !projects.projects[projectId]) throw new Error('本群尚未绑定有效代码项目，可以先继续讨论。');
     if (decision.projectId && decision.projectId !== projectId) throw new Error('不能操作本群绑定范围外的项目。');
     if (decision.action === 'create_task') {
+      if (!canCreateTask(projects, turn, decision.intent)) {
+        throw new Error('只有真人管理员可以创建会执行修改、规划、测试或审计的任务；普通成员可以继续提问，或发起只读源码排查。');
+      }
       const route = routeDecision(turn.role, decision.intent);
       const routing = agentRouting(this.context, route.stage);
       if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
@@ -319,6 +322,9 @@ export class ConversationService {
     }
     if (!admin && !isTaskCreator(projects, job, turn)) throw new Error('只有任务发起人或真人管理员可以补充/取消该任务；转交后需配置跨应用真人身份映射。');
     if (decision.action === 'clarify') {
+      if (!canContinueTask(projects, job, turn)) {
+        throw new Error('只有真人管理员可以补充并继续非只读任务；普通成员只能继续自己的只读源码排查。');
+      }
       const resumed = await store.resumeClarification(job.id, {
         instruction: decision.instruction, sourceMessageId: turn.id, replyToMessageId: turn.messageId,
         senderId: turn.senderId, attachments,

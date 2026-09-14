@@ -15,7 +15,8 @@ The repository `.gitignore` blocks the standard local paths, but ignoring a file
 
 - Keep the default control plane on `127.0.0.1`. Do not expose port 8787 directly to the Internet.
 - Give each Feishu application only the permissions required for bot messages, message resources and card callbacks.
-- Keep the human approval gate. A role prompt is a behavioral rule; process permissions and sandbox flags are the enforceable boundary.
+- Keep the administrator execution and human approval gates. Ordinary group members may chat and request read-only `analysis`; only configured human administrators may create or continue implementation, planning, verification, audit or deployment Jobs. A role prompt is a behavioral rule; process permissions and sandbox flags are the enforceable boundary.
+- Treat `humanIdentities` only as a verified cross-bot identity map. It must never grant administrator, code modification or approval rights.
 - Use a dedicated developer machine or account for unattended startup. Protect that account with disk encryption and screen locking.
 - Runner worktrees may contain proprietary source and uncommitted changes. Back them up and delete them under the owning business repository's Git worktree procedure.
 
