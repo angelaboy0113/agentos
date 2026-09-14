@@ -22,14 +22,17 @@ export class LiveCards {
     this.timer = setInterval(() => this.retry().catch(() => {}), 1000); this.timer.unref();
   }
   async stop() { this.closed = true; clearInterval(this.timer); await Promise.allSettled(this.workers.values()); }
-  async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '' } = {}) {
+  async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '', terminalMention = null } = {}) {
     if (Buffer.byteLength(JSON.stringify(card)) > 28_000) throw new Error('Card exceeds safe message limit');
     await this.store.transact((state) => {
       state.cardMessages ??= {};
       const existing = state.cardMessages[key];
       if (existing?.terminal && !terminal) return; // Late progress cannot overwrite a conclusion.
       if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
+      if (existing?.terminalMention && terminalMention
+        && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
       state.cardMessages[key] = { ...existing, destination, card, terminal, overflow: [],
+        terminalMention: existing?.terminalMention ?? (terminal ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });
@@ -40,7 +43,7 @@ export class LiveCards {
     if (this.closed) return;
     const state = await this.store.read();
     for (const [key, value] of Object.entries(state.cardMessages ?? {})) {
-      if (value.revision !== value.deliveredRevision
+      if ((value.revision !== value.deliveredRevision || (value.terminalMention && !value.mentionDelivered))
         && Date.now() >= (value.retryAt ?? 0)) this.flush(key).catch(() => {});
     }
   }
@@ -56,7 +59,7 @@ export class LiveCards {
   }
   async deliver(key, force) {
     const entry = (await this.store.read()).cardMessages?.[key];
-    if (!entry || entry.revision === entry.deliveredRevision) return entry?.messageId;
+    if (!entry || (entry.revision === entry.deliveredRevision && (!entry.terminalMention || entry.mentionDelivered))) return entry?.messageId;
     // A local maintenance hold prevents external edits while operator approval is pending.
     if (entry.messageId) {
       try {
@@ -83,13 +86,22 @@ export class LiveCards {
         Object.assign(state.cardMessages[key], { messageId, deliveredRevision: entry.revision,
           sentAt: Date.now(), failures: 0, retryAt: 0 });
       });
+      if (entry.terminalMention && !entry.mentionDelivered) {
+        await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
+          profile: entry.terminalMention.profile,
+          idempotencyKey: `aos-mention-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`,
+        });
+        await this.store.transact((state) => {
+          Object.assign(state.cardMessages[key], { mentionDelivered: true, failures: 0, retryAt: 0 });
+        });
+      }
       // Long reports stay in the same card. Never resume legacy plaintext overflow on restart.
       return messageId;
     } catch (error) {
       await this.store.transact((state) => {
         const current = state.cardMessages[key]; current.failures = (current.failures ?? 0) + 1;
         current.retryAt = Date.now() + Math.min(60_000, current.failures * 5000);
-        current.error = '卡片投递失败，等待重试'; // Never persist raw CLI credentials in public status.
+        current.error = '消息投递失败，等待重试'; // Never persist raw CLI credentials in public status.
       });
       throw error;
     }

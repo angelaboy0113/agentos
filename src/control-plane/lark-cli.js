@@ -62,7 +62,7 @@ export class LarkCliFeishuClient {
     const digest = createHash('sha256').update(`${messageId}\n${text}`).digest('hex').slice(0, 20);
     return runLarkCli([
       'im', '+messages-reply', '--as', 'bot', '--message-id', messageId,
-      '--text', text, '--idempotency-key', `agentos-${digest}`, '--json',
+      '--text', text, '--idempotency-key', options.idempotencyKey ?? `agentos-${digest}`, '--json',
     ], { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile, timeoutMs: options.timeoutMs });
   }
 

@@ -31,13 +31,13 @@ export class FeishuClient {
     return this.token;
   }
 
-  async reply(messageId, text) {
+  async reply(messageId, text, options = {}) {
     if (!this.enabled || !messageId) return;
     const token = await this.tenantToken();
     const response = await fetch(`${OPEN_API}/im/v1/messages/${encodeURIComponent(messageId)}/reply`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ msg_type: 'text', content: JSON.stringify({ text }) }),
+      body: JSON.stringify({ msg_type: 'text', content: JSON.stringify({ text }), uuid: options.idempotencyKey }),
     });
     if (!response.ok) throw new Error(`Feishu reply failed: HTTP ${response.status}`);
     const result = await response.json();

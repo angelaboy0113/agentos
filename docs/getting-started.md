@@ -162,6 +162,11 @@ lark-cli --profile agentos-owner event consume im.message.receive_v1 --as bot
 - `baseBranch` 必须在项目仓库本地存在。
 - `verifyCommands` 由项目负责人审阅后填写；Java、前端和其他工程不能照抄 `npm test`。
 - 普通发起人不自动拥有审批权。管理员按对应 profile 的真人 ID 校验。
+- `humanIdentities` 最外层键只是本机稳定代号，例如 `leader`、`alice`，不要求等于飞书姓名；同一组内必须是同一个真人在五个机器人应用视角下分别收到的 `open_id`，禁止把一个值复制五次。
+- 每位需要跨 Agent 补充、刷新或取消自己任务的成员，都要在五个临时事件监听器中各 `@` 一次对应机器人，再将五个 `sender_id` 写入同一组。只在一个 Agent 下对话的普通成员无需提前登记。
+- `humanIdentities` 只延续任务发起人权限，不会让普通成员变成管理员；审批仍只看 `ownerOpenIdsByProfile`。
+
+群聊里的普通问答完成后，机器人会另回一条原生飞书 `@` 给本次提问人。任务最终完成、受阻、失败或取消后，由最初接单的机器人回复原始消息并 `@` 原任务发起人；中间阶段的“待确认/待补充”不会误报为任务结束。该提醒不要求 `humanIdentities`，但跨 Agent 操作仍要求完整映射。
 
 ## 9. 配置 Codex 路径和网络
 

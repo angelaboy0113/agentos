@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.0.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.0.1** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -43,6 +43,7 @@ Set-Location .\agentos
 - 每条发给机器人的消息都调用 Codex：普通聊天直接回复，AI 结合上下文判断是否创建/补充/审批任务，不使用问候/任务关键词词表。
 - 对话使用独立只读 Codex；持久化最近对话与任务上下文，供自然语言指代续接。AI 失败如实反馈，不伪装为规则答复。
 - 信息不足的项目负责人任务进入 `awaiting_clarification`，补充后续接同一个 Job。
+- 群聊回答结束后，原机器人会回复原消息并 `@` 本次提问人；完整任务最终完成、受阻、失败或取消后，会由最初接单的机器人 `@` 原任务发起人。提醒进入持久化 outbox，网络失败只重试提醒，不重跑 AI 或任务。
 
 ## 只读代码分析（2026-09-06）
 
@@ -155,6 +156,8 @@ Set-Location D:\projects\agentos
 ```
 
 多飞书应用下同一用户的 `open_id` 可能不同，`projects.local.json` 支持 `ownerOpenIdsByProfile.agentos-owner` 保存项目负责人机器人视角下的管理员身份。
+
+普通成员可以发起任务；只有真人管理员能放行阶段。若成员要在任务转交后通过另一个 Agent 的消息或卡片继续补充、刷新或取消，需要在 `humanIdentities` 中把该真人在每个机器人 profile 下的 `open_id` 配成一组。这里的映射只识别“同一个发起人”，不会授予管理员权限。结束时的 `@` 提醒不依赖这份跨应用映射：系统固定使用原机器人回复原消息，因此会准确提醒原发起人。
 
 只发图片也会调用 AI 理解，缺少任务意图时自然追问；后续可引用历史图片。聊天图片通过 app-server 的 `localImage` 交给 Codex，研发任务仍通过 `codex exec --image`。`start:local` 默认启用真实 Codex，可用 `AGENTOS_RUNNER_EXECUTOR=mock` 做无代码变更演练（聊天仍是真实 AI）。
 

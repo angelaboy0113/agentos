@@ -20,7 +20,7 @@ async function setup(t, overrides = {}) {
     replyCard: async (id, card, options) => { calls.push({ type: 'send', id, card, options }); return { ok: true, data: { message_id: 'om_card' } }; },
     sendCard: async (id, card, options) => { calls.push({ type: 'send', id, card, options }); return { data: { message_id: 'om_job_card' } }; },
     updateCard: async (id, card, options) => { calls.push({ type: 'patch', id, card, options }); return { ok: true }; },
-    reply: async (id, text) => { calls.push({ type: 'text', id, text }); return { data: { message_id: 'om_more' } }; }, ...overrides,
+    reply: async (id, text, options) => { calls.push({ type: 'text', id, text, options }); return { data: { message_id: 'om_more' } }; }, ...overrides,
   };
   const cards = new LiveCards(store, client, { intervalMs: 0 });
   t.after(async () => { await cards.stop(); await rm(directory, { recursive: true, force: true }); });
@@ -108,7 +108,26 @@ test('uncertain initial send retries the same idempotency key', async (t) => {
   assert.equal(keys[0], keys[1]);
 });
 
-test('full conversation path updates receipt, preserves AI output and accepts reply to the card', async (t) => {
+test('a failed requester mention retries without resending or updating the delivered card', async (t) => {
+  let fail = true;
+  const mentionKeys = [];
+  const { cards, calls, store } = await setup(t, { reply: async (id, text, options) => {
+    calls.push({ type: 'text', id, text, options }); mentionKeys.push(options.idempotencyKey);
+    if (fail) throw new Error('offline');
+    return { data: { message_id: 'om_mention' } };
+  } });
+  const mention = { replyTo: 'om_question', profile: 'owner', text: '<at user_id="ou_human1"></at> 完成' };
+  await assert.rejects(cards.upsert('mention-retry', conversationCard(chat({ status: 'ready', response: '完成' })), destination,
+    { immediate: true, terminal: true, terminalMention: mention }));
+  fail = false;
+  await store.transact((state) => { state.cardMessages['mention-retry'].retryAt = 0; });
+  await cards.flush('mention-retry', true);
+  assert.deepEqual(calls.map((call) => call.type), ['send', 'text', 'text']);
+  assert.equal(mentionKeys[0], mentionKeys[1]);
+  assert.equal((await store.read()).cardMessages['mention-retry'].mentionDelivered, true);
+});
+
+test('full group conversation updates receipt, preserves AI output and ends with one requester mention', async (t) => {
   const { directory, client, calls } = await setup(t);
   let aiCalls = 0;
   const app = await createControlPlane({ dataDir: directory, storeFile: path.join(directory, 'app.json'),
@@ -118,15 +137,34 @@ test('full conversation path updates receipt, preserves AI output and accepts re
       aiCalls++; await pause(50); return { reply: 'AI 的真实回答', action: 'reply', intent: 'none', instruction: '', jobId: '', projectId: '', attachmentIds: [] };
     } });
   t.after(async () => { await app.conversations.stop(); await app.cards.stop(); });
-  const event = { type: 'im.message.receive_v1', message_id: 'm1', chat_id: 'group', sender_id: 'human', chat_type: 'group', sender_type: 'user',
+  const event = { type: 'im.message.receive_v1', message_id: 'm1', chat_id: 'group', sender_id: 'ou_human1', chat_type: 'group', sender_type: 'user',
     agent_role: 'owner_intake', agent_profile: 'owner', mentions: [{ id: 'bot' }], content: '你好' };
   const context = app.conversations.context;
   await handleLarkCliEvent(context, event); await app.conversations.idle();
-  assert.equal(aiCalls, 1); assert.deepEqual(calls.map((c) => c.type), ['send', 'patch']);
+  assert.equal(aiCalls, 1); assert.deepEqual(calls.map((c) => c.type), ['send', 'patch', 'text']);
   assert.match(JSON.stringify(calls[1].card), /AI 的真实回答/);
+  assert.equal(calls[2].id, 'm1'); assert.equal(calls[2].options.profile, 'owner');
+  assert.equal(calls[2].text, '<at user_id="ou_human1"></at> 本次回复已完成，请查看上方结果。');
   assert.equal((await app.store.read()).jobs.length, 0);
   await handleLarkCliEvent(context, { ...event, message_id: 'm2', mentions: [], reply_to: 'om_card', content: '继续' });
   await app.conversations.idle(); assert.equal(aiCalls, 2);
+});
+
+test('terminal job card mentions the original requester through the origin profile exactly once', async (t) => {
+  const { store, cards, client, calls } = await setup(t);
+  const { job } = await store.createJob({ projectId: 'demo', projectName: 'demo', chatId: 'group', stage: 'developer',
+    agentProfile: 'dev', originProfile: 'owner', originChatType: 'group', senderId: 'ou_requester1',
+    replyToMessageId: 'om_origin', instruction: '只测试', workflow: 'single_developer', status: 'running' });
+  const context = { store, cards, feishu: client };
+  const final = await store.appendEvent(job.id, { type: 'completed', result: { outcome: 'blocked', finalMessage: '测试未通过' } });
+  await notifyJobEvent(context, final);
+  await notifyJobEvent(context, final);
+  const mentions = calls.filter((call) => call.type === 'text');
+  assert.equal(mentions.length, 1);
+  assert.equal(mentions[0].id, 'om_origin');
+  assert.equal(mentions[0].options.profile, 'owner');
+  assert.equal(mentions[0].text, '<at user_id="ou_requester1"></at> 任务已结束，请查看上方结果。');
+  assert.equal(calls.find((call) => call.type === 'send').options.profile, 'dev');
 });
 
 test('real job notifications share an execution card, and stale progress renders final state', async (t) => {

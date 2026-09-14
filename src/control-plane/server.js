@@ -12,6 +12,7 @@ import { ConversationService, splitReply, responseMessageId } from './conversati
 import { LiveCards } from './live-cards.js';
 import { jobCard, resultSummary } from './message-cards.js';
 import { handleCardAction } from './card-actions.js';
+import { jobTerminalMention } from './requester-mention.js';
 
 export async function createControlPlane(overrides = {}) {
   const config = controlConfig(overrides);
@@ -280,6 +281,8 @@ async function createJobFromMessage(context, input) {
     projectName: projects.projects[projectId].displayName ?? projectId,
     chatId: input.chatId,
     senderId: input.senderId,
+    originProfile: input.agentProfile ?? null,
+    originChatType: input.chatType ?? null,
     agentRole: routed.stage,
     agentProfile: assigned.agentProfile,
     requestedAgentRole,
@@ -317,7 +320,8 @@ export async function notifyJobEvent(context, { job, event }) {
     const key = `job:${job.id}:${attempt}`;
     const id = await context.cards.upsert(key, jobCard(current),
       { chatId: current.chatId, replyTo: current.chatId ? null : current.replyToMessageId, profile: current.agentProfile },
-      { terminal, immediate: terminal, resultText: terminal ? current.result?.finalMessage : '' });
+      { terminal, immediate: terminal, resultText: terminal ? current.result?.finalMessage : '',
+        terminalMention: jobTerminalMention(current) });
     if (id) await context.store.transact((state) => {
       const saved = state.jobs.find((item) => item.id === job.id);
       saved.notificationIds = [...new Set([...(saved.notificationIds ?? []), id])];

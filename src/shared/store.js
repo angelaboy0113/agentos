@@ -62,6 +62,7 @@ export class JsonStore {
         chatId: input.chatId ?? null,
         sourceMessageId: input.sourceMessageId ?? null,
         replyToMessageId: input.replyToMessageId ?? input.sourceMessageId ?? null,
+        originMessageId: input.originMessageId ?? input.replyToMessageId ?? input.sourceMessageId ?? null,
         senderId: input.senderId ?? null,
         agentRole: input.agentRole ?? input.stage ?? null,
         agentProfile: input.agentProfile ?? null,
@@ -73,6 +74,7 @@ export class JsonStore {
         instruction: input.instruction,
         taskIntent: input.taskIntent ?? 'implementation',
         originProfile: input.originProfile ?? input.requestedAgentProfile ?? input.agentProfile ?? null,
+        originChatType: input.originChatType ?? null,
         context: input.context ?? [],
         attachmentRefs: input.attachmentRefs ?? [],
         attachments: input.attachments ?? [],
@@ -273,7 +275,7 @@ export class JsonStore {
       job.attachments.push(...(input.attachments ?? []).filter((item) => !job.attachments.some((old) => old.id === item.id)));
       job.sourceInstructionMessageId = input.sourceMessageId ?? job.sourceInstructionMessageId ?? null;
       job.replyToMessageId = input.replyToMessageId ?? input.sourceMessageId ?? job.replyToMessageId;
-      job.senderId = input.senderId ?? job.senderId;
+      job.lastActorId = input.senderId ?? job.lastActorId ?? null;
       job.status = 'queued';
       job.result = null;
       job.lease = null;

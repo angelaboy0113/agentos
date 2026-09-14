@@ -4,6 +4,7 @@ import { saveProjects } from './config.js';
 import { conversationCard } from './message-cards.js';
 import path from 'node:path';
 import { isAdministrator, isTaskCreator } from './authorization.js';
+import { conversationTerminalMention } from './requester-mention.js';
 export { isAdministrator } from './authorization.js';
 
 export function sourceEvidence(job, sourceDirectory) {
@@ -63,7 +64,7 @@ export class ConversationService {
       if (existing) return { conversation: true, turnId: existing.id, duplicate: true };
       const turn = {
         id: createId('CHAT'), messageId: event.message_id, chatId: event.chat_id,
-        senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake',
+        senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake', chatType: event.chat_type ?? null,
         projectId: this.context.projects.chatProjectMap[event.chat_id] ?? null,
         parentId: event.reply_to ?? event.root_id ?? null,
         content: event.content ?? '', attachments: event.attachments ?? [],
@@ -209,10 +210,14 @@ export class ConversationService {
         if (this.context.cards?.enabled) {
           const cardId = await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
             { replyTo: turn.messageId, profile: turn.profile }, { terminal: true, immediate: true,
-              resultText: turn.response?.length > 360 ? turn.response : '' });
+              resultText: turn.response?.length > 360 ? turn.response : '', terminalMention: conversationTerminalMention(turn) });
           if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
           parts = [];
-        } else parts = splitReply(turn.response);
+        } else {
+          parts = splitReply(turn.response);
+          const mention = conversationTerminalMention(turn);
+          if (mention && parts.length) parts[parts.length - 1] = `${parts.at(-1)}\n\n${mention.text}`;
+        }
         for (let i = turn.sentParts ?? 0; i < parts.length; i++) {
           const result = await this.context.feishu.reply(turn.messageId, parts[i], { profile: turn.profile });
           const id = responseMessageId(result);
@@ -295,6 +300,7 @@ export class ConversationService {
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
+        originChatType: turn.chatType,
         sourceMessageId: turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, attachments,

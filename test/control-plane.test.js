@@ -202,6 +202,7 @@ test('owner intake can pause for clarification and resume the same job', async (
   t.after(() => rm(directory, { recursive: true, force: true }));
   const created = await app.store.createJob({
     projectId: 'demo', projectName: 'Demo', chatId: 'oc_test', senderId: 'ou_leader',
+    originProfile: 'agentos-owner', originChatType: 'group', replyToMessageId: 'om_original',
     workflow: 'full_delivery', stage: 'owner_intake', instruction: '处理登录问题', status: 'running',
   });
   const completed = await app.store.appendEvent(created.job.id, {
@@ -209,11 +210,15 @@ test('owner intake can pause for clarification and resume the same job', async (
   });
   assert.equal(completed.job.status, 'awaiting_clarification');
   const resumed = await app.store.resumeClarification(created.job.id, {
-    senderId: 'ou_leader', sourceMessageId: 'om_more', instruction: '登录接口返回 500，期望正常登录',
+    senderId: 'ou_helper', sourceMessageId: 'om_more', replyToMessageId: 'om_more', instruction: '登录接口返回 500，期望正常登录',
   });
   assert.equal(resumed.status, 'queued');
   assert.match(resumed.instruction, /用户补充信息/);
   assert.equal(resumed.context.length, 1);
+  assert.equal(resumed.senderId, 'ou_leader');
+  assert.equal(resumed.lastActorId, 'ou_helper');
+  assert.equal(resumed.originMessageId, 'om_original');
+  assert.equal(resumed.replyToMessageId, 'om_more');
 });
 
 test('profile-scoped project administrator can approve through the owner bot', async (t) => {
