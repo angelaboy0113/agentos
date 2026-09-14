@@ -1,0 +1,35 @@
+{
+  "agents": {
+    "legacy": {
+      "displayName": "兼容入口",
+      "profile": "",
+      "openId": "原机器人 open_id",
+      "routeFromText": true
+    },
+    "owner_intake": {
+      "displayName": "项目负责人 Agent",
+      "profile": "agentos-owner",
+      "openId": "机器人 open_id"
+    },
+    "pm": {
+      "displayName": "PM Agent",
+      "profile": "agentos-pm",
+      "openId": "机器人 open_id"
+    },
+    "developer": {
+      "displayName": "开发 Agent",
+      "profile": "agentos-developer",
+      "openId": "机器人 open_id"
+    },
+    "qa": {
+      "displayName": "测试 Agent",
+      "profile": "agentos-qa",
+      "openId": "机器人 open_id"
+    },
+    "owner_audit": {
+      "displayName": "审计 Agent",
+      "profile": "agentos-auditor",
+      "openId": "机器人 open_id"
+    }
+  }
+}

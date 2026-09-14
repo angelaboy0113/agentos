@@ -1,0 +1,30 @@
+{
+  "ownerOpenIds": [
+    "ou_replace_with_owner_open_id"
+  ],
+  "ownerOpenIdsByProfile": {
+    "agentos-owner": [
+      "ou_HUMAN_IN_OWNER_APP"
+    ]
+  },
+  "humanIdentities": {
+    "leader": {
+      "agentos-owner": "ou_HUMAN_IN_OWNER_APP",
+      "agentos-developer": "ou_SAME_HUMAN_IN_DEVELOPER_APP",
+      "agentos-pm": "ou_SAME_HUMAN_IN_PM_APP",
+      "agentos-qa": "ou_SAME_HUMAN_IN_QA_APP",
+      "agentos-auditor": "ou_SAME_HUMAN_IN_AUDITOR_APP"
+    }
+  },
+  "chatProjectMap": {
+    "oc_replace_with_feishu_chat_id": "personal-workbench"
+  },
+  "projects": {
+    "personal-workbench": {
+      "displayName": "个人工作台",
+      "repoPath": "D:\\projects\\your-project",
+      "baseBranch": "main",
+      "verifyCommands": []
+    }
+  }
+}

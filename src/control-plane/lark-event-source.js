@@ -1,0 +1,231 @@
+import { copyFile, mkdir, readdir, stat, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { sanitizeSegment } from '../shared/protocol.js';
+import { runLarkCli, spawnLarkCli } from './lark-cli.js';
+
+export class LarkEventSource {
+  constructor(config) {
+    this.config = config;
+    this.stopped = false;
+    this.child = null;
+    this.pendingEvents = Promise.resolve();
+    this.retryDelayMs = 3000;
+  }
+
+  async start() {
+    if (this.config.eventKey === 'card.action.trigger') {
+      await mkdir(this.callbackDirectory, { recursive: true });
+      for (const name of await readdir(this.callbackDirectory)) {
+        if (!name.endsWith('.json')) continue;
+        this.pendingEvents = this.pendingEvents.then(() => this.deliverCallback(path.join(this.callbackDirectory, name)))
+          .catch(() => console.error(this.logPrefix, '卡片回调重放失败，已保留本地记录'));
+      }
+    }
+    while (!this.stopped) {
+      try {
+        await this.consumeOnce();
+      } catch (error) {
+        if (!this.stopped) console.error(this.logPrefix, error.message);
+      }
+      if (!this.stopped) await delay(this.retryDelayMs);
+    }
+  }
+
+  stop() {
+    this.stopped = true;
+    this.child?.stdin.end();
+  }
+
+  get logPrefix() {
+    return `[lark-event:${this.config.role ?? 'default'}:${this.config.profile ?? 'default'}:${this.config.eventKey ?? 'im.message.receive_v1'}]`;
+  }
+
+  get callbackDirectory() { return path.join(this.config.cwd, 'pending-card-actions'); }
+
+  consumeOnce() {
+    return new Promise((resolve, reject) => {
+      let pending = '';
+      this.child = spawnLarkCli([
+        'event', 'consume', this.config.eventKey ?? 'im.message.receive_v1', '--as', 'bot',
+      ], {
+        cliEntry: this.config.cliEntry,
+        cwd: this.config.cwd,
+        profile: this.config.profile,
+        configDir: this.config.configDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      this.child.stdout.setEncoding('utf8');
+      this.child.stdout.on('data', (chunk) => {
+        pending += chunk.toString();
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          this.pendingEvents = this.pendingEvents.then(() => this.handleLine(line))
+            .catch((error) => console.error(this.logPrefix, error.message));
+        }
+      });
+      this.child.stderr.on('data', (chunk) => {
+        const message = chunk.toString().trim();
+        if (/failed_precondition|not subscribed in console/.test(message)) this.retryDelayMs = 30_000;
+        if (/\[event\] ready/.test(message)) this.retryDelayMs = 3000;
+        if (message) console.error(this.logPrefix, message);
+      });
+      this.child.once('error', reject);
+      this.child.once('close', (code) => {
+        this.child = null;
+        if (this.stopped || code === 0) resolve();
+        else reject(new Error(`event consumer exited with code ${code}`));
+      });
+    });
+  }
+
+  async handleLine(line) {
+    const event = JSON.parse(line);
+    if (this.config.eventKey === 'card.action.trigger') {
+      if (event.type !== 'card.action.trigger' || !event.event_id) return;
+      // Persist before HTTP forwarding: failures/restarts retry the same business effect, not a new one.
+      const payload = Object.fromEntries(['type', 'event_id', 'operator_id', 'message_id', 'chat_id', 'action_tag',
+        'action_value', 'action_name', 'form_value', 'card_content'].map((field) => [field, event[field]]));
+      payload.agent_profile = this.config.profile ?? null;
+      payload.agent_role = this.config.role ?? null;
+      await mkdir(this.callbackDirectory, { recursive: true });
+      const file = path.join(this.callbackDirectory, `${createHash('sha256').update(event.event_id).digest('hex')}.json`);
+      await writeFile(`${file}.tmp`, JSON.stringify(payload), 'utf8');
+      await rename(`${file}.tmp`, file);
+      return this.deliverCallback(file);
+    }
+    if (event.type !== 'im.message.receive_v1' || event.sender_type === 'bot') return;
+    if (!isForThisBot(event, this.config.botOpenId)) return;
+    event.agent_profile = this.config.profile ?? null;
+    event.agent_role = this.config.role ?? null;
+    event.attachments = await this.downloadAttachments(event);
+    if (event.attachments.length > 0 && isAttachmentPlaceholder(event.content, event.message_type)) {
+      event.content = '';
+    }
+    const response = await fetch(`${this.config.serverUrl}/api/v1/events/lark-cli`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.config.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(event),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`control plane rejected ${event.message_id}: ${response.status} ${body}`);
+    }
+  }
+
+  async deliverCallback(file) {
+    let payload;
+    try { payload = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    while (!this.stopped) {
+      try {
+        const response = await fetch(`${this.config.serverUrl}/api/v1/events/card-action`, {
+          method: 'POST', signal: AbortSignal.timeout(10_000),
+          headers: { authorization: `Bearer ${this.config.adminToken}`, 'content-type': 'application/json' }, body: payload,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await unlink(file).catch(() => {});
+        return;
+      } catch {
+        console.warn(this.logPrefix, '卡片回调尚未送达，保留记录并重试');
+        await delay(3000);
+      }
+    }
+  }
+
+  async downloadAttachments(event) {
+    if (!['image', 'file', 'audio', 'media', 'post'].includes(event.message_type)) return [];
+    const messageId = event.message_id ?? event.id;
+    if (!messageId) return [];
+    const directory = path.join(this.config.cwd, 'messages', sanitizeSegment(messageId));
+    await mkdir(directory, { recursive: true });
+    await runLarkCli([
+      'im', '+messages-mget', '--as', 'bot', '--message-ids', messageId,
+      '--download-resources', '--no-reactions', '--json',
+    ], {
+      cliEntry: this.config.cliEntry,
+      cwd: directory,
+      profile: this.config.profile,
+      configDir: this.config.configDir,
+    });
+    const files = await listFiles(directory);
+    return Promise.all(files.map(async (file, index) => ({
+      id: `${sanitizeSegment(messageId)}-${index + 1}`,
+      path: file,
+      contentType: contentType(file),
+      type: /\.(png|jpe?g|gif|webp|bmp)$/i.test(file) ? 'image' : 'file',
+    })));
+  }
+}
+
+export async function startLarkEventSource(config) {
+  const cwd = path.resolve(config.dataDir ?? './data', 'lark-cli-events', sanitizeSegment(config.profile ?? 'default'));
+  const configDir = path.resolve(config.dataDir ?? './data', 'lark-cli-config', sanitizeSegment(config.profile ?? 'default'));
+  await mkdir(cwd, { recursive: true });
+  if (!config.reuseIsolatedConfig) await prepareIsolatedConfig(configDir, config.larkConfigFile);
+  const source = new LarkEventSource({ ...config, cwd, configDir });
+  console.log(`[lark-event] starting ${config.role ?? 'default'} via profile ${config.profile ?? 'default'} in ${configDir}`);
+  const running = source.start();
+  return { source, running };
+}
+
+async function prepareIsolatedConfig(configDir, explicitSource) {
+  const source = path.resolve(explicitSource ?? path.join(os.homedir(), '.lark-cli', 'config.json'));
+  await mkdir(configDir, { recursive: true });
+  await copyFile(source, path.join(configDir, 'config.json'));
+}
+
+export async function startLarkEventSources(config, agents = {}) {
+  const entries = Object.keys(agents).length ? Object.entries(agents) : [[config.role ?? 'owner_intake', { profile: config.profile }]];
+  const sources = [];
+  for (const [role, agent] of entries) {
+    const scoped = {
+      ...config,
+      role: agent.routeFromText ? null : role,
+      profile: agent.profile || null,
+      botOpenId: agent.openId,
+    };
+    sources.push(await startLarkEventSource(scoped));
+    await delay(1_000);
+    // Both subscriptions share this bot's bus and isolated auth, never another bot's profile.
+    sources.push(await startLarkEventSource({ ...scoped, eventKey: 'card.action.trigger', reuseIsolatedConfig: true }));
+  }
+  return sources;
+}
+
+export function isForThisBot(event, botOpenId) {
+  if (!Array.isArray(event.mentions) || event.mentions.length === 0) return true;
+  if (!botOpenId) return event.chat_type === 'p2p';
+  return event.mentions.some((mention) => [mention.id, mention.open_id, mention.user_id]
+    .filter(Boolean).includes(botOpenId));
+}
+
+async function listFiles(directory) {
+  const result = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) result.push(...await listFiles(target));
+    else if (entry.isFile() && (await stat(target)).size > 0) result.push(target);
+  }
+  return result;
+}
+
+function isAttachmentPlaceholder(content, messageType) {
+  const text = String(content ?? '').trim();
+  return messageType !== 'post' && (!text || /^\[(image|file|audio|media)\]$/i.test(text));
+}
+
+function contentType(file) {
+  if (/\.png$/i.test(file)) return 'image/png';
+  if (/\.jpe?g$/i.test(file)) return 'image/jpeg';
+  if (/\.gif$/i.test(file)) return 'image/gif';
+  if (/\.webp$/i.test(file)) return 'image/webp';
+  return 'application/octet-stream';
+}
+
+function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }

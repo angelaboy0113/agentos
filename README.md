@@ -1,0 +1,245 @@
+# Angel AgentOS
+
+**成品版本：v1.0.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+
+第一次部署请按顺序阅读：
+
+1. [从 GitHub 到飞书 Agent 团队：小白完整教程](docs/getting-started.md)
+2. [架构与仓库设计](docs/architecture.md)
+3. [文件、对话、任务、日志和认证位置](docs/storage-and-data.md)
+4. [安全边界](SECURITY.md)
+
+最短入口：
+
+```powershell
+git clone https://github.com/angelaboy0113/agentos.git
+Set-Location .\agentos
+.\scripts\initialize-local.ps1
+.\scripts\doctor.ps1
+# 编辑 config\*.local.json 后：
+.\scripts\use-node22.ps1 npm run check
+.\scripts\use-node22.ps1 npm run start:local
+```
+
+项目修改须遵循 [AGENTS.md](./AGENTS.md) 的角色、验证和文档一致性要求；公开仓库不包含本机运行数据或内部飞书同步快照。
+
+基于飞书群聊驱动本地 Codex 的开发团队控制面。当前版本已支持两种接入方式：本机直接复用 `lark-cli` 长连接（无需公网域名），或由公网 HTTPS 控制面接收飞书回调。开发电脑上的 Runner 主动领取任务：代码修改使用隔离 Git worktree，只读分析使用配置的真实源码目录；关键状态回传飞书。
+
+## 当前能力
+
+- 基于 `config/harness.json` 和 [`config/roles/`](config/roles/) 的共同/岗位约束；部署团队可以指向自己的权威工程规范，STO 为规格、测试、可观测性驱动。
+- `config/harness.json` 与角色文件版本指纹、结构化交接及真实工件检查；参见 [工程适配说明](docs/harness-integration.spec.md)。人工审批和原模型不变，自定义任务执行器需升级 handoff 输出。
+
+- 接收飞书 `im.message.receive_v1` 文本、富文本和图片消息。
+- 群聊与项目绑定，避免每次询问仓库。
+- 支持 `项目负责人 / PM / 开发 / 测试` 角色路由。
+- 支持职责门控：测试或审计收到代码修改指令时，由原机器人说明原因并自动转交项目负责人进入完整交付链。
+- JSON 文件原子持久化、消息去重、任务租约和 Runner 心跳。
+- Runner 只向控制面发起出站请求，开发电脑不开放公网端口。
+- 每个交付链首次执行创建隔离 Git worktree，后续阶段验证并复用前序工作区，确保测试看到开发实际改动。
+- 支持把飞书图片下载后通过 `--image` 传给 Codex。
+- 支持模拟执行器，本地无需飞书凭据即可验收队列闭环。
+- 自动流转前保留人工门：当前阶段完成后进入 `awaiting_approval`。
+- 每条发给机器人的消息都调用 Codex：普通聊天直接回复，AI 结合上下文判断是否创建/补充/审批任务，不使用问候/任务关键词词表。
+- 对话使用独立只读 Codex；持久化最近对话与任务上下文，供自然语言指代续接。AI 失败如实反馈，不伪装为规则答复。
+- 信息不足的项目负责人任务进入 `awaiting_clarification`，补充后续接同一个 Job。
+
+## 只读代码分析（2026-09-06）
+
+读取按项目文件夹，不按根仓 Git 清单：配置 repoPath 为含多个子仓的父目录即可，只读时父目录不必是 Git 仓库。独立子仓、未提交及被忽略的相关源码可以读取，敏感文件仍不输出。写入/提交仍按原有仓库隔离规则执行。
+
+聊天 AI 输出 requiresSourceInspection：查看当前目录、接口或重新检查为 true，程序据此派发 analysis，不让该决策只返回历史回答。历史证据带 workspace/recordedAt/applicability，旧工作树结果不作为当前源码事实；旧 Job 保留、不自动重跑。改后停稳重启，health.sourcePolicy 应为 folder-evidence-v1。诊断时查看 conversations[].decision 及 outcome.jobId：新调查应为 create_task/analysis，不能仅 action=reply。
+
+可手动运行 `node scripts/smoke-source-decision.mjs`（合成上下文的真实 AI 决策）及 `node scripts/smoke-folder-read.mjs`（真实 Codex 读取合成非 Git 父目录和子仓忽略文件）。两者不发送飞书、不创建线上 Job，使用现有 Codex 登录，会消耗订阅额度。
+
+`@项目负责人 帮我查一下登录接口逻辑，不改代码`：AI 判断为 analysis 后，由开发机器人调查，ready 后自动生成同 Mission 的负责人汇总任务，不经过 PM/QA/人工放行。需要已配置开发与负责人 profile；专业测试/审计分析仍由各自执行。失败/环境缺失不自动流转。
+
+分析直接读取 `projects.local.json` 的 `repoPath` 当前检出目录（含独立子仓和未提交变更），Codex 使用 read-only/never；不执行 `verifyCommands`，附件只写 Runner 数据区。它不代表根仓 worktree 已具备多仓写入能力。实施任务仍使用原有隔离工作区和人工门。
+
+角色真源为 `config/roles/analysis.md` 与 `analysis_report.md`，规范见 [analysis-workflow.spec.md](docs/analysis-workflow.spec.md)。修改后在无在途任务时重启 start:local；`/health` 的 `analysisWorkflow` 应为 `read-only-developer-owner-v1`。旧 `single_owner_intake` 任务不自动迁移或重跑，请新发分析请求。结果卡首屏直接展示脱敏结论及交接信息，长证据保留在详情和续文。
+
+## 架构
+
+```text
+飞书群 -> lark-cli 长连接 / HTTPS 回调 -> Control Plane -> JSON Job Store
+                                                      ^
+                                                      | 主动轮询/回传
+                                             Local Agent Runner -> Git worktree -> Codex CLI
+```
+
+## Node 22
+
+项目要求 Node `>=22 <23`；`.nvmrc` 记录当前验证版本 `22.23.2`，但其他 Node 22 补丁版本可先运行完整回归确认。启动脚本按 `AGENTOS_NODE_BIN`、`.nvmrc` 对应的 nvm-windows 目录、当前 PATH 依次寻找可用的 Node 22，不修改全局 Node：
+
+```powershell
+Set-Location D:\projects\agentos
+.\scripts\use-node22.ps1 node --version
+```
+
+## 本地模拟闭环
+
+1. 复制配置，但不要提交真实凭据：
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item config\projects.example.json config\projects.local.json
+Copy-Item config\agents.example.json config\agents.local.json
+```
+
+2. 设置当前终端环境变量后启动控制面：
+
+```powershell
+$env:AGENTOS_ADMIN_TOKEN='local-admin'
+$env:AGENTOS_RUNNER_TOKEN='local-runner'
+$env:AGENTOS_PROJECTS_FILE='.\config\projects.local.json'
+$env:AGENTOS_AGENTS_FILE='.\config\agents.local.json'
+.\scripts\use-node22.ps1 node src\control-plane\server.js
+```
+
+3. 另一个终端启动模拟 Runner：
+
+```powershell
+$env:AGENTOS_RUNNER_TOKEN='local-runner'
+$env:AGENTOS_RUNNER_EXECUTOR='mock'
+.\scripts\use-node22.ps1 node src\runner\index.js
+```
+
+4. 注入一条模拟飞书消息：
+
+```powershell
+$headers = @{ Authorization = 'Bearer local-admin' }
+$body = @{ messageId='om_demo_001'; chatId='oc_demo'; projectId='personal-workbench'; text='开发：修复登录接口报错' } | ConvertTo-Json
+Invoke-RestMethod http://127.0.0.1:8787/api/v1/dev/messages -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+```
+
+## 本机真实飞书 + Codex
+
+本机已经通过 `lark-cli` 配置好飞书机器人时，只需准备 `config/projects.local.json`，然后一条命令同时启动长连接、控制面和 Codex Runner：
+
+```powershell
+Set-Location D:\projects\agentos
+.\scripts\use-node22.ps1 npm run start:local
+```
+
+`config/agents.local.json` 将每个职责绑定到独立的 `lark-cli` profile。`legacy.routeFromText=true` 是原机器人配置兼容标识；其对话同样由 AI 处理，不再按关键词路由。新身份按 `owner_intake → pm → developer → qa → owner_audit → owner_report` 接力，其中最终汇报复用项目负责人机器人的 profile。
+
+各角色真正交给 Codex 的职责约束位于 `config/roles/*.md`；`agents.local.json` 只负责飞书机器人身份与内部角色的映射。AI 对话规则位于 `config/conversation.md`，结构协议在 `config/conversation.schema.json`；语义决策由 `src/control-plane/codex-conversation.js` 调用 Codex，持久化及权限门控在 `src/control-plane/conversations.js`。`src/shared/protocol.js` 保留阶段顺序和本地模拟入口的旧命令兼容，不参与线上消息语义判断。
+
+为避免多个飞书应用争用同一个事件总线，启动时会把本机 `lark-cli` 配置复制到 `data/lark-cli-config/<profile>/` 后分别启动。该目录已被 Git 忽略，包含凭据，不要外发。
+
+首次把机器人加入群后，由项目管理员（真人 Leader，不是项目负责人机器人）在群里 @项目负责人 发送：
+
+```text
+@项目负责人 绑定项目 tpm
+```
+
+绑定成功后可发送：
+
+```text
+项目负责人：新增某项能力
+开发：修复登录接口报错
+```
+
+直接 @ 测试或审计要求修改代码时，AgentOS 不会让该角色越权执行：来源机器人说明转交意图及真实任务编号，项目负责人开始执行时接手，按 `项目负责人 → PM → 开发 → 测试 → 审计` 编排。测试类表述（如“验证登录接口修复结果”）仍由测试机器人处理。
+
+“你好”“在吗”“谢谢”等普通对话不会创建 Job。信息不足时机器人会先要求补充；项目负责人执行后仍发现缺少关键事实时，Job 进入 `awaiting_clarification`，按提示发送：
+
+```text
+@项目负责人 补充 JOB-xxx <具体背景、期望结果和验收标准>
+```
+
+阶段放行仍由真人管理员审批。建议通过已配置管理员身份的项目负责人机器人确认，可自然表达“这个结果可以，交给下一位”，也兼容明确编号：
+
+```text
+@项目负责人 确认 JOB-xxx
+```
+
+多飞书应用下同一用户的 `open_id` 可能不同，`projects.local.json` 支持 `ownerOpenIdsByProfile.agentos-owner` 保存项目负责人机器人视角下的管理员身份。
+
+只发图片也会调用 AI 理解，缺少任务意图时自然追问；后续可引用历史图片。聊天图片通过 app-server 的 `localImage` 交给 Codex，研发任务仍通过 `codex exec --image`。`start:local` 默认启用真实 Codex，可用 `AGENTOS_RUNNER_EXECUTOR=mock` 做无代码变更演练（聊天仍是真实 AI）。
+
+## Windows 登录后自动启动
+
+AgentOS 依赖当前 Windows 用户的飞书配置、Codex 登录态和本地仓库，因此使用当前用户的 `HKCU Run` 登录启动项，而不是计划任务或无人登录的系统服务会话：
+
+```powershell
+.\scripts\install-autostart.ps1
+```
+
+启动项名为 `AngelAgentOS`，运行日志位于 `data/logs/`。如需移除：
+
+```powershell
+.\scripts\uninstall-autostart.ps1
+```
+
+## 接入真实 Codex
+
+确认项目路径后，将 Runner 执行器改为：
+
+```powershell
+$env:AGENTOS_RUNNER_EXECUTOR='codex'
+$env:CODEX_BIN='codex'
+```
+
+Windows 桌面版 Codex 使用版本哈希目录时，AgentOS 会在未指定有效绝对路径的情况下，从当前用户的 Codex 安装目录自动选择最新可用的 `codex.exe`，避免桌面应用更新后旧路径失效。显式 `CODEX_BIN` 仍具有最高优先级。
+
+Runner 不会自动合并、推送或部署。Codex 只在任务 worktree 内修改和验证，结果由飞书人工确认后再进入测试阶段。
+
+## 公网控制面需要的飞书配置
+
+- 企业自建应用与机器人能力。
+- 事件订阅：`im.message.receive_v1`。
+- 消息读取、消息回复、消息资源读取权限。
+- 回调地址：`https://你的域名/webhooks/feishu`。
+- 将机器人加入目标群，并把群 `chat_id` 写入 `projects.local.json`。
+
+真实 `App ID`、`App Secret`、Verification Token 和 Runner Token 只进入服务器环境变量，禁止写入仓库。
+
+## AI 对话数据和验证
+
+- `data/agentos.json`：任务、逐条对话、AI 决策、发送结果和幂等记录；重启不丢历史。模型每次使用同群、同机器人、同发送者最近 20 轮与被引用的历史轮次，本群最近 20 个任务状态。长期历史保留在本地文件，不宣称无限上下文。
+- 系统临时目录下 `agentos-chat-<实例哈希>/`：聊天只读工作目录，置于业务仓库之外，避免一句问候加载项目规范。常驻 Codex app-server 采用 stdio，不开放网络监听。线程 ephemeral + read-only + approvalPolicy=never；禁用聊天进程的插件、桌面 MCP、shell、浏览器等工具。聊天只输出建议，由控制面核验后执行动作。
+- 普通群聊不自动叫醒全部机器人；@、私聊或已关联的回复由对应机器人处理，前提是飞书订阅实际投递消息。机器人消息不触发机器人。
+- 聊天与开发任务队列分开，开发过程中仍可聊天。聊天按群/用户/机器人/角色/项目隔离，同会话有序，不同会话最多 3 路并行。常驻进程复用线程；每 20 轮轮换，并从本地记录恢复最近历史，最多缓存 24 个会话，释放闲置订阅。重启后重新建线程，不丢本地历史。
+- 慢于 3 秒的消息尝试发送一次“已收到”事实提示；这不是 AI 的语义回答。AI 生成上限 90 秒，RPC 另有 15 秒边界，失败不创建任务、不自动重播动作。发送失败保留 outbox；同会话等待发送恢复，其他会话不被阻塞。开发任务运行 30 秒后提供状态，后续最多每分钟一条，不转发原始命令/日志。
+- `data/agentos.json` 的每条 conversation.timing 及 `[conversation-timing]` 日志记录排队、准备、首个输出、AI 完成、发送和总耗时，以及模型、重试数、会话复用情况。开发结果 timing 记录工作区准备、Codex、验证和总时间。
+- `config/task-result.schema.json`：角色任务必须返回 ready / needs_clarification / blocked，后两者不能放行；真实结论分段发送到群。
+- 只读分析、单独规划/测试/审计是单阶段任务，不擅自扩大为完整开发流程。测试或审计要求改业务代码则交给负责人。
+- 运行中的任务支持请求停止，先显示“正在停止”；Runner 确认本任务进程树退出后才显示“已停止”。保留工作区文件修改，不自动回滚。停止无法确认时暂停领取新任务，不能假装已取消。
+
+验证命令：
+
+```powershell
+.\\scripts\\use-node22.ps1 npm run check
+# 真实 Codex 对话验证：不发飞书消息，不执行研发任务，不修改项目代码
+.\\scripts\\use-node22.ps1 node scripts/smoke-ai-conversation.mjs
+```
+
+## Codex 网络出口（更新于 2026-09-11）
+
+保持现有 Codex 模型和 ChatGPT 订阅登录，不使用 API Key。`config/codex-runtime.local.json` 的 `proxyUrl` 或环境变量 `AGENTOS_CODEX_PROXY_URL` 只影响 AgentOS 启动的 Codex 子进程（聊天、研发共用），不修改系统、飞书或全局 Codex 配置。该本地配置被 Git 忽略；迁移到另一台电脑时按那台电脑的实际出口配置，不照搬端口。
+
+`proxyUrl` 显式留空表示直连，并清除 AgentOS 子进程继承到的 HTTP(S)/ALL_PROXY 环境变量；填写代理 URL 才强制使用该代理。本机已于 2026-09-11 通过真实 ChatGPT 登录完成两轮直连烟测，0 次重试，因此当前本地配置不再依赖 VPN。若换到无法直连的网络，再填写该网络实际可用的代理并重启 AgentOS。
+
+Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地有效绝对路径、Windows 桌面版安装目录自动发现、PATH 中的 `codex`。`codexBin` 可写 `codex` 以启用自动发现，不改变模型配置或登录方式。Codex CLI 0.153.4 起，AgentOS 不再注入只有 `enabled=false`、但缺少传输定义的临时 MCP 配置；聊天进程仍通过禁用插件、应用、shell、浏览器等能力及拒绝工具请求保持只读决策边界。
+
+诊断脚本 `scripts/benchmark-codex-app-server.mjs` 仅发送合成问候；`scripts/smoke-ai-conversation.mjs` 用完整角色规则和虚构项目测试对话、连续追问与自然语言授权，不发飞书消息、不执行研发任务。
+# 飞书动态消息
+
+普通对话使用 Card 2.0 回复：超过 3 秒先显示处理状态，最终回答更新在同一张卡片。实际任务由执行角色发送独立卡片，展示当前操作、阶段耗时、实际工具调用次数和最近 3 项完成记录；长结论折叠展示，超长部分续发。
+
+工具动态来自 Codex JSONL，不展示推理正文、原始输出或工具参数。仅固定安全命令可原样显示，其他命令展示类别。更新约每 3 秒合并一次，长时间无事件时由 Runner 的 15 秒进度更新耗时；不是逐 token 直播。
+
+任务卡按钮按状态显示：执行中「停止任务」；排队/等待输入/等待审批「取消任务」；等待审批「确认进入下一阶段」；等待输入提供最多 1000 字的补充表单；非终态可以「刷新状态」。取消有二次确认，不回滚文件；审批仅真人管理员，补充/停止仅本机器人身份下的发起人或真人管理员。过期卡片不能操作新尝试，重复点击不重复推进任务。
+
+各机器人应用分别进入「事件与回调 → 回调配置」，使用长连接并添加「卡片回传交互（card.action.trigger）」；如后台要求发布版本，完成发布。无需公网域名。每个 profile 启动独立消息与回调消费者；实际 CLI 会在未订阅时返回 failed_precondition，程序每 30 秒重试。开启后先点「刷新状态」验证，不能仅根据进程存在就判断点击链路正常。
+
+回调处理：`src/control-plane/card-actions.js`；状态与权限：`src/shared/store.js`；进程隔离与停止：`src/runner/task-process.js`、`task-worker.js`、`index.js`；角色约束仍在 `config/roles/*.md`。卡片回调不调用 AI，普通聊天仍由 Codex 判断。Windows 使用本任务 PID 的 taskkill /T；macOS/Linux 使用独立进程组，跨平台分支需在目标机器再做实际停止验收。
+
+`data/card-updates.paused` 是可选维护文件，JSON 数组列出暂缓更新的 message_id，不影响其他卡片和消息。只在获得对应更新授权后移除条目；不可用它绕过审批。当前部署的外部验收情况见 `docs/card-actions.verification.md`。
+
+卡片投递保存在 `data/agentos.json` 的 `cardMessages` 中，失败只重试投递，不重新运行任务。聊天/角色/任务执行尝试各自隔离。飞书客户端需支持 Card 2.0（7.20+）；机器人需要现有发送消息权限，PATCH 可复用 `im:message:send_as_bot`。
+
+验证：`scripts/use-node22.ps1 npm run check`；`scripts/use-node22.ps1 node scripts/preview-message-cards.mjs` 仅本地 dry-run。只有获得群消息发送授权后，才添加 `--send-preview`，向唯一绑定 TPM 的团队群发送一张明确标记的演示卡。
+
+详见 `docs/live-message-cards.spec.md`。这项改动不更换 Codex 模型、不改审批权限、不推送或部署业务项目。

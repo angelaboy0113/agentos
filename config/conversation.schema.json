@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reply", "action", "intent", "instruction", "jobId", "projectId", "attachmentIds", "requiresSourceInspection"],
+  "properties": {
+    "requiresSourceInspection": { "type": "boolean", "description": "用户要检查当前文件、源码或接口实现时为 true；问候、讨论、解释旧报告为 false。不要因旧任务缺源码而拒绝新调查。" },
+    "reply": { "type": "string" },
+    "action": { "type": "string", "enum": ["reply", "create_task", "clarify", "approve", "cancel", "bind_project"] },
+    "intent": { "type": "string", "enum": ["none", "implementation", "planning", "analysis", "verification", "audit"] },
+    "instruction": { "type": "string" },
+    "jobId": { "type": "string" },
+    "projectId": { "type": "string" },
+    "attachmentIds": { "type": "array", "items": { "type": "string" } }
+  }
+}

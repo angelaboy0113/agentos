@@ -1,0 +1,93 @@
+import { jobActionVersion, jobCard } from './message-cards.js';
+import { nextStage } from '../shared/protocol.js';
+import { isAdministrator, isTaskCreator } from './authorization.js';
+import { handleResultPage } from './result-page-actions.js';
+
+const parse = (value) => typeof value === 'string' ? JSON.parse(value || '{}') : value ?? {};
+
+// Called ONLY by the authenticated, profile-scoped CLI event ingress, never by the public webhook.
+export async function handleCardAction(context, event) {
+  const { store, cards, projects, agents } = context;
+  if (event.type !== 'card.action.trigger' || !event.event_id || !event.operator_id) return { ignored: true };
+  const profile = event.agent_profile ?? null;
+  if (!Object.values(agents.agents ?? {}).some((agent) => (agent.profile || null) === profile)) return { ignored: true };
+  let parsedValue;
+  try { parsedValue = parse(event.action_value); } catch { return { ignored: true }; }
+  if (parsedValue.action === 'result_page') return handleResultPage(context, event);
+  const state = await store.read();
+  const entry = Object.entries(state.cardMessages ?? {}).find(([key, item]) => key.startsWith('job:')
+    && item.messageId === event.message_id && item.destination.profile === profile);
+  if (!entry || !event.card_content) return { ignored: true, reason: '没有可验证的原始任务卡片' };
+  const [key, savedCard] = entry;
+  const jobId = key.split(':')[1];
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job || job.chatId !== event.chat_id || job.agentProfile !== profile) return { ignored: true };
+  const effectKey = `card-action:${profile}:${event.event_id}`;
+  const admin = isAdministrator(projects, { profile, senderId: event.operator_id });
+  const creator = isTaskCreator(projects, job, { profile, senderId: event.operator_id });
+  let result;
+  try {
+    if (!admin && !creator) throw new Error('只有本任务发起人或真人管理员可以操作；转交后身份未识别时，请核对跨应用真人身份映射。');
+    const value = parse(event.action_value);
+    const action = event.action_name?.startsWith('clarify_') ? 'clarify' : value.action;
+    const version = action === 'clarify' ? event.action_name.slice('clarify_'.length) : value.version;
+    if (!['cancel', 'approve', 'clarify', 'refresh'].includes(action)) throw new Error('不支持的卡片操作。');
+    if (action === 'approve' && !admin) throw new Error('只有真人管理员可以确认进入下一阶段。');
+    // Recheck inside the same state transaction as mutation; old cards cannot control a new attempt.
+    const guard = (freshState, current) => {
+      const freshCard = freshState.cardMessages?.[key];
+      if (freshCard?.messageId !== event.message_id || freshCard.destination.profile !== profile
+        || current.chatId !== event.chat_id || current.agentProfile !== profile
+        || jobActionVersion(current) !== version || !hasAction(freshCard.card, action, version)) {
+        throw new Error('这张卡片已过期，请操作最新任务卡片。');
+      }
+    };
+    if (action === 'refresh') {
+      guard(state, job);
+      result = { job, message: '已刷新任务状态。' };
+    } else if (action === 'cancel') {
+      const updated = await store.cancel(job.id, event.operator_id, effectKey, guard);
+      result = { job: updated, message: updated.status === 'cancelling' ? '已请求停止，等待执行器确认退出。' : '任务已取消。' };
+    } else if (action === 'approve') {
+      const role = nextStage(job.workflow, job.stage);
+      const routing = { agentRole: role, agentProfile: agents.agents?.[role === 'owner_report' ? 'owner_intake' : role]?.profile ?? null };
+      const approved = await store.approve(job.id, event.operator_id, routing, effectKey, guard);
+      result = { ...approved, message: '已确认，下一阶段已排队。' };
+    } else {
+      const instruction = String(parse(event.form_value).clarification ?? '').trim();
+      if (!instruction || instruction.length > 1000) throw new Error('请填写 1–1000 字的补充信息。');
+      const updated = await store.resumeClarification(job.id, { instruction }, effectKey, guard);
+      result = { job: updated, resubmitted: true, message: '补充已提交，当前阶段重新排队。' };
+    }
+    // Re-delivery retries only presentation. The business mutation above is effect-idempotent.
+    const latest = await store.getJob(job.id);
+    const shown = result.resubmitted || jobActionVersion(latest) !== version ? { ...latest, status: 'resubmitted' } : latest;
+    await cards.upsert(key, jobCard(shown), savedCard.destination, {
+      terminal: !['queued', 'running', 'cancelling'].includes(shown.status), immediate: true,
+      resultText: shown.result?.finalMessage,
+    });
+    await store.transact((fresh) => {
+      fresh.cardCallbackChecks ??= {};
+      fresh.cardCallbackChecks[profile ?? 'default'] = { at: new Date().toISOString(), action, messageId: event.message_id };
+    });
+    return { ok: true, message: result.message };
+  } catch (error) {
+    // Do not echo arbitrary callback input, tokens or raw errors into the group.
+    const known = /^(只有|这张卡片|请填写|不支持|当前任务)/.test(error.message) ? error.message : '操作未完成：任务状态可能已变化，请刷新后重试。';
+    const noticeKey = `${effectKey}:notice`;
+    const accepted = await store.transactEffect(noticeKey, () => ({ message: known }));
+    const delivered = (await store.read()).cardActionNotices?.[noticeKey];
+    if (!delivered) {
+      await context.feishu.reply(event.message_id, accepted.message, { profile, idempotencyKey: noticeKey });
+      await store.transact((fresh) => { fresh.cardActionNotices ??= {}; fresh.cardActionNotices[noticeKey] = true; });
+    }
+    return { ok: false, message: accepted.message };
+  }
+}
+
+function hasAction(node, action, version) {
+  if (!node || typeof node !== 'object') return false;
+  if (action === 'clarify' && node.tag === 'button' && node.name === `clarify_${version}`) return true;
+  if (node.type === 'callback' && node.value?.action === action && node.value?.version === version) return true;
+  return Object.values(node).some((child) => hasAction(child, action, version));
+}

@@ -1,0 +1,97 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { resultPages } from './result-presentation.js';
+
+export function messageIdOf(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.message_id === 'string') return value.message_id;
+  for (const child of Object.values(value)) { const id = messageIdOf(child); if (id) return id; }
+  return null;
+}
+
+// Durable delivery outbox: a failed update NEVER reruns Codex or creates another task.
+export class LiveCards {
+  constructor(store, feishu, { intervalMs = 3000 } = {}) {
+    this.store = store; this.feishu = feishu; this.intervalMs = intervalMs;
+    this.workers = new Map(); this.closed = false;
+    this.enabled = typeof feishu.replyCard === 'function' && typeof feishu.updateCard === 'function' && feishu.enabled !== false;
+  }
+  start() {
+    if (!this.enabled || this.timer) return;
+    this.timer = setInterval(() => this.retry().catch(() => {}), 1000); this.timer.unref();
+  }
+  async stop() { this.closed = true; clearInterval(this.timer); await Promise.allSettled(this.workers.values()); }
+  async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '' } = {}) {
+    if (Buffer.byteLength(JSON.stringify(card)) > 28_000) throw new Error('Card exceeds safe message limit');
+    await this.store.transact((state) => {
+      state.cardMessages ??= {};
+      const existing = state.cardMessages[key];
+      if (existing?.terminal && !terminal) return; // Late progress cannot overwrite a conclusion.
+      if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
+      state.cardMessages[key] = { ...existing, destination, card, terminal, overflow: [],
+        detailPages: resultPages(resultText),
+        revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
+    });
+    if (immediate) return this.flush(key, true);
+    this.flush(key).catch(() => {});
+  }
+  async retry() {
+    if (this.closed) return;
+    const state = await this.store.read();
+    for (const [key, value] of Object.entries(state.cardMessages ?? {})) {
+      if (value.revision !== value.deliveredRevision
+        && Date.now() >= (value.retryAt ?? 0)) this.flush(key).catch(() => {});
+    }
+  }
+  async flush(key, force = false) {
+    if (this.closed) return;
+    if (this.workers.has(key)) {
+      await this.workers.get(key);
+      return force ? this.flush(key, true) : undefined;
+    }
+    const worker = this.deliver(key, force);
+    this.workers.set(key, worker);
+    try { return await worker; } finally { if (this.workers.get(key) === worker) this.workers.delete(key); }
+  }
+  async deliver(key, force) {
+    const entry = (await this.store.read()).cardMessages?.[key];
+    if (!entry || entry.revision === entry.deliveredRevision) return entry?.messageId;
+    // A local maintenance hold prevents external edits while operator approval is pending.
+    if (entry.messageId) {
+      try {
+        const heldIds = JSON.parse(await readFile(path.join(path.dirname(this.store.file), 'card-updates.paused'), 'utf8'));
+        if (heldIds.includes(entry.messageId)) return entry.messageId;
+      }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (!force && (Date.now() < (entry.retryAt ?? 0) || (!entry.terminal && Date.now() - (entry.sentAt ?? 0) < this.intervalMs))) return;
+    try {
+      const options = { profile: entry.destination.profile, idempotencyKey: `aos-card-${createHash('sha256').update(key).digest('hex').slice(0, 32)}` };
+      let messageId = entry.messageId;
+      if (messageId) {
+        if (entry.revision !== entry.deliveredRevision) await this.feishu.updateCard(messageId, entry.card, options);
+      }
+      else {
+        const result = entry.destination.replyTo
+          ? await this.feishu.replyCard(entry.destination.replyTo, entry.card, options)
+          : await this.feishu.sendCard(entry.destination.chatId, entry.card, options);
+        messageId = messageIdOf(result);
+        if (!messageId) throw new Error('Card send returned no message ID');
+      }
+      await this.store.transact((state) => {
+        Object.assign(state.cardMessages[key], { messageId, deliveredRevision: entry.revision,
+          sentAt: Date.now(), failures: 0, retryAt: 0 });
+      });
+      // Long reports stay in the same card. Never resume legacy plaintext overflow on restart.
+      return messageId;
+    } catch (error) {
+      await this.store.transact((state) => {
+        const current = state.cardMessages[key]; current.failures = (current.failures ?? 0) + 1;
+        current.retryAt = Date.now() + Math.min(60_000, current.failures * 5000);
+        current.error = '卡片投递失败，等待重试'; // Never persist raw CLI credentials in public status.
+      });
+      throw error;
+    }
+  }
+}

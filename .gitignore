@@ -1,0 +1,27 @@
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+config/*.local.json
+
+# Runtime state: conversations, jobs, attachments, copied credentials, logs and worktrees
+data/
+.agentos/
+*.log
+*.tmp
+
+# Local tooling and generated output
+node_modules/
+coverage/
+.codex/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Internal evidence/workbooks are not part of the public product release
+agent-os工作业绩成果记录.xlsx
+agent-os工作业绩成果记录.xlsx.inspect.ndjson
+docs/documentation-sync.md
+docs/feishu-implementation-guide.xml
+scripts/sync-implementation-guide.mjs

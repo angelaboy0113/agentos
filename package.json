@@ -1,0 +1,21 @@
+{
+  "name": "angel-agent-os",
+  "version": "1.0.0",
+  "description": "A Feishu-driven local AgentOS that coordinates role-based Codex development workflows.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/angelaboy0113/agentos.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "start:local": "node src/control-plane/local.js",
+    "start:control": "node src/control-plane/server.js",
+    "start:runner": "node src/runner/index.js",
+    "test": "node --test",
+    "check": "node --check src/control-plane/server.js && node --check src/control-plane/local.js && node --check src/control-plane/lark-event-source.js && node --check src/runner/index.js && node --test"
+  }
+}

@@ -1,0 +1,93 @@
+import { readFile, realpath, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const CONFIG = fileURLToPath(new URL('../../config/', import.meta.url));
+const roles = ['common', 'owner_intake', 'pm', 'developer', 'qa', 'owner_audit', 'owner_report', 'analysis', 'analysis_report'];
+const digest = (value) => createHash('sha256').update(value).digest('hex');
+export async function loadHarness(job, directory = CONFIG) {
+  const raw = await readFile(path.join(directory, 'harness.json'), 'utf8');
+  const manifest = JSON.parse(raw);
+  if (!manifest.version || !manifest.standard?.url || !manifest.standard?.version || !Number.isInteger(manifest.standard?.revision)) throw new Error('Invalid Harness manifest');
+  const texts = {};
+  for (const name of roles) {
+    texts[name] = await readFile(path.join(directory, 'roles', `${name}.md`), 'utf8');
+    if (!texts[name].trim()) throw new Error(`Empty Harness role: ${name}`);
+  }
+  const fingerprint = digest(JSON.stringify({ raw, texts }));
+  const previous = (job.context ?? []).map((entry) => entry.result?.harness).filter(Boolean);
+  if (previous.some((entry) => entry.fingerprint !== fingerprint)) throw new Error('Harness版本在任务链中发生变化；请先由管理员复核，不自动沿用旧批准。');
+  const role = job.taskIntent === 'analysis' ? (job.stage === 'owner_report' ? 'analysis_report' : 'analysis') : job.stage;
+  if (!texts[role]) throw new Error(`Unknown Harness role: ${role}`);
+  return { metadata: { ...manifest, fingerprint, role }, instruction: `${texts.common}\n\n${texts[role]}` };
+}
+
+// Keep raw evidence references available without copying each author's entire persuasive report.
+export function handoffContext(job) {
+  const independent = ['qa', 'owner_audit'].includes(job.stage);
+  return (job.context ?? []).slice(-8).map(({ stage, result = {} }) => ({ stage,
+    outcome: result.outcome, workspace: result.workspace,
+    harness: result.harness,
+    handoff: result.handoff,
+    verifiedArtifacts: result.verifiedArtifacts,
+    verification: result.verification?.map(({ command, code }) => ({ command, code })),
+    ...(independent ? { note: '上游自报checks仅是主张；独立读取工件、diff与原始测试证据。' }
+      : { summary: result.summary, finalMessage: result.finalMessage?.slice(0, 6000) }),
+  }));
+}
+
+const kinds = new Set(['prd', 'spec', 'code', 'test', 'report', 'decision']);
+const statuses = new Set(['passed', 'failed', 'not_run', 'not_applicable']);
+const owners = new Set(['none', 'owner', 'pm', 'developer', 'qa', 'auditor']);
+const nonempty = (s) => typeof s === 'string' && s.trim().length > 0;
+const inside = (root, candidate) => { const rel = path.relative(root, candidate); return rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
+
+export async function validateHandoff(job, result, workspace) {
+  const issues = [], verifiedArtifacts = [];
+  const h = result.handoff;
+  if (!h || !Array.isArray(h.artifacts) || !Array.isArray(h.checks) || !Array.isArray(h.risks) || !owners.has(h.returnTo)) {
+    return { issues: ['缺少完整结构化交接材料'], verifiedArtifacts };
+  }
+  if (h.artifacts.length > 60 || h.checks.length > 60 || h.risks.length > 30) return { issues: ['交接材料超过条目上限'], verifiedArtifacts };
+  if (h.risks.some((risk) => !nonempty(risk))) issues.push('风险必须为非空描述');
+  const root = await realpath(workspace);
+  for (const item of h.artifacts) {
+    try {
+      if (!kinds.has(item.kind) || !nonempty(item.path) || path.isAbsolute(item.path) || /^[a-z]:/i.test(item.path) || item.path.includes(':')) throw new Error();
+      const segments = item.path.replaceAll('\\', '/').split('/');
+      if (segments.some((s) => ['..', '.git', 'node_modules'].includes(s) || /^(\.env(?:\..*)?|\.npmrc|settings\.xml|auth\.json|.*\.(?:pem|key|p12))$/i.test(s))) throw new Error();
+      const candidate = path.resolve(root, item.path);
+      if (!inside(root, candidate)) throw new Error();
+      const resolved = await realpath(candidate);
+      if (!inside(root, resolved)) throw new Error();
+      const info = await stat(resolved);
+      if (!info.isFile() || info.size > 5 * 1024 * 1024) throw new Error();
+      verifiedArtifacts.push({ kind: item.kind, path: path.relative(root, resolved).replaceAll('\\', '/'), sha256: digest(await readFile(resolved)), bytes: info.size });
+    } catch { issues.push('有工件不存在、超出工作区、属于禁止路径或超过5MiB；请核对工件清单'); }
+  }
+  const seen = new Set();
+  for (const check of h.checks) {
+    if (!check || typeof check !== 'object') { issues.push('验收项格式无效'); continue; }
+    if (!nonempty(check.id) || seen.has(check.id) || typeof check.required !== 'boolean' || !statuses.has(check.status) || !nonempty(check.evidence)) issues.push('验收项需唯一编号、明确状态与非空证据');
+    seen.add(check.id);
+    if (result.outcome === 'ready' && check.required && check.status !== 'passed') issues.push(`必需验收项未通过：${check.id}`);
+  }
+  if (result.outcome === 'ready') {
+    if (h.returnTo !== 'none') issues.push('存在退回责任时不能标记ready');
+    if (!h.checks.length) issues.push('ready必须给出本阶段检查依据');
+    if (job.taskIntent !== 'analysis') {
+      if (job.stage === 'pm' && !['prd', 'spec'].every((kind) => verifiedArtifacts.some((a) => a.kind === kind))) issues.push('PM交接缺少实际PRD或Spec');
+      if (job.stage === 'developer' && (job.taskIntent ?? 'implementation') === 'implementation' && !verifiedArtifacts.some((a) => a.kind === 'spec')) issues.push('开发交接缺少实际Spec');
+      if (['developer', 'qa'].includes(job.stage) && !h.checks.some((c) => c?.status === 'passed' && c.required)) issues.push('开发/测试缺少必需验证的通过依据');
+    }
+  }
+  return { issues: [...new Set(issues)], verifiedArtifacts };
+}
+
+export function enforceHandoff(result, gate) {
+  if (!gate.issues.length) return { ...result, verifiedArtifacts: gate.verifiedArtifacts, handoffGate: { passed: true } };
+  return { ...result, outcome: 'blocked', summary: '本阶段交接检查未通过，尚不能交付。需补齐或修正工件与验收证据，具体原因见详情。',
+    finalMessage: `交接检查未通过：\n${gate.issues.map((s) => `- ${s}`).join('\n')}\n\n原阶段报告（不代表已通过）：\n${result.finalMessage}`,
+    verifiedArtifacts: gate.verifiedArtifacts, handoffGate: { passed: false, issues: gate.issues } };
+}

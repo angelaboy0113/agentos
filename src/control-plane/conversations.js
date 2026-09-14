@@ -1,0 +1,370 @@
+import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
+import { CodexConversationEngine, validateDecision } from './codex-conversation.js';
+import { saveProjects } from './config.js';
+import { conversationCard } from './message-cards.js';
+import path from 'node:path';
+import { isAdministrator, isTaskCreator } from './authorization.js';
+export { isAdministrator } from './authorization.js';
+
+export function sourceEvidence(job, sourceDirectory) {
+  const workspace = job.result?.workspace ?? null;
+  const normalize = (value) => /^[a-z]:[\\/]/i.test(value) ? path.win32.normalize(value).replace(/[\\/]+$/, '').toLowerCase()
+    : path.resolve(value);
+  const sameDirectory = Boolean(workspace && sourceDirectory && normalize(workspace) === normalize(sourceDirectory));
+  const compatible = sameDirectory && job.taskIntent === 'analysis'
+    && (job.workflow === 'analysis_review' || ['single_qa', 'single_owner_audit'].includes(job.workflow));
+  return { workspace, recordedAt: job.updatedAt ?? job.createdAt ?? null, workflow: job.workflow,
+    applicability: compatible ? 'historical_snapshot_not_current_check' : 'not_evidence_for_current_source_directory',
+    requiresRecheckForCurrentSource: true };
+}
+
+// Persistence is shared with jobs. Language decisions come exclusively from AI;
+// the switches below enforce the typed action protocol, not keyword matching.
+export class ConversationService {
+  constructor(context, options = {}) {
+    this.context = context;
+    this.engine = options.decide ? null : new CodexConversationEngine({ dataDir: context.config.dataDir });
+    this.decide = options.decide ?? ((input, signal, detail) => this.engine.decide(input, { ...detail, signal }));
+    this.concurrency = options.concurrency ?? 3;
+    this.feedbackMs = options.feedbackMs ?? 3000;
+    this.workers = new Map();
+    this.feedback = new Map();
+    this.stopped = false;
+    this.running = null;
+    this.timer = null;
+    this.abort = new AbortController();
+  }
+
+  async start() {
+    await this.context.store.transact((state) => {
+      for (const turn of state.conversations ?? []) if (turn.status === 'thinking') turn.status = 'queued';
+    });
+    this.engine?.start().catch(() => console.error('[conversation] Codex prewarm failed; next message will retry initialization'));
+    this.wake();
+  }
+
+  async stop() {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    this.abort.abort();
+    this.reschedule?.();
+    for (const entry of this.feedback.values()) { clearTimeout(entry.timer); clearInterval(entry.pulse); }
+    await this.engine?.close();
+    await this.running;
+    await Promise.all([...this.feedback.values()].map((entry) => entry.running));
+  }
+
+  async enqueue(event) {
+    if (!event.message_id || !event.chat_id || !event.sender_id) throw new Error('Missing message identity');
+    const profile = event.agent_profile ?? null;
+    const accepted = await this.context.store.transact((state) => {
+      state.conversations ??= [];
+      const existing = state.conversations.find((turn) => turn.messageId === event.message_id && turn.profile === profile);
+      if (existing) return { conversation: true, turnId: existing.id, duplicate: true };
+      const turn = {
+        id: createId('CHAT'), messageId: event.message_id, chatId: event.chat_id,
+        senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake',
+        projectId: this.context.projects.chatProjectMap[event.chat_id] ?? null,
+        parentId: event.reply_to ?? event.root_id ?? null,
+        content: event.content ?? '', attachments: event.attachments ?? [],
+        status: 'queued', createdAt: new Date().toISOString(),
+        sessionKey: JSON.stringify([event.chat_id, event.sender_id, profile, event.agent_role ?? 'owner_intake',
+          this.context.projects.chatProjectMap[event.chat_id] ?? null]),
+      };
+      state.conversations.push(turn);
+      return { conversation: true, turnId: turn.id, duplicate: false };
+    });
+    this.wake();
+    return accepted;
+  }
+
+  wake() {
+    if (this.stopped) return;
+    this.wakeRequested = true;
+    if (this.running) { this.reschedule?.(); return; }
+    clearTimeout(this.timer);
+    this.running = this.schedule().catch((error) => console.error('[conversation]', error.message)).finally(() => {
+      this.running = null;
+      if (!this.stopped) {
+        this.timer = setTimeout(() => this.wake(), 1000);
+        this.timer.unref();
+      }
+    });
+  }
+
+  async idle() { if (this.running) await this.running; }
+
+  key(turn) { return turn.sessionKey ?? JSON.stringify([turn.chatId, turn.senderId, turn.profile, turn.role]); }
+
+  async schedule() {
+    while (!this.stopped) {
+      this.wakeRequested = false;
+      const state = await this.context.store.read();
+      const heads = new Map();
+      for (const turn of state.conversations ?? []) {
+        if (!['queued', 'thinking', 'decided', 'ready'].includes(turn.status)) continue;
+        const key = this.key(turn);
+        if (!heads.has(key)) heads.set(key, turn);
+        this.scheduleFeedback(turn);
+      }
+      for (const [key, turn] of heads) {
+        if (this.workers.size >= this.concurrency) break;
+        if (this.workers.has(key) || (turn.retryAt && Date.parse(turn.retryAt) > Date.now())) continue;
+        const worker = this.process(key).catch((error) => console.error('[conversation-worker]', error.message))
+          .finally(() => this.workers.delete(key));
+        this.workers.set(key, worker);
+      }
+      if (!this.workers.size) return;
+      if (!this.wakeRequested) await Promise.race([...this.workers.values(), new Promise((resolve) => { this.reschedule = resolve; })]);
+      this.reschedule = null;
+    }
+    await Promise.all(this.workers.values());
+  }
+
+  scheduleFeedback(turn) {
+    if (this.feedback.has(turn.id) || (!this.context.cards?.enabled && turn.feedbackState) || !['queued', 'thinking'].includes(turn.status)) return;
+    const entry = {};
+    entry.timer = setTimeout(() => {
+      entry.running = this.sendFeedback(turn.id).catch(() => {});
+      if (this.context.cards?.enabled) {
+        entry.pulse = setInterval(() => {
+          entry.running = this.sendFeedback(turn.id).catch(() => {});
+        }, 10_000);
+        entry.pulse.unref();
+      }
+    }, Math.max(0, this.feedbackMs - (Date.now() - Date.parse(turn.createdAt))));
+    entry.timer.unref();
+    this.feedback.set(turn.id, entry);
+  }
+
+  async sendFeedback(id) {
+    if (this.stopped) return;
+    const turn = (await this.context.store.read()).conversations.find((item) => item.id === id);
+    if (this.context.cards?.enabled) {
+      if (!turn || !['queued', 'thinking'].includes(turn.status)) return;
+      const messageId = await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
+        { replyTo: turn.messageId, profile: turn.profile }, { immediate: true });
+      if (messageId) await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: messageId });
+      return;
+    }
+    if (!turn || !['queued', 'thinking'].includes(turn.status) || turn.feedbackState) return;
+    // Best-effort factual receipt, not a semantic/template answer. Persist before send.
+    await this.update(id, { feedbackState: 'sending' });
+    const text = turn.status === 'queued' ? '已收到，正在排队；前面的对话处理完后会继续。'
+      : '已收到，Codex 正在理解这条消息，结果会回复在这里。';
+    try {
+      const result = await this.context.feishu.reply(turn.messageId, text, { profile: turn.profile, timeoutMs: 8000 });
+      await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: responseMessageId(result) });
+    } catch { await this.update(id, { feedbackState: 'failed' }); }
+  }
+
+  async update(id, fields) {
+    await this.context.store.transact((state) => Object.assign(state.conversations.find((turn) => turn.id === id), fields));
+  }
+
+  async process(key) {
+    while (!this.stopped) {
+      const state = await this.context.store.read();
+      const turn = (state.conversations ?? []).find((item) => this.key(item) === key && ['queued', 'decided', 'ready'].includes(item.status));
+      if (!turn || (turn.retryAt && Date.parse(turn.retryAt) > Date.now())) return;
+      if (turn.status === 'queued') {
+        const aiStarted = Date.now();
+        await this.update(turn.id, { status: 'thinking', aiStartedAt: new Date(aiStarted).toISOString(),
+          queueMs: aiStarted - Date.parse(turn.createdAt) });
+        try {
+          const input = await this.buildInput(turn);
+          const decision = validateDecision(await this.decide(input, this.abort.signal, { sessionKey: key,
+            onEvent: (event, info) => {
+              if (event === 'error') this.update(turn.id, { connectionRetryAt: new Date().toISOString(), connectionWillRetry: info.willRetry }).catch(() => {});
+            } }));
+          await this.update(turn.id, { status: 'decided', decision, timing: decision.timing ?? { aiMs: Date.now() - aiStarted },
+            attachmentPool: input.attachments, aiCompletedAt: new Date().toISOString() });
+        } catch (error) {
+          if (this.stopped) { await this.update(turn.id, { status: 'queued' }); return; }
+          console.error(`[conversation:${turn.id}] AI failed:`, error.message);
+          await this.update(turn.id, { status: 'ready', error: error.message.slice(0, 4000),
+            response: '这条消息的 AI 调用失败了，没有据此创建或推进任务。请检查开发电脑的网络/VPN和 Codex 登录后，再 @ 我重试。',
+            timing: error.timing ?? { aiMs: Date.now() - aiStarted }, aiFailed: true });
+        }
+        continue;
+      }
+      if (turn.status === 'decided') {
+        try {
+          const outcome = await this.apply(turn);
+          await this.update(turn.id, { status: 'ready', outcome, response: [turn.decision.reply, outcome.notice].filter(Boolean).join('\n\n') });
+        } catch (error) {
+          await this.update(turn.id, { status: 'ready', response: `本次操作未执行：${error.message}`, actionError: error.message });
+        }
+        continue;
+      }
+      try {
+        const feedback = this.feedback.get(turn.id);
+        clearTimeout(feedback?.timer);
+        clearInterval(feedback?.pulse);
+        await feedback?.running;
+        this.feedback.delete(turn.id);
+        const deliveryStarted = Date.now();
+        const responseIds = [...(turn.responseIds ?? [])];
+        let parts;
+        if (this.context.cards?.enabled) {
+          const cardId = await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
+            { replyTo: turn.messageId, profile: turn.profile }, { terminal: true, immediate: true,
+              resultText: turn.response?.length > 360 ? turn.response : '' });
+          if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
+          parts = [];
+        } else parts = splitReply(turn.response);
+        for (let i = turn.sentParts ?? 0; i < parts.length; i++) {
+          const result = await this.context.feishu.reply(turn.messageId, parts[i], { profile: turn.profile });
+          const id = responseMessageId(result);
+          if (id) responseIds.push(id);
+          await this.update(turn.id, { sentParts: i + 1, responseIds });
+        }
+        const timing = { ...turn.timing, queueMs: turn.queueMs, deliveryMs: Date.now() - deliveryStarted, totalMs: Date.now() - Date.parse(turn.createdAt) };
+        await this.update(turn.id, { status: 'sent', completedAt: new Date().toISOString(), responseIds, timing });
+        console.log(`[conversation-timing] ${JSON.stringify({ id: turn.id, role: turn.role, ...timing })}`);
+      } catch (error) {
+        const failures = (turn.deliveryFailures ?? 0) + 1;
+        // Persist the outbox; retry delivery without calling AI or applying actions again.
+        await this.update(turn.id, { deliveryFailures: failures, deliveryError: error.message.slice(0, 2000),
+          retryAt: new Date(Date.now() + Math.min(60_000, failures * 5000)).toISOString() });
+        console.error(`[conversation:${turn.id}] reply delivery failed`);
+      }
+    }
+  }
+
+  async buildInput(turn) {
+    const { projects, store } = this.context;
+    const state = await store.read();
+    const projectId = projects.chatProjectMap[turn.chatId] ?? null;
+    const preceding = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.chatId === turn.chatId
+      && item.profile === turn.profile && item.senderId === turn.senderId && item.status === 'sent'
+      && conversationProject(item) === projectId);
+    const history = preceding.slice(-20);
+    const parent = preceding.find((item) => item.messageId === turn.parentId || item.feedbackMessageId === turn.parentId || item.responseIds?.includes(turn.parentId));
+    if (parent && !history.includes(parent)) history.unshift(parent);
+    const attachments = [...new Map([...history.flatMap((item) => item.attachments ?? []), ...turn.attachments]
+      .map((item) => [item.id, item])).values()].slice(-20);
+    const jobs = state.jobs.filter((job) => job.chatId === turn.chatId && job.projectId === projectId).slice(-20).map((job) => ({
+      id: job.id, projectId: job.projectId, stage: job.stage, status: job.status,
+      instruction: job.instruction.slice(0, 4000),
+      evidence: sourceEvidence(job, projects.projects[projectId]?.repoPath),
+      finalMessage: sourceEvidence(job, projects.projects[projectId]?.repoPath).applicability === 'not_evidence_for_current_source_directory'
+        && job.taskIntent === 'analysis' ? '旧分析结果不适用于当前源码目录；原结果保留在任务记录中，需要查当前源码时重新调查。'
+        : job.result?.finalMessage?.slice(0, 6000) ?? '',
+      canApprove: isAdministrator(projects, turn) && job.status === 'awaiting_approval',
+    }));
+    return {
+      role: turn.role, administrator: isAdministrator(projects, turn),
+      sourcePolicy: { version: 'folder-evidence-v1', checkedNow: false,
+        rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
+      project: projectId ? { id: projectId, name: projects.projects[projectId]?.displayName ?? projectId,
+        sourceDirectory: projects.projects[projectId]?.repoPath ?? null,
+        analysisWorkspace: '配置的源码目录（只读，含本地检出及业务子仓）',
+        implementationWorkspace: 'Runner 创建的隔离 Git worktree；不自动包含独立子仓' } : null,
+      knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
+      history: history.map((item) => ({ user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
+        evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
+      jobs, attachments, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
+    };
+  }
+
+  async apply(turn) {
+    const { store, projects } = this.context;
+    const decision = turn.decision;
+    const projectId = projects.chatProjectMap[turn.chatId];
+    const attachmentIds = new Set(decision.attachmentIds);
+    const attachments = (turn.attachmentPool ?? []).filter((item) => attachmentIds.has(item.id));
+    if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');
+    if (decision.action === 'reply') return {};
+    if (decision.action === 'bind_project') {
+      if (!isAdministrator(projects, turn)) throw new Error('只有真人管理员可以绑定项目，项目负责人机器人不是管理员。');
+      if (!Object.hasOwn(projects.projects, decision.projectId)) throw new Error('项目不存在。');
+      if (projectId && projectId !== decision.projectId) throw new Error('本群已绑定项目，变更绑定需在本地配置中确认。');
+      projects.chatProjectMap[turn.chatId] = decision.projectId;
+      await saveProjects(this.context.config.projectsFile, projects);
+      return { notice: `已绑定：${projects.projects[decision.projectId].displayName ?? decision.projectId}` };
+    }
+    if (!projectId || !projects.projects[projectId]) throw new Error('本群尚未绑定有效代码项目，可以先继续讨论。');
+    if (decision.projectId && decision.projectId !== projectId) throw new Error('不能操作本群绑定范围外的项目。');
+    if (decision.action === 'create_task') {
+      const route = routeDecision(turn.role, decision.intent);
+      const routing = agentRouting(this.context, route.stage);
+      if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
+        throw new Error('代码分析协作需要配置开发和项目负责人两个机器人 profile；本次未创建任务。');
+      }
+      const created = await store.createJob({
+        projectId, projectName: projects.projects[projectId].displayName ?? projectId,
+        chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
+        sourceMessageId: turn.id, replyToMessageId: turn.messageId,
+        requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
+        ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, attachments,
+        delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
+          reason: route.workflow === 'analysis_review' ? '交给开发只读调查，完成后由项目负责人汇总' : '按角色边界转交负责人协调' } : null,
+      });
+      return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${route.workflow === 'analysis_review' ? '协作：开发只读调查 → 项目负责人汇总（不修改代码）\n' : ''}状态：等待执行` };
+    }
+    const job = await store.getJob(decision.jobId);
+    if (!job || job.chatId !== turn.chatId || job.projectId !== projectId) throw new Error('本群没有这个任务，不能跨群操作。');
+    const admin = isAdministrator(projects, turn);
+    if (decision.action === 'approve') {
+      if (!admin) throw new Error('只有真人管理员可以放行。请使用已配置管理员身份 @项目负责人 确认；机器人角色不等于管理员。');
+      const approved = await store.approve(job.id, turn.senderId, agentRouting(this.context, nextStage(job.workflow, job.stage)), turn.id);
+      return { jobId: job.id, nextJobId: approved.nextJob.id, notice: `已放行 ${job.id}\n下一阶段：${stageLabel(approved.nextJob.stage)}（${approved.nextJob.id}）` };
+    }
+    if (!admin && !isTaskCreator(projects, job, turn)) throw new Error('只有任务发起人或真人管理员可以补充/取消该任务；转交后需配置跨应用真人身份映射。');
+    if (decision.action === 'clarify') {
+      const resumed = await store.resumeClarification(job.id, {
+        instruction: decision.instruction, sourceMessageId: turn.id, replyToMessageId: turn.messageId,
+        senderId: turn.senderId, attachments,
+      }, turn.id);
+      return { jobId: job.id, notice: `${resumed.id} 已收到补充，将重新执行当前阶段。` };
+    }
+    if (decision.action === 'cancel') {
+      const cancelled = await store.cancel(job.id, turn.senderId, turn.id);
+      await this.context.notifyJobEvent?.({ job: cancelled, event: { type: cancelled.status === 'cancelling' ? 'cancel_requested' : 'cancelled' } });
+      return { jobId: job.id, notice: `${job.id} ${cancelled.status === 'cancelling' ? '已请求停止，等待执行器确认退出' : '已取消'}。` };
+    }
+    throw new Error('不支持的操作。');
+  }
+}
+
+export function routeDecision(role, intent) {
+  if (intent === 'analysis' && ['owner_intake', 'owner_report', 'pm', 'developer'].includes(role)) {
+    return { stage: 'developer', workflow: 'analysis_review' };
+  }
+  if (intent === 'implementation') {
+    const stage = ['qa', 'owner_audit', 'owner_report'].includes(role) ? 'owner_intake' : role;
+    return { stage, workflow: workflowForStage(stage) };
+  }
+  // Read/plan/test requests are single-stage, never silently escalated to coding.
+  return { stage: role, workflow: `single_${role}` };
+}
+
+function agentRouting(context, role) {
+  const profileRole = role === 'owner_report' ? 'owner_intake' : role;
+  return { agentRole: role, agentProfile: context.agents.agents?.[profileRole]?.profile ?? null };
+}
+
+export function splitReply(text, size = 2500) {
+  const parts = [];
+  const points = Array.from(String(text));
+  for (let i = 0; i < points.length; i += size) parts.push(points.slice(i, i + size).join(''));
+  return parts;
+}
+
+export function responseMessageId(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.message_id === 'string') return value.message_id;
+  for (const child of Object.values(value)) {
+    if (child && typeof child === 'object') { const found = responseMessageId(child); if (found) return found; }
+  }
+  return null;
+}
+
+export function conversationProject(turn) {
+  if (Object.hasOwn(turn, 'projectId')) return turn.projectId;
+  try {
+    const key = JSON.parse(turn.sessionKey);
+    return Array.isArray(key) && key.length === 5 ? key[4] : undefined;
+  } catch { return undefined; }
+}
