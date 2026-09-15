@@ -75,3 +75,8 @@ agentos/
 当前成品基线是 Windows 单机 + 当前用户登录后自启 + lark-cli 长连接，无需公网域名。源码保留 HTTPS Control Plane 与拆分 Runner 入口，但公网化、跨机凭据、反向代理、TLS、高可用数据库和严格多租户隔离不属于开箱即用范围。
 
 完整落盘位置见 `docs/storage-and-data.md`；从零部署见 `docs/getting-started.md`。
+
+
+## 可追溯记忆与台账入口
+
+默认启用近期预算、持久摘录摘要和范围内历史检索；`config/memory.local.json` 可配置，`data/memory.json` 私有保存。分析任务可用项目 `knowledgePaths` 提供台账入口，仍先同步再只读核实，不写台账或扩大权限。详细方案、字段、执行路径、失败恢复与平台限制见 [记忆管理](memory-management.md)。

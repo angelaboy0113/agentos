@@ -3,6 +3,7 @@ import { CodexConversationEngine, validateDecision } from './codex-conversation.
 import { saveProjects } from './config.js';
 import { conversationCard } from './message-cards.js';
 import path from 'node:path';
+import { MemoryService, fitContext } from './memory.js';
 import { canContinueTask, canCreateTask, isAdministrator, isTaskCreator } from './authorization.js';
 import { conversationTerminalMention } from './requester-mention.js';
 export { isAdministrator } from './authorization.js';
@@ -24,6 +25,7 @@ export function sourceEvidence(job, sourceDirectory) {
 export class ConversationService {
   constructor(context, options = {}) {
     this.context = context;
+    this.memory = new MemoryService({ dataDir: context.config.dataDir, settings: options.memorySettings });
     this.engine = options.decide ? null : new CodexConversationEngine({ dataDir: context.config.dataDir });
     this.decide = options.decide ?? ((input, signal, detail) => this.engine.decide(input, { ...detail, signal }));
     this.concurrency = options.concurrency ?? 3;
@@ -244,12 +246,17 @@ export class ConversationService {
     const preceding = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.chatId === turn.chatId
       && item.profile === turn.profile && item.senderId === turn.senderId && item.status === 'sent'
       && conversationProject(item) === projectId);
-    const history = preceding.slice(-20);
-    const parent = preceding.find((item) => item.messageId === turn.parentId || item.feedbackMessageId === turn.parentId || item.responseIds?.includes(turn.parentId));
+    const memory = await this.memory.retrieve(state, turn, projectId);
+    const suppressed = new Set(memory.suppressedRefs ?? []);
+    const suppressedMessages = new Set(preceding.filter((item) => suppressed.has(`conversation:${item.id}`)).map((item) => item.messageId));
+    const availableHistory = memory.available === false ? [] : preceding.filter((item) => !suppressed.has(`conversation:${item.id}`));
+    const history = availableHistory.slice(-this.memory.settings.recentTurns);
+    const parent = availableHistory.find((item) => item.messageId === turn.parentId || item.feedbackMessageId === turn.parentId || item.responseIds?.includes(turn.parentId));
     if (parent && !history.includes(parent)) history.unshift(parent);
     const attachments = [...new Map([...history.flatMap((item) => item.attachments ?? []), ...turn.attachments]
       .map((item) => [item.id, item])).values()].slice(-20);
-    const jobs = state.jobs.filter((job) => job.chatId === turn.chatId && job.projectId === projectId).slice(-20).map((job) => ({
+    const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId
+      && !suppressed.has(`job:${job.id}`) && !suppressed.has(`conversation:${job.sourceMessageId}`) && !suppressedMessages.has(job.originMessageId)).slice(-20).map((job) => ({
       id: job.id, projectId: job.projectId, stage: job.stage, status: job.status,
       instruction: job.instruction.slice(0, 4000),
       evidence: sourceEvidence(job, projects.projects[projectId]?.repoPath),
@@ -258,7 +265,9 @@ export class ConversationService {
         : job.result?.finalMessage?.slice(0, 6000) ?? '',
       canApprove: isAdministrator(projects, turn) && job.status === 'awaiting_approval',
     }));
-    return {
+    delete memory.suppressedRefs;
+    return fitContext({
+      memory,
       role: turn.role, administrator: isAdministrator(projects, turn),
       sourcePolicy: { version: 'folder-evidence-v1', checkedNow: false,
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
@@ -270,7 +279,7 @@ export class ConversationService {
       history: history.map((item) => ({ user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
         evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
       jobs, attachments, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
-    };
+    }, this.memory.settings);
   }
 
   async apply(turn) {

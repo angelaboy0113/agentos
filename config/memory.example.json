@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "recentTurns": 20,
+  "summaryEveryTurns": 10,
+  "summaryItems": 12,
+  "retrievalItems": 8,
+  "historyBudgetTokens": 12000,
+  "inputBudgetTokens": 24000,
+  "systemReserveTokens": 6000,
+  "outputReserveTokens": 4000
+}

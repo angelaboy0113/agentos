@@ -50,7 +50,7 @@ export class CodexConversationEngine {
     if (options.signal?.aborted || this.closed) throw new Error('Conversation stopped');
     const key = options.sessionKey ?? `${input.role}:${input.project?.id ?? ''}`;
     let session = this.sessions.get(key);
-    const reused = Boolean(session && session.generation === this.app.generation && session.count < 20);
+    const reused = Boolean(!input.memory?.enabled && session && session.generation === this.app.generation && session.count < 20);
     if (!reused) {
       if (session) this.releaseSession(key, session);
       if (this.sessions.size >= 24) {

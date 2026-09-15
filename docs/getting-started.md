@@ -293,3 +293,8 @@ git pull --ff-only
 ## 分析前同步升级
 
 源码分析现在要求配置 `analysisRepositories`，由 Runner 在只读 Codex 启动前同步各仓 origin 分支。旧版直接读本地目录的行为被此门禁收紧；参见 [同步配置与排查](source-sync.spec.md)。未配置或同步失败会阻塞，不能通过给分析模型开放写权限解决。
+
+
+## 可追溯记忆与台账入口
+
+默认启用近期预算、持久摘录摘要和范围内历史检索；`config/memory.local.json` 可配置，`data/memory.json` 私有保存。分析任务可用项目 `knowledgePaths` 提供台账入口，仍先同步再只读核实，不写台账或扩大权限。详细方案、字段、执行路径、失败恢复与平台限制见 [记忆管理](memory-management.md)。

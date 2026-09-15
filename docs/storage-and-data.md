@@ -19,6 +19,7 @@
 | `config/*.local.json` | 真实项目路径、群 ID、机器人/真人 ID、网络出口 | 是 | 否 |
 | `.env` | 可选环境变量和令牌 | 严重敏感 | 否 |
 | `docs/`、`scripts/`、`test/` | 设计、部署、维护、辅助脚本和回归测试 | 否 | 是 |
+| `data/memory.json` | 按范围的持久摘录摘要、来源指纹及停用记录；详见[记忆管理](memory-management.md) | 是 | 否 |
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送和幂等记录 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
 | `data/lark-cli/` | lark-cli 消息资源下载工作目录 | 是 | 否 |
@@ -45,7 +46,7 @@
 
 ## 保存、备份与清理
 
-- 停止 AgentOS 后，至少备份 `data/agentos.json` 和仍需保留的 `data/worktrees/`。备份包含敏感信息，应加密并限制访问。
+- 停止 AgentOS 后，至少备份 `data/agentos.json`、已有 `data/memory.json`、local 配置和仍需保留的 `data/worktrees/`。备份包含敏感信息，应加密并限制访问。
 - 不要在运行中手工编辑 `agentos.json`；写入采用临时文件加原子重命名，外部同时改写会破坏状态。
 - 不要直接删除有未提交修改的 `data/worktrees/`。先在对应业务仓执行 `git status`，确认归属和保留方式，再使用 `git worktree remove <路径>`；必要时另行备份。
 - `pending-card-actions/` 未清空表示仍有卡片动作等待送达；不能把删除文件当成“处理成功”。

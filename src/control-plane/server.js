@@ -8,6 +8,7 @@ import { LarkCliFeishuClient } from './lark-cli.js';
 import { JsonStore } from '../shared/store.js';
 import { nextStage, routeInstruction, routeInstructionForStage, stageLabel } from '../shared/protocol.js';
 
+import { loadMemorySettings } from './memory.js';
 import { ConversationService, splitReply, responseMessageId } from './conversations.js';
 import { LiveCards } from './live-cards.js';
 import { jobCard, resultSummary } from './message-cards.js';
@@ -41,7 +42,7 @@ export async function createControlPlane(overrides = {}) {
       saved.updatedAt = new Date().toISOString();
     }
   });
-  const conversations = new ConversationService(context, { ...overrides.conversationOptions, decide: overrides.conversationResponder });
+  const conversations = new ConversationService(context, { memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
   const server = http.createServer(async (request, response) => {
     try {
@@ -64,6 +65,7 @@ async function route(context) {
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
+      memoryPolicy: 'scoped-extractive-memory-v1', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
       analysisWorkflow: 'read-only-developer-owner-v1', sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1',
