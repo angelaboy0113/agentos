@@ -71,9 +71,9 @@ export async function validateHandoff(job, result, workspace) {
     if (!check || typeof check !== 'object') { issues.push('验收项格式无效'); continue; }
     if (!nonempty(check.id) || seen.has(check.id) || typeof check.required !== 'boolean' || !statuses.has(check.status) || !nonempty(check.evidence)) issues.push('验收项需唯一编号、明确状态与非空证据');
     seen.add(check.id);
-    if (result.outcome === 'ready' && check.required && check.status !== 'passed') issues.push(`必需验收项未通过：${check.id}`);
+    if (['ready', 'partial'].includes(result.outcome) && check.required && check.status !== 'passed') issues.push(`必需验收项未通过：${check.id}`);
   }
-  if (result.outcome === 'ready') {
+  if (['ready', 'partial'].includes(result.outcome)) {
     if (h.returnTo !== 'none') issues.push('存在退回责任时不能标记ready');
     if (!h.checks.length) issues.push('ready必须给出本阶段检查依据');
     if (job.taskIntent !== 'analysis') {
@@ -81,6 +81,10 @@ export async function validateHandoff(job, result, workspace) {
       if (job.stage === 'developer' && (job.taskIntent ?? 'implementation') === 'implementation' && !verifiedArtifacts.some((a) => a.kind === 'spec')) issues.push('开发交接缺少实际Spec');
       if (['developer', 'qa'].includes(job.stage) && !h.checks.some((c) => c?.status === 'passed' && c.required)) issues.push('开发/测试缺少必需验证的通过依据');
     }
+  }
+  if (result.outcome === 'partial') {
+    if (job.taskIntent !== 'analysis') issues.push('partial只允许只读分析');
+    if (!verifiedArtifacts.length || !h.checks.some((c) => c?.required && c.status === 'passed') || !h.risks.length) issues.push('部分分析必须有可核验工件、已通过的必需检查及明确证据缺口');
   }
   return { issues: [...new Set(issues)], verifiedArtifacts };
 }
@@ -90,4 +94,17 @@ export function enforceHandoff(result, gate) {
   return { ...result, outcome: 'blocked', summary: '本阶段交接检查未通过，尚不能交付。需补齐或修正工件与验收证据，具体原因见详情。',
     finalMessage: `交接检查未通过：\n${gate.issues.map((s) => `- ${s}`).join('\n')}\n\n原阶段报告（不代表已通过）：\n${result.finalMessage}`,
     verifiedArtifacts: gate.verifiedArtifacts, handoffGate: { passed: false, issues: gate.issues } };
+}
+
+// Summarizing a partial investigation must not silently erase its known gaps.
+export function preserveAnalysisGaps(job, result) {
+  if (job.taskIntent !== 'analysis' || job.stage !== 'owner_report' || !['ready', 'partial'].includes(result.outcome)) return result;
+  const prior = [...(job.context ?? [])].reverse().find((entry) => entry.result?.outcome === 'partial')?.result;
+  if (!prior || !result.handoff) return result;
+  const risks = [...new Set([...(prior.handoff?.risks ?? []), ...(result.handoff.risks ?? [])])];
+  return { ...result, outcome: 'partial',
+    summary: `部分分析完成，仍有待核实项。${result.summary ?? ''}`.slice(0, 360),
+    finalMessage: `${result.finalMessage}\n\n仍未核实（沿用本轮调查）：\n${risks.map((risk) => `- ${risk}`).join('\n')}`,
+    handoff: { ...result.handoff, risks,
+      artifacts: result.handoff.artifacts?.length ? result.handoff.artifacts : prior.handoff?.artifacts ?? [] } };
 }

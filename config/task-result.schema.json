@@ -3,7 +3,7 @@
   "additionalProperties": false,
   "required": ["outcome", "summary", "finalMessage", "handoff"],
   "properties": {
-    "outcome": { "type": "string", "enum": ["ready", "needs_clarification", "blocked"] },
+    "outcome": { "type": "string", "enum": ["ready", "needs_clarification", "blocked", "partial"] },
     "summary": { "type": "string", "maxLength": 360 },
     "finalMessage": { "type": "string" },
     "handoff": {

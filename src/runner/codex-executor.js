@@ -7,7 +7,7 @@ import { prepareWorkspace, runVerification } from './workspace.js';
 import { prepareAnalysisSources, verifyAnalysisSources } from './source-sync.js';
 import { codexEnvironment, resolveCodexBinary } from '../shared/codex-runtime.js';
 import { ExecutionActivity } from '../shared/execution-activity.js';
-import { loadHarness, handoffContext, validateHandoff, enforceHandoff } from './harness.js';
+import { loadHarness, handoffContext, validateHandoff, enforceHandoff, preserveAnalysisGaps } from './harness.js';
 
 const DEFAULT_STAGE_INSTRUCTIONS = {
   owner_intake: '你是项目负责人。核对目标、边界、风险与验收口径，输出可供PM继续处理的任务简报，不修改业务代码。信息不足时最终结果第一行必须写 [NEEDS_CLARIFICATION]；信息足够进入下一阶段时第一行写 [READY]。',
@@ -39,7 +39,7 @@ export async function executeJob(job, config, emit) {
   const prompt = await buildPrompt(job, project, harness, sourceSync);
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
-  const rawResult = await runCodex({ job, config, workspace, attachmentPaths, prompt, emit });
+  const rawResult = preserveAnalysisGaps(job, await runCodex({ job, config, workspace, attachmentPaths, prompt, emit }));
   if (sourceSync) {
     try { await verifyAnalysisSources(project, sourceSync); }
     catch (error) { return { ...sourceBlocked(error), sourceSync }; }
@@ -144,7 +144,7 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit 
       if (code !== 0 || failure) return reject(new Error(failure || `Codex exited ${code}: ${stderr.slice(-4000)}`));
       try {
         const result = JSON.parse(finalMessage);
-        if (!['ready', 'needs_clarification', 'blocked'].includes(result.outcome) || !result.finalMessage?.trim()) throw new Error('Missing valid outcome');
+        if (!['ready', 'needs_clarification', 'blocked', ...(job.taskIntent === 'analysis' ? ['partial'] : [])].includes(result.outcome) || !result.finalMessage?.trim()) throw new Error('Missing valid outcome');
         resolve({ threadId, ...result });
       } catch (error) { reject(new Error(`Codex result invalid: ${error.message}`)); }
     });
@@ -205,7 +205,7 @@ ${prior}
 2. 事实不充分时停止并在最终结果中列出所需信息，不要编造。
 3. 不输出或提交任何密钥，不执行生产部署，不合并主分支。
 4. 最终说明：结论、变更文件、验证命令与结果、遗留风险、建议下一步。
-5. 按输出 schema 返回 JSON：outcome=ready 仅表示当前阶段有证据通过；缺少用户输入为 needs_clarification；测试失败、验收未通过或环境阻断为 blocked。finalMessage 写完整自然语言结论，不用仅“已完成”代替证据。角色文件中的标记可以出现在 finalMessage 中，状态以 outcome 为准。
+5. 按输出 schema 返回 JSON：outcome=partial 仅供 analysis：已确认部分有用结论但尚有证据缺口，必须明确列出已确认、未核实及补齐方法；不得把真正同步/权限阻塞改成 partial。outcome=ready 仅表示当前阶段有证据通过；缺少用户输入为 needs_clarification；测试失败、验收未通过或环境阻断为 blocked。finalMessage 写完整自然语言结论，不用仅“已完成”代替证据。角色文件中的标记可以出现在 finalMessage 中，状态以 outcome 为准。
 6. 所有角色统一面向用户汇报：summary 用 2–4 句大白话、建议 120–240 字，最多 360 字，先直接回答用户问题，再说重要风险/未验证项和是否需要用户操作。禁止在 summary 堆类名、完整路径、代码块、工具日志，不能用“已完成调查”代替实际发现。summary 必须与证据一致，不能为了短而隐藏阻塞或测试失败。
 7. finalMessage 是按需展开的技术详情：保留必要接口、关键逻辑、项目相对文件路径及行号、验证范围和风险，不重复流水账。负责人汇总必须消化开发结果，用用户能理解的语言回答，不整篇复制开发报告。文件引用使用项目相对路径，不使用本机 Markdown 文件跳转链接；不要预先 HTML 转义。长代码只保留说明问题所需的片段。
 `;

@@ -195,6 +195,10 @@ export class JsonStore {
         job.lease = null;
       }
       if (event.type === 'completed' && job.status !== 'cancelling') {
+        if (event.result?.outcome === 'partial' && (job.taskIntent !== 'analysis'
+          || event.result.sourceSyncBlocked || event.result.handoffGate?.passed !== true
+          || !event.result.verifiedArtifacts?.length || !event.result.handoff?.risks?.length
+          || !event.result.sourceSync?.repositories?.length)) throw new Error('Invalid partial analysis evidence');
         job.result = event.result ?? null;
         job.status = event.result?.outcome === 'blocked' ? 'blocked' : needsClarification(job, event.result)
           ? 'awaiting_clarification'
@@ -213,7 +217,7 @@ export class JsonStore {
       // Persist completion and successor together; duplicate/late leases are rejected above.
       if (event.type === 'completed' && job.status === 'awaiting_approval'
         && job.taskIntent === 'analysis' && job.workflow === 'analysis_review' && job.stage === 'developer'
-        && event.result?.outcome === 'ready' && completionRouting.agentRole === 'owner_report'
+        && ['ready', 'partial'].includes(event.result?.outcome) && completionRouting.agentRole === 'owner_report'
         && completionRouting.agentProfile) {
         nextJob = makeNextJob(job, 'owner_report', completionRouting, job.updatedAt);
         job.status = 'completed';
