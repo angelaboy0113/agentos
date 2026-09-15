@@ -264,7 +264,7 @@ export class ConversationService {
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
       project: projectId ? { id: projectId, name: projects.projects[projectId]?.displayName ?? projectId,
         sourceDirectory: projects.projects[projectId]?.repoPath ?? null,
-        analysisWorkspace: '配置的源码目录（只读，含本地检出及业务子仓）',
+        analysisWorkspace: 'Runner 先同步 analysisRepositories 各仓 origin 分支，再只读分析；缺配置或同步失败则阻塞',
         implementationWorkspace: 'Runner 创建的隔离 Git worktree；不自动包含独立子仓' } : null,
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
       history: history.map((item) => ({ user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,

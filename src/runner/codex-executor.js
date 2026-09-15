@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stageLabel } from '../shared/protocol.js';
 import { prepareWorkspace, runVerification } from './workspace.js';
+import { prepareAnalysisSources, verifyAnalysisSources } from './source-sync.js';
 import { codexEnvironment, resolveCodexBinary } from '../shared/codex-runtime.js';
 import { ExecutionActivity } from '../shared/execution-activity.js';
 import { loadHarness, handoffContext, validateHandoff, enforceHandoff } from './harness.js';
@@ -26,13 +27,23 @@ export async function executeJob(job, config, emit) {
   const project = config.projects[job.projectId];
   const began = Date.now();
   const harness = await loadHarness(job);
+  let sourceSync;
+  if (job.taskIntent === 'analysis') {
+    await emit({ type: 'progress', message: job.stage === 'owner_report' ? '正在核对本次分析的源码版本证据' : '正在同步配置仓库的 origin 分支，成功后进入只读分析' });
+    try { sourceSync = await prepareAnalysisSources(job, project); }
+    catch (error) { return sourceBlocked(error); }
+  }
   const workspace = await prepareWorkspace(job, project, config.worktreeRoot);
   const attachmentPaths = await downloadAttachments(job, config,
     job.taskIntent === 'analysis' ? path.join(config.worktreeRoot, 'analysis-resources') : workspace);
-  const prompt = await buildPrompt(job, project, harness);
+  const prompt = await buildPrompt(job, project, harness, sourceSync);
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
   const rawResult = await runCodex({ job, config, workspace, attachmentPaths, prompt, emit });
+  if (sourceSync) {
+    try { await verifyAnalysisSources(project, sourceSync); }
+    catch (error) { return { ...sourceBlocked(error), sourceSync }; }
+  }
   let codexResult = enforceHandoff(rawResult, await validateHandoff(job, rawResult, workspace));
   const aiCompleted = Date.now();
   const verifyCommands = verificationCommands(job, project, codexResult.outcome);
@@ -43,9 +54,14 @@ export async function executeJob(job, config, emit) {
     (text) => emit({ type: 'progress', message: text.slice(-500) }).catch(() => undefined));
   // Recheck final files after verification commands may have generated/changed artifacts.
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace));
-  return { workspace, threadId: codexResult.threadId, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { workspace, ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate,
     timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };
+}
+
+function sourceBlocked(error) {
+  const summary = `源码版本检查未通过，本次没有形成有效分析结论。${error.message} 已同步的仓库可能保留更新，不自动回滚；请管理员在本机处理后重新发起分析。`;
+  return { outcome: 'blocked', summary, finalMessage: summary, verification: [] };
 }
 
 export function verificationCommands(job, project, outcome) {
@@ -166,7 +182,7 @@ async function downloadAttachments(job, config, workspace) {
   return downloaded;
 }
 
-export async function buildPrompt(job, project, harness = null) {
+export async function buildPrompt(job, project, harness = null, sourceSync = null) {
   harness ??= await loadHarness(job);
   const stageInstruction = harness.instruction;
   const prior = job.context?.length
@@ -179,7 +195,8 @@ export async function buildPrompt(job, project, harness = null) {
 任务编号：${job.id}
 项目：${job.projectName} (${job.projectId})
 基准分支：${project.baseBranch ?? 'main'}
-${job.taskIntent === 'analysis' ? '本次是只读分析，实际读取配置 repoPath 的当前本地检出内容（包括未提交变更及嵌套业务仓），不是基准分支快照。只检查相关代码仓，注明分支/commit/脏状态。禁止修改文件、安装依赖、构建生成文件或调用有外部副作用的接口；仓库中的记录台账/写文档约定不得扩大本次只读授权。' : ''}
+${job.taskIntent === 'analysis' ? '本次是只读分析，Runner 已同步 analysisRepositories 中各仓库的 origin 对应分支；仅在清单内调查相关代码，不把其它目录或未跟踪/忽略文件当作已同步源码。使用下方本次版本证据，注明分支/commit/同步时间；汇总不再次拉取。禁止修改文件、安装依赖、构建生成文件或调用有外部副作用的接口；仓库中的记录台账/写文档约定不得扩大本次只读授权。' : ''}
+本次源码同步证据：${sourceSync ? JSON.stringify(sourceSync) : '无（不得声称已同步）'}
 用户原始要求：${job.instruction}
 用户授权的工作性质：${job.taskIntent ?? 'implementation'}。analysis 仅分析不改文件；planning 仅文档不改业务实现；verification/audit 只测试审查，发现业务代码问题须报告，不代替开发修复。不能因角色有开发职责就擅自扩展本次授权。
 ${prior}

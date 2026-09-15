@@ -289,3 +289,7 @@ git pull --ff-only
 6. 查看 `data/logs/` 的必要脱敏片段，不把整份日志外发。
 
 所有文件、日志和认证位置见 `docs/storage-and-data.md`；系统边界见 `docs/architecture.md` 与根目录 `SECURITY.md`。
+
+## 分析前同步升级
+
+源码分析现在要求配置 `analysisRepositories`，由 Runner 在只读 Codex 启动前同步各仓 origin 分支。旧版直接读本地目录的行为被此门禁收紧；参见 [同步配置与排查](source-sync.spec.md)。未配置或同步失败会阻塞，不能通过给分析模型开放写权限解决。

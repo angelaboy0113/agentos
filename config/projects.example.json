@@ -24,7 +24,13 @@
       "displayName": "个人工作台",
       "repoPath": "D:\\projects\\your-project",
       "baseBranch": "main",
-      "verifyCommands": []
+      "verifyCommands": [],
+      "analysisRepositories": [
+        {
+          "path": ".",
+          "branch": "main"
+        }
+      ]
     }
   }
 }

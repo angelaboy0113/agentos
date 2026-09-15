@@ -29,3 +29,7 @@ The repository `.gitignore` blocks the standard local paths, but ignoring a file
 5. If a credential was committed, revoke or rotate it first; deleting the latest file does not remove it from Git history.
 
 Report security issues privately to the repository owner. Do not open a public issue containing credentials, message payloads or private source code.
+
+## Analysis source synchronization
+
+Trusted local `analysisRepositories` configuration authorizes Runner to fetch origin and fast-forward named checkouts before read-only analysis. Chat/model output cannot select these targets. This host-side preparation writes Git metadata and updates checkouts; it does not grant write access to the analysis model or implementation rights to ordinary members. See `docs/source-sync.spec.md` for fail-closed behavior and concurrency limits.

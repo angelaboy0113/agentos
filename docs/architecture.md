@@ -67,7 +67,7 @@ agentos/
 ## 工作区边界
 
 - 实施任务：每个 Mission 首次进入开发时在 `data/worktrees/` 创建 `codex/agentos-<job>-<stage>` 分支工作树；后续 QA/审计复用真实工作区和未提交改动。
-- 只读分析：直接读取项目配置的 `repoPath`，允许非 Git 父目录和独立子仓，但使用只读审批策略且不执行业务验证命令。
+- 只读分析：Runner 按 analysisRepositories 对各独立仓先做 origin 快进同步，失败即阻塞；再读取 repoPath，使用只读审批策略且不执行业务验证命令。版本证据留在 result.sourceSync，详见 source-sync.spec.md。
 - AgentOS 不自动 merge、push 或 deploy。业务代码是否提交由团队现有 Git 规则和真人决定。
 
 ## 部署边界

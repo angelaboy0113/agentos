@@ -48,7 +48,7 @@ Set-Location .\agentos
 
 ## 只读代码分析（2026-09-06）
 
-读取按项目文件夹，不按根仓 Git 清单：配置 repoPath 为含多个子仓的父目录即可，只读时父目录不必是 Git 仓库。独立子仓、未提交及被忽略的相关源码可以读取，敏感文件仍不输出。写入/提交仍按原有仓库隔离规则执行。
+读取按项目文件夹，不按根仓 Git 清单：配置 repoPath 为含多个子仓的父目录即可，只读时父目录不必是 Git 仓库。独立子仓须列入分析同步清单；未跟踪或被忽略文件不属于远端版本证据，敏感文件仍不输出。写入/提交仍按原有仓库隔离规则执行。
 
 聊天 AI 输出 requiresSourceInspection：查看当前目录、接口或重新检查为 true，程序据此派发 analysis，不让该决策只返回历史回答。历史证据带 workspace/recordedAt/applicability，旧工作树结果不作为当前源码事实；旧 Job 保留、不自动重跑。改后停稳重启，health.sourcePolicy 应为 folder-evidence-v1。诊断时查看 conversations[].decision 及 outcome.jobId：新调查应为 create_task/analysis，不能仅 action=reply。
 
@@ -56,7 +56,7 @@ Set-Location .\agentos
 
 `@项目负责人 帮我查一下登录接口逻辑，不改代码`：AI 判断为 analysis 后，由开发机器人调查，ready 后自动生成同 Mission 的负责人汇总任务，不经过 PM/QA/人工放行。需要已配置开发与负责人 profile；专业测试/审计分析仍由各自执行。失败/环境缺失不自动流转。
 
-分析直接读取 `projects.local.json` 的 `repoPath` 当前检出目录（含独立子仓和未提交变更），Codex 使用 read-only/never；不执行 `verifyCommands`，附件只写 Runner 数据区。它不代表根仓 worktree 已具备多仓写入能力。实施任务仍使用原有隔离工作区和人工门。
+分析先按 `projects.local.json` 的 `analysisRepositories` 同步各仓 origin 对应分支；缺少清单或同步失败即阻塞。成功后读取 `repoPath` 内的已同步源码，Codex 使用 read-only/never；不执行 `verifyCommands`，附件只写 Runner 数据区。它不代表根仓 worktree 已具备多仓写入能力。实施任务仍使用原有隔离工作区和人工门。
 
 角色真源为 `config/roles/analysis.md` 与 `analysis_report.md`，规范见 [analysis-workflow.spec.md](docs/analysis-workflow.spec.md)。修改后在无在途任务时重启 start:local；`/health` 的 `analysisWorkflow` 应为 `read-only-developer-owner-v1`。旧 `single_owner_intake` 任务不自动迁移或重跑，请新发分析请求。结果卡首屏直接展示脱敏结论及交接信息，长证据保留在详情和续文。
 
@@ -247,3 +247,5 @@ Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地
 验证：`scripts/use-node22.ps1 npm run check`；`scripts/use-node22.ps1 node scripts/preview-message-cards.mjs` 仅本地 dry-run。只有获得群消息发送授权后，才添加 `--send-preview`，向唯一绑定 TPM 的团队群发送一张明确标记的演示卡。
 
 详见 `docs/live-message-cards.spec.md`。这项改动不更换 Codex 模型、不改审批权限、不推送或部署业务项目。
+
+分析前 origin 同步的配置、权限、证据和升级操作见 [源码同步规范](docs/source-sync.spec.md)。升级后先配置 analysisRepositories，再空闲重启；不自动重跑历史任务。

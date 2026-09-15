@@ -4,7 +4,7 @@
 
 - AI 判断 intent=analysis 后，负责人/PM/开发入口转为 `analysis_review: developer -> owner_report`。测试和审计入口保留专业单阶段分析，不能扩大为写代码。
 - 创建协作前核验开发与负责人 profile；不能拿默认机器人冒充缺失角色。开发 ready 时原子创建负责人汇总任务，同一 Mission、继承证据；只读链自动交接，不触动研发人工审批。
-- analysis 工作区使用配置的 repoPath 实际目录，以 read-only/never 执行，读取本地当前检出内容及嵌套业务仓。不是 HEAD 快照，不创建 worktree，不覆盖未提交修改。用户文字、历史工作区不能改写 repoPath。
+- analysis 工作区使用配置的 repoPath 实际目录，以 read-only/never 执行，读取 Runner 按 analysisRepositories 同步后的各仓检出内容。不创建 worktree；存在未提交修改时阻塞，不覆盖。用户文字、历史工作区不能改写 repoPath。
 - 分析附件存 Runner 数据区，不写业务仓；不运行 verifyCommands（可能有写入副作用）。开发记录相关仓分支/commit/脏状态与证据，不能把本地代码当生产配置。
 - owner_report 基于开发证据直接回答原问题，不索要不适用的 PRD/QA/审计。缺代码/权限/环境为 blocked，缺真实用户选择才 needs_clarification。
 - 卡片首屏显示脱敏结论/阻塞原因，保留完整详情、溢出正文及身份/交接可见性。
@@ -25,3 +25,7 @@ AI 输出 requiresSourceInspection，区分查当前源码与解释旧报告。�
 增加无 Git 根目录读取、旧证据过滤、AI 决策协议测试，以及不发送飞书、不执行 Job 的真实 Codex 语义烟测。真实飞书交接独立验收。
 
 真实临时嵌套 Git 仓读取与无文件变更；分析不运行验证命令；AI 路由、两机器人身份、自动交接、重复/迟到/取消事件防重；缺 profile 不建单；错误/未通过不自动放行；卡片首屏脱敏。完整 node --test 回归。
+
+## 分析前同步升级
+
+源码分析现在要求配置 `analysisRepositories`，由 Runner 在只读 Codex 启动前同步各仓 origin 分支。旧版直接读本地目录的行为被此门禁收紧；参见 [同步配置与排查](source-sync.spec.md)。未配置或同步失败会阻塞，不能通过给分析模型开放写权限解决。
