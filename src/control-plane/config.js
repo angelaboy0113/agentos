@@ -43,6 +43,7 @@ export async function loadProjects(file) {
       ownerOpenIdsByProfile: parsed.ownerOpenIdsByProfile ?? {},
       humanIdentities: validateHumanIdentities(parsed.humanIdentities ?? {}),
       chatProjectMap: parsed.chatProjectMap ?? {},
+      ...chatDeliverySettings(parsed),
       projects: parsed.projects ?? {},
     };
   } catch (error) {
@@ -57,4 +58,15 @@ export async function saveProjects(file, projects) {
   const temporary = `${target}.${process.pid}.tmp`;
   await writeFile(temporary, `${JSON.stringify(projects, null, 2)}\n`, 'utf8');
   await rename(temporary, target);
+}
+
+function chatDeliverySettings(value) {
+  const result = {};
+  for (const key of ['topicChatIds', 'retiredChatIds']) {
+    if (value[key] === undefined) continue;
+    if (!Array.isArray(value[key]) || value[key].some(id => typeof id !== 'string' || !id.trim())) throw new Error('Invalid chat delivery settings');
+    result[key] = [...new Set(value[key])];
+  }
+  if (result.topicChatIds?.some(id => result.retiredChatIds?.includes(id))) throw new Error('A topic chat cannot also be retired');
+  return result;
 }

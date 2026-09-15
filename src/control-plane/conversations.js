@@ -73,6 +73,7 @@ export class ConversationService {
         senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake', chatType: event.chat_type ?? null,
         projectId: this.context.projects.chatProjectMap[event.chat_id] ?? null,
         parentId: event.reply_to ?? event.root_id ?? null,
+        ...(this.context.projects.topicChatIds?.includes(event.chat_id) || event.thread_id ? { replyInThread: true } : {}),
         content: event.content ?? '', attachments: event.attachments ?? [],
         status: 'queued', createdAt: new Date().toISOString(),
         sessionKey: JSON.stringify([event.chat_id, event.sender_id, profile, event.agent_role ?? 'owner_intake',
@@ -152,7 +153,7 @@ export class ConversationService {
     if (this.context.cards?.enabled) {
       if (!turn || !['queued', 'thinking'].includes(turn.status)) return;
       const messageId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
-        { replyTo: turn.messageId, profile: turn.profile }, { immediate: true });
+        { replyTo: turn.messageId, profile: turn.profile, ...(turn.replyInThread ? { replyInThread: true } : {}) }, { immediate: true });
       if (messageId) await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: messageId });
       return;
     }
@@ -162,7 +163,7 @@ export class ConversationService {
     const text = turn.status === 'queued' ? '已收到，正在排队；前面的对话处理完后会继续。'
       : '已收到，Codex 正在理解这条消息，结果会回复在这里。';
     try {
-      const result = await this.context.feishu.reply(turn.messageId, text, { profile: turn.profile, timeoutMs: 8000 });
+      const result = await this.context.feishu.reply(turn.messageId, text, { profile: turn.profile, replyInThread: turn.replyInThread, timeoutMs: 8000 });
       await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: responseMessageId(result) });
     } catch { await this.update(id, { feedbackState: 'failed' }); }
   }
@@ -217,7 +218,7 @@ export class ConversationService {
         let parts;
         if (this.context.cards?.enabled) {
           const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
-            { replyTo: turn.messageId, profile: turn.profile }, { terminal: true, immediate: true,
+            { replyTo: turn.messageId, profile: turn.profile, ...(turn.replyInThread ? { replyInThread: true } : {}) }, { terminal: true, immediate: true,
               resultText: turn.response?.length > 360 ? turn.response : '', terminalMention: conversationTerminalMention(turn) });
           if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
           parts = [];
@@ -227,7 +228,7 @@ export class ConversationService {
           if (mention && parts.length) parts[parts.length - 1] = `${parts.at(-1)}\n\n${mention.text}`;
         }
         for (let i = turn.sentParts ?? 0; i < parts.length; i++) {
-          const result = await this.context.feishu.reply(turn.messageId, parts[i], { profile: turn.profile });
+          const result = await this.context.feishu.reply(turn.messageId, parts[i], { profile: turn.profile, replyInThread: turn.replyInThread });
           const id = responseMessageId(result);
           if (id) responseIds.push(id);
           await this.update(turn.id, { sentParts: i + 1, responseIds });

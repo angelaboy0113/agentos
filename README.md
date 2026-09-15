@@ -260,3 +260,7 @@ Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地
 ## 群共享会话与问题主卡片（可选）
 
 在 `config/conversation.local.json` 开启 `groupSessions` 与 `questionCards`，使用 Codex 原生持久会话，并让每个新问题维护一张主卡片。不开启时保留现有隔离记忆和卡片行为；不会改变普通成员权限或改建话题群。配置、使用、状态结构、备份及限制见[群共享会话与一问一卡](docs/group-question-cards.md)。
+
+## 飞书话题群接入
+
+支持配置 `topicChatIds` 将卡片、进度与最终提醒留在原话题；通过 `retiredChatIds` 让旧群停止接单并保留历史。角色、管理员与环境审批规则不变。详见[话题群部署与边界](docs/topic-chats.md)。

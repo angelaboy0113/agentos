@@ -62,6 +62,7 @@ export class LarkCliFeishuClient {
     const digest = createHash('sha256').update(`${messageId}\n${text}`).digest('hex').slice(0, 20);
     return runLarkCli([
       'im', '+messages-reply', '--as', 'bot', '--message-id', messageId,
+      ...(options.replyInThread ? ['--reply-in-thread'] : []),
       '--text', text, '--idempotency-key', options.idempotencyKey ?? `agentos-${digest}`, '--json',
     ], { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile, timeoutMs: options.timeoutMs });
   }
@@ -78,6 +79,7 @@ export class LarkCliFeishuClient {
   async replyCard(messageId, card, options = {}) {
     await mkdir(this.cwd, { recursive: true });
     return runLarkCli(['im', '+messages-reply', '--as', 'bot', '--message-id', messageId,
+      ...(options.replyInThread ? ['--reply-in-thread'] : []),
       '--msg-type', 'interactive', '--content', JSON.stringify(card), '--idempotency-key', options.idempotencyKey, '--json'],
     { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile, timeoutMs: 15_000 });
   }

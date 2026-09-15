@@ -16,6 +16,7 @@ export function attachQuestion(state, turn, event, projects) {
       || state.conversations.some((other) => other.questionId === item.id && parents.includes(other.messageId))));
   const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
     projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
+    ...(turn.replyInThread ? { replyInThread: true } : {}),
     title: publicText(turn.content).replace(/\s+/g, ' ').slice(0, 60) || '附件问题', generation: 1 };
   if (q) question.generation = Math.max(question.generation, question.cardGeneration ?? 1) + 1;
   question.latestTurnId = turn.id;
@@ -51,9 +52,10 @@ export function questionView(state, questionId, projects = {}) {
   const mention = terminal ? (useJob
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
     : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
+  if (mention && q.replyInThread) mention.replyInThread = true;
   return { question: q, job: useJob ? job : null, card, terminal, mention,
     resultText: useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '',
-    destination: { replyTo: q.messageId, profile: q.profile } };
+    destination: { replyTo: q.messageId, profile: q.profile, ...(q.replyInThread ? { replyInThread: true } : {}) } };
 }
 // Fence a snapshot against incoming replies, transitions and result changes between read and publish.
 function sourceVersion(state, id) {

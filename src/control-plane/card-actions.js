@@ -15,6 +15,7 @@ export async function handleCardAction(context, event) {
   if (!Object.values(agents.agents ?? {}).some((agent) => (agent.profile || null) === profile)) return { ignored: true };
   let parsedValue;
   try { parsedValue = parse(event.action_value); } catch { return { ignored: true }; }
+  if (projects.retiredChatIds?.includes(event.chat_id) && !['result_page', 'refresh'].includes(parsedValue.action)) return { ignored: true, reason: 'retired_group' };
   if (parsedValue.action === 'result_page') return handleResultPage(context, event);
   const state = await store.read();
   const entry = Object.entries(state.cardMessages ?? {}).find(([key, item]) => (key.startsWith('job:') || key.startsWith('question:'))
@@ -91,7 +92,7 @@ export async function handleCardAction(context, event) {
     const accepted = await store.transactEffect(noticeKey, () => ({ message: known }));
     const delivered = (await store.read()).cardActionNotices?.[noticeKey];
     if (!delivered) {
-      await context.feishu.reply(event.message_id, accepted.message, { profile, idempotencyKey: noticeKey });
+      await context.feishu.reply(event.message_id, accepted.message, { profile, replyInThread: savedCard.destination.replyInThread, idempotencyKey: noticeKey });
       await store.transact((fresh) => { fresh.cardActionNotices ??= {}; fresh.cardActionNotices[noticeKey] = true; });
     }
     return { ok: false, message: accepted.message };

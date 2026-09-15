@@ -231,7 +231,7 @@ async function handleFeishuEvent(context, envelope) {
     chat_id: message.chat_id, chat_type: message.chat_type,
     sender_id: event.sender?.sender_id?.open_id, sender_type: 'user',
     content: parsed.text, mentions: message.mentions, attachments,
-    reply_to: message.parent_id, root_id: message.root_id,
+    reply_to: message.parent_id, root_id: message.root_id, thread_id: message.thread_id,
     agent_role: context.config.feishu.role ?? 'owner_intake',
     agent_profile: context.config.feishu.profile ?? null,
   });
@@ -239,6 +239,7 @@ async function handleFeishuEvent(context, envelope) {
 
 export async function handleLarkCliEvent(context, event) {
   if (event.type !== 'im.message.receive_v1' || ['bot', 'app'].includes(event.sender_type)) return null;
+  if (context.projects.retiredChatIds?.includes(event.chat_id)) return { ignored: true, reason: 'retired_group' };
   const messageId = event.message_id ?? event.id;
   const role = event.agent_role ?? 'owner_intake';
   const sourceProfile = event.agent_profile ?? null;

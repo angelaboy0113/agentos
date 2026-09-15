@@ -37,7 +37,7 @@ export class FeishuClient {
     const response = await fetch(`${OPEN_API}/im/v1/messages/${encodeURIComponent(messageId)}/reply`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ msg_type: 'text', content: JSON.stringify({ text }), uuid: options.idempotencyKey }),
+      body: JSON.stringify({ msg_type: 'text', content: JSON.stringify({ text }), uuid: options.idempotencyKey, ...(options.replyInThread ? { reply_in_thread: true } : {}) }),
     });
     if (!response.ok) throw new Error(`Feishu reply failed: HTTP ${response.status}`);
     const result = await response.json();
@@ -47,7 +47,7 @@ export class FeishuClient {
 
   async replyCard(messageId, card, options = {}) {
     return this.cardRequest('POST', `/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
-      { msg_type: 'interactive', content: JSON.stringify(card), uuid: options.idempotencyKey });
+      { msg_type: 'interactive', content: JSON.stringify(card), uuid: options.idempotencyKey, ...(options.replyInThread ? { reply_in_thread: true } : {}) });
   }
   async sendCard(chatId, card, options = {}) {
     return this.cardRequest('POST', '/im/v1/messages?receive_id_type=chat_id',

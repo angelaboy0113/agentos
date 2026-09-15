@@ -75,7 +75,7 @@ export class LiveCards {
     }
     if (!force && (Date.now() < (entry.retryAt ?? 0) || (!entry.terminal && Date.now() - (entry.sentAt ?? 0) < this.intervalMs))) return;
     try {
-      const options = { profile: entry.destination.profile, idempotencyKey: `aos-card-${createHash('sha256').update(key).digest('hex').slice(0, 32)}` };
+      const options = { replyInThread: entry.destination.replyInThread, profile: entry.destination.profile, idempotencyKey: `aos-card-${createHash('sha256').update(key).digest('hex').slice(0, 32)}` };
       let messageId = entry.messageId;
       if (messageId) {
         if (entry.revision !== entry.deliveredRevision) await this.feishu.updateCard(messageId, entry.card, options);
@@ -98,7 +98,7 @@ export class LiveCards {
         && !fresh.jobs.some((j) => j.questionId === question.id && ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification', ...(entry.terminalMention?.kind === 'environment_approval' ? [] : ['awaiting_environment_approval'])].includes(j.status)));
       if (entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
-          profile: entry.terminalMention.profile,
+          profile: entry.terminalMention.profile, replyInThread: entry.terminalMention.replyInThread ?? entry.destination.replyInThread,
           idempotencyKey: `aos-mention-${createHash('sha256').update(entry.generation ? `${key}:${entry.generation}` : key).digest('hex').slice(0, 32)}`,
         });
         await this.store.transact((state) => {
