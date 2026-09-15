@@ -38,3 +38,13 @@ test('source sync blocks mention origin-profile admins with deduplication and le
     assert.doesNotMatch(jobTerminalMention({ ...job, result }, config).text, /ou_admin/);
   }
 });
+
+test('successful task actions defer chat mentions to final task outcome, while rejected actions still reply', () => {
+  const turn = { chatType: 'group', messageId: 'm', profile: 'owner', senderId: 'ou_requester' };
+  for (const action of ['create_task', 'approve', 'clarify', 'cancel']) {
+    assert.equal(conversationTerminalMention({ ...turn, decision: { action }, outcome: { jobId: 'J' } }), null);
+    assert.ok(conversationTerminalMention({ ...turn, decision: { action }, actionError: 'rejected' }));
+  }
+  assert.ok(conversationTerminalMention({ ...turn, outcome: {} }));
+  assert.equal(jobTerminalMention({ originChatType: 'group', status: 'completed', nextJobId: 'report' }), null);
+});

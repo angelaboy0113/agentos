@@ -6,7 +6,7 @@ export function requesterMentionText(userId, message) {
 }
 
 export function conversationTerminalMention(turn) {
-  if (turn?.chatType !== 'group') return null;
+  if (turn?.chatType !== 'group' || turn.outcome?.jobId || turn.outcome?.nextJobId) return null;
   return mention(turn.messageId, turn.profile, turn.senderId, '本次回复已完成，请查看上方结果。');
 }
 

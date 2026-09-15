@@ -213,3 +213,34 @@ test('source sync escalation retries the same requester/admin mention without re
   assert.equal(after[0].status, 'blocked');
   assert.deepEqual(after[0].result, before[0].result);
 });
+
+test('analysis receipt stays silent until developer and owner report finish the chain', async (t) => {
+  const { directory, client, calls } = await setup(t);
+  const app = await createControlPlane({ dataDir: directory, storeFile: path.join(directory, 'chain.json'),
+    projects: { projects: { demo: { displayName: 'demo' } }, chatProjectMap: { group: 'demo' } },
+    agents: { agents: { owner_intake: { profile: 'owner', openId: 'bot' }, developer: { profile: 'dev', openId: 'devbot' } } },
+    feishuClient: client, conversationResponder: async () => ({ reply: '已交给开发调查', action: 'create_task', intent: 'analysis',
+      instruction: '只读调查', jobId: '', projectId: '', attachmentIds: [] }) });
+  t.after(async () => { await app.conversations.stop(); await app.cards.stop(); });
+  const context = app.conversations.context;
+  await handleLarkCliEvent(context, { type: 'im.message.receive_v1', message_id: 'origin', chat_id: 'group',
+    sender_id: 'ou_requester', chat_type: 'group', sender_type: 'user', agent_role: 'owner_intake', agent_profile: 'owner',
+    mentions: [{ id: 'bot' }], content: '查源码' });
+  await app.conversations.idle();
+  assert.equal(calls.filter(c => c.type === 'text').length, 0);
+  const developer = await app.store.leaseNext('runner');
+  const complete = (job) => ({ type: 'completed', runnerId: 'runner', leaseId: job.lease.id,
+    result: { outcome: 'ready', finalMessage: '调查证据' } });
+  const first = await app.store.appendEvent(developer.id, complete(developer), { agentRole: 'owner_report', agentProfile: 'owner' });
+  await notifyJobEvent(context, first);
+  assert.ok(first.nextJob);
+  assert.equal(calls.filter(c => c.type === 'text').length, 0);
+  const owner = await app.store.leaseNext('runner');
+  const final = await app.store.appendEvent(owner.id, complete(owner));
+  await notifyJobEvent(context, final); await notifyJobEvent(context, final);
+  const notices = calls.filter(c => c.type === 'text');
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].id, 'origin');
+  assert.equal(notices[0].options.profile, 'owner');
+  assert.match(notices[0].text, /ou_requester/);
+});
