@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { cardMarkdownTables } from './card-markdown-tables.js';
 
 const clip = (text, size) => Array.from(text).slice(0, size).join('');
 export function publicText(text) {
@@ -16,12 +17,12 @@ export function publicText(text) {
 }
 
 export function readableMarkdown(text) {
-  return publicText(text).replace(/&#60;/g, '＜').replace(/&#62;/g, '＞')
+  return cardMarkdownTables(publicText(text).replace(/&#60;/g, '＜').replace(/&#62;/g, '＞')
     .replace(/\[([^\]\n]+)\]\((?!https?:\/\/)[^\n)]*\)/gi, '$1')
     .replace(/(^|[\s`(])\/?[a-z]:[\\/][^\s`<>）)]*/gi, (_, prefix) => `${prefix}[本机路径]`)
     .replace(/(^|[\s`(])\/(?:Users|home)\/[^\s`<>）)]*/g, (_, prefix) => `${prefix}[本机路径]`)
     .replace(/^\s*\[(?:READY|NEEDS_CLARIFICATION|BLOCKED)\]\s*/i, '')
-    .replace(/^#{1,6}\s+(.+)$/gm, '**$1**').trim();
+    .replace(/^#{1,6}\s+(.+)$/gm, '**$1**')).trim();
 }
 
 export function conciseSummary(text) {

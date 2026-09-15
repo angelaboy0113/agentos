@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { jobCard, conversationCard } from '../src/control-plane/message-cards.js';
-import { resultPages, readableMarkdown, publicText, detailVersion } from '../src/control-plane/result-presentation.js';
+import { resultPages, readableMarkdown, publicText, detailVersion, withResultPage } from '../src/control-plane/result-presentation.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { JsonStore } from '../src/shared/store.js';
 import { LiveCards } from '../src/control-plane/live-cards.js';
@@ -78,4 +78,34 @@ test('chat and job pagination updates same card, survives retries, rejects wrong
     assert.equal(saved.revision, saved.deliveredRevision);
   }
   assert.equal(sends, 2); assert.equal(texts, 0);
+});
+
+
+test('paging an old table card rebuilds only presentation from original evidence', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentos-legacy-table-'));
+  const store = new JsonStore(path.join(dir, 'state.json'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = '| Date | Evidence |\n| --- | --- |\n| day-one | original proof |';
+  const oldPages = ['| Date | Evidence |\n| --- | --- |', '| day-one | original proof |'];
+  const turn = { id: 'old-chat', status: 'sent', profile: 'owner', chatId: 'group', senderId: 'creator', response: source };
+  const card = withResultPage(conversationCard(turn), oldPages);
+  await store.transact((state) => {
+    state.conversations = [turn];
+    state.cardMessages = { 'chat:old-chat': { messageId: 'old-message', destination: { profile: 'owner' }, terminal: true,
+      detailPages: oldPages, card, revision: 1 } };
+  });
+  let flushed = 0;
+  const context = { store, projects: {}, agents: { agents: { owner_intake: { profile: 'owner' } } }, cards: { flush: async () => { flushed++; } } };
+  const before = await store.read();
+  const event = { type: 'card.action.trigger', event_id: 'new-page-event', operator_id: 'creator', agent_profile: 'owner',
+    chat_id: 'group', message_id: 'old-message', card_content: JSON.stringify(card),
+    action_value: { action: 'result_page', page: 1, version: detailVersion(oldPages) } };
+  assert.equal((await handleCardAction(context, event)).ok, true);
+  const after = await store.read();
+  assert.deepEqual(after.jobs, before.jobs);
+  assert.deepEqual(after.conversations, before.conversations);
+  assert.deepEqual(after.cardMessages['chat:old-chat'].detailPages, resultPages(source));
+  assert.match(JSON.stringify(after.cardMessages['chat:old-chat'].card), /original proof/);
+  assert.equal(after.cardMessages['chat:old-chat'].messageId, 'old-message');
+  assert.equal(flushed, 1);
 });

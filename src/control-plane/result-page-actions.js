@@ -1,4 +1,4 @@
-import { detailVersion, withResultPage } from './result-presentation.js';
+import { detailVersion, resultPages, withResultPage } from './result-presentation.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
 
 // Presentation-only callbacks: no Job mutation, Runner dispatch or model invocation.
@@ -22,7 +22,12 @@ export async function handleResultPage(context, event) {
       const pages = entry.detailPages ?? [];
       if (!Number.isInteger(value.page) || value.page < 0 || value.page >= pages.length
         || value.version !== detailVersion(pages) || !containsPageAction(entry.card, value)) throw new Error('stale page');
-      entry.card = withResultPage(entry.card, pages, value.page, true);
+      // Validate the button against the published version first. Then rebuild only
+      // presentation from the original evidence, including cards saved by older versions.
+      const source = key.startsWith('job:') ? record.result?.finalMessage : record.response;
+      const formatted = typeof source === 'string' && source.trim() ? resultPages(source) : pages;
+      entry.detailPages = formatted;
+      entry.card = withResultPage(entry.card, formatted, Math.min(value.page, formatted.length - 1), true);
       entry.revision += 1;
       entry.updatedAt = new Date().toISOString();
       return { key };
