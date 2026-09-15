@@ -1,3 +1,4 @@
+import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
 import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
 import { CodexConversationEngine, validateDecision } from './codex-conversation.js';
 import { saveProjects } from './config.js';
@@ -25,6 +26,8 @@ export function sourceEvidence(job, sourceDirectory) {
 export class ConversationService {
   constructor(context, options = {}) {
     this.context = context;
+    this.groupSessions = options.groupSessions === true;
+    this.questionCards = options.questionCards === true;
     this.memory = new MemoryService({ dataDir: context.config.dataDir, settings: options.memorySettings });
     this.engine = options.decide ? null : new CodexConversationEngine({ dataDir: context.config.dataDir });
     this.decide = options.decide ?? ((input, signal, detail) => this.engine.decide(input, { ...detail, signal }));
@@ -74,6 +77,7 @@ export class ConversationService {
         sessionKey: JSON.stringify([event.chat_id, event.sender_id, profile, event.agent_role ?? 'owner_intake',
           this.context.projects.chatProjectMap[event.chat_id] ?? null]),
       };
+      if (this.questionCards && turn.chatType === 'group' && this.context.cards?.enabled) attachQuestion(state, turn, event, this.context.projects);
       state.conversations.push(turn);
       return { conversation: true, turnId: turn.id, duplicate: false };
     });
@@ -97,7 +101,8 @@ export class ConversationService {
 
   async idle() { if (this.running) await this.running; }
 
-  key(turn) { return turn.sessionKey ?? JSON.stringify([turn.chatId, turn.senderId, turn.profile, turn.role]); }
+  key(turn) { if (this.groupSessions && turn.chatType === 'group') return JSON.stringify(['group-v1', turn.chatId, turn.profile, turn.role, this.context.projects.chatProjectMap[turn.chatId] ?? null]);
+    return turn.sessionKey ?? JSON.stringify([turn.chatId, turn.senderId, turn.profile, turn.role]); }
 
   async schedule() {
     while (!this.stopped) {
@@ -145,7 +150,7 @@ export class ConversationService {
     const turn = (await this.context.store.read()).conversations.find((item) => item.id === id);
     if (this.context.cards?.enabled) {
       if (!turn || !['queued', 'thinking'].includes(turn.status)) return;
-      const messageId = await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
+      const messageId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
         { replyTo: turn.messageId, profile: turn.profile }, { immediate: true });
       if (messageId) await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: messageId });
       return;
@@ -210,7 +215,7 @@ export class ConversationService {
         const responseIds = [...(turn.responseIds ?? [])];
         let parts;
         if (this.context.cards?.enabled) {
-          const cardId = await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
+          const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
             { replyTo: turn.messageId, profile: turn.profile }, { terminal: true, immediate: true,
               resultText: turn.response?.length > 360 ? turn.response : '', terminalMention: conversationTerminalMention(turn) });
           if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
@@ -243,10 +248,11 @@ export class ConversationService {
     const { projects, store } = this.context;
     const state = await store.read();
     const projectId = projects.chatProjectMap[turn.chatId] ?? null;
+    const shared = this.groupSessions && turn.chatType === 'group';
     const preceding = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.chatId === turn.chatId
-      && item.profile === turn.profile && item.senderId === turn.senderId && item.status === 'sent'
+      && item.profile === turn.profile && (shared ? item.chatType === 'group' : item.senderId === turn.senderId) && item.status === 'sent'
       && conversationProject(item) === projectId);
-    const memory = await this.memory.retrieve(state, turn, projectId);
+    const memory = shared ? { enabled: false, available: true, policy: 'native-persistent-thread-v1' } : await this.memory.retrieve(state, turn, projectId);
     const suppressed = new Set(memory.suppressedRefs ?? []);
     const suppressedMessages = new Set(preceding.filter((item) => suppressed.has(`conversation:${item.id}`)).map((item) => item.messageId));
     const availableHistory = memory.available === false ? [] : preceding.filter((item) => !suppressed.has(`conversation:${item.id}`));
@@ -267,7 +273,9 @@ export class ConversationService {
     }));
     delete memory.suppressedRefs;
     return fitContext({
-      memory,
+      memory, nativeSession: shared, requestId: turn.id, questionId: turn.questionId ?? null,
+      questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
+      currentActor: { senderId: turn.senderId, profile: turn.profile },
       role: turn.role, administrator: isAdministrator(projects, turn),
       sourcePolicy: { version: 'folder-evidence-v1', checkedNow: false,
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
@@ -276,7 +284,7 @@ export class ConversationService {
         analysisWorkspace: 'Runner 先同步 analysisRepositories 各仓 origin 分支，再只读分析；缺配置或同步失败则阻塞',
         implementationWorkspace: 'Runner 创建的隔离 Git worktree；不自动包含独立子仓' } : null,
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
-      history: history.map((item) => ({ user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
+      history: history.map((item) => ({ senderId: item.senderId, user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
         evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
       jobs, attachments, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
     }, this.memory.settings);
@@ -304,6 +312,10 @@ export class ConversationService {
       if (!canCreateTask(projects, turn, decision.intent)) {
         throw new Error('只有真人管理员可以创建会执行修改、规划、测试或审计的任务；普通成员可以继续提问，或发起只读源码排查。');
       }
+      if (turn.questionId) {
+        const current = questionJob(await store.read(), turn.questionId);
+        if (current && activeQuestionJob(current)) throw new Error('这个问题已有未结束任务；请补充当前任务，或重新 @ 发起一个独立问题。');
+      }
       const route = routeDecision(turn.role, decision.intent);
       const routing = agentRouting(this.context, route.stage);
       if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
@@ -312,7 +324,7 @@ export class ConversationService {
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
-        originChatType: turn.chatType,
+        originChatType: turn.chatType, questionId: turn.questionId,
         sourceMessageId: turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, attachments,
@@ -323,6 +335,7 @@ export class ConversationService {
     }
     const job = await store.getJob(decision.jobId);
     if (!job || job.chatId !== turn.chatId || job.projectId !== projectId) throw new Error('本群没有这个任务，不能跨群操作。');
+    if (turn.questionId && job.questionId !== turn.questionId) throw new Error('请回复对应问题的主卡片操作任务，不能在一个问题里推进另一个问题。');
     const admin = isAdministrator(projects, turn);
     if (decision.action === 'approve') {
       if (!admin) throw new Error('只有真人管理员可以放行。请使用已配置管理员身份 @项目负责人 确认；机器人角色不等于管理员。');

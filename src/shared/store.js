@@ -56,6 +56,7 @@ export class JsonStore {
       const now = new Date().toISOString();
       const job = {
         id: createId('JOB'),
+        ...(input.questionId ? { questionId: input.questionId } : {}),
         missionId: input.missionId ?? createId('MISSION'),
         projectId: input.projectId,
         projectName: input.projectName ?? input.projectId,

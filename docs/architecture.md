@@ -80,3 +80,8 @@ agentos/
 ## 可追溯记忆与台账入口
 
 默认启用近期预算、持久摘录摘要和范围内历史检索；`config/memory.local.json` 可配置，`data/memory.json` 私有保存。分析任务可用项目 `knowledgePaths` 提供台账入口，仍先同步再只读核实，不写台账或扩大权限。详细方案、字段、执行路径、失败恢复与平台限制见 [记忆管理](memory-management.md)。
+
+
+## 群共享会话与问题主卡片（可选）
+
+在 `config/conversation.local.json` 开启 `groupSessions` 与 `questionCards`，使用 Codex 原生持久会话，并让每个新问题维护一张主卡片。不开启时保留现有隔离记忆和卡片行为；不会改变普通成员权限或改建话题群。配置、使用、状态结构、备份及限制见[群共享会话与一问一卡](group-question-cards.md)。

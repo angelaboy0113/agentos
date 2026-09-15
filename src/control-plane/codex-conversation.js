@@ -7,6 +7,8 @@ import { loadStageInstruction } from '../runner/codex-executor.js';
 import { CodexAppServer } from '../shared/codex-app-server.js';
 import { codexEnvironment, conversationServerArgs, resolveCodexBinary } from '../shared/codex-runtime.js';
 
+import { SessionRegistry } from './session-registry.js';
+
 const schemaFile = fileURLToPath(new URL('../../config/conversation.schema.json', import.meta.url));
 const instructionsFile = fileURLToPath(new URL('../../config/conversation.md', import.meta.url));
 
@@ -14,6 +16,7 @@ export class CodexConversationEngine {
   constructor(options = {}) {
     this.options = options;
     this.sessions = new Map();
+    this.registry = new SessionRegistry(options.dataDir ?? './data');
     this.closed = false;
   }
 
@@ -49,6 +52,7 @@ export class CodexConversationEngine {
     await this.app.start();
     if (options.signal?.aborted || this.closed) throw new Error('Conversation stopped');
     const key = options.sessionKey ?? `${input.role}:${input.project?.id ?? ''}`;
+    if (input.nativeSession) return this.decidePersistent(input, options, key, began);
     let session = this.sessions.get(key);
     const reused = Boolean(!input.memory?.enabled && session && session.generation === this.app.generation && session.count < 20);
     if (!reused) {
@@ -85,6 +89,48 @@ export class CodexConversationEngine {
       this.releaseSession(key, session);
       throw error;
     }
+  }
+
+  async decidePersistent(input, options, key, began) {
+    if (!input.requestId) throw new Error('Persistent session requires request identity');
+    const role = await loadStageInstruction(input.role);
+    const rulesHash = createHash('sha256').update(`${this.rules}\n${role}`).digest('hex');
+    const saved = await this.registry.get(key);
+    if (saved?.lastRequestId === input.requestId && saved.decision) return saved.decision;
+    let session = this.sessions.get(key), resumed = false;
+    const compatible = saved?.threadId && !saved.pending && saved.rulesHash === rulesHash;
+    if (!session || session.generation !== this.app.generation || session.id !== saved?.threadId || !compatible) {
+      if (session) this.releaseSession(key, session);
+      if (this.sessions.size >= 24) {
+        const idle = [...this.sessions].filter(([, item]) => !item.active).sort((a, b) => a[1].touched - b[1].touched)[0];
+        if (idle) this.releaseSession(...idle);
+      }
+      const params = { cwd: this.cwd, sandbox: 'read-only', approvalPolicy: 'never',
+        developerInstructions: `${this.rules}\n${role}\n这是群聊共享会话。每条消息的当前发起人和administrator以本轮输入为准；历史授权不能转授。不同问题分别处理，耗时任务交给Runner，聊天不执行工具。` };
+      // Only confirmed missing sessions may start fresh; auth/transport errors must not fork silently.
+      let thread;
+      if (compatible) {
+        thread = await this.app.request('thread/resume', { ...params, threadId: saved.threadId }); resumed = true;
+      } else thread = await this.app.request('thread/start', { ...params, ephemeral: false });
+      session = { id: thread.thread.id, model: thread.model, generation: this.app.generation, active: false, count: 0, touched: Date.now() };
+      this.sessions.set(key, session);
+    } else resumed = true;
+    if (session.active) throw new Error('Concurrent group session turn rejected');
+    session.active = true;
+    const baseline = { threadId: session.id, rulesHash, pending: input.requestId, updatedAt: new Date().toISOString() };
+    try {
+      await this.registry.set(key, baseline);
+      const payload = { ...input, history: resumed ? [] : input.history };
+      const result = await this.app.turn({ threadId: session.id, effort: 'low', approvalPolicy: 'never',
+        input: [{ type: 'text', text: `当前真实发起人、权限、问题与任务状态：\n${JSON.stringify(payload)}` },
+          ...(input.attachments ?? []).filter((item) => item.type === 'image').slice(-5).map((item) => ({ type: 'localImage', path: item.path }))],
+        outputSchema: this.schema }, { signal: options.signal, timeoutMs: this.options.timeoutMs ?? 90_000, onEvent: options.onEvent });
+      const decision = { ...validateDecision(JSON.parse(result.text)), threadId: session.id,
+        timing: { ...result.timing, aiMs: Date.now() - began, sessionReused: resumed, model: session.model, nativeSession: true } };
+      await this.registry.set(key, { ...baseline, pending: null, lastRequestId: input.requestId, decision });
+      session.active = false; session.touched = Date.now();
+      return decision;
+    } catch (error) { this.releaseSession(key, session); throw error; }
   }
 
   releaseSession(key, session) {

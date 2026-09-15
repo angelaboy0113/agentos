@@ -22,17 +22,22 @@ export class LiveCards {
     this.timer = setInterval(() => this.retry().catch(() => {}), 1000); this.timer.unref();
   }
   async stop() { this.closed = true; clearInterval(this.timer); await Promise.allSettled(this.workers.values()); }
-  async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '', terminalMention = null } = {}) {
+  async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '', terminalMention = null, generation = 0, guard } = {}) {
     if (Buffer.byteLength(JSON.stringify(card)) > 28_000) throw new Error('Card exceeds safe message limit');
     await this.store.transact((state) => {
+      guard?.(state);
       state.cardMessages ??= {};
       const existing = state.cardMessages[key];
-      if (existing?.terminal && !terminal) return; // Late progress cannot overwrite a conclusion.
+      if (generation && (!key.startsWith('question:') || !Number.isSafeInteger(generation) || generation < 1)) throw new Error('Invalid card generation');
+      if ((existing?.generation ?? 0) > generation) return;
+      const reopening = generation > (existing?.generation ?? 0);
+      if (existing?.terminal && !terminal && !reopening) return; // Late progress cannot overwrite a conclusion.
       if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
-      if (existing?.terminalMention && terminalMention
+      if (!reopening && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
-      state.cardMessages[key] = { ...existing, destination, card, terminal, overflow: [],
-        terminalMention: existing?.terminalMention ?? (terminal ? terminalMention : null),
+      state.cardMessages[key] = { ...existing, destination, card, terminal, generation, overflow: [],
+        mentionDelivered: reopening ? false : existing?.mentionDelivered,
+        terminalMention: (reopening ? null : existing?.terminalMention) ?? (terminal ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });
@@ -86,13 +91,18 @@ export class LiveCards {
         Object.assign(state.cardMessages[key], { messageId, deliveredRevision: entry.revision,
           sentAt: Date.now(), failures: 0, retryAt: 0 });
       });
-      if (entry.terminalMention && !entry.mentionDelivered) {
+      const fresh = await this.store.read(), latest = fresh.cardMessages[key];
+      const question = key.startsWith('question:') ? fresh.questions?.[key.slice(9)] : null;
+      const questionReady = !question || (question.generation <= entry.generation
+        && !fresh.conversations.some((t) => t.questionId === question.id && ['queued', 'thinking', 'decided'].includes(t.status))
+        && !fresh.jobs.some((j) => j.questionId === question.id && ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification'].includes(j.status)));
+      if (entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile,
-          idempotencyKey: `aos-mention-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`,
+          idempotencyKey: `aos-mention-${createHash('sha256').update(entry.generation ? `${key}:${entry.generation}` : key).digest('hex').slice(0, 32)}`,
         });
         await this.store.transact((state) => {
-          Object.assign(state.cardMessages[key], { mentionDelivered: true, failures: 0, retryAt: 0 });
+          if (state.cardMessages[key].generation === entry.generation) Object.assign(state.cardMessages[key], { mentionDelivered: true, failures: 0, retryAt: 0 });
         });
       }
       // Long reports stay in the same card. Never resume legacy plaintext overflow on restart.

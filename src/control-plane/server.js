@@ -1,3 +1,4 @@
+import { publishQuestion } from './questions.js';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -8,6 +9,7 @@ import { LarkCliFeishuClient } from './lark-cli.js';
 import { JsonStore } from '../shared/store.js';
 import { nextStage, routeInstruction, routeInstructionForStage, stageLabel } from '../shared/protocol.js';
 
+import { loadConversationSettings } from './conversation-settings.js';
 import { loadMemorySettings } from './memory.js';
 import { ConversationService, splitReply, responseMessageId } from './conversations.js';
 import { LiveCards } from './live-cards.js';
@@ -42,7 +44,7 @@ export async function createControlPlane(overrides = {}) {
       saved.updatedAt = new Date().toISOString();
     }
   });
-  const conversations = new ConversationService(context, { memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
+  const conversations = new ConversationService(context, { ...await loadConversationSettings(config.conversationFile), memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
   const server = http.createServer(async (request, response) => {
     try {
@@ -65,7 +67,9 @@ async function route(context) {
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
-      memoryPolicy: 'scoped-extractive-memory-v1', memoryStatus: context.conversations.memory.status,
+      conversationScope: context.conversations.groupSessions ? 'group-profile-project-v1' : 'sender-profile-project-v1',
+      questionCards: context.conversations.questionCards,
+      memoryPolicy: context.conversations.groupSessions ? 'native-persistent-thread-v1' : 'scoped-extractive-memory-v1', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
       analysisWorkflow: 'read-only-developer-owner-v1', sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1',
@@ -318,6 +322,7 @@ export async function notifyJobEvent(context, { job, event }) {
     if (event.type === 'progress' && !['codex_waiting', 'codex_working', 'connection_retry', 'verification', 'tool_activity'].includes(event.phase)) return;
     // Always re-read authoritative state; HTTP event notifications may arrive out of order.
     const current = await context.store.getJob(job.id);
+    if (current.questionId) { await publishQuestion(context, current.questionId); return; }
     const terminal = !['queued', 'running', 'cancelling'].includes(current.status);
     const attempt = current.events.filter((e) => e.type === 'started').at(-1)?.id ?? 'first';
     const key = `job:${job.id}:${attempt}`;

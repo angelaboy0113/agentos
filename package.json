@@ -15,7 +15,7 @@
     "start:local": "node src/control-plane/local.js",
     "start:control": "node src/control-plane/server.js",
     "start:runner": "node src/runner/index.js",
-    "test": "node --test",
-    "check": "node --check src/control-plane/server.js && node --check src/control-plane/local.js && node --check src/control-plane/lark-event-source.js && node --check src/runner/index.js && node --test"
+    "test": "node scripts/test.js",
+    "check": "node --check src/control-plane/server.js && node --check src/control-plane/local.js && node --check src/control-plane/lark-event-source.js && node --check src/runner/index.js && node scripts/test.js"
   }
 }

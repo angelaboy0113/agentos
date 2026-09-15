@@ -4,7 +4,7 @@ import { publicText, conciseSummary, resultPages, resultPanel } from './result-p
 export { publicText } from './result-presentation.js';
 
 export function jobActionVersion(job) {
-  return createHash('sha256').update((job.events ?? []).filter((e) => ['started', 'clarification_received'].includes(e.type))
+  return createHash('sha256').update((job.questionId ? `${job.id}|` : '') + (job.events ?? []).filter((e) => ['started', 'clarification_received'].includes(e.type))
     .map((e) => e.id ?? e.at).join('|')).digest('hex').slice(0, 16);
 }
 

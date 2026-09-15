@@ -1,3 +1,4 @@
+import { publishQuestion, questionJob } from './questions.js';
 import { jobActionVersion, jobCard } from './message-cards.js';
 import { nextStage } from '../shared/protocol.js';
 import { canContinueTask, isAdministrator, isTaskCreator } from './authorization.js';
@@ -15,13 +16,14 @@ export async function handleCardAction(context, event) {
   try { parsedValue = parse(event.action_value); } catch { return { ignored: true }; }
   if (parsedValue.action === 'result_page') return handleResultPage(context, event);
   const state = await store.read();
-  const entry = Object.entries(state.cardMessages ?? {}).find(([key, item]) => key.startsWith('job:')
+  const entry = Object.entries(state.cardMessages ?? {}).find(([key, item]) => (key.startsWith('job:') || key.startsWith('question:'))
     && item.messageId === event.message_id && item.destination.profile === profile);
   if (!entry || !event.card_content) return { ignored: true, reason: '没有可验证的原始任务卡片' };
   const [key, savedCard] = entry;
-  const jobId = key.split(':')[1];
+  const questionId = key.startsWith('question:') ? key.slice('question:'.length) : null;
+  const jobId = questionId ? questionJob(state, questionId)?.id : key.split(':')[1];
   const job = state.jobs.find((item) => item.id === jobId);
-  if (!job || job.chatId !== event.chat_id || job.agentProfile !== profile) return { ignored: true };
+  if (!job || job.chatId !== event.chat_id || (questionId ? state.questions?.[questionId]?.profile : job.agentProfile) !== profile) return { ignored: true };
   const effectKey = `card-action:${profile}:${event.event_id}`;
   const admin = isAdministrator(projects, { profile, senderId: event.operator_id });
   const creator = isTaskCreator(projects, job, { profile, senderId: event.operator_id });
@@ -37,7 +39,8 @@ export async function handleCardAction(context, event) {
     const guard = (freshState, current) => {
       const freshCard = freshState.cardMessages?.[key];
       if (freshCard?.messageId !== event.message_id || freshCard.destination.profile !== profile
-        || current.chatId !== event.chat_id || current.agentProfile !== profile
+        || current.chatId !== event.chat_id || (questionId ? freshState.questions?.[questionId]?.profile : current.agentProfile) !== profile
+        || (questionId && questionJob(freshState, questionId)?.id !== current.id)
         || jobActionVersion(current) !== version || !hasAction(freshCard.card, action, version)) {
         throw new Error('这张卡片已过期，请操作最新任务卡片。');
       }
@@ -65,7 +68,8 @@ export async function handleCardAction(context, event) {
     // Re-delivery retries only presentation. The business mutation above is effect-idempotent.
     const latest = await store.getJob(job.id);
     const shown = result.resubmitted || jobActionVersion(latest) !== version ? { ...latest, status: 'resubmitted' } : latest;
-    await cards.upsert(key, jobCard(shown), savedCard.destination, {
+    if (questionId) await publishQuestion(context, questionId);
+    else await cards.upsert(key, jobCard(shown), savedCard.destination, {
       terminal: !['queued', 'running', 'cancelling'].includes(shown.status), immediate: true,
       resultText: shown.result?.finalMessage,
     });

@@ -8,6 +8,7 @@ export function controlConfig(overrides = {}) {
     host: overrides.host ?? process.env.AGENTOS_HOST ?? '127.0.0.1',
     port: Number(overrides.port ?? process.env.AGENTOS_PORT ?? 8787),
     dataDir,
+    conversationFile: overrides.conversationFile ?? process.env.AGENTOS_CONVERSATION_FILE ?? './config/conversation.local.json',
     memoryFile: overrides.memoryFile ?? process.env.AGENTOS_MEMORY_FILE ?? './config/memory.local.json',
     storeFile: overrides.storeFile ?? path.join(dataDir, 'agentos.json'),
     projectsFile: overrides.projectsFile ?? process.env.AGENTOS_PROJECTS_FILE ?? './config/projects.local.json',

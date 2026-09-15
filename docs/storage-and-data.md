@@ -19,6 +19,7 @@
 | `config/*.local.json` | 真实项目路径、群 ID、机器人/真人 ID、网络出口 | 是 | 否 |
 | `.env` | 可选环境变量和令牌 | 严重敏感 | 否 |
 | `docs/`、`scripts/`、`test/` | 设计、部署、维护、辅助脚本和回归测试 | 否 | 是 |
+| `data/codex-conversations.json` | 可选群会话的持久线程引用、待定请求与最近决策；依赖本机 Codex 会话文件，0600，不是登录文件 | 是 | 否 |
 | `data/memory.json` | 按范围的持久摘录摘要、来源指纹及停用记录；详见[记忆管理](memory-management.md) | 是 | 否 |
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送和幂等记录 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
@@ -63,3 +64,5 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 ```
 
 这些私有路径都应显示为 ignored。完整发布检查见根目录 `SECURITY.md`。
+
+开启问题卡片后，`agentos.json` 新增 `questions` 元数据，新对话与新 Job 带 `questionId`；旧记录不回填。备份应包括已有 `codex-conversations.json` 与 `config/conversation.local.json`，详见[实现与恢复](group-question-cards.md)。
