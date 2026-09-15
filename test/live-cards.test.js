@@ -184,3 +184,32 @@ test('real job notifications share an execution card, and stale progress renders
   assert.equal(calls.at(-1).card.header.template, 'red');
   assert.match(JSON.stringify(calls.at(-1).card), /测试未通过|git diff --stat/);
 });
+
+test('source sync escalation retries the same requester/admin mention without rerunning jobs', async (t) => {
+  let attempts = 0;
+  const deliveries = [];
+  const { store, cards, client } = await setup(t, { reply: async (id, text, options) => {
+    deliveries.push({ id, text, options });
+    if (++attempts === 1) throw new Error('offline');
+    return { message_id: 'om_notice' };
+  } });
+  const { job } = await store.createJob({ projectId: 'demo', chatId: 'group', stage: 'developer',
+    taskIntent: 'analysis', agentProfile: 'dev', originProfile: 'owner', originChatType: 'group',
+    senderId: 'ou_member', replyToMessageId: 'om_origin', instruction: 'inspect', workflow: 'single_developer' });
+  const context = { store, cards, feishu: client, projects: { ownerOpenIdsByProfile: { owner: ['ou_admin'] } } };
+  const final = await store.appendEvent(job.id, { type: 'completed', result: { outcome: 'blocked', sourceSyncBlocked: true, finalMessage: 'source unavailable' } });
+  await assert.rejects(notifyJobEvent(context, final), /offline/);
+  const before = (await store.read()).jobs;
+  context.projects.ownerOpenIdsByProfile.owner = ['ou_changed'];
+  await notifyJobEvent(context, final);
+  await notifyJobEvent(context, final);
+  assert.equal(deliveries.length, 2);
+  assert.deepEqual(deliveries[0], deliveries[1]);
+  assert.equal(deliveries[1].options.profile, 'owner');
+  assert.match(deliveries[1].text, /ou_member/); assert.match(deliveries[1].text, /ou_admin/);
+  assert.doesNotMatch(deliveries[1].text, /ou_changed/);
+  const after = (await store.read()).jobs;
+  assert.equal(after.length, before.length);
+  assert.equal(after[0].status, 'blocked');
+  assert.deepEqual(after[0].result, before[0].result);
+});

@@ -21,3 +21,20 @@ test('task mentions only final mission outcomes and retains the originating bot 
     replyTo: 'm-origin', profile: 'owner', text: '<at user_id="ou_abc123"></at> 任务已结束，请查看上方结果。',
   });
 });
+
+test('source sync blocks mention origin-profile admins with deduplication and legacy fallback', () => {
+  const job = { taskIntent: 'analysis', status: 'blocked', originChatType: 'group', originMessageId: 'm',
+    originProfile: 'owner', agentProfile: 'dev', senderId: 'ou_member', result: { sourceSyncBlocked: true } };
+  const config = { ownerOpenIdsByProfile: { owner: ['ou_admin', 'ou_admin', 'all'], dev: ['ou_wrongApp'] }, ownerOpenIds: ['ou_legacy'] };
+  const text = jobTerminalMention(job, config).text;
+  assert.equal((text.match(/<at /g) ?? []).length, 2);
+  assert.match(text, /ou_member/); assert.match(text, /ou_admin/);
+  assert.doesNotMatch(text, /ou_wrongApp|ou_legacy|user_id="all"/);
+  assert.equal((jobTerminalMention({ ...job, senderId: 'ou_admin' }, config).text.match(/<at /g) ?? []).length, 1);
+  assert.doesNotMatch(jobTerminalMention(job, { ...config, ownerOpenIdsByProfile: { owner: [] } }).text, /ou_legacy/);
+  assert.match(jobTerminalMention(job, { ownerOpenIds: ['ou_legacy'] }).text, /ou_legacy/);
+  assert.equal(jobTerminalMention({ ...job, originChatType: 'p2p' }, config), null);
+  for (const result of [{}, { finalMessage: '源码同步受阻' }]) {
+    assert.doesNotMatch(jobTerminalMention({ ...job, result }, config).text, /ou_admin/);
+  }
+});

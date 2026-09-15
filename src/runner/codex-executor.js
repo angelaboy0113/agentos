@@ -61,7 +61,7 @@ export async function executeJob(job, config, emit) {
 
 function sourceBlocked(error) {
   const summary = `源码版本检查未通过，本次没有形成有效分析结论。${error.message} 已同步的仓库可能保留更新，不自动回滚；请管理员在本机处理后重新发起分析。`;
-  return { outcome: 'blocked', summary, finalMessage: summary, verification: [] };
+  return { outcome: 'blocked', sourceSyncBlocked: true, summary, finalMessage: summary, verification: [] };
 }
 
 export function verificationCommands(job, project, outcome) {

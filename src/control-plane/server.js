@@ -319,10 +319,12 @@ export async function notifyJobEvent(context, { job, event }) {
     const terminal = !['queued', 'running', 'cancelling'].includes(current.status);
     const attempt = current.events.filter((e) => e.type === 'started').at(-1)?.id ?? 'first';
     const key = `job:${job.id}:${attempt}`;
+    // Once queued, keep the exact recipients across retries/config changes.
+    const frozenMention = (await context.store.read()).cardMessages?.[key]?.terminalMention;
     const id = await context.cards.upsert(key, jobCard(current),
       { chatId: current.chatId, replyTo: current.chatId ? null : current.replyToMessageId, profile: current.agentProfile },
       { terminal, immediate: terminal, resultText: terminal ? current.result?.finalMessage : '',
-        terminalMention: jobTerminalMention(current) });
+        terminalMention: frozenMention ?? jobTerminalMention(current, context.projects) });
     if (id) await context.store.transact((state) => {
       const saved = state.jobs.find((item) => item.id === job.id);
       saved.notificationIds = [...new Set([...(saved.notificationIds ?? []), id])];

@@ -90,6 +90,7 @@ test('executeJob blocks before starting Codex when sync config is absent; read-o
     executor: 'codex', codexBin: '/must-not-start', projects: { demo: {} },
   }, async () => {});
   assert.equal(result.outcome, 'blocked');
+  assert.equal(result.sourceSyncBlocked, true);
   assert.match(result.finalMessage, /analysisRepositories/);
   const args = buildCodexArgs('/tmp', [], { readOnly: true });
   assert.equal(args[args.indexOf('--sandbox') + 1], 'read-only');
