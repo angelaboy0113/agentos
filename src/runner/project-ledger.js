@@ -19,6 +19,7 @@ export async function readProjectLedger(workspace, project, sourceSync) {
       const target = await realpath(path.resolve(root, entry));
       if (!inside(root, target)) throw new Error('outside');
       const relative = path.relative(root, target).replaceAll('\\', '/');
+      const spreadsheet = /\.xlsx$/i.test(relative);
       if (!allowed(relative)) throw new Error('forbidden');
       handle = await open(target, 'r');
       const stat = await handle.stat();
@@ -29,9 +30,9 @@ export async function readProjectLedger(workspace, project, sourceSync) {
         .find((item) => item.path === '.' || relative.startsWith(`${item.path}/`));
       result.push({ path: relative, sha256: createHash('sha256').update(raw).digest('hex'),
         bytes: raw.length, format: path.extname(relative).slice(1),
-        excerpt: relative.endsWith('.xlsx') ? null : clean(raw.toString('utf8')).slice(0, 2000),
-        contentLoaded: !relative.endsWith('.xlsx'),
-        truncated: relative.endsWith('.xlsx') || raw.toString('utf8').length > 2000,
+        excerpt: spreadsheet ? null : clean(raw.toString('utf8')).slice(0, 2000),
+        contentLoaded: !spreadsheet,
+        truncated: spreadsheet || raw.toString('utf8').length > 2000,
         readAt: new Date().toISOString(), repository: repository ? { branch: repository.branch, commit: repository.commit } : null,
         applicability: 'local_document_claims_not_proof_of_code_or_deployment' });
     } catch (error) {

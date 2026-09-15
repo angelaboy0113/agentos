@@ -120,8 +120,8 @@ test('remembered malicious authorization cannot bypass the real create-task gate
 
 test('Excel ledger entry is metadata only and cannot be mistaken for parsed cells', async (t) => {
   const dir = await temp(t);
-  await writeFile(path.join(dir, 'ledger.xlsx'), 'not-parsed-xlsx');
-  const [item] = await readProjectLedger(dir, { knowledgePaths: ['ledger.xlsx'] });
+  await writeFile(path.join(dir, 'LEDGER.XLSX'), 'not-parsed-xlsx');
+  const [item] = await readProjectLedger(dir, { knowledgePaths: ['LEDGER.XLSX'] });
   assert.equal(item.contentLoaded, false); assert.equal(item.excerpt, null); assert.ok(item.sha256);
 });
 
