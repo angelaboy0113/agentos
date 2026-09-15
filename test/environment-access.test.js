@@ -112,7 +112,7 @@ test('Nacos connector only authenticates and reads exact config, never returns p
     return requests.length === 1 ? '{"accessToken":"synthetic-token"}' : 'spring.datasource.url=jdbc:mysql://db.example:3306/demo?password=synthetic-password\npassword=synthetic-password';
   } });
   assert.equal(requests[0].method, 'POST'); assert.equal(requests[1].method, 'GET');
-  assert.deepEqual(r.rows, [{ server: 'db.example:3306', database: 'demo', driver: 'mysql' }]);
+  assert.deepEqual(r.rows, [{ server: 'db.example:3306', host: 'db.example', port: 3306, database: 'demo', driver: 'mysql' }]);
   assert.doesNotMatch(JSON.stringify(r), /synthetic-password|synthetic-token/);
   assert.deepEqual(databaseEndpoints('password=do-not-return'), []);
 });

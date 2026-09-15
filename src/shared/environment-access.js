@@ -1,3 +1,4 @@
+import { validateToolQuery } from './environment-tool-policy.js';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -21,6 +22,7 @@ export async function loadEnvironments(file = environmentFile()) {
       if (!id(qid) || q.reviewed !== true || typeof q.description !== 'string' || !q.description.trim() || q.description.length > 200
         || !Number.isInteger(q.maxRows) || q.maxRows < 1 || q.maxRows > 200 || !Number.isInteger(q.timeoutMs) || q.timeoutMs < 100 || q.timeoutMs > 10000 || !Array.isArray(q.parameters)) throw new Error('查询模板尚未审核或限制无效');
       if (q.parameters.some((p) => !id(p.name) || sensitive.test(p.name) || !['string', 'integer'].includes(p.type))) throw new Error('查询参数定义无效');
+      if (validateToolQuery(e, q)) continue;
       if (e.kind === 'mysql') {
         if (typeof q.sql !== 'string' || !/^SELECT\s/i.test(q.sql.trim()) || /;|--|\/\*|\b(INTO|OUTFILE|DUMPFILE|FOR\s+UPDATE|LOCK|SLEEP|BENCHMARK|LOAD_FILE|GET_LOCK)\b/i.test(q.sql)
           || (q.sql.match(/\?/g) ?? []).length !== q.parameters.length || !Array.isArray(q.outputColumns) || !q.outputColumns.length || q.outputColumns.length > 12
@@ -33,7 +35,7 @@ export async function loadEnvironments(file = environmentFile()) {
 export function isEnvironmentOwner(e, actor) { return (e.ownerOpenIdsByProfile?.[actor.profile] ?? []).includes(actor.senderId); }
 export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
-    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows })) }));
+    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, maxCalls: q.maxCalls, scope: e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const e = config.environments[request?.environmentId], q = e?.queries?.[request?.queryId];
@@ -48,7 +50,7 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
   if (!(e.ownerOpenIdsByProfile[actor.profile] ?? []).length) throw new Error('本环境未配置当前机器人对应的查询审批人');
   const scope = { expiresAt: new Date(now + 15 * 60000).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: q.timeoutMs };
   const owner = isEnvironmentOwner(e, actor), approvalRequired = !owner && (e.tier === 'prd' || !e.membersRead);
-  return { ...scope, description: q.description, tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
+  return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；最多${q.maxCalls}次只读工具调用` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
     approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: owner ? actor.senderId : approvalRequired ? null : 'policy:uat-read', approvedAt: approvalRequired ? null : new Date(now).toISOString() };
 }
 export function verifyPlan(config, plan, now = Date.now()) {

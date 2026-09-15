@@ -19,6 +19,7 @@
     "check": "node --check src/control-plane/server.js && node --check src/control-plane/local.js && node --check src/control-plane/lark-event-source.js && node --check src/runner/index.js && node scripts/test.js"
   },
   "dependencies": {
-    "mysql2": "3.24.4"
+    "mysql2": "3.24.4",
+    "yaml": "2.9.1"
   }
 }

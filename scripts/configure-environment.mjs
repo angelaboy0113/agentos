@@ -5,11 +5,13 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { credential, boundedFetch } from '../src/runner/environment-connector.js';
+import { createEnvironmentTools } from '../src/runner/environment-tools.js';
 import { loadEnvironments } from '../src/shared/environment-access.js';
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const file = path.join(repo, 'config/environments.local.json');
 if (!stdin.isTTY || process.platform !== 'darwin') throw new Error('Run this setup in a local macOS terminal');
-const rl = createInterface({ input: stdin, output: stdout });
+let rl = createInterface({ input: stdin, output: stdout });
 try {
   const projects = JSON.parse(await readFile(path.join(repo, 'config/projects.local.json'), 'utf8'));
   const projectEntries = Object.entries(projects.projects);
@@ -34,9 +36,13 @@ try {
       parameters: [], outputColumns: ['database_name', 'checked_at'], maxRows: 1, timeoutMs: 5000 };
   } else if (kind === 'nacos') {
     e.baseUrl = (await rl.question('Nacos base URL ending in /nacos (no login fragment): ')).trim();
-    const namespace = (await rl.question('Exact namespace ID (empty for public): ')).trim(), group = (await rl.question('Config group [DEFAULT_GROUP]: ')).trim() || 'DEFAULT_GROUP', dataId = (await rl.question('Exact config dataId: ')).trim();
-    e.queries.database_endpoints = { reviewed: true, description: '读取指定Nacos配置，仅返回MySQL主机和库名，不返回账号密码', namespace, group, dataId, parameters: [], maxRows: 20, timeoutMs: 5000 };
+    // Namespace is discovered after local login; no dataId or group needs manual entry.
+    e.baseUrl = new URL(e.baseUrl).origin + new URL(e.baseUrl).pathname.replace(/\/$/, '');
+    e.queries.investigate = { reviewed: true, mode: 'investigate', description: '在选定命名空间内自动发现配置、解析数据库地址；不连接数据库', namespaces: [''], parameters: [{ name: 'purpose', type: 'string', maxLength: 200 }], maxRows: 20, maxCalls: 8, timeoutMs: 5000 };
   } else throw new Error('Unsupported connector');
+  if (kind === 'mysql' && (await rl.question('允许在本库基础表中按条件只读排查？结果对群可见，不提供SQL或写入工具 (yes/no): ')).trim() === 'yes') {
+    e.queries.investigate = { reviewed: true, mode: 'investigate', description: '本库基础表结构及按条件只读查询，每次最多20行；不允许全表读取或写入', tables: ['*'], parameters: [{ name: 'purpose', type: 'string', maxLength: 200 }], maxRows: 20, maxCalls: 8, timeoutMs: 5000 };
+  }
   let config = { version: 1, environments: {} }, original;
   try { original = await readFile(file); config = JSON.parse(original); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (config.environments[name]?.kind === kind) e.queries = { ...config.environments[name].queries, ...e.queries };
@@ -48,12 +54,35 @@ try {
   rl.close();
   const saved = spawnSync('python3', [path.join(repo, 'scripts/keychain-credential.py'), 'set', credentialRef], { stdio: 'inherit' });
   if (saved.status !== 0) { const { unlink } = await import('node:fs/promises'); await unlink(temporary); throw new Error('Credential setup did not complete; configuration unchanged'); }
+  const cred = await credential(credentialRef);
+  if (kind === 'nacos') {
+    const base = e.baseUrl.replace(/\/$/, '');
+    const login = JSON.parse(await boundedFetch(base + '/v1/auth/login', { method: 'POST', signal: AbortSignal.timeout(5000), headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: cred.username, password: cred.password }) }));
+    if (!login.accessToken) throw new Error('Login failed');
+    const url = new URL(base + '/v2/console/namespace/list'); url.searchParams.set('accessToken', login.accessToken);
+    const result = JSON.parse(await boundedFetch(url, { signal: AbortSignal.timeout(5000) }));
+    if (result.code !== 0 || !Array.isArray(result.data) || result.data.length > 200) throw new Error('Namespace discovery failed');
+    console.log('Nacos连接及登录成功。请选择允许读取的命名空间（可多选；不要把PRD空间放入UAT入口）。');
+    result.data.forEach((x,i) => console.log(`${i+1}. ${String(x.namespaceShowName ?? '').replace(/[\x00-\x1f\x7f]/g,'').slice(0,100)}`));
+    rl = createInterface({ input: stdin, output: stdout });
+    const chosen = (await rl.question('输入序号，多个用逗号分隔: ')).split(',').map(x => Number(x.trim()) - 1);
+    if (!chosen.length || chosen.some(i => !Number.isInteger(i) || !result.data[i])) throw new Error('Invalid selection');
+    e.queries.investigate.namespaces = [...new Set(chosen.map(i => result.data[i].namespace))];
+    e.queries.investigate.description = `所选命名空间内自动发现配置与解析数据库地址（${e.queries.investigate.namespaces.length}个空间），不连接数据库`;
+    rl.close();
+  } else {
+    const { mysqlRead } = await import('../src/runner/environment-connector.js');
+    await mysqlRead(e, e.queries.connection_check, [], cred);
+    console.log('数据库连接及只读授权检查成功。');
+  }
+  await writeFile(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  await loadEnvironments(temporary);
   if (original) {
     const dir = path.join(repo, 'data/environment-config-backups', `${Date.now()}`); await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(path.join(dir, 'environments.local.json'), original, { mode: 0o400 });
     await writeFile(path.join(dir, 'manifest.json'), JSON.stringify({ sha256: createHash('sha256').update(original).digest('hex'), bytes: original.length, beforeEnvironments: Object.keys(JSON.parse(original).environments).length, afterEnvironments: Object.keys(config.environments).length }), { mode: 0o400 });
   }
   await chmod(temporary, 0o600); await rename(temporary, file);
-  console.log('Environment configured locally. New requests can discover it without restarting AgentOS. Business queries still require locally reviewed templates.');
+  console.log('环境已保存，连接已验证，无需重启。可在群里发起已授权范围的只读排查；数据库查询需要独立只读账号，Nacos登录不代表数据库已连接。');
 } catch { console.error('Setup incomplete. Check non-secret environment fields, selected identity and local Keychain. No credentials printed.'); process.exitCode = 1; }
 finally { rl.close(); }

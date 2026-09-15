@@ -89,3 +89,7 @@ agentos/
 ## 可选环境查询边界
 
 详见[受控环境查询](environment-access.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。PRD 成员请求及源码排查新增查询先进入 `awaiting_environment_approval`，获指定环境负责人对本次范围批准后才允许 Runner 单次领取。审批不授予代码或数据库写入权限，普通 analysis 沙箱保持只读。查询结果归属原问题卡片，不注入共享长期记忆；真实环境验收须在本机配置后完成。
+
+## 环境工具排查升级
+
+所有成员均可发起只读排查；PRD 成员查询仍需指定负责人批准。新增 Codex 按范围选择 Nacos 发现/解析及 MySQL 结构化查询工具，本机向导自动发现命名空间并验证连接。固定模板继续兼容。首次凭据仍本机录入，Nacos 业务账号不复用为数据库登录。见 [环境工具说明](environment-access.md)。

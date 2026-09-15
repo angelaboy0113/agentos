@@ -1,10 +1,11 @@
+import { databaseEndpoints } from './config-endpoints.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { loadEnvironments, verifyApprovedPlan, fingerprint } from '../shared/environment-access.js';
 const exec = promisify(execFile);
 const helper = fileURLToPath(new URL('../../scripts/keychain-credential.py', import.meta.url));
-async function credential(ref) {
+export async function credential(ref) {
   try { const { stdout } = await exec('python3', [helper, 'get', ref], { timeout: 10000, maxBuffer: 16000 }); return JSON.parse(stdout); }
   catch { throw new Error('本机凭据不可读取；请在 Mac 本机完成安全录入或解锁钥匙串'); }
 }
@@ -36,7 +37,7 @@ export async function mysqlRead(e, q, parameters, cred, adapters = {}) {
     return { truncated: rows.length > q.maxRows, rows: rows.slice(0, q.maxRows).map((row) => Object.fromEntries(q.outputColumns.map((key) => [key, clean(row[key], [cred.password, cred.username])])) ) };
   } finally { clearTimeout(timer); if (connection) { try { await connection.rollback(); } finally { connection.destroy(); } } }
 }
-async function boundedFetch(url, options, maxBytes = 1024 * 1024) {
+export async function boundedFetch(url, options, maxBytes = 1024 * 1024) {
   const response = await fetch(url, { ...options, redirect: 'error' });
   if (!response.ok) throw new Error('环境接口未成功响应');
   if (Number(response.headers.get('content-length') || 0) > maxBytes) { await response.body?.cancel(); throw new Error('环境响应超过限制'); }
@@ -45,10 +46,7 @@ async function boundedFetch(url, options, maxBytes = 1024 * 1024) {
   finally { await reader.cancel(); }
   return Buffer.concat(chunks).toString('utf8');
 }
-export function databaseEndpoints(text) {
-  const found = [...text.matchAll(/jdbc:mysql:\/\/([a-zA-Z0-9.:-]+)\/([a-zA-Z0-9_-]+)/g)];
-  return [...new Map(found.map((m) => [`${m[1]}/${m[2]}`, { server: m[1], database: m[2], driver: 'mysql' }])).values()];
-}
+export { databaseEndpoints } from './config-endpoints.js';
 export async function nacosRead(e, q, cred, adapters = {}) {
   const request = adapters.fetch ?? boundedFetch, base = e.baseUrl.replace(/\/$/, '');
   const signal = AbortSignal.timeout(q.timeoutMs);
@@ -56,8 +54,10 @@ export async function nacosRead(e, q, cred, adapters = {}) {
   if (!login.accessToken || typeof login.accessToken !== 'string') throw new Error('环境认证未成功');
   const url = new URL(`${base}/v1/cs/configs`); url.search = new URLSearchParams({ dataId: q.dataId, group: q.group, tenant: q.namespace, accessToken: login.accessToken }).toString();
   const content = await request(url, { signal });
-  return { rows: databaseEndpoints(content).slice(0, q.maxRows), truncated: databaseEndpoints(content).length > q.maxRows,
-    note: '仅提取 MySQL JDBC 主机和库名，未返回账号密码或原配置；不代表数据库连接已验证。' };
+  const endpoints = databaseEndpoints(content);
+  return { rows: endpoints.slice(0, q.maxRows), truncated: endpoints.length > q.maxRows, partial: !endpoints.length || endpoints.unresolved,
+    steps: ['Nacos 登录成功', '指定配置读取成功', endpoints.length ? '数据库地址已解析' : '未解析出数据库地址'],
+    note: `${endpoints.unresolved ? '部分配置引用未解析。' : ''}${!endpoints.length ? '未提取到数据库地址，排查未完成。' : ''}数据库连接尚未验证；需要独立配置的只读数据库连接。未返回账号密码或原配置。` };
 }
 export async function readEnvironment(plan, adapters = {}) {
   const config = adapters.config ?? await loadEnvironments(); const e = verifyApprovedPlan(config, plan);
