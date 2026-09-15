@@ -14,6 +14,7 @@
 ```powershell
 git clone https://github.com/angelaboy0113/agentos.git
 Set-Location .\agentos
+npm ci
 .\scripts\initialize-local.ps1
 .\scripts\doctor.ps1
 # 编辑 config\*.local.json 后：
@@ -25,7 +26,12 @@ Set-Location .\agentos
 
 基于飞书群聊驱动本地 Codex 的开发团队控制面。当前版本已支持两种接入方式：本机直接复用 `lark-cli` 长连接（无需公网域名），或由公网 HTTPS 控制面接收飞书回调。开发电脑上的 Runner 主动领取任务：代码修改使用隔离 Git worktree，只读分析使用配置的真实源码目录；关键状态回传飞书。
 
+![AgentOS 工作流](docs/images/agentos-workflow-environment.png)
+
 ## 当前能力
+
+- 可选[受控环境查询](docs/environment-access.md)：PRD 按次批准、Mac Keychain、本机 Nacos / MySQL 只读连接器；不开启通用模型网络权限。
+
 
 - 基于 `config/harness.json` 和 [`config/roles/`](config/roles/) 的共同/岗位约束；部署团队可以指向自己的权威工程规范，STO 为规格、测试、可观测性驱动。
 - `config/harness.json` 与角色文件版本指纹、结构化交接及真实工件检查；参见 [工程适配说明](docs/harness-integration.spec.md)。人工审批和原模型不变，自定义任务执行器需升级 handoff 输出。

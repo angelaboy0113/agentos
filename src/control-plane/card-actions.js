@@ -1,3 +1,4 @@
+import { loadEnvironments, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { publishQuestion, questionJob } from './questions.js';
 import { jobActionVersion, jobCard } from './message-cards.js';
 import { nextStage } from '../shared/protocol.js';
@@ -33,7 +34,7 @@ export async function handleCardAction(context, event) {
     const value = parse(event.action_value);
     const action = event.action_name?.startsWith('clarify_') ? 'clarify' : value.action;
     const version = action === 'clarify' ? event.action_name.slice('clarify_'.length) : value.version;
-    if (!['cancel', 'approve', 'clarify', 'refresh'].includes(action)) throw new Error('不支持的卡片操作。');
+    if (!['cancel', 'approve', 'approve_environment', 'clarify', 'refresh'].includes(action)) throw new Error('不支持的卡片操作。');
     if (action === 'approve' && !admin) throw new Error('只有真人管理员可以确认进入下一阶段。');
     // Recheck inside the same state transaction as mutation; old cards cannot control a new attempt.
     const guard = (freshState, current) => {
@@ -51,6 +52,11 @@ export async function handleCardAction(context, event) {
     } else if (action === 'cancel') {
       const updated = await store.cancel(job.id, event.operator_id, effectKey, guard);
       result = { job: updated, message: updated.status === 'cancelling' ? '已请求停止，等待执行器确认退出。' : '任务已取消。' };
+    } else if (action === 'approve_environment') {
+      const e = verifyPlan(await loadEnvironments(), job.environmentAccess ?? {});
+      if (!isEnvironmentOwner(e, { profile, senderId: event.operator_id })) throw new Error('只有本环境指定负责人可以批准查询');
+      const updated = await store.approveEnvironment(job.id, event.operator_id, job.environmentAccess.scopeHash, effectKey, guard);
+      result = { job: updated, message: '本次只读查询已批准并排队，不授予其他查询或修改权限。' };
     } else if (action === 'approve') {
       const role = nextStage(job.workflow, job.stage);
       const routing = { agentRole: role, agentProfile: agents.agents?.[role === 'owner_report' ? 'owner_intake' : role]?.profile ?? null };
@@ -80,7 +86,7 @@ export async function handleCardAction(context, event) {
     return { ok: true, message: result.message };
   } catch (error) {
     // Do not echo arbitrary callback input, tokens or raw errors into the group.
-    const known = /^(只有|这张卡片|请填写|不支持|当前任务)/.test(error.message) ? error.message : '操作未完成：任务状态可能已变化，请刷新后重试。';
+    const known = /^(只有|这张卡片|请填写|不支持|当前任务|查询授权|查询申请)/.test(error.message) ? error.message : '操作未完成：任务状态可能已变化，请刷新后重试。';
     const noticeKey = `${effectKey}:notice`;
     const accepted = await store.transactEffect(noticeKey, () => ({ message: known }));
     const delivered = (await store.read()).cardActionNotices?.[noticeKey];

@@ -1,26 +1,151 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["outcome", "summary", "finalMessage", "handoff"],
+  "required": [
+    "outcome",
+    "summary",
+    "finalMessage",
+    "handoff",
+    "environmentQuery"
+  ],
   "properties": {
-    "outcome": { "type": "string", "enum": ["ready", "needs_clarification", "blocked", "partial"] },
-    "summary": { "type": "string", "maxLength": 360 },
-    "finalMessage": { "type": "string" },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "needs_clarification",
+        "blocked",
+        "partial"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 360
+    },
+    "finalMessage": {
+      "type": "string"
+    },
     "handoff": {
-      "type": "object", "additionalProperties": false,
-      "required": ["artifacts", "checks", "risks", "returnTo"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifacts",
+        "checks",
+        "risks",
+        "returnTo"
+      ],
       "properties": {
-        "artifacts": { "type": "array", "maxItems": 60, "items": {
-          "type": "object", "additionalProperties": false, "required": ["kind", "path"],
-          "properties": { "kind": { "type": "string", "enum": ["prd", "spec", "code", "test", "report", "decision"] }, "path": { "type": "string" } }
-        } },
-        "checks": { "type": "array", "maxItems": 60, "items": {
-          "type": "object", "additionalProperties": false, "required": ["id", "required", "status", "evidence"],
-          "properties": { "id": { "type": "string" }, "required": { "type": "boolean" }, "status": { "type": "string", "enum": ["passed", "failed", "not_run", "not_applicable"] }, "evidence": { "type": "string" } }
-        } },
-        "risks": { "type": "array", "maxItems": 30, "items": { "type": "string" } },
-        "returnTo": { "type": "string", "enum": ["none", "owner", "pm", "developer", "qa", "auditor"] }
+        "artifacts": {
+          "type": "array",
+          "maxItems": 60,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "prd",
+                  "spec",
+                  "code",
+                  "test",
+                  "report",
+                  "decision"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 60,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "required",
+              "status",
+              "evidence"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not_run",
+                  "not_applicable"
+                ]
+              },
+              "evidence": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "risks": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "string"
+          }
+        },
+        "returnTo": {
+          "type": "string",
+          "enum": [
+            "none",
+            "owner",
+            "pm",
+            "developer",
+            "qa",
+            "auditor"
+          ]
+        }
       }
+    },
+    "environmentQuery": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "environmentId",
+            "queryId",
+            "parameters"
+          ],
+          "properties": {
+            "environmentId": {
+              "type": "string"
+            },
+            "queryId": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

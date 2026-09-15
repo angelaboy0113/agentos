@@ -154,7 +154,7 @@ export async function decideWithCodex(input, options = {}) {
 }
 
 export function validateDecision(value) {
-  const actions = ['reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project'];
+  const actions = ['reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment'];
   const intents = ['none', 'implementation', 'planning', 'analysis', 'verification', 'audit'];
   if (!value || !actions.includes(value.action) || !intents.includes(value.intent)) throw new Error('Unknown action or intent');
   for (const key of ['reply', 'instruction', 'jobId', 'projectId']) {
@@ -164,6 +164,8 @@ export function validateDecision(value) {
   if (!Array.isArray(value.attachmentIds) || value.attachmentIds.some((id) => typeof id !== 'string')) throw new Error('Invalid attachments');
   if (value.requiresSourceInspection !== undefined && typeof value.requiresSourceInspection !== 'boolean') throw new Error('Invalid source inspection decision');
   // Typed AI decision, not phrase matching. Legacy persisted decisions may omit it.
+  if (value.environmentQuery != null && (value.action !== 'create_task' || value.intent !== 'analysis' || value.requiresSourceInspection === true)) throw new Error('Environment query must be a separate readonly request');
+  if (value.action === 'approve_environment' && !value.jobId) throw new Error('Missing environment approval target');
   if (value.requiresSourceInspection === true) {
     if (!['reply', 'create_task'].includes(value.action) || !['none', 'analysis'].includes(value.intent)
       || !value.instruction.trim()) throw new Error('Source inspection requires a standalone read-only analysis scope');

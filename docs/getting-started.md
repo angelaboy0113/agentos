@@ -22,7 +22,7 @@ Set-Location .\agentos
 git status
 ```
 
-仓库当前没有第三方 npm 运行依赖；Node、Codex、Git 和 lark-cli 是本机工具。先执行：
+先执行 `npm ci` 安装锁定的 npm 运行依赖（包含可选环境查询使用的 mysql2）。Node、Codex、Git 和 lark-cli 是本机工具。再执行：
 
 ```powershell
 .\scripts\doctor.ps1
@@ -303,3 +303,7 @@ git pull --ff-only
 ## 群共享会话与问题主卡片（可选）
 
 在 `config/conversation.local.json` 开启 `groupSessions` 与 `questionCards`，使用 Codex 原生持久会话，并让每个新问题维护一张主卡片。不开启时保留现有隔离记忆和卡片行为；不会改变普通成员权限或改建话题群。配置、使用、状态结构、备份及限制见[群共享会话与一问一卡](group-question-cards.md)。
+
+## 可选：受控 UAT/PRD 查询
+
+按[环境查询部署与权限说明](environment-access.md)在 Mac 本机配置，准备专用只读数据库账号和已审核模板。源码只读沙箱不放宽；PRD 普通成员请求逐次等待指定环境负责人批准。

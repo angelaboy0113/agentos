@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "environments": {
+    "prd_mysql": {
+      "projectId": "your_project",
+      "tier": "prd",
+      "kind": "mysql",
+      "host": "db.example.internal",
+      "port": 3306,
+      "database": "your_database",
+      "tls": true,
+      "credentialRef": "prd_mysql_readonly",
+      "membersRead": false,
+      "ownerOpenIdsByProfile": { "agentos-owner": ["ou_REPLACEWITHENVOWNER"] },
+      "queries": {
+        "connection_check": {
+          "reviewed": true,
+          "description": "核对当前库名和数据库时间",
+          "sql": "SELECT DATABASE() AS database_name, CURRENT_TIMESTAMP() AS checked_at",
+          "parameters": [],
+          "outputColumns": ["database_name", "checked_at"],
+          "maxRows": 1,
+          "timeoutMs": 5000
+        }
+      }
+    }
+  }
+}

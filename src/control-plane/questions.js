@@ -4,7 +4,7 @@ import { conversationCard, jobCard, publicText } from './message-cards.js';
 import { conversationTerminalMention, jobTerminalMention } from './requester-mention.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
 const pending = (turn) => ['queued', 'thinking', 'decided'].includes(turn.status);
-export const activeQuestionJob = (job) => ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification'].includes(job.status);
+export const activeQuestionJob = (job) => ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification', 'awaiting_environment_approval'].includes(job.status);
 
 // A reply is an explicit association. Never infer a question from model prose or the latest user in the group.
 export function attachQuestion(state, turn, event, projects) {

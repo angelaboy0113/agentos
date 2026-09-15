@@ -95,7 +95,7 @@ export class LiveCards {
       const question = key.startsWith('question:') ? fresh.questions?.[key.slice(9)] : null;
       const questionReady = !question || (question.generation <= entry.generation
         && !fresh.conversations.some((t) => t.questionId === question.id && ['queued', 'thinking', 'decided'].includes(t.status))
-        && !fresh.jobs.some((j) => j.questionId === question.id && ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification'].includes(j.status)));
+        && !fresh.jobs.some((j) => j.questionId === question.id && ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification', ...(entry.terminalMention?.kind === 'environment_approval' ? [] : ['awaiting_environment_approval'])].includes(j.status)));
       if (entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile,

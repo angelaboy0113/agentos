@@ -52,7 +52,7 @@ export function memorySources(state, turn, projectId, suppressed = new Set()) {
     receiptOnly: Boolean(item.outcome?.jobId || item.outcome?.nextJobId),
     evidence: { applicability: 'historical_conversation_not_current_fact', requiresRecheckForCurrentSource: true } }));
   for (const job of state.jobs ?? []) {
-    if (job.chatId !== turn.chatId || job.projectId !== projectId || (job.originProfile ?? null) !== (turn.profile ?? null)
+    if (job.environmentAccess || job.chatId !== turn.chatId || job.projectId !== projectId || (job.originProfile ?? null) !== (turn.profile ?? null)
       || !(ids.has(job.originMessageId) || ids.has(job.sourceMessageId))
       || !['completed', 'cancelled', 'failed', 'blocked'].includes(job.status)) continue;
     sources.push({ ref: `job:${job.id}`, recordedAt: job.updatedAt ?? job.createdAt,

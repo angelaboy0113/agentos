@@ -17,5 +17,8 @@
     "start:runner": "node src/runner/index.js",
     "test": "node scripts/test.js",
     "check": "node --check src/control-plane/server.js && node --check src/control-plane/local.js && node --check src/control-plane/lark-event-source.js && node --check src/runner/index.js && node scripts/test.js"
+  },
+  "dependencies": {
+    "mysql2": "3.24.4"
   }
 }

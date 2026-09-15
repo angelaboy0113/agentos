@@ -1,3 +1,4 @@
+import { loadEnvironments, catalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
 import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
 import { CodexConversationEngine, validateDecision } from './codex-conversation.js';
@@ -266,9 +267,10 @@ export class ConversationService {
       id: job.id, projectId: job.projectId, stage: job.stage, status: job.status,
       instruction: job.instruction.slice(0, 4000),
       evidence: sourceEvidence(job, projects.projects[projectId]?.repoPath),
-      finalMessage: sourceEvidence(job, projects.projects[projectId]?.repoPath).applicability === 'not_evidence_for_current_source_directory'
+      finalMessage: job.environmentAccess ? '环境查询的明细不注入共享记忆；需要当前数据请重新发起受控查询。' : sourceEvidence(job, projects.projects[projectId]?.repoPath).applicability === 'not_evidence_for_current_source_directory'
         && job.taskIntent === 'analysis' ? '旧分析结果不适用于当前源码目录；原结果保留在任务记录中，需要查当前源码时重新调查。'
         : job.result?.finalMessage?.slice(0, 6000) ?? '',
+      environmentAccess: job.environmentAccess ? { environmentId: job.environmentAccess.environmentId, queryId: job.environmentAccess.queryId, scopeHash: job.environmentAccess.scopeHash, expiresAt: job.environmentAccess.expiresAt, description: job.environmentAccess.description } : null,
       canApprove: isAdministrator(projects, turn) && job.status === 'awaiting_approval',
     }));
     delete memory.suppressedRefs;
@@ -276,6 +278,7 @@ export class ConversationService {
       memory, nativeSession: shared, requestId: turn.id, questionId: turn.questionId ?? null,
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
+      environmentCatalog: catalog(await loadEnvironments(), projectId),
       role: turn.role, administrator: isAdministrator(projects, turn),
       sourcePolicy: { version: 'folder-evidence-v1', checkedNow: false,
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
@@ -316,7 +319,12 @@ export class ConversationService {
         const current = questionJob(await store.read(), turn.questionId);
         if (current && activeQuestionJob(current)) throw new Error('这个问题已有未结束任务；请补充当前任务，或重新 @ 发起一个独立问题。');
       }
-      const route = routeDecision(turn.role, decision.intent);
+      let environmentAccess;
+      if (decision.environmentQuery) {
+        if (!turn.questionId) throw new Error('环境查询需要开启问题主卡片并在群里发起');
+        environmentAccess = planQuery(await loadEnvironments(), decision.environmentQuery, projectId, turn);
+      }
+      const route = environmentAccess ? { stage: 'developer', workflow: 'single_developer' } : routeDecision(turn.role, decision.intent);
       const routing = agentRouting(this.context, route.stage);
       if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
         throw new Error('代码分析协作需要配置开发和项目负责人两个机器人 profile；本次未创建任务。');
@@ -324,18 +332,25 @@ export class ConversationService {
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
-        originChatType: turn.chatType, questionId: turn.questionId,
+        originChatType: turn.chatType, questionId: turn.questionId, environmentAccess,
+        ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, attachments,
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
           reason: route.workflow === 'analysis_review' ? '交给开发只读调查，完成后由项目负责人汇总' : '按角色边界转交负责人协调' } : null,
       });
-      return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${route.workflow === 'analysis_review' ? '协作：开发只读调查 → 项目负责人汇总（不修改代码）\n' : ''}状态：等待执行` };
+      return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${route.workflow === 'analysis_review' ? '协作：开发只读调查 → 项目负责人汇总（不修改代码）\n' : ''}状态：${created.job.status === 'awaiting_environment_approval' ? '等待环境负责人批准本次查询' : '等待执行'}` };
     }
     const job = await store.getJob(decision.jobId);
     if (!job || job.chatId !== turn.chatId || job.projectId !== projectId) throw new Error('本群没有这个任务，不能跨群操作。');
     if (turn.questionId && job.questionId !== turn.questionId) throw new Error('请回复对应问题的主卡片操作任务，不能在一个问题里推进另一个问题。');
+    if (decision.action === 'approve_environment') {
+      const e = verifyPlan(await loadEnvironments(), job.environmentAccess ?? {});
+      if (!isEnvironmentOwner(e, turn)) throw new Error('只有本环境指定负责人可以批准查询');
+      const updated = await store.approveEnvironment(job.id, turn.senderId, job.environmentAccess.scopeHash, turn.id);
+      return { jobId: updated.id, notice: '已批准本次固定范围只读查询；该批准不能用于其他查询或修改操作。' };
+    }
     const admin = isAdministrator(projects, turn);
     if (decision.action === 'approve') {
       if (!admin) throw new Error('只有真人管理员可以放行。请使用已配置管理员身份 @项目负责人 确认；机器人角色不等于管理员。');

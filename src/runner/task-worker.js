@@ -1,3 +1,4 @@
+import { executeEnvironmentJob } from './environment-job.js';
 import { executeJob } from './codex-executor.js';
 
 process.once('message', async ({ job, config }) => {
@@ -6,7 +7,7 @@ process.once('message', async ({ job, config }) => {
     process.send(message, (error) => error ? reject(error) : resolve());
   });
   try {
-    const result = await executeJob(job, config, (event) => send({ type: 'event', event }));
+    const result = await (job.environmentAccess ? executeEnvironmentJob : executeJob)(job, config, (event) => send({ type: 'event', event }));
     await send({ type: 'result', result });
   } catch (error) {
     await send({ type: 'failure', message: error.message }).catch(() => undefined);

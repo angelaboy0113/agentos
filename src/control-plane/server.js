@@ -1,3 +1,4 @@
+import { loadEnvironments, planQuery } from '../shared/environment-access.js';
 import { publishQuestion } from './questions.js';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
@@ -19,6 +20,7 @@ import { jobTerminalMention } from './requester-mention.js';
 
 export async function createControlPlane(overrides = {}) {
   const config = controlConfig(overrides);
+  await loadEnvironments();
   const projects = overrides.projects ?? await loadProjects(config.projectsFile);
   const agents = overrides.agents ?? await loadAgents(config.agentsFile);
   const store = new JsonStore(config.storeFile);
@@ -68,7 +70,7 @@ async function route(context) {
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: context.conversations.groupSessions ? 'group-profile-project-v1' : 'sender-profile-project-v1',
-      questionCards: context.conversations.questionCards,
+      questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-query-approval-v1',
       memoryPolicy: context.conversations.groupSessions ? 'native-persistent-thread-v1' : 'scoped-extractive-memory-v1', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
@@ -113,6 +115,13 @@ async function route(context) {
     return json(response, 200, result);
   }
 
+  const environmentMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/environment-claim$/);
+  if (request.method === 'POST' && environmentMatch) {
+    requireBearer(request, config.runnerToken, 'runner');
+    const plan = await store.claimEnvironment(decodeURIComponent(environmentMatch[1]), await readJson(request));
+    return json(response, 200, { ok: true, plan });
+  }
+
   const controlMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/control$/);
   if (request.method === 'POST' && controlMatch) {
     requireBearer(request, config.runnerToken, 'runner');
@@ -146,7 +155,23 @@ async function route(context) {
     if (!job?.lease?.id || body.leaseId !== job.lease.id || body.runnerId !== job.lease.runnerId) {
       return json(response, 409, { ok: false, error: 'Stale or foreign Runner lease' });
     }
-    const result = await store.appendEvent(job.id, body, agentRouting(context, nextStage(job.workflow, job.stage)));
+    let routing = agentRouting(context, nextStage(job.workflow, job.stage));
+    if (body.type === 'completed' && body.result?.environmentQuery) {
+      try {
+        if (job.taskIntent !== 'analysis' || job.stage !== 'developer' || !job.questionId || job.environmentAccess
+          || body.result.outcome !== 'needs_clarification') throw new Error('当前阶段不允许申请环境查询');
+        const plan = planQuery(await loadEnvironments(), body.result.environmentQuery, job.projectId,
+          { senderId: job.senderId, profile: job.originProfile });
+        routing = { ...agentRouting(context, 'developer'), environmentPlan: { ...plan,
+          approvalRequired: true, approvedBy: null, approvedAt: null } };
+        if (!routing.agentProfile) throw new Error('开发角色未配置');
+      } catch {
+        body.result = { ...body.result, outcome: 'blocked', environmentQuery: null,
+          summary: '本次环境查询申请未通过范围检查；未访问环境。请在本机核对模板、参数、项目和审批人。',
+          finalMessage: '源码阶段提出的环境查询申请无效；未访问环境，原始源码证据保留在阶段记录中。' };
+      }
+    }
+    const result = await store.appendEvent(job.id, body, routing);
     setImmediate(() => notifyJobEvent(context, result).catch((error) => console.error('[notify]', error)));
     return json(response, 200, { ok: true, job: result.job });
   }

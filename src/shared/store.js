@@ -1,3 +1,4 @@
+import { loadEnvironments, verifyApprovedPlan } from './environment-access.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createId, nextStage } from './protocol.js';
@@ -57,6 +58,7 @@ export class JsonStore {
       const job = {
         id: createId('JOB'),
         ...(input.questionId ? { questionId: input.questionId } : {}),
+        ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
         missionId: input.missionId ?? createId('MISSION'),
         projectId: input.projectId,
         projectName: input.projectName ?? input.projectId,
@@ -89,6 +91,31 @@ export class JsonStore {
       state.jobs.push(job);
       if (input.sourceMessageId) state.processedMessages[input.sourceMessageId] = job.id;
       return { job, duplicate: false };
+    });
+  }
+
+  async approveEnvironment(id, approver, scopeHash, effectKey, guard = () => {}) {
+    return this.transactEffect(effectKey, (state) => {
+      const job = requireJob(state, id); guard(state, job);
+      if (job.status !== 'awaiting_environment_approval' || job.environmentAccess?.scopeHash !== scopeHash
+        || Date.parse(job.environmentAccess.expiresAt) <= Date.now()) throw new Error('查询申请已过期或状态改变，请重新申请');
+      job.environmentAccess.approvedBy = approver; job.environmentAccess.approvedAt = new Date().toISOString();
+      job.status = 'queued'; job.updatedAt = new Date().toISOString();
+      job.events.push({ id: createId('EVT'), type: 'environment_approved', at: job.updatedAt, scopeHash });
+      return structuredClone(job);
+    });
+  }
+
+  async claimEnvironment(id, identity) {
+    const config = await loadEnvironments();
+    return this.transact((state) => {
+      const job = requireJob(state, id);
+      if (job.status !== 'running' || job.lease?.id !== identity.leaseId || job.lease?.runnerId !== identity.runnerId || !(Date.parse(job.lease?.expiresAt) > Date.now())) throw new Error('查询租约已失效');
+      verifyApprovedPlan(config, job.environmentAccess ?? {});
+      if (!job.environmentAccess.approvedBy || job.environmentAccess.startedAt) throw new Error('查询未批准或已经执行；不自动重试');
+      job.environmentAccess.startedAt = new Date().toISOString();
+      job.events.push({ id: createId('EVT'), type: 'environment_query_started', at: job.environmentAccess.startedAt, scopeHash: job.environmentAccess.scopeHash });
+      return structuredClone(job.environmentAccess);
     });
   }
 
@@ -182,7 +209,7 @@ export class JsonStore {
       if (event.leaseId && (job.lease?.id !== event.leaseId || job.lease?.runnerId !== event.runnerId)) {
         throw new Error('Stale or foreign Runner lease');
       }
-      if (['cancelled', 'completed', 'failed', 'blocked', 'awaiting_approval', 'awaiting_clarification'].includes(job.status)) {
+      if (['cancelled', 'completed', 'failed', 'blocked', 'awaiting_approval', 'awaiting_clarification', 'awaiting_environment_approval'].includes(job.status)) {
         throw new Error('Task is already terminal');
       }
       const entry = { id: createId('EVT'), at: new Date().toISOString(), ...event };
@@ -214,6 +241,17 @@ export class JsonStore {
       if (event.type === 'failed' && job.status === 'cancelling') job.cancellationError = '执行器无法确认停止，已暂停领取新任务，请管理员检查本机进程。';
       job.updatedAt = new Date().toISOString();
       let nextJob = null;
+      if (event.type === 'completed' && job.status === 'awaiting_clarification'
+        && job.taskIntent === 'analysis' && job.stage === 'developer' && job.questionId && !job.environmentAccess
+        && event.result?.environmentQuery && completionRouting.environmentPlan && completionRouting.agentProfile) {
+        nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);
+        Object.assign(nextJob, { workflow: 'single_developer', status: 'awaiting_environment_approval',
+          environmentAccess: completionRouting.environmentPlan,
+          delegation: { fromStage: 'developer', toStage: 'developer', reason: '源码排查需要环境证据，等待负责人批准具体查询范围' } });
+        job.status = 'completed'; job.nextJobId = nextJob.id;
+        job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'environment_approval_requested', nextJobId: nextJob.id });
+        state.jobs.push(nextJob);
+      }
       // Only this explicitly read-only edge may bypass the human delivery gate.
       // Persist completion and successor together; duplicate/late leases are rejected above.
       if (event.type === 'completed' && job.status === 'awaiting_approval'
@@ -295,7 +333,7 @@ export class JsonStore {
     return this.transactEffect(effectKey, (state) => {
       const job = requireJob(state, jobId);
       guard(state, job);
-      if (!['running', 'queued', 'awaiting_instruction', 'awaiting_clarification', 'awaiting_approval'].includes(job.status)) {
+      if (!['running', 'queued', 'awaiting_instruction', 'awaiting_clarification', 'awaiting_approval', 'awaiting_environment_approval'].includes(job.status)) {
         throw new Error('当前任务已结束或正在停止，不能重复取消。');
       }
       job.status = job.status === 'running' ? 'cancelling' : 'cancelled';

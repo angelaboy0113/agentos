@@ -26,3 +26,7 @@
 - 已有 `analysis` Job 允许其原发起人继续补充。
 - 缺少 `taskIntent` 的历史 Job 对普通成员按非只读处理，仅管理员可以继续。
 - 持有本机管理令牌的开发注入接口属于受信运维边界，不对飞书群成员开放。
+
+## 可选环境查询边界
+
+详见[受控环境查询](environment-access.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。PRD 成员请求及源码排查新增查询先进入 `awaiting_environment_approval`，获指定环境负责人对本次范围批准后才允许 Runner 单次领取。审批不授予代码或数据库写入权限，普通 analysis 沙箱保持只读。查询结果归属原问题卡片，不注入共享长期记忆；真实环境验收须在本机配置后完成。

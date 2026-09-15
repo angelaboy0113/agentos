@@ -12,6 +12,12 @@ export function conversationTerminalMention(turn) {
 
 export function jobTerminalMention(job, projects = {}) {
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
+  if (job.status === 'awaiting_environment_approval') {
+    const ids = job.environmentAccess?.approvalOwnerIds ?? [];
+    if (!ids.length) return null;
+    return { kind: 'environment_approval', replyTo: job.originMessageId ?? job.replyToMessageId, profile: job.originProfile,
+      text: `${ids.filter((id) => OPEN_ID.test(id)).map((id) => `<at user_id="${id}"></at>`).join(' ')} 请审核原卡中的环境、查询范围、参数及结果展示范围；未批准前不会访问环境。` };
+  }
   if (!['completed', 'blocked', 'failed', 'cancelled'].includes(job.status)) return null;
   const replyTo = job.originMessageId ?? job.replyToMessageId;
   if (job.taskIntent === 'analysis' && job.status === 'blocked' && job.result?.sourceSyncBlocked === true) {

@@ -4,16 +4,16 @@ import { publicText, conciseSummary, resultPages, resultPanel } from './result-p
 export { publicText } from './result-presentation.js';
 
 export function jobActionVersion(job) {
-  return createHash('sha256').update((job.questionId ? `${job.id}|` : '') + (job.events ?? []).filter((e) => ['started', 'clarification_received'].includes(e.type))
+  return createHash('sha256').update((job.questionId ? `${job.id}|${job.environmentAccess ? `${job.environmentAccess.scopeHash}|` : ''}` : '') + (job.events ?? []).filter((e) => ['started', 'clarification_received'].includes(e.type))
     .map((e) => e.id ?? e.at).join('|')).digest('hex').slice(0, 16);
 }
 
 function actionButton(job, action, label, type = 'default') {
   const button = { tag: 'button', type, width: 'fill', text: { tag: 'plain_text', content: label },
     behaviors: [{ type: 'callback', value: { action, version: jobActionVersion(job) } }] };
-  if (['cancel', 'approve'].includes(action)) button.confirm = {
+  if (['cancel', 'approve', 'approve_environment'].includes(action)) button.confirm = {
     title: { tag: 'plain_text', content: label },
-    text: { tag: 'plain_text', content: action === 'cancel' ? '停止后保留已有文件修改，不会回滚代码。确定继续？' : '确认当前阶段结论通过，并将任务交给下一角色执行？' },
+    text: { tag: 'plain_text', content: action === 'approve_environment' ? '仅批准卡片展示的环境、模板、参数和限额；结果将在本群卡片显示，不授权任何修改。' : action === 'cancel' ? '停止后保留已有文件修改，不会回滚代码。确定继续？' : '确认当前阶段结论通过，并将任务交给下一角色执行？' },
   };
   return button;
 }
@@ -64,6 +64,7 @@ export function elapsed(start, end = Date.now()) {
 }
 export function jobCard(job, now = Date.now()) {
   const labels = { running: ['执行中', 'blue'], queued: ['等待执行', 'blue'], completed: ['当前阶段已完成', 'green'],
+    awaiting_environment_approval: ['待环境负责人批准查询', 'orange'],
     awaiting_approval: ['待真人确认', 'orange'], awaiting_clarification: ['待补充信息', 'orange'],
     blocked: ['任务受阻 / 未通过', 'red'], failed: ['执行失败', 'red'], cancelled: ['已取消 / 已停止', 'grey'],
     cancelling: ['正在停止', 'orange'], resubmitted: ['补充已提交', 'blue'] };
@@ -92,7 +93,7 @@ export function jobCard(job, now = Date.now()) {
     ...activity.recent.slice(-3).map((item) => md(`${item.failed ? '未通过' : '完成'} · ${publicText(clip(item.label, 120))}`, true))]));
   if (!active && job.result?.finalMessage) elements.push(resultPanel(resultPages(job.result.finalMessage)));
   elements[0].columns[0].elements.push(md(publicText(job.id), true));
-  if (job.taskIntent === 'analysis') elements[0].columns[0].elements.push(md('只读分析 · 不修改代码', true));
+  if (job.taskIntent === 'analysis') elements[0].columns[0].elements.push(md(job.environmentAccess ? '环境只读查询 · 不修改数据库或配置' : '只读分析 · 不修改代码', true));
   if (job.nextJobId) elements[0].columns[0].elements.push(md(`已交给项目负责人汇总 · ${publicText(job.nextJobId)}`, true));
   if (job.delegation) elements[0].columns[0].elements.push(md(`协作：${stageLabel(job.delegation.fromStage)} → ${stageLabel(job.delegation.toStage)}`, true));
   if (job.status === 'awaiting_clarification') elements.push({ tag: 'form', name: 'clarification_form', elements: [
@@ -101,12 +102,17 @@ export function jobCard(job, now = Date.now()) {
     { tag: 'button', name: `clarify_${jobActionVersion(job)}`, form_action_type: 'submit', type: 'primary_filled',
       width: 'fill', text: { tag: 'plain_text', content: '提交补充 · 重新执行当前阶段' } },
   ] });
+  if (job.environmentAccess) {
+    const p = job.environmentAccess;
+    elements[0].columns[0].elements.push(md(publicText(`环境：${p.environmentId} (${p.tier}) · 模板：${p.queryId}\n范围：${p.description}\n参数：${JSON.stringify(p.parameters)}\n最多 ${p.maxRows} 条 · 超时 ${p.timeoutMs} ms\n授权截止：${p.expiresAt}\n结果在本问题卡片向群内展示；仅本次查询，不授权修改。`), true));
+  }
   const buttons = [];
+  if (job.status === 'awaiting_environment_approval') buttons.push(actionButton(job, 'approve_environment', '批准本次只读查询', 'primary_filled'));
   if (job.status === 'awaiting_approval') buttons.push(actionButton(job, 'approve', '确认进入下一阶段', 'primary_filled'));
-  if (['running', 'queued', 'awaiting_clarification', 'awaiting_approval'].includes(job.status)) {
+  if (['running', 'queued', 'awaiting_clarification', 'awaiting_approval', 'awaiting_environment_approval'].includes(job.status)) {
     buttons.push(actionButton(job, 'cancel', job.status === 'running' ? '停止任务' : '取消任务', 'danger'));
   }
-  if (['running', 'queued', 'cancelling', 'awaiting_clarification', 'awaiting_approval'].includes(job.status)) {
+  if (['running', 'queued', 'cancelling', 'awaiting_clarification', 'awaiting_approval', 'awaiting_environment_approval'].includes(job.status)) {
     buttons.push(actionButton(job, 'refresh', '刷新状态'));
   }
   if (buttons.length) elements.push({ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '8px',
