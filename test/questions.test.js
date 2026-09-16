@@ -67,20 +67,22 @@ test('question card stays owned by intake bot across developer/report, mentions 
   assert.match(calls.find((c) => c.type === 'mention').text, /ou_asker/);
   assert.equal((await app.store.read()).cardMessages[`question:${qid}`].terminal, true);
 });
-test('explicit reply reopens same card; stranger and unrelated roots get separate cards', async (t) => {
+test('completed answer survives followup; new card retains parent association', async (t) => {
   const { app, send, calls } = await setup(t);
   await send('m'); const s = await app.store.read(), key = Object.keys(s.cardMessages)[0], card = s.cardMessages[key];
   await send('follow', 'ou_asker', { reply_to: card.messageId });
-  let state = await app.store.read(); assert.equal(Object.keys(state.questions).length, 1);
+  let state = await app.store.read(); assert.equal(Object.keys(state.questions).length, 2);
   assert.equal(state.cardMessages[key].messageId, card.messageId);
-  assert.equal(state.cardMessages[key].generation, 2);
+  assert.deepEqual(state.cardMessages[key].card, card.card);
+  assert.equal(state.questions[state.conversations[1].questionId].parentQuestionId, state.conversations[0].questionId);
+  assert.equal(state.cardMessages[key].generation, 1);
   assert.equal(calls.filter((c) => c.type === 'mention').length, 2);
   assert.equal(new Set(calls.filter((c) => c.type === 'mention').map((c) => c.options.idempotencyKey)).size, 2);
   await send('stranger', 'ou_other', { reply_to: card.messageId });
   await send('new', 'ou_asker');
-  assert.equal(Object.keys((await app.store.read()).questions).length, 3);
+  assert.equal(Object.keys((await app.store.read()).questions).length, 4);
   await app.cards.upsert(key, card.card, card.destination, { generation: 1, terminal: true, immediate: true });
-  assert.equal((await app.store.read()).cardMessages[key].generation, 2);
+  assert.equal((await app.store.read()).cardMessages[key].generation, 1);
 });
 test('a followup cannot duplicate a running question task or borrow administrator authority', async (t) => {
   const { app, send } = await setup(t, (input) => decision({ action: 'create_task', intent: input.message.includes('write') ? 'implementation' : 'analysis', instruction: '检查' }));

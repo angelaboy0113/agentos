@@ -21,7 +21,7 @@ async function fixture(t, responder = () => decision()) {
   const previous = process.env.AGENTOS_ENVIRONMENTS_FILE; process.env.AGENTOS_ENVIRONMENTS_FILE = path.join(dir, 'environments.json');
   const cfg = config(); await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE, JSON.stringify(cfg));
   const calls = [];
-  const client = { replyCard: async (id, card) => { calls.push({ type: 'card', card }); return { message_id: 'synthetic-card' }; }, updateCard: async (id, card) => calls.push({ type: 'update', card }), reply: async (id, text) => calls.push({ type: 'text', text }) };
+  const client = { replyCard: async (id, card) => { calls.push({ type: 'card', card }); return { message_id: `synthetic-card-${calls.length}` }; }, updateCard: async (id, card) => calls.push({ type: 'update', card }), reply: async (id, text) => calls.push({ type: 'text', text }) };
   const app = await createControlPlane({ runnerToken: 'synthetic-runner', dataDir: dir, storeFile: path.join(dir, 'state.json'),
     projects: { projects: { demo: {} }, chatProjectMap: { group: 'demo' }, ownerOpenIdsByProfile: { owner: ['ou_owner', 'ou_otherAdmin'] } },
     agents: { agents: { owner_intake: { profile: 'owner' }, developer: { profile: 'developer' } } },

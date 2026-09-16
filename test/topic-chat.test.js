@@ -23,10 +23,10 @@ async function appFixture(t, topic = true) {
 }
 test('topic questions keep separate cards and thread replies/mentions on the original question', async t => {
  const { app, calls, send } = await appFixture(t); await send('root-one'); await send('root-two'); await send('follow-up', { root_id: 'root-one', reply_to: 'root-one' });
- const s = await app.store.read(); assert.equal(Object.keys(s.questions).length, 2); assert.equal(s.jobs.length, 0);
- assert.equal(s.conversations[0].questionId, s.conversations[2].questionId); assert.notEqual(s.conversations[0].questionId, s.conversations[1].questionId);
+ const s = await app.store.read(); assert.equal(Object.keys(s.questions).length, 3); assert.equal(s.jobs.length, 0);
+ assert.notEqual(s.conversations[0].questionId, s.conversations[2].questionId); assert.notEqual(s.conversations[0].questionId, s.conversations[1].questionId);
  assert.ok(calls.length >= 4); assert.ok(calls.every(c => c.options.replyInThread === true));
- assert.deepEqual(calls.filter(c => c.kind === 'card').map(c => c.id), ['root-one', 'root-two']);
+ assert.deepEqual(calls.filter(c => c.kind === 'card').map(c => c.id), ['root-one', 'root-two', 'follow-up']);
 });
 test('normal groups retain ordinary reply mode', async t => {
  const { calls, send } = await appFixture(t, false); await send('normal-root');

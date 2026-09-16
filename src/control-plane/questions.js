@@ -4,19 +4,25 @@ import { conversationCard, jobCard, publicText } from './message-cards.js';
 import { conversationTerminalMention, jobTerminalMention } from './requester-mention.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
 const pending = (turn) => ['queued', 'thinking', 'decided'].includes(turn.status);
-export const activeQuestionJob = (job) => ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification', 'awaiting_environment_approval'].includes(job.status);
+export const activeQuestionJob = (job) => ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification', 'awaiting_environment_approval'].includes(job?.status);
 
 // A reply is an explicit association. Never infer a question from model prose or the latest user in the group.
 export function attachQuestion(state, turn, event, projects) {
   state.questions ??= {};
-  const parents = [event.reply_to, event.root_id].filter(Boolean);
-  const q = Object.values(state.questions).find((item) => item.chatId === turn.chatId && item.profile === turn.profile
-    && item.projectId === turn.projectId && (isTaskCreator(projects, item, turn) || isAdministrator(projects, turn))
-    && (parents.includes(item.messageId) || parents.includes(state.cardMessages?.[`question:${item.id}`]?.messageId)
-      || state.conversations.some((other) => other.questionId === item.id && parents.includes(other.messageId))));
+  const candidates = Object.values(state.questions).reverse().filter(item => item.chatId === turn.chatId && item.profile === turn.profile
+    && item.projectId === turn.projectId && (isTaskCreator(projects, item, turn) || isAdministrator(projects, turn)));
+  const direct = (item, id) => Boolean(id && (item.messageId === id || state.cardMessages?.[`question:${item.id}`]?.messageId === id
+    || state.conversations.some(other => other.questionId === item.id && other.messageId === id)));
+  // An explicit card reply wins over the broad topic root, especially for approval.
+  const related = candidates.find(item => direct(item, event.reply_to))
+    ?? candidates.find(item => event.root_id && (item.threadRootId === event.root_id || direct(item, event.root_id)));
+  const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && ['requested','opening','login_required'].includes(e.status));
+  const relatedTurn = related && state.conversations.find(t => t.id === related.latestTurnId);
+  const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && pending(relatedTurn))) ? related : null;
   const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
-    projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
+    threadRootId: event.root_id ?? turn.messageId, projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
     ...(turn.replyInThread ? { replyInThread: true } : {}),
+    ...(related ? { parentQuestionId: related.id } : {}),
     title: publicText(turn.content).replace(/\s+/g, ' ').slice(0, 60) || '附件问题', generation: 1 };
   if (q) question.generation = Math.max(question.generation, question.cardGeneration ?? 1) + 1;
   question.latestTurnId = turn.id;
@@ -49,7 +55,9 @@ export function questionView(state, questionId, projects = {}) {
     if (outstanding) card.body.elements[0].columns[0].elements.push({ tag: 'markdown', text_size: 'notation', content: '已收到补充，负责人正在处理；任务进度仍显示在本卡。' });
   }
   const root = state.conversations.find((item) => item.id === q.rootTurnId);
-  const mention = terminal ? (useJob
+  const enrollment = Object.values(state.environmentEnrollments ?? {}).find(e => e.questionId === q.id && ['requested','opening','login_required'].includes(e.status));
+  const adminIds = (projects.ownerOpenIdsByProfile?.[q.profile] ?? []).filter(id => /^ou_[A-Za-z0-9]+$/.test(id));
+  const mention = enrollment ? (enrollment.status === 'requested' && adminIds.length ? { profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+' 请确认本话题的新环境接入；登录仅在运行AgentOS的电脑完成。' } : null) : terminal ? (useJob
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
     : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
   if (mention && q.replyInThread) mention.replyInThread = true;

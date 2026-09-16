@@ -10,7 +10,8 @@
     "projectId",
     "attachmentIds",
     "requiresSourceInspection",
-    "environmentQuery"
+    "environmentQuery",
+    "environmentSetup"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -29,7 +30,9 @@
         "approve",
         "cancel",
         "bind_project",
-        "approve_environment"
+        "approve_environment",
+        "request_environment_setup",
+        "approve_environment_setup"
       ]
     },
     "intent": {
@@ -83,6 +86,41 @@
               "items": {
                 "type": "string"
               }
+            }
+          }
+        }
+      ]
+    },
+    "environmentSetup": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "tier",
+            "url"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "nacos",
+                "mysql"
+              ]
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "uat",
+                "prd"
+              ]
+            },
+            "url": {
+              "type": "string"
             }
           }
         }

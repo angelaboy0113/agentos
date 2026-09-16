@@ -259,6 +259,7 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
         const password = page.locator('input[type="password"]');
         await password.first().waitFor({ state: "visible" });
         if (manual) {
+          await adapters.onLoginReady?.();
           let timer;
           try {
             await Promise.race([
@@ -387,13 +388,13 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
 }
 
 // Local setup only: capture successful form credentials into memory, never send them to the model.
-export async function loginNacosLocally(baseUrl) {
+export async function loginNacosLocally(baseUrl, options = {}) {
   const cred = {};
   const b = await createNacosBrowser(
     { baseUrl },
     { namespaces: [], maxCalls: 1, maxRows: 1, timeoutMs: 10000 },
     cred,
-    { manualLogin: true },
+    { manualLogin: true, onLoginReady: options.onLoginReady },
   );
   try {
     await b.run("browser_open");

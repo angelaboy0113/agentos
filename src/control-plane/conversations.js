@@ -1,3 +1,4 @@
+import { requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
 import { loadEnvironments, catalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
 import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
@@ -109,6 +110,7 @@ export class ConversationService {
   async schedule() {
     while (!this.stopped) {
       this.wakeRequested = false;
+      await pollEnrollments(this.context);
       const state = await this.context.store.read();
       const heads = new Map();
       for (const turn of state.conversations ?? []) {
@@ -277,6 +279,7 @@ export class ConversationService {
     delete memory.suppressedRefs;
     return fitContext({
       memory, nativeSession: shared, requestId: turn.id, questionId: turn.questionId ?? null,
+      environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: catalog(await loadEnvironments(), projectId),
@@ -301,6 +304,8 @@ export class ConversationService {
     const attachmentIds = new Set(decision.attachmentIds);
     const attachments = (turn.attachmentPool ?? []).filter((item) => attachmentIds.has(item.id));
     if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');
+    if (decision.action === 'request_environment_setup') return requestEnrollment(this.context, turn);
+    if (decision.action === 'approve_environment_setup') return approveEnrollment(this.context, turn);
     if (decision.action === 'reply') return {};
     if (decision.action === 'bind_project') {
       if (!isAdministrator(projects, turn)) throw new Error('只有真人管理员可以绑定项目，项目负责人机器人不是管理员。');
