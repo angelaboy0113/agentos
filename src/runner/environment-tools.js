@@ -29,7 +29,7 @@ export function selectStatement(args, tables, q) {
   return { sql: `SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`${table}\` WHERE ${where} LIMIT ${q.maxRows + 1}`, params, columns };
 }
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
-  const secrets = [cred.username, cred.password]; let conn, token, calls = 0, active = true;
+  const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map();
   const request = adapters.fetch ?? boundedFetch;
   async function nacos(api, params = {}, login = false) {
@@ -63,7 +63,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   let browser;
   if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
   const run = async (tool, args = {}) => {
-    if (!active || ++calls > q.maxCalls) throw new Error('工具次数已达本次上限');
+    if (!active) throw new Error('工具执行已结束');
     if (!spec.some(x => x.tool === tool) || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('不支持的工具或参数');
     if (tool.startsWith('browser_')) { if (!browser) throw new Error('当前范围未启用浏览器'); return browser.run(tool,args); }
     // A single operation cannot keep a connection alive beyond its declared timeout.

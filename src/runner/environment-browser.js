@@ -245,8 +245,8 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
     };
   }
   async function perform(tool, args = {}) {
-    if (!active || ++calls > q.maxCalls)
-      throw new Error("浏览器调用已结束或超过次数限制");
+    if (!active)
+      throw new Error("浏览器调用已结束");
     try {
       phase = "launch";
       await ensure();

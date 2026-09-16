@@ -24,3 +24,12 @@ test('completed query puts answers first while approval still exposes full scope
  const front=JSON.stringify(jobCard(job).body.elements[0]);assert.match(front,/db.example/);assert.doesNotMatch(front,/授权截止|模板：/);
  const approval=JSON.stringify(jobCard({...job,status:'awaiting_environment_approval',result:null}));assert.match(approval,/授权截止/);assert.match(approval,/批准本次只读查询/);
 });
+
+test('environment results separate key data and pending evidence into readable blocks',()=>{
+ const p=presentEnvironmentResult({...plan,kind:'mysql'},{rows:[{activity_code:'EP-example',amount:'10',status:32}],partial:true,summary:'主单已找到；关联明细仍待核实。',evidence:{readAt:'2026-09-16'}});
+ assert.match(p.summary,/关键数据\n/);assert.match(p.summary,/\n\n待核实\n/);assert.match(p.summary,/activity_code：EP-example\namount：10/);
+});
+test('narrow-card summaries split numbered prose without changing amounts or claims',async()=>{
+ const {summaryParagraphs}=await import('../src/control-plane/result-presentation.js');
+ assert.deepEqual(summaryParagraphs('只读结果：1）连接成功。 2）金额1422.0100。 3）明细未确认。'),['只读结果：1）连接成功。','2） 金额1422.0100。','3） 明细未确认。']);
+});

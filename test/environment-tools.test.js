@@ -43,15 +43,18 @@ test('investigation preserves member PRD approval gate and needs explicit scope'
   const p = planQuery(cfg, { environmentId: 'env', queryId: 'investigate', parameters: ['检查连接'] }, 'demo', { profile: 'owner', senderId: 'ou_member' });
   assert.equal(p.approvalRequired, true); assert.equal(p.approvedBy, null);
   assert.throws(() => validateToolQuery(environment, { ...query, namespaces: [] }));
-  assert.throws(() => validateToolQuery(environment, { ...query, maxCalls: 999 }));
+  assert.equal(validateToolQuery(environment, { ...query, maxCalls: 999 }),true);
+  assert.equal(validateToolQuery(environment, { ...query, maxCalls: undefined }),true);
+  assert.throws(()=>validateToolQuery(environment,{...query,maxCalls:-1}));
 });
 test('tool loop rechecks authorization after model decision and closes tools', async () => {
   const cfg = { version: 1, environments: { env: structuredClone(environment) } };
   const plan = planQuery(cfg, { environmentId: 'env', queryId: 'investigate', parameters: ['检查配置'] }, 'demo', { profile: 'owner', senderId: 'ou_member' });
   const calls = []; let closed = false;
-  await assert.rejects(investigateEnvironment(plan, async () => {}, { load: async () => cfg, credential: async () => credentials,
+  const result = await investigateEnvironment(plan, async () => {}, { load: async () => cfg, credential: async () => credentials,
     tools: async () => ({ spec: [{ tool: 'connection' }, { tool: 'discover' }], run: async t => { calls.push(t); return {}; }, close: async () => { closed = true; } }),
-    planner: async () => ({ next: async () => { cfg.environments.env.membersRead = false; return { tool: 'discover', arguments: '{}' }; }, close: async () => {} }) }));
+    planner: async () => ({ next: async () => { cfg.environments.env.membersRead = false; return { tool: 'discover', arguments: '{}' }; }, close: async () => {} }) });
+  assert.equal(result.partial,true);
   assert.deepEqual(calls, ['connection']); assert.equal(closed, true);
 });
 test('tool loop reports unresolved extraction as partial even when model claims complete', async () => {
@@ -127,7 +130,7 @@ test('recoverable input attempts are bounded and unresolved finish cannot become
  const run=()=>investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
  tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{if(t==='connection')return{};attempts++;throw new QueryInputError('COLUMN_LIMIT','too many');},close:async()=>{closed=true;}}),
  planner:async()=>({next:async()=>finish&&attempts?{tool:'finish',complete:true,summary:'incorrect success'}:{tool:'select',arguments:'{}'},close:async()=>{}})});
- if(finish){const r=await run();assert.equal(r.partial,true);assert.doesNotMatch(r.summary,/incorrect success/);}else{await assert.rejects(run(),e=>e.code==='COLUMN_LIMIT');assert.equal(attempts,3);}assert.equal(closed,true);
+ if(finish){const r=await run();assert.equal(r.partial,true);assert.doesNotMatch(r.summary,/incorrect success/);}else{const r=await run();assert.equal(r.partial,true);assert.match(r.summary,/COLUMN_LIMIT/);assert.equal(attempts,3);}assert.equal(closed,true);
  }
 });
 test('scope failures never enter parameter correction loop',async()=>{
@@ -142,12 +145,31 @@ test('last tool result receives final synthesis with provenance and no extra que
  const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
  tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{executions++;return t==='connection'?{}:{table:'orders',rows:[{id:'one'}]};},close:async()=>{}}),
  planner:async()=>({next:async input=>{if(input.remainingCalls===0){assert.deepEqual(input.tools,[]);assert.equal(input.results.at(-1).result.table,'orders');return{tool:'finish',summary:'已核对orders中指定记录；原因待查',complete:false};}return{tool:'select',arguments:'{}'};},close:async()=>{}})});
- assert.equal(executions,2);assert.equal(r.partial,true);assert.match(r.summary,/原因待查/);assert.deepEqual(r.rows,[{id:'one','来源表':'orders'}]);
+ assert.equal(executions,5);assert.equal(r.partial,true);assert.match(r.summary,/原因待查/);assert.deepEqual(r.rows,[{id:'one','来源表':'orders'}]);
 });
 test('final synthesis cannot execute tools and failures preserve prior evidence',async()=>{
  for(const fail of [false,true]){
  const q={...query,maxCalls:1},cfg={version:1,environments:{env:{...environment,queries:{investigate:q}}}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;
- const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;return{stage:'connected'};},close:async()=>{}}),planner:async()=>({next:async()=>{if(fail)throw new Error('summary unavailable');return{tool:'select',arguments:'{}',complete:true};},close:async()=>{}})});
- assert.equal(calls,1);assert.equal(r.partial,true);assert.equal(r.steps.length,1);
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;return{stage:'connected'};},close:async()=>{}}),planner:async()=>({next:async input=>{if(input.remainingCalls!==0)return{tool:'connection',arguments:'{}'};if(fail)throw new Error('summary unavailable');return{tool:'select',arguments:'{}',complete:true};},close:async()=>{}})});
+ assert.equal(calls,4);assert.equal(r.partial,true);assert.equal(r.steps.length,4);
  }
+});
+
+test('evidence-driven investigation passes twelve calls and legacy maxCalls without stopping',async()=>{
+ const q={...query,maxCalls:1},cfg={version:1,environments:{env:{...environment,queries:{investigate:q}}}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对关联证据']},'demo',{profile:'owner',senderId:'ou_member'});let executed=0;
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{executed++;return t==='connection'?{}:{table:'orders',rows:[{id:String(executed)}]};},close:async()=>{}}),
+ planner:async()=>({next:async input=>{assert.equal(input.remainingCalls,undefined);return executed<16?{tool:'select',arguments:'{}'}:{tool:'finish',summary:'完成',complete:true};},close:async()=>{}})});
+ assert.equal(executed,16);assert.equal(r.partial,false);assert.equal(r.rows.length,15);
+});
+test('expiry during long investigation retains evidence and prohibits subsequent queries',async()=>{
+ const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;plan.expiresAt='2000-01-01T00:00:00Z';return{stage:'connected'};},close:async()=>{}}),planner:async()=>({next:async input=>{assert.deepEqual(input.tools,[]);return{tool:'finish',summary:'已有连接证据',complete:true};},close:async()=>{}})});
+ assert.equal(calls,1);assert.equal(r.partial,true);assert.match(r.summary,/SCOPE_LIMIT/);assert.match(r.summary,/已有连接证据/);
+});
+test('MySQL tool layer no longer enforces legacy call count',async()=>{
+ const c={query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],rollback:async()=>{},destroy:()=>{}};
+ const t=await createEnvironmentTools({...environment,kind:'mysql'}, {...query,maxCalls:1}, credentials,{mysql:{createConnection:async()=>c}});
+ try{for(let i=0;i<16;i++)await t.run('connection');}finally{await t.close();}
+ await assert.rejects(t.run('connection'));
 });

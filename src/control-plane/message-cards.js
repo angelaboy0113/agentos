@@ -1,7 +1,7 @@
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { stageLabel } from '../shared/protocol.js';
 import { createHash } from 'node:crypto';
-import { publicText, conciseSummary, resultPages, resultPanel } from './result-presentation.js';
+import { publicText, conciseSummary, summaryParagraphs, resultPages, resultPanel } from './result-presentation.js';
 export { publicText } from './result-presentation.js';
 
 export function jobActionVersion(job) {
@@ -82,10 +82,10 @@ export function jobCard(job, now = Date.now()) {
     : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
   const summary = !active && job.result?.finalMessage ? resultSummary(job.result.summary || job.result.finalMessage) : '';
-  const elements = [block([md(`**${active ? '当前操作' : '结论'}**`), md(active ? publicText(clip(operation, 120))
+  const elements = [block([md(`**${active ? '当前操作' : '结论'}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'
-    : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label))], color),
+    : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label)).map(part => md(part))], color),
     { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns: [
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${elapsed(start, active ? now : Date.parse(job.updatedAt))}**`), md('本阶段耗时', true)] },
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${Number(activity?.total) || 0} 次**`), md('实际工具调用', true)] },

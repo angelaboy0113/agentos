@@ -37,7 +37,7 @@ export async function loadEnvironments(file = environmentFile()) {
 export function isEnvironmentOwner(e, actor) { return (e.ownerOpenIdsByProfile?.[actor.profile] ?? []).includes(actor.senderId); }
 export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
-    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, maxCalls: q.maxCalls, scope: e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
+    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const e = config.environments[request?.environmentId], q = e?.queries?.[request?.queryId];
@@ -52,7 +52,7 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
   if (!(e.ownerOpenIdsByProfile[actor.profile] ?? []).length) throw new Error('本环境未配置当前机器人对应的查询审批人');
   const scope = { expiresAt: new Date(now + 15 * 60000).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: q.timeoutMs };
   const owner = isEnvironmentOwner(e, actor), approvalRequired = !owner && (e.tier === 'prd' || !e.membersRead);
-  return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；最多${q.maxCalls}次只读工具调用` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
+  return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；按证据推进，无固定调用次数上限；连续3次无新增证据暂停` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
     approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: owner ? actor.senderId : approvalRequired ? null : 'policy:uat-read', approvedAt: approvalRequired ? null : new Date(now).toISOString() };
 }
 export function verifyPlan(config, plan, now = Date.now()) {

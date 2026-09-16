@@ -35,6 +35,12 @@ export function conciseSummary(text) {
   return `${boundary > 120 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n详情含完整证据与未验证事项。`;
 }
 
+// Split compact numbered prose for narrow message cards without changing its claims.
+export function summaryParagraphs(text) {
+  return String(text ?? '').replace(/([^\n])\s+([1-9][)）])\s*/g, '$1\n\n$2 ')
+    .split(/\n\s*\n/).map(part => part.trim()).filter(Boolean);
+}
+
 // Small pages bound card bytes. Preserve paragraphs and balance code fences on every page.
 export function resultPages(text) {
   const source = readableMarkdown(text);

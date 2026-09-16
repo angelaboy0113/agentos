@@ -152,7 +152,6 @@ try {
       namespaces: [""],
       parameters: [{ name: "purpose", type: "string", maxLength: 200 }],
       maxRows: 20,
-      maxCalls: 8,
       timeoutMs: 5000,
     };
   } else throw new Error("Unsupported connector");
@@ -173,7 +172,6 @@ try {
       tables: ["*"],
       parameters: [{ name: "purpose", type: "string", maxLength: 200 }],
       maxRows: 20,
-      maxCalls: 8,
       timeoutMs: 5000,
     };
   }
