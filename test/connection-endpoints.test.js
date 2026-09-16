@@ -10,6 +10,7 @@ test('connection metadata is bounded and isolated to related questions and match
  assert.equal(connectionCandidates(state,turn,'p').length,1);
  assert.doesNotMatch(JSON.stringify(connectionCandidates(state,turn,'p')),/password|do-not-copy/);
  for(const mutate of [j=>j.chatId='else',j=>j.projectId='else',j=>j.questionId='else',j=>j.originProfile='else',j=>j.updatedAt='2020-01-01',j=>j.result.environmentEvidence.scopeHash='else',j=>j.status='failed']) {const copy=structuredClone(state);mutate(copy.jobs[0]);assert.equal(connectionCandidates(copy,turn,'p').length,0);}
+ assert.deepEqual(connectionCandidates({jobs:[job()]},turn,'p'),[]);
  assert.deepEqual(connectionEndpoints([{host:'user@host',port:3306,database:'x'},{host:'db',port:0,database:'x'}]),[]);
 });
 test('connect followup fills a unique discovered address and multiple databases require selection',async()=>{

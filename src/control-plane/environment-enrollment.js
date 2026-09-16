@@ -156,7 +156,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
   let state = await context.store.read();
   // Resume metadata discovery without borrowing another user's PRD authority.
   for (const job of state.jobs ?? []) {
-    const turn = state.conversations.find(t=>t.id===job.sourceMessageId);
+    const turn = (state.conversations ?? []).find(t=>t.id===job.sourceMessageId);
     if (!turn || job.connectionEnrollmentHandled || job.status!=='completed' || !job.environmentAccess
       || turn.decision?.environmentSetup?.kind!=='mysql' || turn.decision.environmentSetup.url
       || turn.decision.action!=='create_task') continue;

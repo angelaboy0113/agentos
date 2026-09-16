@@ -350,7 +350,7 @@ export class ConversationService {
       if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
         throw new Error('代码分析协作需要配置开发和项目负责人两个机器人 profile；本次未创建任务。');
       }
-      await store.transact(s => { const t = s.conversations.find(x=>x.id===turn.id); if(t) t.decision=structuredClone(decision); });
+      await store.transact(s => { const t = (s.conversations ?? []).find(x=>x.id===turn.id); if(t) t.decision=structuredClone(decision); });
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
