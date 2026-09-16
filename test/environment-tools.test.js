@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { databaseEndpoints } from '../src/runner/config-endpoints.js';
-import { createEnvironmentTools, selectStatement } from '../src/runner/environment-tools.js';
+import { createEnvironmentTools, selectStatement, QueryInputError } from '../src/runner/environment-tools.js';
 import { validateToolQuery } from '../src/shared/environment-tool-policy.js';
 import { planQuery } from '../src/shared/environment-access.js';
 import { investigateEnvironment } from '../src/runner/environment-investigator.js';
@@ -94,4 +94,45 @@ test('large schemas stay within tool budget and can continue by cursor or target
  const b=await tools.run('schema',{cursor:a.nextCursor});assert.equal(b.nextCursor,200);const c=await tools.run('schema',{cursor:b.nextCursor});assert.equal(c.truncated,false);assert.equal(Object.keys(c.tables).length,40);
  await assert.rejects(tools.run('schema',{table:'bad;DELETE'}));assert.match(calls[1],/OFFSET 100/);
  }finally{await tools.close();}
+});
+
+test('SELECT input failures are specific and hard scope failures remain nonrecoverable', () => {
+ const tables=new Map([['orders',Array.from({length:13},(_,i)=>'field'+i)]]);
+ const args={table:'orders',columns:tables.get('orders'),filters:[{column:'field0',op:'=',value:'test'}]};
+ assert.throws(()=>selectStatement(args,tables,query),e=>e instanceof QueryInputError&&e.code==='COLUMN_LIMIT');
+ assert.throws(()=>selectStatement({...args,columns:['missing']},tables,query),e=>e.code==='SCHEMA_FIELDS');
+ assert.throws(()=>selectStatement({...args,columns:['field0']},new Map(),query),e=>e.code==='SCHEMA_REQUIRED');
+ for(const change of [{table:'other'},{columns:['password']},{filters:[{column:'token',op:'=',value:'x'}],columns:['field0']}])
+  assert.throws(()=>selectStatement({...args,...change},tables,query),e=>!(e instanceof QueryInputError));
+});
+test('planner corrects too many fields without executing invalid SQL or widening authorization', async()=>{
+ const q={...query,maxCalls:8},env={...environment,kind:'mysql',host:'fake',port:3306,database:'demo',queries:{investigate:q}};
+ const cfg={version:1,environments:{env}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['查指定记录']},'demo',{profile:'owner',senderId:'ou_member'});
+ const cols=Array.from({length:13},(_,i)=>'field'+i);let business=0,closed=false,n=0;
+ const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async stmt=>{
+ if(stmt.sql.includes('information_schema'))return[cols.map(column_name=>({table_name:'orders',column_name}))];
+ business++;assert.match(stmt.sql,/WHERE `field0` = \? LIMIT/);return[[{field1:'found'}]];
+ },rollback:async()=>{},destroy:()=>{closed=true;}})};
+ const result=await investigateEnvironment(plan,async()=>{}, {load:async()=>cfg,credential:async()=>credentials,
+ tools:async(e,q,c)=>createEnvironmentTools(e,q,c,{mysql:driver}),planner:async()=>({next:async input=>{
+ n++;if(n===1)return{tool:'schema',arguments:'{"table":"orders"}'};
+ if(n===2)return{tool:'select',arguments:JSON.stringify({table:'orders',columns:cols,filters:[{column:'field0',op:'=',value:'record'}]})};
+ if(n===3){assert.equal(input.results.at(-1).error.code,'COLUMN_LIMIT');assert.equal(input.results.at(-1).executed,false);return{tool:'select',arguments:JSON.stringify({table:'orders',columns:['field1'],filters:[{column:'field0',op:'=',value:'record'}]})};}
+ return{tool:'finish',summary:'已找到',complete:true};},close:async()=>{}})});
+ assert.equal(business,1);assert.equal(closed,true);assert.equal(result.partial,false);assert.deepEqual(result.rows,[{field1:'found'}]);assert.equal(result.evidence.toolCount,4);
+});
+test('recoverable input attempts are bounded and unresolved finish cannot become success',async()=>{
+ for(const finish of [false,true]){
+ const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['查指定记录']},'demo',{profile:'owner',senderId:'ou_member'});let attempts=0,closed=false;
+ const run=()=>investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{if(t==='connection')return{};attempts++;throw new QueryInputError('COLUMN_LIMIT','too many');},close:async()=>{closed=true;}}),
+ planner:async()=>({next:async()=>finish&&attempts?{tool:'finish',complete:true,summary:'incorrect success'}:{tool:'select',arguments:'{}'},close:async()=>{}})});
+ if(finish){const r=await run();assert.equal(r.partial,true);assert.doesNotMatch(r.summary,/incorrect success/);}else{await assert.rejects(run(),e=>e.code==='COLUMN_LIMIT');assert.equal(attempts,3);}assert.equal(closed,true);
+ }
+});
+test('scope failures never enter parameter correction loop',async()=>{
+ const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['查指定记录']},'demo',{profile:'owner',senderId:'ou_member'});let attempts=0;
+ await assert.rejects(investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{if(t==='connection')return{};attempts++;throw new Error('[SCOPE_LIMIT] denied');},close:async()=>{}}),
+ planner:async()=>({next:async()=>({tool:'select',arguments:'{}'}),close:async()=>{}})}));assert.equal(attempts,1);
 });

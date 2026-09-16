@@ -1,5 +1,9 @@
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['COLUMN_LIMIT', /\[COLUMN_LIMIT\]/, '查询字段校验', '单次查询字段超过12个，查询未执行；不是授权不足。', '减少为相关字段后继续，可按相同筛选条件分次查询。'],
+  ['SCHEMA_REQUIRED', /\[SCHEMA_REQUIRED\]/, '查询结构校验', '尚未读取目标表结构，查询未执行。', '先读取目标表schema，再使用返回字段查询。'],
+  ['SCHEMA_FIELDS', /\[SCHEMA_FIELDS\]/, '查询字段校验', '查询字段尚未在已读取结构中确认，查询未执行。', '读取目标表结构或下一页，并使用实际字段。'],
+  ['QUERY_INPUT', /\[QUERY_INPUT\]/, '查询参数校验', '筛选条件或字段参数格式不符合工具要求，查询未执行。', '在原授权范围内修正参数，无需因此重新授权。'],
   ['RESULT_LIMIT', /工具结果超出大小限制|结果超出大小|Response limit/, '工具结果整理', '结果超过单次返回大小限制，并非连接失败。', '缩小查询范围或分页读取；表结构可指定目标表继续。'],
   ['TLS_UNSUPPORTED', /HANDSHAKE_NO_SSL_SUPPORT|does not support secure connection/i, '数据库TLS握手', '数据库服务器不支持当前要求的TLS加密连接；尚未开始查询。', '请运维启用TLS；如需内网非TLS例外，必须由管理员另行明确确认，程序不会自动降级。'],
   ['TLS_VALIDATION', /certificate|SSL|TLS|HANDSHAKE/i, '数据库加密连接', '数据库TLS连接或证书校验未通过。', '请管理员核对服务器TLS支持和信任证书；程序不会自动关闭验证。'],

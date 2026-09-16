@@ -6,13 +6,24 @@ import { databaseEndpoints } from './config-endpoints.js';
 const secretName = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 const bounded = (x, secrets = []) => { let s = String(x ?? '').slice(0, 500); for (const v of secrets.filter(Boolean)) s = s.split(v).join('[已隐藏]'); return s; };
+export class QueryInputError extends Error {
+  constructor(code, message) { super(`[${code}] ${message}`); this.code = code; }
+}
 export function selectStatement(args, tables, q) {
   const { table, columns, filters } = args;
   const known = tables.get(table);
-  if (!known || !(q.tables.includes('*') || q.tables.includes(table)) || !Array.isArray(columns) || !columns.length || columns.length > 12 || columns.some(c => !known.includes(c) || !ident(c) || secretName.test(c))) throw new Error('查询表或列超出范围');
-  if (!Array.isArray(filters) || !filters.length || filters.length > 6) throw new Error('业务查询必须包含明确筛选条件，不能全表读取');
+  if (!ident(table) || !(q.tables.includes('*') || q.tables.includes(table))) throw new Error('查询表超出范围');
+  if (!known) throw new QueryInputError('SCHEMA_REQUIRED', '目标表尚未读取结构；先调用schema并指定table，再选择实际返回的字段。');
+  if (!Array.isArray(columns) || !columns.length) throw new QueryInputError('QUERY_INPUT', 'columns必须是非空字段数组。');
+  if (columns.length > 12) throw new QueryInputError('COLUMN_LIMIT', '一次最多选择12个字段；只选择与问题相关的字段，必要时分次读取。');
+  if (columns.some(c => typeof c === 'string' && secretName.test(c))) throw new Error('查询列超出范围');
+  if (columns.some(c => !ident(c))) throw new QueryInputError('QUERY_INPUT', 'columns仅接受schema返回的普通字段名，不能使用*、函数或表达式。');
+  if (columns.some(c => !known.includes(c))) throw new QueryInputError('SCHEMA_FIELDS', '字段未在已读取结构中；重新读取目标表schema或继续分页，仅使用返回的字段。');
+  if (!Array.isArray(filters) || !filters.length || filters.length > 6) throw new QueryInputError('QUERY_INPUT', 'filters必须包含1至6个明确筛选条件，不允许全表读取。');
   const params = [], where = filters.map(f => {
-    if (!known.includes(f.column) || !ident(f.column) || secretName.test(f.column) || !['=','>','>=','<','<='].includes(f.op) || !['string','number'].includes(typeof f.value) || String(f.value).length > 200) throw new Error('查询筛选条件无效');
+    if (!f || !ident(f.column) || secretName.test(f.column)) throw new Error('查询筛选列超出范围');
+    if (!known.includes(f.column)) throw new QueryInputError('SCHEMA_FIELDS', '筛选字段未在已读取结构中；先读取目标表schema并使用实际字段。');
+    if (!['=','>','>=','<','<='].includes(f.op) || !['string','number'].includes(typeof f.value) || (typeof f.value === 'number' && !Number.isFinite(f.value)) || String(f.value).length > 200) throw new QueryInputError('QUERY_INPUT', '筛选仅支持=、>、>=、<、<=；value为不超过200字符的字符串或有限数字。');
     params.push(f.value); return `\`${f.column}\` ${f.op} ?`;
   }).join(' AND ');
   return { sql: `SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`${table}\` WHERE ${where} LIMIT ${q.maxRows + 1}`, params, columns };
@@ -47,7 +58,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'connection', args: {}, description: '测试数据库连接、只读账号授权与只读事务' },
     { tool: 'tables', args: {cursor:'可选：nextCursor，默认0'}, description:'分页列出允许的基础表名称，先定位目标表再用schema读取列' },
     { tool: 'schema', args: { table: '可选：限定基础表名', cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段，不读取业务数据' },
-    { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=', value: '筛选值' }] }, description: `按明确条件读取最多${q.maxRows}行；仅基础表，不允许SQL、函数、联表或写入` }
+    { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=', value: '筛选值' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件且op仅支持=、>、>=、<、<=；仅基础表，不允许SQL、函数、联表或写入` }
   ];
   let browser;
   if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
@@ -102,7 +113,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
       })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, q.timeoutMs); })]);
-    } catch (error) { throw safeExecutionError(error); }
+    } catch (error) { if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
   return { spec, run, close: async () => { active = false; token = null; await browser?.close(); if (conn) { try { await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
