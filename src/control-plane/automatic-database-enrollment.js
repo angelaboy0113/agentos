@@ -36,9 +36,11 @@ export async function automaticDatabaseEnrollment(context, enrollment, adapters=
  if(sha(content)!==x.contentHash)throw new Error('Nacos配置已改变，请重新发现并确认');
  const dbCred=databaseCredential(content,source); // local only; never model/state/event data
  const id=enrollment.id.toLowerCase();
- const target={kind:'mysql',projectId:e.projectId,tier:e.tier,host:source.host,port:source.port,database:source.database,tls:true,credentialRef:id,
+ const exception=enrollment.tlsException;
+ if(exception && (exception.url!==enrollment.url || exception.approverId!==enrollment.approver.senderId || exception.profile!==enrollment.approver.profile || !Number.isFinite(Date.parse(exception.confirmedAt)) || Date.now()-Date.parse(exception.confirmedAt)>1800000)) throw new Error('非TLS例外与当前目标或批准人不一致');
+ const target={kind:'mysql',projectId:e.projectId,tier:e.tier,host:source.host,port:source.port,database:source.database,tls:!exception,credentialRef:id,
   ownerOpenIdsByProfile:e.ownerOpenIdsByProfile,membersRead:e.membersRead,accountPolicy:'business-readonly',
-  businessAccountAuthorization:{approverId:enrollment.approver.senderId,confirmedAt:new Date().toISOString()},queries:{
+  businessAccountAuthorization:{approverId:enrollment.approver.senderId,confirmedAt:new Date().toISOString(),...(exception?{transportException:exception}:{})},queries:{
    connection_check:{reviewed:true,description:'测试数据库连接与只读事务',sql:CONNECTION_SQL,parameters:[],outputColumns:['database_name','checked_at'],maxRows:1,timeoutMs:5000},
    investigate:{reviewed:true,mode:'investigate',description:'在已确认数据库基础表中受控读取；业务账号使用只读事务',tables:['*'],parameters:[{name:'purpose',type:'string',maxLength:200}],maxRows:20,maxCalls:8,timeoutMs:5000}}};
  await (adapters.mysqlRead??mysqlRead)(target,target.queries.connection_check,[],dbCred);

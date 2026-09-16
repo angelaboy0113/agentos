@@ -325,7 +325,7 @@ export class ConversationService {
       }
       if (decision.action === 'request_environment_setup') return requestEnrollment(this.context, turn);
     }
-    if (decision.action === 'approve_environment_setup') return approveEnrollment(this.context, turn);
+    if (['approve_environment_setup','approve_environment_without_tls'].includes(decision.action)) return approveEnrollment(this.context, turn);
     if (decision.action === 'reply') return {};
     if (decision.action === 'bind_project') {
       if (!isAdministrator(projects, turn)) throw new Error('只有真人管理员可以绑定项目，项目负责人机器人不是管理员。');

@@ -16,7 +16,7 @@ export function attachQuestion(state, turn, event, projects) {
   // An explicit card reply wins over the broad topic root, especially for approval.
   const related = candidates.find(item => direct(item, event.reply_to))
     ?? candidates.find(item => event.root_id && (item.threadRootId === event.root_id || direct(item, event.root_id)));
-  const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && ['requested','opening','login_required'].includes(e.status));
+  const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status));
   const relatedTurn = related && state.conversations.find(t => t.id === related.latestTurnId);
   const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && pending(relatedTurn))) ? related : null;
   const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
@@ -55,9 +55,9 @@ export function questionView(state, questionId, projects = {}) {
     if (outstanding) card.body.elements[0].columns[0].elements.push({ tag: 'markdown', text_size: 'notation', content: '已收到补充，负责人正在处理；任务进度仍显示在本卡。' });
   }
   const root = state.conversations.find((item) => item.id === q.rootTurnId);
-  const enrollment = Object.values(state.environmentEnrollments ?? {}).find(e => e.questionId === q.id && ['requested','opening','login_required'].includes(e.status));
+  const enrollment = Object.values(state.environmentEnrollments ?? {}).find(e => e.questionId === q.id && ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status));
   const adminIds = (projects.ownerOpenIdsByProfile?.[q.profile] ?? []).filter(id => /^ou_[A-Za-z0-9]+$/.test(id));
-  const mention = enrollment ? (enrollment.status === 'requested' && adminIds.length ? { profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+' 请确认本话题的新环境接入；登录仅在运行AgentOS的电脑完成。' } : null) : terminal ? (useJob
+  const mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；登录仅在运行AgentOS的电脑完成。') } : null) : terminal ? (useJob
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
     : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
   if (mention && q.replyInThread) mention.replyInThread = true;

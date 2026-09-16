@@ -188,3 +188,14 @@ test('database discovery continues once into enrollment without opening a window
  assert.equal(state.jobs[0].connectionEnrollmentHandled,true);assert.match(turn.response,/管理员/);assert.doesNotMatch(JSON.stringify(requests),/never-copy/);
  await pollEnrollments(context);assert.equal(Object.keys(state.environmentEnrollments).length,1);
 });
+
+test('unsupported TLS produces pending scoped confirmation, never automatic downgrade',async t=>{
+ const {context,state,turn,admin}=await fixture(t);await requestEnrollment(context,turn);const e=Object.values(state.environmentEnrollments)[0];e.databaseSource={synthetic:true};
+ const first=await approveEnrollment(context,admin,async()=>{throw Object.assign(new Error('Server does not support secure connection'),{code:'HANDSHAKE_NO_SSL_SUPPORT'});});
+ assert.equal(e.status,'awaiting_tls_confirmation');assert.equal(e.tlsException,undefined);assert.match(first.notice,/同意本目标使用非TLS/);
+ for(const content of ['同意','不同意本目标使用非TLS'])await assert.rejects(approveEnrollment(context,{...admin,content,decision:{action:'approve_environment_without_tls'}},async()=>{}));
+ await assert.rejects(approveEnrollment(context,{...turn,content:'同意本目标使用非TLS',decision:{action:'approve_environment_without_tls'}},async()=>{}),/管理员/);
+ let calls=0;await approveEnrollment(context,{...admin,content:'同意本目标使用非TLS',decision:{action:'approve_environment_without_tls'}},async value=>{});
+ assert.equal(e.tlsException.url,e.url);assert.equal(e.tlsException.approverId,admin.senderId);
+ await assert.rejects(approveEnrollment(context,{...admin,content:'同意本目标使用非TLS',decision:{action:'approve_environment_without_tls'}},async()=>{calls++;}));assert.equal(calls,0);
+});

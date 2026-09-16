@@ -154,7 +154,7 @@ export async function decideWithCodex(input, options = {}) {
 }
 
 export function validateDecision(value) {
-  const actions = ['reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup'];
+  const actions = ['reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];
   const intents = ['none', 'implementation', 'planning', 'analysis', 'verification', 'audit'];
   if (!value || !actions.includes(value.action) || !intents.includes(value.intent)) throw new Error('Unknown action or intent');
   for (const key of ['reply', 'instruction', 'jobId', 'projectId']) {

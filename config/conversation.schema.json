@@ -32,7 +32,8 @@
         "bind_project",
         "approve_environment",
         "request_environment_setup",
-        "approve_environment_setup"
+        "approve_environment_setup",
+        "approve_environment_without_tls"
       ]
     },
     "intent": {

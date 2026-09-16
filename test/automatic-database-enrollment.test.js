@@ -28,3 +28,13 @@ test('automatic enrollment rejects wrong approver, changed source, namespace, ta
  }
  const f=await fixture(t);f.adapters.mysqlRead=async()=>{throw new Error('TLS failed');};await assert.rejects(automaticDatabaseEnrollment(f.context,f.enrollment,f.adapters));assert.equal(f.calls.includes('save'),false);
 });
+
+test('non-TLS exception is bound to exact target, approver and time; unrelated sources stay encrypted',async t=>{
+ for(const change of [e=>e.tlsException.url='mysql://other:3306/demo',e=>e.tlsException.approverId='ou_other',e=>e.tlsException.confirmedAt='2020-01-01']) {
+  const f=await fixture(t);f.enrollment.tlsException={url:f.enrollment.url,approverId:'ou_admin',profile:'owner',confirmedAt:new Date().toISOString()};change(f.enrollment);
+  await assert.rejects(automaticDatabaseEnrollment(f.context,f.enrollment,f.adapters));assert.equal(f.calls.includes('mysql'),false);
+ }
+ const f=await fixture(t);f.enrollment.tlsException={url:f.enrollment.url,approverId:'ou_admin',profile:'owner',confirmedAt:new Date().toISOString()};
+ f.adapters.mysqlRead=async e=>{assert.equal(e.tls,false);assert.equal(e.accountPolicy,'business-readonly');};
+ await automaticDatabaseEnrollment(f.context,f.enrollment,f.adapters);const cfg=JSON.parse(await readFile(f.file,'utf8'));assert.equal(cfg.environments['enr-synthetic'].tls,false);assert.equal(cfg.environments['enr-synthetic'].businessAccountAuthorization.transportException.url,f.enrollment.url);assert.equal(cfg.environments.source.kind,'nacos');
+});

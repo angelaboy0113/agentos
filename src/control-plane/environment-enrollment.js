@@ -59,7 +59,7 @@ export async function requestEnrollment(context, turn) {
     if (old) return { notice: "等待管理员确认本机接入", enrollmentId: old.id };
     if (
       Object.values(state.environmentEnrollments).filter((e) =>
-        ["requested", "opening", "login_required"].includes(e.status),
+        ["requested", "opening", "login_required", "awaiting_tls_confirmation"].includes(e.status),
       ).length >= 5
     )
       throw new Error("待接入请求过多，请先完成已有请求");
@@ -88,11 +88,13 @@ export async function approveEnrollment(
   turn,
   launch = launchEnrollment,
 ) {
+  const withoutTls = turn.decision?.action === 'approve_environment_without_tls';
+  if(withoutTls && String(turn.content ?? '').replace(/<at\b[^>]*>.*?<\/at>/g,'').replace(/\s+/g,'').replace(/[。！!]$/,'').toUpperCase() !== '同意本目标使用非TLS') throw new Error('请回复本卡“同意本目标使用非TLS”，普通同意不授权关闭TLS');
   if (!isAdministrator(context.projects, turn))
     throw new Error("只有本群管理员可以确认新环境接入");
   const e = await context.store.transact((state) => {
     const e = Object.values(state.environmentEnrollments ?? {}).find(
-      (x) => x.questionId === turn.questionId && x.status === "requested",
+      (x) => x.questionId === turn.questionId && x.status === (withoutTls ? "awaiting_tls_confirmation" : "requested"),
     );
     if (
       !e ||
@@ -108,6 +110,10 @@ export async function approveEnrollment(
       )
     )
       throw new Error("本机已有接入窗口，请先完成");
+    if(withoutTls) {
+      if(!e.databaseSource || !e.diagnostic?.startsWith('错误码：TLS_UNSUPPORTED')) throw new Error('没有可确认的TLS例外');
+      e.tlsException={url:e.url,approverId:turn.senderId,profile:turn.profile,confirmedAt:new Date().toISOString()};
+    }
     e.status = "opening";
     e.approver = { profile: turn.profile, senderId: turn.senderId };
     return structuredClone(e);
@@ -115,10 +121,13 @@ export async function approveEnrollment(
   try {
     await launch(context, e);
   } catch (error) {
+    const diagnostic = failureDiagnostic(error);
+    const needsTlsConsent = e.databaseSource && !e.tlsException && diagnostic.startsWith('错误码：TLS_UNSUPPORTED');
     await context.store.transact((s) => {
-      s.environmentEnrollments[e.id].status = "failed";
-      s.environmentEnrollments[e.id].diagnostic = failureDiagnostic(error);
+      s.environmentEnrollments[e.id].status = needsTlsConsent ? "awaiting_tls_confirmation" : "failed";
+      s.environmentEnrollments[e.id].diagnostic = diagnostic;
     });
+    if(needsTlsConsent) return {enrollmentId:e.id,notice:`${diagnostic}\n\n目标：${e.tier.toUpperCase()} · ${e.url}。若接受此目标失去TLS传输保护，请管理员回复本卡“同意本目标使用非TLS”。仅此数据库例外，保留只读事务、查询限制及PRD审批；未确认前不重试。`};
     throw new Error(e.databaseSource ? "自动连接未完成。\n"+failureDiagnostic(error) : "本机窗口未能启动；需要已登录的macOS桌面，未保存新环境");
   }
   return {
@@ -179,7 +188,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
   }
   state = await context.store.read();
   for (const e of Object.values(state.environmentEnrollments ?? {})) {
-    if (!["requested", "opening", "login_required"].includes(e.status))
+    if (!["requested", "opening", "login_required", "awaiting_tls_confirmation"].includes(e.status))
       continue;
     const expired = Date.now() - Date.parse(e.createdAt) > 1800000;
     let event;
@@ -220,7 +229,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
     }
     await context.store.transact((s) => {
       const current = s.environmentEnrollments[e.id];
-      if (!["requested", "opening", "login_required"].includes(current.status))
+      if (!["requested", "opening", "login_required", "awaiting_tls_confirmation"].includes(current.status))
         return;
       const original = s.conversations.find((t) => t.id === e.turnId);
       const q = s.questions[e.questionId];
