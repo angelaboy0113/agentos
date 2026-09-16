@@ -103,7 +103,12 @@ export class ConversationService {
     });
   }
 
-  async idle() { if (this.running) await this.running; }
+  async idle() {
+    if (this.running) await this.running;
+    // One fresh pass covers enqueues racing a settling scheduler. Do not loop
+    // until all turns finish: a delivery failure may intentionally block a queue.
+    if (!this.stopped) { this.wake(); if (this.running) await this.running; }
+  }
 
   key(turn) { if (this.groupSessions && turn.chatType === 'group') return JSON.stringify(['group-v1', turn.chatId, turn.profile, turn.role, this.context.projects.chatProjectMap[turn.chatId] ?? null]);
     return turn.sessionKey ?? JSON.stringify([turn.chatId, turn.senderId, turn.profile, turn.role]); }
