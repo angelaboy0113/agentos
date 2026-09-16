@@ -88,8 +88,11 @@ export async function approveEnrollment(
   turn,
   launch = launchEnrollment,
 ) {
-  const withoutTls = turn.decision?.action === 'approve_environment_without_tls';
-  if(withoutTls && String(turn.content ?? '').replace(/<at\b[^>]*>.*?<\/at>/g,'').replace(/\s+/g,'').replace(/[。！!]$/,'').toUpperCase() !== '同意本目标使用非TLS') throw new Error('请回复本卡“同意本目标使用非TLS”，普通同意不授权关闭TLS');
+  const awaiting=(Object.values((await context.store.read()).environmentEnrollments ?? {})).filter(e=>e.questionId===turn.questionId && e.chatId===turn.chatId && e.projectId===context.projects.chatProjectMap[turn.chatId] && ['requested','awaiting_tls_confirmation'].includes(e.status));
+  if(awaiting.length!==1) throw new Error('待审批事项不唯一或不存在，请回复具体待审批卡片');
+  const withoutTls = awaiting[0].status==='awaiting_tls_confirmation';
+  const confirmation=String(turn.content ?? '').replace(/<at\b[^>]*>.*?<\/at>/g,'').replace(/\s+/g,'').replace(/[。！!]$/,'').toUpperCase();
+  if(withoutTls && !['同意','同意本目标使用非TLS'].includes(confirmation)) throw new Error('请回复本待审批卡片“同意”；未明确同意前保持TLS');
   if (!isAdministrator(context.projects, turn))
     throw new Error("只有本群管理员可以确认新环境接入");
   const e = await context.store.transact((state) => {
@@ -127,7 +130,7 @@ export async function approveEnrollment(
       s.environmentEnrollments[e.id].status = needsTlsConsent ? "awaiting_tls_confirmation" : "failed";
       s.environmentEnrollments[e.id].diagnostic = diagnostic;
     });
-    if(needsTlsConsent) return {enrollmentId:e.id,notice:`${diagnostic}\n\n目标：${e.tier.toUpperCase()} · ${e.url}。若接受此目标失去TLS传输保护，请管理员回复本卡“同意本目标使用非TLS”。仅此数据库例外，保留只读事务、查询限制及PRD审批；未确认前不重试。`};
+    if(needsTlsConsent) return {enrollmentId:e.id,notice:`${diagnostic}\n\n目标：${e.tier.toUpperCase()} · ${e.url}。若接受此目标失去TLS传输保护，请管理员回复本卡“同意”。仅此数据库例外，保留只读事务、查询限制及PRD审批；未确认前不重试。`};
     throw new Error(e.databaseSource ? "自动连接未完成。\n"+failureDiagnostic(error) : "本机窗口未能启动；需要已登录的macOS桌面，未保存新环境");
   }
   return {

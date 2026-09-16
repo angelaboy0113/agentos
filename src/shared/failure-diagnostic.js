@@ -1,5 +1,6 @@
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['RESULT_LIMIT', /工具结果超出大小限制|结果超出大小|Response limit/, '工具结果整理', '结果超过单次返回大小限制，并非连接失败。', '缩小查询范围或分页读取；表结构可指定目标表继续。'],
   ['TLS_UNSUPPORTED', /HANDSHAKE_NO_SSL_SUPPORT|does not support secure connection/i, '数据库TLS握手', '数据库服务器不支持当前要求的TLS加密连接；尚未开始查询。', '请运维启用TLS；如需内网非TLS例外，必须由管理员另行明确确认，程序不会自动降级。'],
   ['TLS_VALIDATION', /certificate|SSL|TLS|HANDSHAKE/i, '数据库加密连接', '数据库TLS连接或证书校验未通过。', '请管理员核对服务器TLS支持和信任证书；程序不会自动关闭验证。'],
   ['CREDENTIAL_SOURCE', /凭据引用|外部或加密凭据|目标数据库凭据|凭据字段|配置凭据|Nacos配置已改变/, '配置凭据解析', '配置已改变，或无法唯一解析目标数据库凭据。', '重新发现并确认配置；外部密钥或多个账号需要管理员指定正确来源。'],

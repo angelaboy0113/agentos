@@ -45,7 +45,8 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'read_config', args: { ref: '从discover返回的ref' }, description: '读取一个已发现配置并解析同文件变量，仅返回数据库端点与解析状态' }
   ] : [
     { tool: 'connection', args: {}, description: '测试数据库连接、只读账号授权与只读事务' },
-    { tool: 'schema', args: {}, description: '读取本数据库允许的基础表和普通字段，不读取业务数据' },
+    { tool: 'tables', args: {cursor:'可选：nextCursor，默认0'}, description:'分页列出允许的基础表名称，先定位目标表再用schema读取列' },
+    { tool: 'schema', args: { table: '可选：限定基础表名', cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段，不读取业务数据' },
     { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=', value: '筛选值' }] }, description: `按明确条件读取最多${q.maxRows}行；仅基础表，不允许SQL、函数、联表或写入` }
   ];
   let browser;
@@ -77,10 +78,25 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         }
         const c = await mysql();
         if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };
+        if (tool === 'tables') {
+          const offset=args.cursor===undefined?0:Number(args.cursor);
+          if(!Number.isInteger(offset)||offset<0||offset>100000)throw new Error('结构分页参数无效');
+          const [rows]=await c.execute({sql:`SELECT TABLE_NAME AS table_name FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME LIMIT 101 OFFSET ${offset}`,timeout:q.timeoutMs},[e.database]);
+          return {tableNames:rows.slice(0,100).map(r=>r.table_name).filter(t=>ident(t)&&(q.tables.includes('*')||q.tables.includes(t))),truncated:rows.length>100,nextCursor:rows.length>100?offset+100:null};
+        }
         if (tool === 'schema') {
-          const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%' ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 2001", timeout: q.timeoutMs }, [e.database]);
-          tables.clear(); for (const r of rows.slice(0, 2000)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) tables.set(r.table_name, [...(tables.get(r.table_name) ?? []), r.column_name]);
-          return { tables: Object.fromEntries(tables), truncated: rows.length > 2000 };
+          if(args.table !== undefined && (!ident(args.table) || !(q.tables.includes('*') || q.tables.includes(args.table)))) throw new Error('查询表超出范围');
+          const offset = args.cursor === undefined ? 0 : Number(args.cursor);
+          if(!Number.isInteger(offset) || offset<0 || offset>100000) throw new Error('结构分页参数无效');
+          const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${offset}`, timeout: q.timeoutMs }, args.table ? [e.database,args.table] : [e.database]);
+          const visible = new Map();
+          for (const r of rows.slice(0,100)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) {
+            visible.set(r.table_name,[...(visible.get(r.table_name)??[]),r.column_name]);
+            tables.set(r.table_name,[...new Set([...(tables.get(r.table_name)??[]),r.column_name])]);
+          }
+          const result = {tables:Object.fromEntries(visible),truncated:rows.length>100,nextCursor:rows.length>100?offset+100:null};
+          if(result.truncated) result.note='仅当前页表结构；可用schema的nextCursor继续，或指定table读取目标表。';
+          return result;
         }
         const statement = selectStatement(args, tables, q);
         const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);

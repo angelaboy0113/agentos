@@ -4,7 +4,7 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createControlPlane, notifyJobEvent } from '../src/control-plane/server.js';
-import { publishQuestion, questionJob } from '../src/control-plane/questions.js';
+import { publishQuestion, questionJob, questionView } from '../src/control-plane/questions.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { jobActionVersion } from '../src/control-plane/message-cards.js';
 import { CodexConversationEngine } from '../src/control-plane/codex-conversation.js';
@@ -185,4 +185,9 @@ test('persistent pending turn starts fresh and a resume transport error does not
   e.sessions.clear(); calls.length = 0;
   await assert.rejects(e.decide({ ...input, requestId: 'later' }, { sessionKey: 'g' }), /transport/);
   assert.deepEqual(calls, ['thread/resume']);
+});
+
+test('question details retain completed predecessor results after a later stage fails',()=>{
+ const state={questions:{q:{id:'q',title:'Investigate',latestTurnId:'t2',rootTurnId:'t1',profile:'owner',senderId:'ou_user',messageId:'m'}},conversations:[{id:'t1',questionId:'q',status:'sent',chatType:'group',response:'Earlier approval',outcome:{}},{id:'t2',questionId:'q',status:'sent',response:'Latest',outcome:{jobId:'j2'}}],jobs:[{id:'j1',questionId:'q',status:'completed',stage:'developer',events:[],result:{finalMessage:'Earlier database endpoint evidence',summary:'Earlier'}},{id:'j2',questionId:'q',status:'blocked',stage:'developer',events:[],result:{finalMessage:'Current failure details',summary:'Failed'}}]};
+ const view=questionView(state,'q',{});assert.match(view.resultText,/Earlier database endpoint evidence/);assert.match(view.resultText,/Current failure details/);assert.match(view.resultText,/Earlier approval/);assert.match(JSON.stringify(view.card),/此前.*保留/);assert.deepEqual(state.jobs[0].result.summary,'Earlier');
 });

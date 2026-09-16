@@ -1,3 +1,4 @@
+import { resultPages, withResultPage } from './result-presentation.js';
 import { createHash } from 'node:crypto';
 import { createId } from '../shared/protocol.js';
 import { conversationCard, jobCard, publicText } from './message-cards.js';
@@ -41,7 +42,7 @@ export function questionView(state, questionId, projects = {}) {
   const outstanding = state.conversations.some((item) => item.questionId === q.id && pending(item));
   const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId);
   const shown = useJob ? job : turn;
-  const card = useJob ? jobCard(job) : conversationCard(turn);
+  let card = useJob ? jobCard(job) : conversationCard(turn);
   const terminal = !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
   const label = card.header.title.content;
   card.header.title.content = q.title;
@@ -61,8 +62,17 @@ export function questionView(state, questionId, projects = {}) {
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
     : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
   if (mention && q.replyInThread) mention.replyInThread = true;
+  const currentResult=useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '';
+  const priorJobs=state.jobs.filter(j=>j.questionId===q.id && j.id!== (useJob?job.id:null) && j.result?.finalMessage);
+  const priorTurns=state.conversations.filter(t=>t.questionId===q.id && t.id!==turn.id && t.status==='sent' && t.response && !t.outcome?.jobId && !t.outcome?.nextJobId);
+  const history=[...priorJobs.map(j=>`已完成阶段 · ${j.id}\n${j.result.finalMessage}`),...priorTurns.map(t=>`此前回复 · ${t.createdAt ?? ''}\n${t.response}`)];
+  const resultText=[currentResult,...history.length?['—— 此前结果与回复（保留） ——',...history]:[]].join('\n\n');
+  if(history.length) {
+    card=withResultPage(card,resultPages(resultText));
+    card.body.elements.push({tag:'markdown',text_size:'notation',content:`此前 ${history.length} 项结果与回复已保留，可在“详细结果与证据”中翻阅。`});
+  }
   return { question: q, job: useJob ? job : null, card, terminal, mention,
-    resultText: useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '',
+    resultText,
     destination: { replyTo: q.messageId, profile: q.profile, ...(q.replyInThread ? { replyInThread: true } : {}) } };
 }
 // Fence a snapshot against incoming replies, transitions and result changes between read and publish.
