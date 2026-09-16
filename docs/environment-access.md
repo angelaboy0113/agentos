@@ -108,3 +108,7 @@ MySQL 删除 `browser`（仅 Nacos 支持），将 `namespaces` 换为 `tables: 
 浏览器实现：`environment-browser.js` 与 `nacos-browser-policy.js`；回归包括真实 Chromium 的登录、读取详情、危险请求未达服务器、本机登录凭据捕获和旧引用失效。
 
 实现：`environment-tool-policy.js`、`environment-access.js`、`environment-tools.js`、`environment-investigator.js`、`environment-connector.js`、`config-endpoints.js`、`environment-job.js`；接入向导为 `scripts/configure-environment.mjs`。
+
+## 查询结果交付
+
+环境查询完成后的主卡片直接展示实际结果。数据库端点首屏使用主机/IP、端口、库名，重复读取的同一端点去重；超过两项的结果在详情保留。没有记录明确说明未返回，部分结果保留未完成标记。密码、token和账号字段不进入展示。卡片首屏不再以“已查询若干条”替代答案；授权参数移至结果详情，等待批准时仍完整显示本次范围。群共享记忆继续使用不含端点的过程摘要，实际结果保留在本次任务与卡片中。既有历史结果不重写、不自动重发，新任务使用新展示；流程架构未变。

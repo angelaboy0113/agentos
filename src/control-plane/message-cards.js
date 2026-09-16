@@ -102,7 +102,7 @@ export function jobCard(job, now = Date.now()) {
     { tag: 'button', name: `clarify_${jobActionVersion(job)}`, form_action_type: 'submit', type: 'primary_filled',
       width: 'fill', text: { tag: 'plain_text', content: '提交补充 · 重新执行当前阶段' } },
   ] });
-  if (job.environmentAccess) {
+  if (job.environmentAccess && (active || job.status === 'awaiting_environment_approval')) {
     const p = job.environmentAccess;
     elements[0].columns[0].elements.push(md(publicText(`环境：${p.environmentId} (${p.tier}) · 模板：${p.queryId}\n范围：${p.description}\n参数：${JSON.stringify(p.parameters)}\n最多 ${p.maxRows} 条 · 超时 ${p.timeoutMs} ms\n授权截止：${p.expiresAt}\n结果在本问题卡片向群内展示；仅本次查询，不授权修改。`), true));
   }

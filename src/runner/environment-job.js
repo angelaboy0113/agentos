@@ -1,3 +1,4 @@
+import { presentEnvironmentResult } from './environment-result-presentation.js';
 import { investigateEnvironment } from './environment-investigator.js';
 import { loadEnvironments } from '../shared/environment-access.js';
 import { readEnvironment } from './environment-connector.js';
@@ -14,7 +15,8 @@ export async function executeEnvironmentJob(job, config, emit) {
   let result;
   try { const cfg = await loadEnvironments(); result = cfg.environments[plan.environmentId]?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit) : await readEnvironment(plan); }
   catch (error) { return { outcome: 'blocked', summary: error.message, finalMessage: error.message, verification: [] }; }
-  const safeSummary = `${result.partial ? '部分结果，排查尚未完成。' : ''}${plan.tier.toUpperCase()} · ${plan.description}：已查询 ${result.rows.length} 条${result.truncated ? '（结果受限，非全部数据）' : ''}。读取时间：${result.evidence.readAt}。${result.note ?? ''}`;
+  const presented = presentEnvironmentResult(plan, result);
+  const safeSummary = presented.metadata;
   let explanation = '';
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });
   try {
@@ -28,7 +30,7 @@ export async function executeEnvironmentJob(job, config, emit) {
     if (answer.action === 'reply') explanation = publicText(answer.reply);
   } catch { explanation = '自动解释暂不可用，以下为本次实际查询结果。'; }
   finally { await engine.close(); }
-  const rows = result.rows.map((row, i) => `记录 ${i + 1}\n${Object.entries(row).map(([k, v]) => `${k}：${publicText(String(v))}`).join('\n')}`).join('\n\n');
-  return { outcome: result.partial ? 'partial' : 'ready', summary: safeSummary, finalMessage: [safeSummary, (result.steps ?? []).join(' → '), result.summary, explanation, rows].filter(Boolean).join('\n\n'),
+  const scopeDetails = publicText(`查询范围与授权\n环境：${plan.environmentId} (${plan.tier}) · 模板：${plan.queryId}\n参数：${JSON.stringify(plan.parameters)}\n最多 ${plan.maxRows} 条 · 超时 ${plan.timeoutMs} ms\n授权截止：${plan.expiresAt}\n仅本次只读查询，不授权修改。`);
+  return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, presented.details, result.summary, explanation, (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
     environmentEvidence: result.evidence, memorySafeSummary: safeSummary, verification: [] };
 }
