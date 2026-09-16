@@ -1,6 +1,6 @@
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { createNacosBrowser } from './environment-browser.js';
-import { boundedFetch, assertReadOnlyGrants } from './environment-connector.js';
+import { boundedFetch, checkAccountGrants } from './environment-connector.js';
 import { databaseEndpoints } from './config-endpoints.js';
 const secretName = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
@@ -33,7 +33,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
       const driver = adapters.mysql ?? await import('mysql2/promise');
       conn = await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false, ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
       if (!active) { conn.destroy(); conn = null; throw new Error('连接已超时'); }
-      try { const [g] = await conn.query('SHOW GRANTS FOR CURRENT_USER'); assertReadOnlyGrants(g); await conn.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`); await conn.query('START TRANSACTION READ ONLY'); }
+      try { const [g] = await conn.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, g); await conn.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`); await conn.query('START TRANSACTION READ ONLY'); }
       catch (error) { conn.destroy(); conn = null; throw error; }
     }
     return conn;
@@ -75,7 +75,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           return { config: args.ref, rows: found.slice(0, q.maxRows), truncated: found.length > q.maxRows, partial: found.unresolved || !found.length, stage: found.length ? '配置已读取，数据库地址已解析' : '配置已读取，未解析出数据库地址', databaseConnection: '未测试；不能把配置业务账号用于数据库连接' };
         }
         const c = await mysql();
-        if (tool === 'connection') return { stage: '数据库连接、账号只读授权和只读事务已验证' };
+        if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };
         if (tool === 'schema') {
           const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%' ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 2001", timeout: q.timeoutMs }, [e.database]);
           tables.clear(); for (const r of rows.slice(0, 2000)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) tables.set(r.table_name, [...(tables.get(r.table_name) ?? []), r.column_name]);

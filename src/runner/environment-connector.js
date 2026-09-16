@@ -1,3 +1,4 @@
+import { accountMode } from '../shared/database-account-policy.js';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { databaseEndpoints } from './config-endpoints.js';
 import { execFile } from 'node:child_process';
@@ -23,6 +24,11 @@ export function assertReadOnlyGrants(rows) {
     if (!m || /WITH GRANT OPTION/i.test(text) || m[1].split(',').some((p) => !['USAGE', 'SELECT', 'SHOW VIEW'].includes(p.trim().toUpperCase()))) throw new Error('数据库账号含写权限、角色授权或不可核验权限；拒绝查询');
   }
 }
+export function checkAccountGrants(e, rows) {
+  const mode = accountMode(e);
+  if(mode === 'strict-readonly') assertReadOnlyGrants(rows);
+  else if(!Array.isArray(rows) || !rows.length || rows.some(r=>!/^GRANT /i.test(String(Object.values(r)[0])))) throw new Error('无法核验业务账号权限信息');
+}
 export async function mysqlRead(e, q, parameters, cred, adapters = {}) {
   const mysql = adapters.mysql ?? await import('mysql2/promise');
   let connection, timedOut = false;
@@ -31,7 +37,7 @@ export async function mysqlRead(e, q, parameters, cred, adapters = {}) {
     connection = await mysql.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password,
       connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false, ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
     if (timedOut) throw new Error('timeout');
-    const [grants] = await connection.query('SHOW GRANTS FOR CURRENT_USER'); assertReadOnlyGrants(grants);
+    const [grants] = await connection.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, grants);
     await connection.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`);
     await connection.query('START TRANSACTION READ ONLY');
     const [rows] = await connection.execute({ sql: `SELECT * FROM (${q.sql}) AS agentos_read_scope LIMIT ${q.maxRows + 1}`, timeout: q.timeoutMs }, parameters);

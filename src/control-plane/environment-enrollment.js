@@ -250,7 +250,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
         original.response =
           current.status === "login_required"
             ? e.kind === "mysql"
-              ? "已在运行AgentOS的电脑上打开本机终端凭据输入。请输入专用只读账号；不要在群里发送密码。"
+              ? "已在运行AgentOS的电脑上打开本机终端凭据输入。默认使用专用只读账号；如只能使用业务账号，请在本机向导明确确认受控模式。不要在群里发送密码。"
               : "已在运行AgentOS的电脑上打开登录界面。请在本机登录，然后选择允许读取的范围；不要在群里发送密码。"
             : "本次接入未完成或已超时，请重新发起；未自动继续查询。";
       }

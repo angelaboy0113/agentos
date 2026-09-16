@@ -107,6 +107,16 @@ try {
       (
         await rl.question("Require TLS certificate verification? (yes/no): ")
       ).trim() === "yes";
+    e.accountPolicy = "strict-readonly";
+    const business = (await rl.question("是否使用现有业务账号？账号可能有写权限，保护依赖AgentOS受控工具与只读事务（默认no；输入yes启用）: ")).trim();
+    if (business === "yes") {
+      const confirmation = (await rl.question("确认你是管理员并接受上述限制，输入 USE BUSINESS ACCOUNT 确认: ")).trim();
+      if (confirmation !== "USE BUSINESS ACCOUNT") throw new Error("未确认业务账号模式");
+      const approverId = Object.entries(identity[1]).find(([profile,id])=>projects.ownerOpenIdsByProfile?.[profile]?.includes(id))?.[1];
+      if(!approverId) throw new Error("管理员身份无效");
+      e.accountPolicy="business-readonly";
+      e.businessAccountAuthorization={approverId,confirmedAt:new Date().toISOString()};
+    }
     e.queries.connection_check = {
       reviewed: true,
       description: "验证只读数据库连接，返回当前库名和数据库时间",
@@ -310,7 +320,7 @@ try {
       "../src/runner/environment-connector.js"
     );
     await mysqlRead(e, e.queries.connection_check, [], cred);
-    console.log("数据库连接及只读授权检查成功。");
+    console.log(e.accountPolicy === "business-readonly" ? "数据库连接及受控只读事务验证成功；业务账号本身仍可能有写权限。" : "数据库连接及只读授权检查成功。");
   }
   await writeFile(temporary, JSON.stringify(config, null, 2) + "\n", {
     mode: 0o600,
