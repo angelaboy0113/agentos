@@ -4,7 +4,7 @@ import ctypes as C, json, sys, re, getpass
 
 def main():
     if sys.platform != 'darwin': raise RuntimeError('This credential adapter requires macOS Keychain')
-    if len(sys.argv)!=3 or sys.argv[1] not in ('get','set') or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}',sys.argv[2]): raise RuntimeError('Usage: keychain-credential.py set|get reference')
+    if len(sys.argv)!=3 or sys.argv[1] not in ('get','set','set-json') or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}',sys.argv[2]): raise RuntimeError('Usage: keychain-credential.py set|get reference')
     sec=C.CDLL('/System/Library/Frameworks/Security.framework/Security');cf=C.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
     ptr=C.c_void_p; holders=[]
     cf.CFStringCreateWithCString.argtypes=[ptr,C.c_char_p,C.c_uint32];cf.CFStringCreateWithCString.restype=ptr
@@ -25,9 +25,14 @@ def main():
         return value
     base=[('kSecClass',constant('kSecClassGenericPassword')),('kSecAttrService',string('com.angel.agentos.environment.'+sys.argv[2])),('kSecAttrAccount',string('agentos'))]
     try:
-        if sys.argv[1]=='set':
-            if not sys.stdin.isatty():raise RuntimeError('Credential entry requires a local interactive terminal')
-            username=input('Environment account: ').strip();password=getpass.getpass('Environment password (hidden): ')
+        if sys.argv[1] in ('set','set-json'):
+            if sys.argv[1]=='set-json':
+                if sys.stdin.isatty():raise RuntimeError('Pipe required')
+                value=json.loads(sys.stdin.buffer.read(16001));username=value.get('username');password=value.get('password')
+                if not isinstance(username,str) or not isinstance(password,str) or len(username)>1000 or len(password)>8000:raise RuntimeError('Invalid credential')
+            else:
+                if not sys.stdin.isatty():raise RuntimeError('Credential entry requires a local interactive terminal')
+                username=input('Environment account: ').strip();password=getpass.getpass('Environment password (hidden): ')
             if not username or not password:raise RuntimeError('Empty credential')
             raw=json.dumps({'username':username,'password':password}).encode();buf=C.create_string_buffer(raw);data=cf.CFDataCreate(None,buf,len(raw));holders.append(data)
             code=sec.SecItemAdd(dictionary(base+[('kSecValueData',data)]),None)

@@ -38,7 +38,7 @@ try {
     e.baseUrl = (await rl.question('Nacos base URL ending in /nacos (no login fragment): ')).trim();
     // Namespace is discovered after local login; no dataId or group needs manual entry.
     e.baseUrl = new URL(e.baseUrl).origin + new URL(e.baseUrl).pathname.replace(/\/$/, '');
-    e.queries.investigate = { reviewed: true, mode: 'investigate', description: '在选定命名空间内自动发现配置、解析数据库地址；不连接数据库', namespaces: [''], parameters: [{ name: 'purpose', type: 'string', maxLength: 200 }], maxRows: 20, maxCalls: 8, timeoutMs: 5000 };
+    e.queries.investigate = { reviewed: true, mode: 'investigate', browser: (await rl.question('启用独立浏览器查看当前Nacos？仅允许已选范围的只读页面操作 (yes/no): ')).trim() === 'yes', description: '在选定命名空间内自动发现配置、解析数据库地址；不连接数据库', namespaces: [''], parameters: [{ name: 'purpose', type: 'string', maxLength: 200 }], maxRows: 20, maxCalls: 8, timeoutMs: 5000 };
   } else throw new Error('Unsupported connector');
   if (kind === 'mysql' && (await rl.question('允许在本库基础表中按条件只读排查？结果对群可见，不提供SQL或写入工具 (yes/no): ')).trim() === 'yes') {
     e.queries.investigate = { reviewed: true, mode: 'investigate', description: '本库基础表结构及按条件只读查询，每次最多20行；不允许全表读取或写入', tables: ['*'], parameters: [{ name: 'purpose', type: 'string', maxLength: 200 }], maxRows: 20, maxCalls: 8, timeoutMs: 5000 };
@@ -52,7 +52,13 @@ try {
   console.log('Only the selected identity may approve PRD queries. No database/config write connector will be enabled.');
   if ((await rl.question('Save this environment and enter credentials in this terminal? (yes/no): ')).trim() !== 'yes') { const { unlink } = await import('node:fs/promises'); await unlink(temporary); throw new Error('Setup cancelled'); }
   rl.close();
-  const saved = spawnSync('python3', [path.join(repo, 'scripts/keychain-credential.py'), 'set', credentialRef], { stdio: 'inherit' });
+  let saved;
+  if(kind==='nacos' && e.queries.investigate?.browser){
+    console.log('已打开独立浏览器。请在该窗口登录；认证成功后会自动返回，不要在群里发送密码。');
+    const { loginNacosLocally } = await import('../src/runner/environment-browser.js');
+    const localCredential = await loginNacosLocally(e.baseUrl);
+    saved=spawnSync('python3',[path.join(repo,'scripts/keychain-credential.py'),'set-json',credentialRef],{input:JSON.stringify(localCredential),stdio:['pipe','ignore','pipe']});
+  }else saved = spawnSync('python3', [path.join(repo, 'scripts/keychain-credential.py'), 'set', credentialRef], { stdio: 'inherit' });
   if (saved.status !== 0) { const { unlink } = await import('node:fs/promises'); await unlink(temporary); throw new Error('Credential setup did not complete; configuration unchanged'); }
   const cred = await credential(credentialRef);
   if (kind === 'nacos') {

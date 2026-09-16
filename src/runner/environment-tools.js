@@ -1,3 +1,4 @@
+import { createNacosBrowser } from './environment-browser.js';
 import { boundedFetch, assertReadOnlyGrants } from './environment-connector.js';
 import { databaseEndpoints } from './config-endpoints.js';
 const secretName = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
@@ -45,9 +46,12 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'schema', args: {}, description: '读取本数据库允许的基础表和普通字段，不读取业务数据' },
     { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=', value: '筛选值' }] }, description: `按明确条件读取最多${q.maxRows}行；仅基础表，不允许SQL、函数、联表或写入` }
   ];
+  let browser;
+  if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
   const run = async (tool, args = {}) => {
     if (!active || ++calls > q.maxCalls) throw new Error('工具次数已达本次上限');
     if (!spec.some(x => x.tool === tool) || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('不支持的工具或参数');
+    if (tool.startsWith('browser_')) { if (!browser) throw new Error('当前范围未启用浏览器'); return browser.run(tool,args); }
     // A single operation cannot keep a connection alive beyond its declared timeout.
     let timer;
     try {
@@ -83,5 +87,5 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     } catch { throw new Error('环境工具未完成；请核对连接、凭据、范围或输入。未执行写入，未暴露远端错误。'); }
     finally { clearTimeout(timer); }
   };
-  return { spec, run, close: async () => { active = false; token = null; if (conn) { try { await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
+  return { spec, run, close: async () => { active = false; token = null; await browser?.close(); if (conn) { try { await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
 }

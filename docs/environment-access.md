@@ -20,7 +20,7 @@
 
 ## 首次接入：本机登录一次
 
-要求 Node 22、`npm ci`、本机 Codex ChatGPT 登录。当前凭据适配器为 macOS Keychain，登录钥匙串需解锁。普通成员不需要在 Mac 单独登录。
+要求 Node 22、`npm ci`、`npx playwright install chromium`、本机 Codex ChatGPT 登录。Linux 浏览器宿主还需安装 Chromium 系统依赖（`npx playwright install --with-deps chromium`）。完整测试也使用真实 Chromium 本机测试页面，不使用业务凭据。当前凭据适配器为 macOS Keychain，登录钥匙串需解锁。普通成员不需要在 Mac 单独登录。
 
 ```sh
 cd <你的AgentOS程序目录>
@@ -28,12 +28,12 @@ node scripts/configure-environment.mjs
 ```
 
 1. 选择项目、环境负责人、UAT/PRD 和 Nacos/MySQL，起一个环境别名。
-2. Nacos 填 `/nacos` 入口地址，账号密码只在本机终端录入；程序实际测试登录，自动列出命名空间，选择允许读取的空间。无需手填 Group、Data ID；这些在排查中自动发现。不要将 PRD 空间归入 UAT 入口。
+2. Nacos 填 `/nacos` 入口地址，选择启用独立浏览器后，会弹出专用 Nacos 登录窗口；在此窗口输入账号密码。程序只在登录成功后把凭据存入本机 Keychain，自动列出命名空间，选择允许读取的空间。不启用浏览器时保留终端隐藏输入。无需手填 Group、Data ID；这些在排查中自动发现。不要将 PRD 空间归入 UAT 入口。
 3. MySQL 使用独立只读账号，填写固定数据库入口；程序检查连接和账号授权。可选择允许本库基础表的按条件排查，无需逐个编写业务 SQL 模板。
 4. 保存 `config/environments.local.json`（0600），凭据只存 Keychain。已有配置先备份原始只读副本、SHA-256、字节及环境数量，再原子更新。
 5. 新配置每次请求重新加载，无需重启。升级程序本身仍需空闲时单实例重启。
 
-群里提供 URL 是接入线索，不能自动扩大授权或从聊天提取密码。当前首次登录仍通过上述本机向导；未实现通用浏览器登录、任意网站工具或在聊天中自动创建环境。已接入 Nacos 使用受控 API，体验是自动找配置，不是让模型随意点击发布按钮。
+群里提供 URL 是接入线索，不能自动扩大授权或从聊天提取密码。当前支持 Nacos 2.x 的实际控制台浏览器适配，在 macOS Nacos 2.5.2 验证；不支持任意网站自动接管、SSO/MFA 或复用个人浏览器登录。新的 PRD 入口需单独接入，UAT 成功不能代表 PRD 已配置。
 
 ## Codex 如何选择工具
 
@@ -52,6 +52,20 @@ node scripts/configure-environment.mjs
 
 Nacos中的业务账号不会成为数据库凭据；Nacos读取成功不代表数据库已连接。跨到MySQL需要另外配置的只读入口及对应批准。
 
+## 实际网页排查
+
+Nacos 的 `investigate` 配置增加可选 `browser: true`。已有配置默认不启用；管理员确认已批准的范围后可开启。审批指纹包含此字段，旧批准不能复用。
+
+开发 Agent 可以选择 API 工具，也可以选择 `browser_open` → `browser_snapshot` / `browser_search` / `browser_click`。模型只提交当前页面的控件引用与搜索词，不能提交任意 URL、JavaScript 或文件路径。输入搜索词后再点击查询；点击详情、翻页后刷新引用。浏览器实际操作列表与详情，页面控件上下文帮助区分同名“详情”。每个任务独立临时浏览器，会话结束关闭，不读取用户个人 Chrome 配置。
+
+- 网络请求默认拒绝，只放行同源已审核静态资源、登录接口、必要元数据和批准命名空间的配置读取；登录 POST 只在登录阶段允许。跨站、重定向、写接口、未知参数、WebSocket、Service Worker 与下载受阻断。
+- 无需靠模型“自觉不点击保存”：发布、删除等写请求不会发往 Nacos。只按 GET/POST 区分读写是不够的，因此路径与参数也必须通过检查。
+- 配置响应在进入页面前过滤，模型只看到配置元信息与数据库端点摘要；原配置、密码与 token 不进入页面快照或模型。当前不是任意配置字段阅读器，Redis/MQ 等新类型需要增加可审阅的脱敏解析器。
+- 只读配置查询不意味着连接数据库。MySQL 仍必须另行配置独立只读账号；不会复用 Nacos 中的业务数据库账号。
+- 页面适配失败、登录失败、超时或范围不足时停止，不回退到无限制浏览器。公告、引导和默认公共空间请求可能被拦截，不会因此开放越界读取。普通页面操作有30秒总时限，首次本机登录最多5分钟。
+
+示例提问：**“打开已接入的 UAT Nacos 页面，查找公共数据库配置，查看详情并核对数据库主机、端口和库名；说明实际验证到了哪一步。”**
+
 ## 动态数据库读取的边界
 
 工具只从本次 schema 返回的基础表/列中选择。必须有1—6个比较条件，操作符仅 `= > >= < <=`，值绑定为参数；禁止空条件全表读取、任意SQL、函数、联表、写语句或任意目标地址。每次最多200行、12列，单值500字符，单工具结果24KB，最多12次工具调用。调用达到上限时报告部分结果。
@@ -64,18 +78,19 @@ Nacos中的业务账号不会成为数据库凭据；Nacos读取成功不代表�
 {
   "investigate": {
     "mode": "investigate",
+    "browser": true,
     "reviewed": true,
     "description": "指定命名空间内发现配置和解析数据库地址，不连接数据库",
     "namespaces": ["YOUR_NAMESPACE_ID"],
     "parameters": [{ "name": "purpose", "type": "string", "maxLength": 200 }],
     "maxRows": 20,
-    "maxCalls": 8,
-    "timeoutMs": 5000
+    "maxCalls": 12,
+    "timeoutMs": 10000
   }
 }
 ```
 
-MySQL 将 `namespaces` 换为 `tables: ["orders"]` 并修改描述。`tables:["*"]` 明确表示当前数据库全部基础表，仍受只读账号授权、列和筛选检查约束；应优先限定必要表。生产批准内容包括这些范围，工具排查不是逐条SQL审批。固定已审核 SQL 模板可继续使用，适合复杂而稳定的业务查询。
+MySQL 删除 `browser`（仅 Nacos 支持），将 `namespaces` 换为 `tables: ["orders"]` 并修改描述。`tables:["*"]` 明确表示当前数据库全部基础表，仍受只读账号授权、列和筛选检查约束；应优先限定必要表。生产批准内容包括这些范围，工具排查不是逐条SQL审批。固定已审核 SQL 模板可继续使用，适合复杂而稳定的业务查询。
 
 ## 记忆与数据流向
 
@@ -89,5 +104,7 @@ MySQL 将 `namespaces` 换为 `tables: ["orders"]` 并修改描述。`tables:["*
 - 卡片区分：登录成功、配置发现、配置读取、地址解析、数据库连接、业务查询。零端点或未解析引用为部分结果，不标作完整排查。
 - 本机直接工具测试不等于飞书真实验收；首次查询、普通成员PRD申请、本人批准、撤回和最终提醒需在本团队群验证。
 - 不支持的服务版本、网络、凭据或范围问题会停止并返回脱敏错误，不回退到通用shell或自动扩大权限。
+
+浏览器实现：`environment-browser.js` 与 `nacos-browser-policy.js`；回归包括真实 Chromium 的登录、读取详情、危险请求未达服务器、本机登录凭据捕获和旧引用失效。
 
 实现：`environment-tool-policy.js`、`environment-access.js`、`environment-tools.js`、`environment-investigator.js`、`environment-connector.js`、`config-endpoints.js`、`environment-job.js`；接入向导为 `scripts/configure-environment.mjs`。

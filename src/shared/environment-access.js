@@ -35,7 +35,7 @@ export async function loadEnvironments(file = environmentFile()) {
 export function isEnvironmentOwner(e, actor) { return (e.ownerOpenIdsByProfile?.[actor.profile] ?? []).includes(actor.senderId); }
 export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
-    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, maxCalls: q.maxCalls, scope: e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
+    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, maxCalls: q.maxCalls, scope: e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const e = config.environments[request?.environmentId], q = e?.queries?.[request?.queryId];
