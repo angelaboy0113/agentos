@@ -110,8 +110,12 @@ export class ConversationService {
     if (!this.stopped) { this.wake(); if (this.running) await this.running; }
   }
 
-  key(turn) { if (this.groupSessions && turn.chatType === 'group') return JSON.stringify(['group-v1', turn.chatId, turn.profile, turn.role, this.context.projects.chatProjectMap[turn.chatId] ?? null]);
-    return turn.sessionKey ?? JSON.stringify([turn.chatId, turn.senderId, turn.profile, turn.role]); }
+  key(turn) {
+    // Versioned namespace never resumes the legacy group-wide native thread.
+    return JSON.stringify(['question-v2', turn.chatId, turn.profile, turn.role,
+      this.context.projects.chatProjectMap[turn.chatId] ?? null,
+      turn.questionId ? ['question', turn.questionId] : ['sender', turn.senderId]]);
+  }
 
   async schedule() {
     while (!this.stopped) {
@@ -258,11 +262,17 @@ export class ConversationService {
     const { projects, store } = this.context;
     const state = await store.read();
     const projectId = projects.chatProjectMap[turn.chatId] ?? null;
-    const shared = this.groupSessions && turn.chatType === 'group';
+    const scoped = Boolean(turn.questionId);
+    const questionIds = new Set();
+    let q = state.questions?.[turn.questionId];
+    while (q && !questionIds.has(q.id) && q.chatId === turn.chatId && q.profile === turn.profile && q.projectId === projectId) {
+      questionIds.add(q.id); q = state.questions?.[q.parentQuestionId];
+    }
+    if (scoped) questionIds.add(turn.questionId);
     const preceding = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.chatId === turn.chatId
-      && item.profile === turn.profile && (shared ? item.chatType === 'group' : item.senderId === turn.senderId) && item.status === 'sent'
+      && item.profile === turn.profile && (scoped ? questionIds.has(item.questionId) : item.senderId === turn.senderId) && item.status === 'sent'
       && conversationProject(item) === projectId);
-    const memory = shared ? { enabled: false, available: true, policy: 'native-persistent-thread-v1' } : await this.memory.retrieve(state, turn, projectId);
+    const memory = scoped ? { enabled: false, available: true, policy: 'question-scoped-native-v2' } : await this.memory.retrieve(state, turn, projectId);
     const suppressed = new Set(memory.suppressedRefs ?? []);
     const suppressedMessages = new Set(preceding.filter((item) => suppressed.has(`conversation:${item.id}`)).map((item) => item.messageId));
     const availableHistory = memory.available === false ? [] : preceding.filter((item) => !suppressed.has(`conversation:${item.id}`));
@@ -271,7 +281,12 @@ export class ConversationService {
     if (parent && !history.includes(parent)) history.unshift(parent);
     const attachments = [...new Map([...history.flatMap((item) => item.attachments ?? []), ...turn.attachments]
       .map((item) => [item.id, item])).values()].slice(-20);
+    const relatedMessages = new Set(preceding.flatMap(item => [item.id,item.messageId]).filter(Boolean));
+    relatedMessages.add(turn.id); relatedMessages.add(turn.messageId);
+    const explicitJob = job => !scoped && isAdministrator(projects,turn) && String(turn.content).split(/[^A-Za-z0-9_-]+/).includes(job.id);
     const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId
+      && (explicitJob(job) || (job.originProfile ?? job.agentProfile ?? null) === (turn.profile ?? null))
+      && (scoped ? questionIds.has(job.questionId) : relatedMessages.has(job.originMessageId) || relatedMessages.has(job.sourceMessageId) || explicitJob(job))
       && !suppressed.has(`job:${job.id}`) && !suppressed.has(`conversation:${job.sourceMessageId}`) && !suppressedMessages.has(job.originMessageId)).slice(-20).map((job) => ({
       id: job.id, projectId: job.projectId, stage: job.stage, status: job.status,
       instruction: job.instruction.slice(0, 4000),
@@ -284,7 +299,7 @@ export class ConversationService {
     }));
     delete memory.suppressedRefs;
     return fitContext({
-      memory, nativeSession: shared, requestId: turn.id, questionId: turn.questionId ?? null,
+      memory, nativeSession: scoped, contextIsolation: { policy: 'question-v2', questionIds: [...questionIds], rule: '只回答当前问题；关联问题历史不是其他任务的授权。不得引入无关话题。' }, requestId: turn.id, questionId: turn.questionId ?? null,
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
       environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,

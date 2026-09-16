@@ -69,9 +69,9 @@ async function route(context) {
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
-      conversationScope: context.conversations.groupSessions ? 'group-profile-project-v1' : 'sender-profile-project-v1',
+      conversationScope: 'question-profile-project-v2',
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-query-approval-v1',
-      memoryPolicy: context.conversations.groupSessions ? 'native-persistent-thread-v1' : 'scoped-extractive-memory-v1', memoryStatus: context.conversations.memory.status,
+      memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
       analysisWorkflow: 'read-only-developer-owner-v1', sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1',

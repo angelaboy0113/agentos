@@ -77,8 +77,8 @@ test('new source request gets current project context and a developer task witho
     workspace: 'D:/old-worktree', finalMessage: 'SOURCE_MISSING_OLD' }; });
   await send(message('inspect-again', '那你看看现在里面具体都有些什么'));
   assert.equal(inputs[0].sourcePolicy.checkedNow, false);
-  assert.equal(inputs[0].jobs[0].evidence.workspace, 'D:/old-worktree');
-  assert.doesNotMatch(inputs[0].jobs[0].finalMessage, /SOURCE_MISSING_OLD/);
+  assert.equal(inputs[0].jobs.length,0);
+  assert.doesNotMatch(JSON.stringify(inputs[0]), /SOURCE_MISSING_OLD/);
   const state = await app.store.read();
   assert.equal(state.jobs.length, 2);
   assert.equal(state.jobs[1].stage, 'developer');

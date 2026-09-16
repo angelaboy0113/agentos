@@ -33,7 +33,7 @@ async function setup(t, decide = () => decision()) {
   t.after(async () => { await app.conversations.stop(); await app.cards.stop(); await rm(directory, { recursive: true, force: true }); });
   return { app, context, send, calls, inputs, directory };
 }
-test('five senders have five durable question cards, shared intake context, current actor authority', async (t) => {
+test('five senders have five durable question cards, isolated intake context, current actor authority', async (t) => {
   const { app, send, calls, inputs } = await setup(t);
   await Promise.all(Array.from({ length: 5 }, (_, i) => send(`m${i}`, i ? `ou_person${i}` : 'ou_admin')));
   const state = await app.store.read();
@@ -42,8 +42,8 @@ test('five senders have five durable question cards, shared intake context, curr
   assert.equal(calls.filter((c) => c.type === 'send').length, 5);
   assert.equal(new Set(calls.filter((c) => c.type === 'send').map((c) => c.id)).size, 5);
   assert.equal(inputs[0].administrator, true); assert.equal(inputs[1].administrator, false);
-  assert.equal(inputs[4].history.length, 4); assert.equal(inputs[4].nativeSession, true);
-  assert.equal(new Set(state.conversations.map((c) => app.conversations.key(c))).size, 1);
+  assert.equal(inputs[4].history.length, 0); assert.equal(inputs[4].nativeSession, true);
+  assert.equal(new Set(state.conversations.map((c) => app.conversations.key(c))).size, 5);
 });
 test('question card stays owned by intake bot across developer/report, mentions only final original asker', async (t) => {
   const { app, context, send, calls } = await setup(t, () => decision({ action: 'create_task', intent: 'analysis', instruction: '只读检查' }));
@@ -196,4 +196,29 @@ test('question titles remove rich-text markers while preserving literal undersco
  const {questionTitle}=await import('../src/control-plane/questions.js');
  assert.equal(questionTitle('**帮我查看** **EP-20260814-0001**'),'帮我查看 EP-20260814-0001');
  assert.equal(questionTitle('[查看](https://example.invalid) `activity_code`'),'查看 activity_code');
+});
+
+test('two simultaneous topics cannot borrow the other asker task, attachment or history',async(t)=>{
+ const {app,send,inputs}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'topic-specific'}));
+ await send('gift','ou_admin',{content:'搭赠揉价',attachments:[{id:'gift-file'}]});
+ await send('warehouse','ou_person',{content:'仓管核销'});
+ const input=inputs.at(-1);assert.equal(input.history.length,0);assert.equal(input.jobs.length,0);assert.equal(input.attachments.length,0);
+ assert.doesNotMatch(JSON.stringify(input),/搭赠揉价|gift-file/);
+ const state=await app.store.read();assert.notEqual(app.conversations.key(state.conversations[0]),app.conversations.key(state.conversations[1]));
+});
+test('explicit followup receives only its own ancestry and a new native session',async(t)=>{
+ const {app,send,inputs}=await setup(t);
+ await send('first','ou_asker',{content:'仓管核销'});let state=await app.store.read();const first=state.conversations[0],card=state.cardMessages['question:'+first.questionId];
+ await send('unrelated','ou_asker',{content:'搭赠揉价'});
+ await send('follow','ou_asker',{reply_to:card.messageId,content:'前面是PRD吗'});
+ const input=inputs.at(-1);assert.deepEqual(input.history.map(x=>x.user),['仓管核销']);assert.doesNotMatch(JSON.stringify(input),/搭赠揉价/);
+ state=await app.store.read();assert.notEqual(app.conversations.key(first),app.conversations.key(state.conversations.at(-1)));
+});
+test('supplement on running question reuses its own session and excludes unrelated jobs',async(t)=>{
+ const {app,send,inputs}=await setup(t,input=>input.message==='补充'?decision():decision({action:'create_task',intent:'analysis',instruction:input.message}));
+ await send('a','ou_asker',{content:'问题A'});let state=await app.store.read();const first=state.conversations[0],card=state.cardMessages['question:'+first.questionId];
+ await send('b','ou_other',{content:'问题B'});
+ await send('supplement','ou_asker',{reply_to:card.messageId,content:'补充'});
+ state=await app.store.read();assert.equal(app.conversations.key(first),app.conversations.key(state.conversations.at(-1)));
+ assert.equal(inputs.at(-1).jobs.length,1);assert.equal(inputs.at(-1).jobs[0].instruction,'问题A');assert.doesNotMatch(JSON.stringify(inputs.at(-1)),/问题B/);
 });
