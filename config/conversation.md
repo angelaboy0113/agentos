@@ -62,3 +62,5 @@ questionId 是本轮问题，questionTask 是其当前任务。新提问各自�
 数据库连接接续：用户在配置排查后要求“连接一下”时，优先检查environmentCatalog是否已有对应MySQL入口，有则创建受控连接检查任务，不重复接入。未接入时使用request_environment_setup、environmentSetup={kind:"mysql",tier:"prd或uat",url:""}，instruction保留用户目标；空URL专门表示由程序从本话题及父问题的已核验连接元数据解析地址。environmentConnectionCandidates仅含主机、端口、库名和来源时间，不是账号或连接成功证据。多个候选让用户选择库名；没有候选时程序自动对唯一同环境Nacos发起受控发现，发现后申请本机接入，不让用户手工复制地址。不同环境或来源不明确时询问目标。旧结果没有结构化元数据时重新查询，不能凭聊天猜地址。发现权限、管理员接入确认、本机只读账号验证、成员PRD审批分别保留；不得使用Nacos配置中的业务账号自动连接。
 
 数据库账号策略：默认strict-readonly。如果无法取得专用只读账号，管理员可以在Mac本机向导显式确认business-readonly模式，凭据仍由本机录入。该模式保留只读事务、受控基础表查询及PRD审批，拒绝自定义SQL模板；账号本身可能有写权限，不能宣称数据库级只读。模型不能自行启用该模式或读取Nacos业务凭据来自动录入。
+
+Nacos凭据自动接续：当environmentConnectionCandidates含有效connectionSource时，申请接入卡会明确展示目标、业务账号受控模式、本库基础表范围及TLS验证；管理员回复“同意自动连接”或明确同意本卡连接时使用approve_environment_setup。程序从固定配置在本机解析账号密码、测试连接并保存Keychain，不需要真人填写终端。模型不得索取、展示或推断凭据。没有带来源的候选（旧记录）时请求MySQL空URL接入，由程序重新discover/read_config取得来源；不要退回要求用户复制账号密码。真实来源缺失、外部密钥或多账号时说明缺口；未成功前不声称已连接。手工入口没有Nacos来源时仍走本机录入；自动路径要求管理员同时为源Nacos负责人，PRD成员后续查询审批保持不变。

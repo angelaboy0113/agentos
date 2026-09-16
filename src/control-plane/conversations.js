@@ -313,14 +313,14 @@ export class ConversationService {
     if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');
     if (decision.action === 'request_environment_setup') {
       if (decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url) {
-        const candidates = connectionCandidates(await store.read(), turn, projectId).filter(e=>e.tier===decision.environmentSetup.tier);
+        const candidates = connectionCandidates(await store.read(), turn, projectId).filter(e=>e.tier===decision.environmentSetup.tier && e.connectionSource);
         if (candidates.length === 1) decision.environmentSetup.url = candidates[0].url;
         else if (candidates.length > 1) return { notice: '发现多个数据库入口，请选择目标库名：' + candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') + '。无需提供密码。' };
         else {
           const sources = catalog(await loadEnvironments(), projectId).filter(e=>e.kind==='nacos' && e.tier===decision.environmentSetup.tier && e.queries.some(q=>q.queryId==='investigate'));
           if (sources.length !== 1) return { notice: '需要先确定用于发现数据库地址的 Nacos 入口；请指出环境或目标配置，不需要手动复制数据库地址。' };
           decision.action = 'create_task'; decision.intent = 'analysis';
-          decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:['查找公共数据库配置并解析主机、端口和库名，用于后续本机只读账号接入。不要连接数据库。']};
+          decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:['使用discover和read_config获取公共数据库配置的地址及来源，用于管理员确认后在本机接续凭据。不要连接数据库，不返回账号密码。']};
         }
       }
       if (decision.action === 'request_environment_setup') return requestEnrollment(this.context, turn);

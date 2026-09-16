@@ -4,7 +4,7 @@ import {connectionEndpoints,connectionCandidates} from '../src/shared/connection
 import {ConversationService} from '../src/control-plane/conversations.js';
 import {jobTerminalMention} from '../src/control-plane/requester-mention.js';
 const now=()=>new Date().toISOString();
-const job=()=>({id:'j',questionId:'parent',chatId:'c',projectId:'p',originProfile:'o',status:'completed',updatedAt:now(),environmentAccess:{tier:'prd',startedAt:now(),scopeHash:'h'},result:{outcome:'ready',environmentEvidence:{scopeHash:'h',readAt:now()},connectionEndpoints:[{host:'db.test',port:3306,database:'demo',password:'do-not-copy'}]}});
+const job=()=>({id:'j',questionId:'parent',chatId:'c',projectId:'p',originProfile:'o',status:'completed',updatedAt:now(),environmentAccess:{tier:'prd',startedAt:now(),scopeHash:'h'},result:{outcome:'ready',environmentEvidence:{scopeHash:'h',readAt:now()},connectionEndpoints:[{host:'db.test',port:3306,database:'demo',connectionSource:{namespace:'prd',group:'g',dataId:'d',contentHash:'a'.repeat(64)},password:'do-not-copy'}]}});
 test('connection metadata is bounded and isolated to related questions and matching evidence',()=>{
  const turn={questionId:'q',chatId:'c',profile:'o'},state={questions:{q:{id:'q',parentQuestionId:'parent'},parent:{id:'parent'}},jobs:[job()]};
  assert.equal(connectionCandidates(state,turn,'p').length,1);
@@ -18,7 +18,7 @@ test('connect followup fills a unique discovered address and multiple databases 
  const context={projects:{chatProjectMap:{c:'p'},projects:{p:{}}},store:{read:async()=>structuredClone(state),transact:async fn=>fn(state)}};
  const make=()=>({id:'turn',questionId:'q',chatId:'c',profile:'o',senderId:'member',decision:{action:'request_environment_setup',intent:'analysis',attachmentIds:[],environmentSetup:{kind:'mysql',tier:'prd',url:''}}});
  const out=await ConversationService.prototype.apply.call({context},make());assert.ok(out.enrollmentId);assert.equal(Object.values(state.environmentEnrollments)[0].url,'mysql://db.test:3306/demo');
- state.jobs[0].result.connectionEndpoints.push({host:'db.test',port:3306,database:'second'});
+ state.jobs[0].result.connectionEndpoints.push({host:'db.test',port:3306,database:'second',connectionSource:{namespace:'prd',group:'g',dataId:'d',contentHash:'a'.repeat(64)}});
  assert.match((await ConversationService.prototype.apply.call({context},make())).notice,/多个数据库/);assert.equal(Object.keys(state.environmentEnrollments).length,1);
  assert.equal(jobTerminalMention({status:'completed',connectionEnrollmentPending:true}),null);
 });

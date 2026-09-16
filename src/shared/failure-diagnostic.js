@@ -1,5 +1,7 @@
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['TLS_VALIDATION', /certificate|SSL|TLS|HANDSHAKE/i, '数据库加密连接', '数据库TLS连接或证书校验未通过。', '请管理员核对服务器TLS支持和信任证书；程序不会自动关闭验证。'],
+  ['CREDENTIAL_SOURCE', /凭据引用|外部或加密凭据|目标数据库凭据|凭据字段|配置凭据|Nacos配置已改变/, '配置凭据解析', '配置已改变，或无法唯一解析目标数据库凭据。', '重新发现并确认配置；外部密钥或多个账号需要管理员指定正确来源。'],
   ['RESULT_CONTRACT', /Invalid partial (analysis|environment) evidence/, '结果提交校验', '程序拒绝了部分结果的证据格式，并非已确认的远端连接失败。', '联系维护者核对版本与结果协议；修复后重新发起查询。'],
   ['AUTH_REQUIRED', /认证未成功|Invalid login|Login required|credential|本机凭据|ChatGPT 登录|Unapproved login/i, '登录与凭据', '登录未完成或本机凭据不可用。', '在 AgentOS 所在电脑重新登录对应服务或解锁钥匙串。'],
   ['READ_PERMISSION', /只读账号权限|数据库账号含写权限|无权限|ER_ACCESS_DENIED_ERROR|HTTP 40[13]/i, '读取权限检查', '服务拒绝读取，或账号未通过只读权限核验。', '请管理员核对读取权限；核对当前账号策略与授权，不要关闭只读事务。'],

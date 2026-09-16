@@ -1,3 +1,5 @@
+import { failureDiagnostic } from '../shared/failure-diagnostic.js';
+import { automaticDatabaseEnrollment } from './automatic-database-enrollment.js';
 import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { loadEnvironments } from "../shared/environment-access.js";
 import { mkdir, writeFile, readFile, chmod } from "node:fs/promises";
@@ -44,6 +46,8 @@ export function enrollmentTarget(input) {
 export async function requestEnrollment(context, turn) {
   if (!turn.questionId) throw new Error("请在已绑定项目群的话题中申请接入");
   const target = enrollmentTarget(turn.decision.environmentSetup);
+  const candidates=connectionCandidates(await context.store.read(),turn,context.projects.chatProjectMap[turn.chatId]);
+  const source=target.kind==='mysql' ? candidates.find(c=>c.url===target.url && c.tier===target.tier && c.connectionSource) : null;
   const projectId = context.projects.chatProjectMap[turn.chatId];
   if (!projectId || !context.projects.projects[projectId])
     throw new Error("项目尚未绑定");
@@ -63,6 +67,7 @@ export async function requestEnrollment(context, turn) {
     state.environmentEnrollments[id] = {
       id,
       ...target,
+      ...(source ? {databaseSource:source} : {}),
       projectId,
       questionId: turn.questionId,
       turnId: turn.id,
@@ -74,7 +79,7 @@ export async function requestEnrollment(context, turn) {
     };
     return {
       enrollmentId: id,
-      notice: `该环境尚未接入。请本群管理员回复此卡“同意本机接入”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；接入不等于批准生产查询，密码不要发到群里。`,
+      notice: source ? `请管理员回复此卡“同意自动连接”，确认 ${target.tier.toUpperCase()} 数据库 ${target.url}。将从本次Nacos配置在Mac本机提取业务凭据、验证TLS证书与只读事务，并开放本库基础表的受控查询；账号本身可能有写权限。凭据不交给模型、不发群。接入不代替成员PRD查询审批。` : `该环境尚未接入。请本群管理员回复此卡“同意本机接入”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；接入不等于批准生产查询，密码不要发到群里。`,
     };
   });
 }
@@ -109,19 +114,20 @@ export async function approveEnrollment(
   });
   try {
     await launch(context, e);
-  } catch {
+  } catch (error) {
     await context.store.transact((s) => {
       s.environmentEnrollments[e.id].status = "failed";
     });
-    throw new Error("本机窗口未能启动；需要已登录的macOS桌面，未保存新环境");
+    throw new Error(e.databaseSource ? "自动连接未完成。\n"+failureDiagnostic(error) : "本机窗口未能启动；需要已登录的macOS桌面，未保存新环境");
   }
   return {
-    notice:
+    notice: e.databaseSource ? "自动连接与只读事务验证已完成，正在按原发起人的权限继续查询。" :
       "正在启动本机接入窗口，尚未确认登录。请在运行AgentOS的电脑上完成登录与范围选择；完成后自动继续原问题。",
     enrollmentId: e.id,
   };
 }
 export async function launchEnrollment(context, e) {
+  if(e.databaseSource) return automaticDatabaseEnrollment(context,e);
   if (process.platform !== "darwin") throw new Error("当前自动弹窗仅支持macOS");
   const dir = path.join(
     context.config.dataDir,
@@ -160,7 +166,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
     if (!turn || job.connectionEnrollmentHandled || job.status!=='completed' || !job.environmentAccess
       || turn.decision?.environmentSetup?.kind!=='mysql' || turn.decision.environmentSetup.url
       || turn.decision.action!=='create_task') continue;
-    const candidates=connectionCandidates(state,turn,job.projectId).filter(e=>e.tier===turn.decision.environmentSetup.tier);
+    const candidates=connectionCandidates(state,turn,job.projectId).filter(e=>e.tier===turn.decision.environmentSetup.tier && e.connectionSource);
     let outcome;
     if(candidates.length===1) outcome=await requestEnrollment(context,{...turn,decision:{...turn.decision,environmentSetup:{...turn.decision.environmentSetup,url:candidates[0].url}}});
     else outcome={notice:candidates.length ? '发现多个数据库入口，请选择目标库名：'+candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') : '尚未取得完整数据库地址；请补充目标配置或命名空间，已有查询结果保留，未尝试数据库登录。'};

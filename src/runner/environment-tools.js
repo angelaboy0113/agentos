@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { createNacosBrowser } from './environment-browser.js';
 import { boundedFetch, checkAccountGrants } from './environment-connector.js';
@@ -72,7 +73,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const x = configs.get(args.ref); if (!x) throw new Error('仅可读取本次发现的配置引用');
           const content = await nacos('/v1/cs/configs', { tenant: x.namespace, group: x.group, dataId: x.dataId });
           const found = databaseEndpoints(content);
-          return { config: args.ref, rows: found.slice(0, q.maxRows), truncated: found.length > q.maxRows, partial: found.unresolved || !found.length, stage: found.length ? '配置已读取，数据库地址已解析' : '配置已读取，未解析出数据库地址', databaseConnection: '未测试；不能把配置业务账号用于数据库连接' };
+          return { config: args.ref, rows: found.slice(0, q.maxRows).map(row=>({...row,connectionSource:{...x,contentHash:createHash('sha256').update(content).digest('hex')}})), truncated: found.length > q.maxRows, partial: found.unresolved || !found.length, stage: found.length ? '配置已读取，数据库地址已解析' : '配置已读取，未解析出数据库地址', databaseConnection: '未测试；管理员确认后可在本机提取凭据并通过受控只读模式验证' };
         }
         const c = await mysql();
         if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };

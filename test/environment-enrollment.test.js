@@ -182,7 +182,7 @@ test('database discovery continues once into enrollment without opening a window
  const {context,state,turn}=await fixture(t);
  turn.decision={...turn.decision,action:'create_task',environmentSetup:{kind:'mysql',tier:'prd',url:''}};
  const evidence={scopeHash:'scope',readAt:new Date().toISOString()};
- state.jobs.push({id:'discovery',sourceMessageId:turn.id,questionId:'q',chatId:'group',projectId:'demo',originProfile:'owner',status:'completed',updatedAt:new Date().toISOString(),environmentAccess:{tier:'prd',startedAt:new Date().toISOString(),scopeHash:'scope'},result:{outcome:'partial',environmentEvidence:evidence,connectionEndpoints:[{host:'db.example.test',port:3306,database:'app',password:'never-copy'}]}});
+ state.jobs.push({id:'discovery',sourceMessageId:turn.id,questionId:'q',chatId:'group',projectId:'demo',originProfile:'owner',status:'completed',updatedAt:new Date().toISOString(),environmentAccess:{tier:'prd',startedAt:new Date().toISOString(),scopeHash:'scope'},result:{outcome:'partial',environmentEvidence:evidence,connectionEndpoints:[{host:'db.example.test',port:3306,database:'app',connectionSource:{namespace:'prd',group:'g',dataId:'d',contentHash:'a'.repeat(64)},password:'never-copy'}]}});
  await pollEnrollments(context);
  const requests=Object.values(state.environmentEnrollments);assert.equal(requests.length,1);assert.equal(requests[0].url,'mysql://db.example.test:3306/app');assert.equal(requests[0].senderId,'ou_member');assert.equal(requests[0].status,'requested');
  assert.equal(state.jobs[0].connectionEnrollmentHandled,true);assert.match(turn.response,/管理员/);assert.doesNotMatch(JSON.stringify(requests),/never-copy/);
