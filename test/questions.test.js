@@ -191,3 +191,9 @@ test('question details retain completed predecessor results after a later stage 
  const state={questions:{q:{id:'q',title:'Investigate',latestTurnId:'t2',rootTurnId:'t1',profile:'owner',senderId:'ou_user',messageId:'m'}},conversations:[{id:'t1',questionId:'q',status:'sent',chatType:'group',response:'Earlier approval',outcome:{}},{id:'t2',questionId:'q',status:'sent',response:'Latest',outcome:{jobId:'j2'}}],jobs:[{id:'j1',questionId:'q',status:'completed',stage:'developer',events:[],result:{finalMessage:'Earlier database endpoint evidence',summary:'Earlier'}},{id:'j2',questionId:'q',status:'blocked',stage:'developer',events:[],result:{finalMessage:'Current failure details',summary:'Failed'}}]};
  const view=questionView(state,'q',{});assert.match(view.resultText,/Earlier database endpoint evidence/);assert.match(view.resultText,/Current failure details/);assert.match(view.resultText,/Earlier approval/);assert.match(JSON.stringify(view.card),/此前.*保留/);assert.deepEqual(state.jobs[0].result.summary,'Earlier');
 });
+
+test('question titles remove rich-text markers while preserving literal underscores',async()=>{
+ const {questionTitle}=await import('../src/control-plane/questions.js');
+ assert.equal(questionTitle('**帮我查看** **EP-20260814-0001**'),'帮我查看 EP-20260814-0001');
+ assert.equal(questionTitle('[查看](https://example.invalid) `activity_code`'),'查看 activity_code');
+});

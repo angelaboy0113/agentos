@@ -4,6 +4,7 @@ import { createId } from '../shared/protocol.js';
 import { conversationCard, jobCard, publicText } from './message-cards.js';
 import { conversationTerminalMention, jobTerminalMention } from './requester-mention.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
+export const questionTitle = text => publicText(text).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\*\*|__|~~|`/g, '').replace(/\s+/g, ' ').trim().slice(0,60) || '附件问题';
 const pending = (turn) => ['queued', 'thinking', 'decided'].includes(turn.status);
 export const activeQuestionJob = (job) => ['queued', 'running', 'cancelling', 'awaiting_approval', 'awaiting_clarification', 'awaiting_environment_approval'].includes(job?.status);
 
@@ -24,7 +25,7 @@ export function attachQuestion(state, turn, event, projects) {
     threadRootId: event.root_id ?? turn.messageId, projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
     ...(turn.replyInThread ? { replyInThread: true } : {}),
     ...(related ? { parentQuestionId: related.id } : {}),
-    title: publicText(turn.content).replace(/\s+/g, ' ').slice(0, 60) || '附件问题', generation: 1 };
+    title: questionTitle(turn.content), generation: 1 };
   if (q) question.generation = Math.max(question.generation, question.cardGeneration ?? 1) + 1;
   question.latestTurnId = turn.id;
   state.questions[question.id] = question;
@@ -45,9 +46,9 @@ export function questionView(state, questionId, projects = {}) {
   let card = useJob ? jobCard(job) : conversationCard(turn);
   const terminal = !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
   const label = card.header.title.content;
-  card.header.title.content = q.title;
+  card.header.title.content = questionTitle(q.title);
   card.header.subtitle.content = `${q.id} · ${label}`;
-  card.config.summary.content = `${q.title} · ${label}`;
+  card.config.summary.content = `${questionTitle(q.title)} · ${label}`;
   if (useJob) {
     const roles = { developer: '开发', owner_report: '负责人汇总', owner_intake: '负责人', pm: 'PM', qa: '测试', owner_audit: '审计' };
     const flow = state.jobs.filter((item) => item.questionId === q.id).slice(-6)

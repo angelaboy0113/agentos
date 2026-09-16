@@ -50,13 +50,21 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       const encoded = JSON.stringify(result); if (Buffer.byteLength(encoded) > 24000) throw new Error('工具结果超出大小限制，请缩小范围');
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
     }
+    if (!summary) {
+      // Final synthesis uses existing evidence only; it cannot execute another query.
+      try {
+        const final = await planner.next({ purpose: plan.parameters[0], tools: [], results, remainingCalls: 0,
+          instruction: '查询额度已用完。仅返回finish汇总已有证据、来源表与未查明原因，不执行工具、不把查到记录等同根因已确认。' });
+        if (final.tool === 'finish') { summary = String(final.summary ?? '').slice(0,6000); complete = final.complete === true; }
+      } catch { /* Preserve gathered evidence if summary generation fails. */ }
+    }
     if (!summary) summary = '本次工具调用已达上限；以下为已取得的证据，未声称排查完成。';
     // A planner cannot turn unresolved extraction or an empty evidence trail into success.
     if (results.filter(x => x.result).length < 2 || unresolvedInput || results.some(x => x.result?.partial)) complete = false;
     if (unresolvedInput) summary = '查询参数尚未修正完成，未取得本次业务查询结果。';
     const serialized = JSON.stringify(results);
     for (const secret of [cred.username, cred.password].filter(Boolean)) summary = summary.split(secret).join('[已隐藏]');
-    return { rows: results.filter(x => x.result?.rows).flatMap(x => x.result?.rows), steps, summary, partial: !complete,
+    return { rows: results.filter(x => x.result?.rows).flatMap(x => x.result.rows.map(row => x.result.table ? { ...row, '来源表': x.result.table } : row)), steps, summary, partial: !complete,
       note: e.kind === 'nacos' ? 'Nacos 读取与数据库连接是两步；本次未连接数据库。' : '仅本次范围内的数据库只读工具。',
       evidence: { environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash, readAt: new Date().toISOString(), toolCount: results.length, rowCount: results.filter(x => x.result?.rows).reduce((n,x) => n+x.result?.rows.length, 0), resultHash: fingerprint(serialized) } };
   } finally { await tools.close(); await planner?.close(); }

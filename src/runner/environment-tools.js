@@ -111,7 +111,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         }
         const statement = selectStatement(args, tables, q);
         const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
-        return { rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
+        return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
       })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, q.timeoutMs); })]);
     } catch (error) { if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }

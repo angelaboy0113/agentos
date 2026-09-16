@@ -119,7 +119,7 @@ test('planner corrects too many fields without executing invalid SQL or widening
  if(n===2)return{tool:'select',arguments:JSON.stringify({table:'orders',columns:cols,filters:[{column:'field0',op:'=',value:'record'}]})};
  if(n===3){assert.equal(input.results.at(-1).error.code,'COLUMN_LIMIT');assert.equal(input.results.at(-1).executed,false);return{tool:'select',arguments:JSON.stringify({table:'orders',columns:['field1'],filters:[{column:'field0',op:'=',value:'record'}]})};}
  return{tool:'finish',summary:'已找到',complete:true};},close:async()=>{}})});
- assert.equal(business,1);assert.equal(closed,true);assert.equal(result.partial,false);assert.deepEqual(result.rows,[{field1:'found'}]);assert.equal(result.evidence.toolCount,4);
+ assert.equal(business,1);assert.equal(closed,true);assert.equal(result.partial,false);assert.deepEqual(result.rows,[{field1:'found','来源表':'orders'}]);assert.equal(result.evidence.toolCount,4);
 });
 test('recoverable input attempts are bounded and unresolved finish cannot become success',async()=>{
  for(const finish of [false,true]){
@@ -135,4 +135,19 @@ test('scope failures never enter parameter correction loop',async()=>{
  await assert.rejects(investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
  tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{if(t==='connection')return{};attempts++;throw new Error('[SCOPE_LIMIT] denied');},close:async()=>{}}),
  planner:async()=>({next:async()=>({tool:'select',arguments:'{}'}),close:async()=>{}})}));assert.equal(attempts,1);
+});
+
+test('last tool result receives final synthesis with provenance and no extra query',async()=>{
+ const q={...query,maxCalls:2},cfg={version:1,environments:{env:{...environment,queries:{investigate:q}}}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对指定记录']},'demo',{profile:'owner',senderId:'ou_member'});let executions=0;
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{executions++;return t==='connection'?{}:{table:'orders',rows:[{id:'one'}]};},close:async()=>{}}),
+ planner:async()=>({next:async input=>{if(input.remainingCalls===0){assert.deepEqual(input.tools,[]);assert.equal(input.results.at(-1).result.table,'orders');return{tool:'finish',summary:'已核对orders中指定记录；原因待查',complete:false};}return{tool:'select',arguments:'{}'};},close:async()=>{}})});
+ assert.equal(executions,2);assert.equal(r.partial,true);assert.match(r.summary,/原因待查/);assert.deepEqual(r.rows,[{id:'one','来源表':'orders'}]);
+});
+test('final synthesis cannot execute tools and failures preserve prior evidence',async()=>{
+ for(const fail of [false,true]){
+ const q={...query,maxCalls:1},cfg={version:1,environments:{env:{...environment,queries:{investigate:q}}}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;return{stage:'connected'};},close:async()=>{}}),planner:async()=>({next:async()=>{if(fail)throw new Error('summary unavailable');return{tool:'select',arguments:'{}',complete:true};},close:async()=>{}})});
+ assert.equal(calls,1);assert.equal(r.partial,true);assert.equal(r.steps.length,1);
+ }
 });

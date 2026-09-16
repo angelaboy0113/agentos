@@ -42,7 +42,7 @@ export async function automaticDatabaseEnrollment(context, enrollment, adapters=
   ownerOpenIdsByProfile:e.ownerOpenIdsByProfile,membersRead:e.membersRead,accountPolicy:'business-readonly',
   businessAccountAuthorization:{approverId:enrollment.approver.senderId,confirmedAt:new Date().toISOString(),...(exception?{transportException:exception}:{})},queries:{
    connection_check:{reviewed:true,description:'测试数据库连接与只读事务',sql:CONNECTION_SQL,parameters:[],outputColumns:['database_name','checked_at'],maxRows:1,timeoutMs:5000},
-   investigate:{reviewed:true,mode:'investigate',description:'在已确认数据库基础表中受控读取；业务账号使用只读事务',tables:['*'],parameters:[{name:'purpose',type:'string',maxLength:200}],maxRows:20,maxCalls:8,timeoutMs:5000}}};
+   investigate:{reviewed:true,mode:'investigate',description:'在已确认数据库基础表中受控读取；业务账号使用只读事务',tables:['*'],parameters:[{name:'purpose',type:'string',maxLength:200}],maxRows:20,maxCalls:12,timeoutMs:5000}}};
  await (adapters.mysqlRead??mysqlRead)(target,target.queries.connection_check,[],dbCred);
  if(expired() || !(await readFile(file)).equals(original))throw new Error('配置或申请已变更，请重新确认');
  if(config.environments[id])throw new Error('入口已存在，不重复接入');
