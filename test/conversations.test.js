@@ -311,3 +311,22 @@ test('job progress is rate-limited and never forwards arbitrary log text', async
   assert.equal(replies.length, 1);
   assert.match(replies[0].text, /尚未完成/);
 });
+
+test('source environment is selected from local catalog, missing/unknown environment creates no job', async t => {
+  let selected = '';
+  const project = { displayName:'Demo', repoPath:'/project', analysisSourceMode:'isolated', analysisEnvironments:{uat:{description:'System UAT',repositories:[]},prd:{description:'Production',repositories:[]}} };
+  const {send,app,inputs,replies} = await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'read code',sourceEnvironment:selected}),{
+    projects:{chatProjectMap:{group:'demo'},projects:{demo:project},ownerOpenIdsByProfile:{owner:['leader']}},
+  });
+  await send(message('missing-env','查代码'));
+  assert.equal((await app.store.read()).jobs.length,0);
+  assert.equal(inputs[0].project.sourceEnvironments.length,2);
+  assert.match(replies.at(-1).text,/明确/);
+  selected='unconfigured'; await send(message('bad-env','查代码'));
+  assert.equal((await app.store.read()).jobs.length,0);
+  selected='uat'; await send(message('uat-env','查 UAT 代码'));
+  assert.equal((await app.store.read()).jobs[0].sourceEnvironment,'uat');
+  const evidence=sourceEvidence({taskIntent:'analysis',workflow:'analysis_review',result:{workspace:'/snapshots/a/workspace',sourceSync:{sourceRoot:'/project',environment:'uat',repositories:[{branch:'uat',commit:'abc'}]}}},'/project');
+  assert.equal(evidence.applicability,'historical_snapshot_not_current_check');
+  assert.equal(evidence.sourceEnvironment,'uat');
+});

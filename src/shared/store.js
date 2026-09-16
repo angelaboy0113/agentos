@@ -77,6 +77,7 @@ export class JsonStore {
         stage: input.stage,
         instruction: input.instruction,
         taskIntent: input.taskIntent ?? 'implementation',
+        ...(input.sourceEnvironment ? { sourceEnvironment: input.sourceEnvironment } : {}),
         originProfile: input.originProfile ?? input.requestedAgentProfile ?? input.agentProfile ?? null,
         originChatType: input.originChatType ?? null,
         context: input.context ?? [],

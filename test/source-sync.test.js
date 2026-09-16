@@ -111,3 +111,44 @@ test('unfinished Git operation, symlink escape and changed committed evidence ar
   await assert.rejects(verifyAnalysisSources(f.project, report), /不同于/);
   await assert.rejects(prepareAnalysisSources({ stage: 'owner_report', context: [] }, f.project), /缺少本次/);
 });
+
+test('isolated environment snapshots preserve dirty feature checkout and separate concurrent UAT/PRD', async t => {
+  const f = await fixture(t);
+  await git(f.writer, 'checkout', '-b', 'uat'); await commit(f.writer, 'uat code'); await git(f.writer, 'push', 'origin', 'uat');
+  await git(f.repo, 'checkout', '-b', 'personal'); await writeFile(path.join(f.repo, 'source.txt'), 'my unfinished work');
+  const before = await git(f.repo, 'status', '--porcelain');
+  const project = { ...f.project, analysisSourceMode: 'isolated', analysisSnapshotRoot: path.join(f.base, 'snapshots'), analysisEnvironments: {
+    uat: { repositories: [{ path: 'business', branch: 'uat' }] }, prd: { repositories: [{ path: 'business', branch: f.branch }] },
+  } };
+  const [uat, prd] = await Promise.all(['uat','prd'].map(sourceEnvironment => prepareAnalysisSources({ stage: 'developer', sourceEnvironment }, project)));
+  assert.notEqual(uat.workspace, prd.workspace);
+  assert.equal(await readFile(path.join(uat.workspace, 'business/source.txt'), 'utf8'), 'uat code');
+  assert.equal(await readFile(path.join(prd.workspace, 'business/source.txt'), 'utf8'), 'old');
+  assert.equal(await git(f.repo, 'branch', '--show-current'), 'personal');
+  assert.equal(await git(f.repo, 'status', '--porcelain'), before);
+  assert.equal(await readFile(path.join(f.repo, 'source.txt'), 'utf8'), 'my unfinished work');
+  await git(f.repo, 'remote', 'set-url', 'origin', '/unavailable');
+  assert.deepEqual(await prepareAnalysisSources({ stage:'owner_report', context:[{result:{sourceSync:uat}}] }, project), uat);
+  await assert.rejects(prepareAnalysisSources({ stage:'developer' }, project), /明确/);
+  await assert.rejects(prepareAnalysisSources({ stage:'developer',sourceEnvironment:'other' }, project), /明确/);
+  await assert.rejects(verifyAnalysisSources(project, {...uat, environment:'prd'}), /不匹配/);
+  await writeFile(path.join(uat.workspace,'business/source.txt'), 'tampered');
+  await assert.rejects(verifyAnalysisSources(project, uat), /本地修改/);
+});
+
+test('isolated root plus child repositories work and reject changed manifest, escape, and missing branch', async t => {
+  const f = await fixture(t);
+  await git(f.root,'init','-b','docs'); await commit(f.root,'root docs');
+  // The root must not track the independently configured child repository.
+  await git(f.root,'rm','--cached','business');
+  await writeFile(path.join(f.root,'.gitignore'),'business/\n');
+  await git(f.root,'add','.gitignore'); await git(f.root,'-c','user.name=Test','-c','user.email=test@example.invalid','commit','-m','ignore child');
+  const rootOrigin=path.join(f.base,'root.git'); await git(f.base,'clone','--bare',f.root,rootOrigin); await git(f.root,'remote','add','origin',rootOrigin);
+  const project={repoPath:f.root,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'.',branch:'docs'},{path:'business',branch:f.branch}]}}};
+  const report=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+  assert.equal(report.repositories.length,2); await verifyAnalysisSources(project,report);
+  await assert.rejects(verifyAnalysisSources(project,{...report,workspace:f.root}),/不匹配/);
+  await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},{...project,analysisSnapshotRoot:path.join(f.root,'snapshots')}),/分开/);
+  project.analysisEnvironments.uat.repositories[1].branch='missing';
+  await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),/business.*missing/);
+});

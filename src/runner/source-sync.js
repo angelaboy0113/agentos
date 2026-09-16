@@ -1,3 +1,4 @@
+import { syncSnapshot, verifySnapshot } from './source-snapshot.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { realpath, stat, access } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import os from 'node:os';
 
 const exec = promisify(execFile);
 const policy = 'origin-ff-before-analysis-v1';
-async function git(cwd, args) {
+export async function git(cwd, args) {
   try {
     const { stdout } = await exec('git', ['-c', `core.hooksPath=${os.devNull}`, '-c', 'submodule.recurse=false', '-C', cwd, ...args], {
       windowsHide: true, timeout: 120000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
@@ -16,7 +17,7 @@ async function git(cwd, args) {
   } catch { throw new Error('Git 操作失败或超时；请在本机检查 origin、分支、网络与登录。'); }
 }
 function stop(name, reason) { throw new Error(`源码同步受阻（${name}）：${reason}。`); }
-async function repositories(project) {
+export async function repositories(project) {
   const entries = project?.analysisRepositories;
   if (!Array.isArray(entries) || !entries.length) throw new Error('请管理员在 projects.local.json 配置 analysisRepositories（每个仓库的相对 path 与 branch）。');
   const root = await realpath(project.repoPath);
@@ -71,6 +72,7 @@ export async function syncAnalysisSources(project) {
 }
 
 export async function verifyAnalysisSources(project, report) {
+  if (report?.policy === 'isolated-environment-source-v1') return verifySnapshot(project, report);
   if (report?.policy !== policy || !Array.isArray(report.repositories)) throw new Error('缺少本次分析的同步证据，请重新发起分析；不重跑旧任务。');
   const repos = await repositories(project);
   if (repos.length !== report.repositories.length) throw new Error('分析仓库配置已改变，请重新分析。');
@@ -82,7 +84,7 @@ export async function verifyAnalysisSources(project, report) {
 }
 
 export async function prepareAnalysisSources(job, project) {
-  if (job.stage !== 'owner_report') return syncAnalysisSources(project);
+  if (job.stage !== 'owner_report') return project.analysisSourceMode === 'isolated' ? syncSnapshot(project, job.sourceEnvironment) : syncAnalysisSources(project);
   const report = [...(job.context ?? [])].reverse().find((entry) => entry.result?.sourceSync)?.result.sourceSync;
   return verifyAnalysisSources(project, report);
 }

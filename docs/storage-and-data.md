@@ -70,3 +70,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 ## 可选环境查询边界
 
 详见[受控环境查询](environment-access.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。PRD 成员请求及源码排查新增查询先进入 `awaiting_environment_approval`，获指定环境负责人对本次范围批准后才允许 Runner 单次领取。审批不授予代码或数据库写入权限，普通 analysis 沙箱保持只读。查询结果归属原问题卡片，不注入共享长期记忆；真实环境验收须在本机配置后完成。
+
+## 环境源码快照
+
+可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。每次调查与负责人汇总复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。

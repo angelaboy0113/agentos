@@ -162,6 +162,7 @@ export function validateDecision(value) {
   }
   if (!value.reply.trim()) throw new Error('Empty reply');
   if (!Array.isArray(value.attachmentIds) || value.attachmentIds.some((id) => typeof id !== 'string')) throw new Error('Invalid attachments');
+  if (value.sourceEnvironment !== undefined && (typeof value.sourceEnvironment !== 'string' || value.sourceEnvironment.length > 100)) throw new Error('Invalid source environment');
   if (value.requiresSourceInspection !== undefined && typeof value.requiresSourceInspection !== 'boolean') throw new Error('Invalid source inspection decision');
   // Typed AI decision, not phrase matching. Legacy persisted decisions may omit it.
   if (value.environmentQuery != null && (value.action !== 'create_task' || value.intent !== 'analysis' || value.requiresSourceInspection === true)) throw new Error('Environment query must be a separate readonly request');

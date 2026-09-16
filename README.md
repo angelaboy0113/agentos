@@ -272,3 +272,7 @@ Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地
 浏览器依赖与完整测试：`npm ci` 后运行 `npx playwright install chromium`，再运行 `npm run check`。Linux 使用 `npx playwright install --with-deps chromium` 安装系统依赖。仅启用 Nacos 已适配的只读网页能力；未知网站需另行适配。
 
 环境首次接入支持群内申请与管理员确认，在已登录的 Mac 上自动打开本机 Nacos 登录或 MySQL 只读凭据窗口。范围确认后继续原提问人的任务，PRD审批独立保留。完成后的追问生成关联新卡，旧结果不再覆盖。部署前阅读 [接入与卡片说明](docs/environment-access.md)，定制决策器需同步最新 conversation schema。
+
+## 环境源码快照
+
+可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。每次调查与负责人汇总复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](docs/source-sync.spec.md)。

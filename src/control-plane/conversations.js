@@ -1,3 +1,4 @@
+import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/source-environments.js';
 import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
 import { loadEnvironments, catalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
@@ -16,10 +17,10 @@ export function sourceEvidence(job, sourceDirectory) {
   const workspace = job.result?.workspace ?? null;
   const normalize = (value) => /^[a-z]:[\\/]/i.test(value) ? path.win32.normalize(value).replace(/[\\/]+$/, '').toLowerCase()
     : path.resolve(value);
-  const sameDirectory = Boolean(workspace && sourceDirectory && normalize(workspace) === normalize(sourceDirectory));
+  const sameDirectory = Boolean(workspace && sourceDirectory && normalize(job.result?.sourceSync?.sourceRoot ?? workspace) === normalize(sourceDirectory));
   const compatible = sameDirectory && job.taskIntent === 'analysis'
     && (job.workflow === 'analysis_review' || ['single_qa', 'single_owner_audit'].includes(job.workflow));
-  return { workspace, recordedAt: job.updatedAt ?? job.createdAt ?? null, workflow: job.workflow,
+  return { workspace, sourceEnvironment: job.result?.sourceSync?.environment ?? job.sourceEnvironment ?? null, repositories: job.result?.sourceSync?.repositories ?? [], recordedAt: job.updatedAt ?? job.createdAt ?? null, workflow: job.workflow,
     applicability: compatible ? 'historical_snapshot_not_current_check' : 'not_evidence_for_current_source_directory',
     requiresRecheckForCurrentSource: true };
 }
@@ -310,6 +311,8 @@ export class ConversationService {
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
       project: projectId ? { id: projectId, name: projects.projects[projectId]?.displayName ?? projectId,
         sourceDirectory: projects.projects[projectId]?.repoPath ?? null,
+        sourceEnvironments: sourceEnvironmentCatalog(projects.projects[projectId]),
+        sourceEnvironmentRule: '源码任务必须选择 sourceEnvironments 中匹配本问题的 id，不能从其它问题借用环境。没有明确环境且未配置默认值时先询问用户；不能将 PRD 当 UAT，也不能用历史快照证明当前源码。',
         analysisWorkspace: 'Runner 先同步 analysisRepositories 各仓 origin 分支，再只读分析；缺配置或同步失败则阻塞',
         implementationWorkspace: 'Runner 创建的隔离 Git worktree；不自动包含独立子仓' } : null,
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
@@ -365,6 +368,11 @@ export class ConversationService {
         if (!turn.questionId) throw new Error('环境查询需要开启问题主卡片并在群里发起');
         environmentAccess = planQuery(await loadEnvironments(), decision.environmentQuery, projectId, turn);
       }
+      let sourceEnvironment;
+      if (!environmentAccess && decision.intent === 'analysis') {
+        try { sourceEnvironment = selectSourceEnvironment(projects.projects[projectId], decision.sourceEnvironment); }
+        catch (error) { return { notice: error.message }; }
+      }
       const route = environmentAccess ? { stage: 'developer', workflow: 'single_developer' } : routeDecision(turn.role, decision.intent);
       const routing = agentRouting(this.context, route.stage);
       if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
@@ -374,7 +382,7 @@ export class ConversationService {
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
-        originChatType: turn.chatType, questionId: turn.questionId, environmentAccess,
+        originChatType: turn.chatType, questionId: turn.questionId, environmentAccess, sourceEnvironment,
         connectionEnrollmentPending: decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url,
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
