@@ -33,3 +33,9 @@ test('failure cards show bounded cause and remedy without copying arbitrary erro
   assert.equal(failureDiagnostic(safeExecutionError(new Error(message))),failureDiagnostic(message));
  }
 });
+
+test('native MySQL TLS unsupported code becomes an actionable secret-free diagnostic',()=>{
+ const error=Object.assign(new Error('Server does not support secure connection password=synthetic-secret'),{code:'HANDSHAKE_NO_SSL_SUPPORT'});
+ const diagnostic=failureDiagnostic(error);assert.match(diagnostic,/TLS_UNSUPPORTED/);assert.match(diagnostic,/尚未开始查询/);assert.doesNotMatch(diagnostic,/synthetic-secret/);
+ assert.equal(failureDiagnostic(safeExecutionError(error)),diagnostic);
+});

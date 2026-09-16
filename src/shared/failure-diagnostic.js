@@ -1,5 +1,6 @@
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['TLS_UNSUPPORTED', /HANDSHAKE_NO_SSL_SUPPORT|does not support secure connection/i, '数据库TLS握手', '数据库服务器不支持当前要求的TLS加密连接；尚未开始查询。', '请运维启用TLS；如需内网非TLS例外，必须由管理员另行明确确认，程序不会自动降级。'],
   ['TLS_VALIDATION', /certificate|SSL|TLS|HANDSHAKE/i, '数据库加密连接', '数据库TLS连接或证书校验未通过。', '请管理员核对服务器TLS支持和信任证书；程序不会自动关闭验证。'],
   ['CREDENTIAL_SOURCE', /凭据引用|外部或加密凭据|目标数据库凭据|凭据字段|配置凭据|Nacos配置已改变/, '配置凭据解析', '配置已改变，或无法唯一解析目标数据库凭据。', '重新发现并确认配置；外部密钥或多个账号需要管理员指定正确来源。'],
   ['RESULT_CONTRACT', /Invalid partial (analysis|environment) evidence/, '结果提交校验', '程序拒绝了部分结果的证据格式，并非已确认的远端连接失败。', '联系维护者核对版本与结果协议；修复后重新发起查询。'],
@@ -12,8 +13,8 @@ const rules = [
   ['HTTP_RESPONSE', /HTTP [45][0-9]{2}|Read failed|环境接口未成功响应/i, '服务响应', '远端接口返回失败状态。', '检查服务状态和接口兼容性；未据此判断数据库是否可连接。'],
 ];
 export function failureDiagnostic(error) {
-  const message = typeof error === 'string' ? error : String(error?.message ?? '');
-  const matched = rules.find(([code, pattern]) => message.startsWith(`[${code}]`) || pattern.test(message));
+  const message = typeof error === 'string' ? error : `${String(error?.code ?? '')} ${String(error?.message ?? '')}`;
+  const matched = rules.find(([code, pattern]) => message.trimStart().startsWith(`[${code}]`) || pattern.test(message));
   const [code, , phase, cause, next] = matched ?? ['EXECUTION_ERROR', null, '任务执行', '执行器遇到未分类错误，原因尚未确认。', '请维护者按任务编号检查本机日志；不要在群内发送原始日志或凭据。'];
   return `错误码：${code}\n失败环节：${phase}\n原因：${cause}\n建议：${next}`;
 }

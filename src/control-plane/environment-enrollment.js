@@ -117,6 +117,7 @@ export async function approveEnrollment(
   } catch (error) {
     await context.store.transact((s) => {
       s.environmentEnrollments[e.id].status = "failed";
+      s.environmentEnrollments[e.id].diagnostic = failureDiagnostic(error);
     });
     throw new Error(e.databaseSource ? "自动连接未完成。\n"+failureDiagnostic(error) : "本机窗口未能启动；需要已登录的macOS桌面，未保存新环境");
   }
