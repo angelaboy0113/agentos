@@ -1,3 +1,4 @@
+import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { databaseEndpoints } from './config-endpoints.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -39,7 +40,7 @@ export async function mysqlRead(e, q, parameters, cred, adapters = {}) {
 }
 export async function boundedFetch(url, options, maxBytes = 1024 * 1024) {
   const response = await fetch(url, { ...options, redirect: 'error' });
-  if (!response.ok) throw new Error('环境接口未成功响应');
+  if (!response.ok) throw new Error(`环境接口未成功响应 HTTP ${response.status}`);
   if (Number(response.headers.get('content-length') || 0) > maxBytes) { await response.body?.cancel(); throw new Error('环境响应超过限制'); }
   const reader = response.body.getReader(); let length = 0; const chunks = [];
   try { while (true) { const { done, value } = await reader.read(); if (done) break; length += value.length; if (length > maxBytes) throw new Error('环境响应超过限制'); chunks.push(value); } }
@@ -72,6 +73,6 @@ export async function readEnvironment(plan, adapters = {}) {
       readAt: new Date().toISOString(), rowCount: result.rows.length, resultHash: fingerprint(result.rows) } };
   } catch (error) {
     if (/^(本机凭据|数据库账号|无法核验|环境响应)/.test(error.message)) throw error;
-    throw new Error('环境只读查询失败；请核对本机网络、凭据、模板与只读权限。未自动重试，未输出原始错误或凭据。');
+    throw safeExecutionError(error);
   }
 }

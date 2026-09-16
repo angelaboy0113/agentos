@@ -1,3 +1,4 @@
+import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { stageLabel } from '../shared/protocol.js';
 import { createHash } from 'node:crypto';
 import { publicText, conciseSummary, resultPages, resultPanel } from './result-presentation.js';
@@ -84,7 +85,7 @@ export function jobCard(job, now = Date.now()) {
   const elements = [block([md(`**${active ? '当前操作' : '结论'}**`), md(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'
-    : job.status === 'failed' ? '执行未成功；详细错误保留在本地日志，不在群里展示凭据或原始输出。' : label))], color),
+    : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label))], color),
     { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns: [
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${elapsed(start, active ? now : Date.parse(job.updatedAt))}**`), md('本阶段耗时', true)] },
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${Number(activity?.total) || 0} 次**`), md('实际工具调用', true)] },

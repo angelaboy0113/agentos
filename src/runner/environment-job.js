@@ -1,3 +1,4 @@
+import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { presentEnvironmentResult } from './environment-result-presentation.js';
 import { investigateEnvironment } from './environment-investigator.js';
 import { loadEnvironments } from '../shared/environment-access.js';
@@ -14,7 +15,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
   let result;
   try { const cfg = await loadEnvironments(); result = cfg.environments[plan.environmentId]?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit) : await readEnvironment(plan); }
-  catch (error) { return { outcome: 'blocked', summary: error.message, finalMessage: error.message, verification: [] }; }
+  catch (error) { return { outcome: 'blocked', summary: failureDiagnostic(error), finalMessage: failureDiagnostic(error), verification: [] }; }
   const presented = presentEnvironmentResult(plan, result);
   const safeSummary = presented.metadata;
   let explanation = '';

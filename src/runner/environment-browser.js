@@ -1,3 +1,4 @@
+import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { chromium } from "playwright";
 import {
   browserRequestPolicy,
@@ -332,7 +333,7 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
       loggingIn = false;
       await close();
       throw new Error(
-        "浏览器只读操作未完成：阶段：" +
+        safeExecutionError(error).message + "\n浏览器只读操作未完成：阶段：" +
           phase +
           "；可能需要本机重新登录、页面版本不支持、引用失效或请求超出范围。未放开写入或其他网址。",
       );

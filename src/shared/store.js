@@ -223,7 +223,16 @@ export class JsonStore {
         job.lease = null;
       }
       if (event.type === 'completed' && job.status !== 'cancelling') {
-        if (event.result?.outcome === 'partial' && (job.taskIntent !== 'analysis'
+        if (event.result?.outcome === 'partial' && job.environmentAccess) {
+          const p = job.environmentAccess, e = event.result.environmentEvidence;
+          if (job.taskIntent !== 'analysis' || !p.approvedBy || !p.startedAt
+            || !job.events.some(x => x.type === 'environment_query_started' && x.scopeHash === p.scopeHash)
+            || !e || e.environmentId !== p.environmentId || e.queryId !== p.queryId || e.scopeHash !== p.scopeHash
+            || !Number.isFinite(Date.parse(e.readAt)) || Date.parse(e.readAt) < Date.parse(p.startedAt)
+            || !Number.isInteger(e.rowCount) || e.rowCount < 0 || !/^[a-f0-9]{64}$/.test(e.resultHash ?? '')
+            || !event.result.finalMessage) throw new Error('Invalid partial environment evidence');
+        }
+        if (event.result?.outcome === 'partial' && !job.environmentAccess && (job.taskIntent !== 'analysis'
           || event.result.sourceSyncBlocked || event.result.handoffGate?.passed !== true
           || !event.result.verifiedArtifacts?.length || !event.result.handoff?.risks?.length
           || !event.result.sourceSync?.repositories?.length)) throw new Error('Invalid partial analysis evidence');

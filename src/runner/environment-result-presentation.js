@@ -14,7 +14,7 @@ export function presentEnvironmentResult(plan, result) {
     : `${i + 1}. ${Object.entries(row).slice(0, 4).map(([k,v]) => `${cell(k)}：${cell(v)}`).join('；')}`;
   const preview = unique.slice(0, 2).map(line).join('\n\n');
   const note = plan.kind === 'mysql' ? (result.note ?? '') : (result.note ?? '以上来自配置读取，未验证数据库连接。');
-  const summary = [heading, preview, unique.length > 2 ? `另有 ${unique.length - 2} 条，展开详情查看。` : '', note].filter(Boolean).join('\n');
+  const summary = [heading, result.partial ? publicText(result.summary ?? '').slice(0, 600) : '', preview, unique.length > 2 ? `另有 ${unique.length - 2} 条，展开详情查看。` : '', note].filter(Boolean).join('\n');
   const details = rows.map((row,i) => `记录 ${i+1}\n${Object.entries(row).map(([k,v]) => `${cell(k)}：${cell(v)}`).join('\n')}`).join('\n\n');
   const metadata = `${plan.tier.toUpperCase()} · ${plan.description}：返回 ${unique.length} 条去重结果${result.truncated ? '（结果受限，非全部数据）' : ''}。读取时间：${result.evidence.readAt}。${note}`;
   return { summary, details, metadata };

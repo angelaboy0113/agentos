@@ -1,3 +1,4 @@
+import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { createNacosBrowser } from './environment-browser.js';
 import { boundedFetch, assertReadOnlyGrants } from './environment-connector.js';
 import { databaseEndpoints } from './config-endpoints.js';
@@ -84,7 +85,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
       })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, q.timeoutMs); })]);
-    } catch { throw new Error('环境工具未完成；请核对连接、凭据、范围或输入。未执行写入，未暴露远端错误。'); }
+    } catch (error) { throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
   return { spec, run, close: async () => { active = false; token = null; await browser?.close(); if (conn) { try { await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
