@@ -1,3 +1,4 @@
+import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
 import { loadEnvironments, catalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
@@ -279,6 +280,7 @@ export class ConversationService {
     delete memory.suppressedRefs;
     return fitContext({
       memory, nativeSession: shared, requestId: turn.id, questionId: turn.questionId ?? null,
+      environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
       environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
@@ -304,7 +306,20 @@ export class ConversationService {
     const attachmentIds = new Set(decision.attachmentIds);
     const attachments = (turn.attachmentPool ?? []).filter((item) => attachmentIds.has(item.id));
     if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');
-    if (decision.action === 'request_environment_setup') return requestEnrollment(this.context, turn);
+    if (decision.action === 'request_environment_setup') {
+      if (decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url) {
+        const candidates = connectionCandidates(await store.read(), turn, projectId).filter(e=>e.tier===decision.environmentSetup.tier);
+        if (candidates.length === 1) decision.environmentSetup.url = candidates[0].url;
+        else if (candidates.length > 1) return { notice: '发现多个数据库入口，请选择目标库名：' + candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') + '。无需提供密码。' };
+        else {
+          const sources = catalog(await loadEnvironments(), projectId).filter(e=>e.kind==='nacos' && e.tier===decision.environmentSetup.tier && e.queries.some(q=>q.queryId==='investigate'));
+          if (sources.length !== 1) return { notice: '需要先确定用于发现数据库地址的 Nacos 入口；请指出环境或目标配置，不需要手动复制数据库地址。' };
+          decision.action = 'create_task'; decision.intent = 'analysis';
+          decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:['查找公共数据库配置并解析主机、端口和库名，用于后续本机只读账号接入。不要连接数据库。']};
+        }
+      }
+      if (decision.action === 'request_environment_setup') return requestEnrollment(this.context, turn);
+    }
     if (decision.action === 'approve_environment_setup') return approveEnrollment(this.context, turn);
     if (decision.action === 'reply') return {};
     if (decision.action === 'bind_project') {
@@ -335,12 +350,14 @@ export class ConversationService {
       if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
         throw new Error('代码分析协作需要配置开发和项目负责人两个机器人 profile；本次未创建任务。');
       }
+      await store.transact(s => { const t = s.conversations.find(x=>x.id===turn.id); if(t) t.decision=structuredClone(decision); });
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
         originChatType: turn.chatType, questionId: turn.questionId, environmentAccess,
+        connectionEnrollmentPending: decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url,
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
-        sourceMessageId: turn.id, replyToMessageId: turn.messageId,
+        sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, attachments,
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
@@ -369,7 +386,7 @@ export class ConversationService {
         throw new Error('只有真人管理员可以补充并继续非只读任务；普通成员只能继续自己的只读源码排查。');
       }
       const resumed = await store.resumeClarification(job.id, {
-        instruction: decision.instruction, sourceMessageId: turn.id, replyToMessageId: turn.messageId,
+        instruction: decision.instruction, sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         senderId: turn.senderId, attachments,
       }, turn.id);
       return { jobId: job.id, notice: `${resumed.id} 已收到补充，将重新执行当前阶段。` };

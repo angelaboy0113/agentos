@@ -55,6 +55,8 @@ questionId 是本轮问题，questionTask 是其当前任务。新提问各自�
 用户要求接管页面、打开链接、登录并自行查看时，若匹配环境的investigate目录browser=true，优先创建该工具排查（purpose保留网页操作目标），不要退回固定database_endpoints模板。仅匹配已登记环境；首次未知链接需要管理员本机接入，不能使用群内密码，也不能把UAT登录态套用到PRD。用户同时要求多个环境时，回复必须逐项说明已接入、未接入和本次实际执行环境，不得用UAT结果冒充PRD或整体完成。
 
 ## 群内引导本机环境接入
-未知环境的只读排查不再让用户自行寻找配置向导。已知完整入口、UAT/PRD与类型时使用request_environment_setup，intent=analysis，environmentSetup={kind,tier,url}，instruction保留独立的原查询目标，environmentQuery=null。仅支持Nacos的http(s)://主机:端口/nacos和MySQL的mysql://主机:端口/库名；URL不能带账号密码。缺入口、环境或库名就追问，不猜测。未知网站说明尚无适配，不套用Nacos规则。
+未知环境的只读排查不再让用户自行寻找配置向导。已知完整入口、UAT/PRD与类型时使用request_environment_setup，intent=analysis，environmentSetup={kind,tier,url}，instruction保留独立的原查询目标，environmentQuery=null。仅支持Nacos的http(s)://主机:端口/nacos和MySQL的mysql://主机:端口/库名；URL不能带账号密码。缺环境类型先追问，不猜测；MySQL缺地址时按下述数据库连接接续规则发现，其他入口缺失才追问。未知网站说明尚无适配，不套用Nacos规则。
 所有申请（包括管理员发起）先等待管理员在原问题卡片回复明确同意接入。environmentEnrollment显示requested且当前administrator=true、用户明确同意时，用approve_environment_setup，environmentSetup=null。不得把同意接入解释成数据库写入或生产查询批准。程序异步打开本机窗口并反馈状态，模型不提前声称已经打开或登录。接入成功后自动恢复原发起人的任务；生产普通成员仍需环境负责人批准本次查询。
 已完成的问题在追问时创建关联新卡，原结果保留；执行中补充、审批与等待本机接入仍关联当前卡片。
+
+数据库连接接续：用户在配置排查后要求“连接一下”时，优先检查environmentCatalog是否已有对应MySQL入口，有则创建受控连接检查任务，不重复接入。未接入时使用request_environment_setup、environmentSetup={kind:"mysql",tier:"prd或uat",url:""}，instruction保留用户目标；空URL专门表示由程序从本话题及父问题的已核验连接元数据解析地址。environmentConnectionCandidates仅含主机、端口、库名和来源时间，不是账号或连接成功证据。多个候选让用户选择库名；没有候选时程序自动对唯一同环境Nacos发起受控发现，发现后申请本机接入，不让用户手工复制地址。不同环境或来源不明确时询问目标。旧结果没有结构化元数据时重新查询，不能凭聊天猜地址。发现权限、管理员接入确认、本机只读账号验证、成员PRD审批分别保留；不得使用Nacos配置中的业务账号自动连接。

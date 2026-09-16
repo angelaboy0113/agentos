@@ -146,6 +146,7 @@ test("successful local setup resumes original member once and retains PRD query 
   await pollEnrollments(context, async () => cfg);
   assert.equal(turn.senderId, "ou_member");
   assert.equal(turn.status, "decided");
+  assert.ok(turn.environmentResumeKey);
   assert.equal(turn.decision.action, "create_task");
   const plan = planQuery(cfg, turn.decision.environmentQuery, "demo", turn);
   assert.equal(plan.approvalRequired, true);
@@ -175,4 +176,15 @@ test('exact approval-card reply takes priority over newer cards sharing a topic 
  const state={questions:{first:{id:'first',messageId:'root',threadRootId:'root',chatId:'g',profile:'owner',projectId:'p',senderId:'ou_member',latestTurnId:'one',generation:1},second:{id:'second',messageId:'follow',threadRootId:'root',chatId:'g',profile:'owner',projectId:'p',senderId:'ou_member',latestTurnId:'two',generation:1}},conversations:[{id:'one',status:'sent'},{id:'two',status:'sent'}],jobs:[{id:'j1',questionId:'first',status:'awaiting_environment_approval'},{id:'j2',questionId:'second',status:'running'}],cardMessages:{'question:first':{messageId:'card1'},'question:second':{messageId:'card2'}}};
  const turn={id:'approve',chatId:'g',profile:'owner',projectId:'p',senderId:'ou_admin',content:'同意',messageId:'new'};
  attachQuestion(state,turn,{reply_to:'card1',root_id:'root'},{ownerOpenIdsByProfile:{owner:['ou_admin']}});assert.equal(turn.questionId,'first');
+});
+
+test('database discovery continues once into enrollment without opening a window or borrowing authority', async t=>{
+ const {context,state,turn}=await fixture(t);
+ turn.decision={...turn.decision,action:'create_task',environmentSetup:{kind:'mysql',tier:'prd',url:''}};
+ const evidence={scopeHash:'scope',readAt:new Date().toISOString()};
+ state.jobs.push({id:'discovery',sourceMessageId:turn.id,questionId:'q',chatId:'group',projectId:'demo',originProfile:'owner',status:'completed',updatedAt:new Date().toISOString(),environmentAccess:{tier:'prd',startedAt:new Date().toISOString(),scopeHash:'scope'},result:{outcome:'partial',environmentEvidence:evidence,connectionEndpoints:[{host:'db.example.test',port:3306,database:'app',password:'never-copy'}]}});
+ await pollEnrollments(context);
+ const requests=Object.values(state.environmentEnrollments);assert.equal(requests.length,1);assert.equal(requests[0].url,'mysql://db.example.test:3306/app');assert.equal(requests[0].senderId,'ou_member');assert.equal(requests[0].status,'requested');
+ assert.equal(state.jobs[0].connectionEnrollmentHandled,true);assert.match(turn.response,/管理员/);assert.doesNotMatch(JSON.stringify(requests),/never-copy/);
+ await pollEnrollments(context);assert.equal(Object.keys(state.environmentEnrollments).length,1);
 });

@@ -1,3 +1,4 @@
+import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { loadEnvironments } from "../shared/environment-access.js";
 import { mkdir, writeFile, readFile, chmod } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -152,7 +153,24 @@ export async function launchEnrollment(context, e) {
   });
 }
 export async function pollEnrollments(context, load = loadEnvironments) {
-  const state = await context.store.read();
+  let state = await context.store.read();
+  // Resume metadata discovery without borrowing another user's PRD authority.
+  for (const job of state.jobs ?? []) {
+    const turn = state.conversations.find(t=>t.id===job.sourceMessageId);
+    if (!turn || job.connectionEnrollmentHandled || job.status!=='completed' || !job.environmentAccess
+      || turn.decision?.environmentSetup?.kind!=='mysql' || turn.decision.environmentSetup.url
+      || turn.decision.action!=='create_task') continue;
+    const candidates=connectionCandidates(state,turn,job.projectId).filter(e=>e.tier===turn.decision.environmentSetup.tier);
+    let outcome;
+    if(candidates.length===1) outcome=await requestEnrollment(context,{...turn,decision:{...turn.decision,environmentSetup:{...turn.decision.environmentSetup,url:candidates[0].url}}});
+    else outcome={notice:candidates.length ? '发现多个数据库入口，请选择目标库名：'+candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') : '尚未取得完整数据库地址；请补充目标配置或命名空间，已有查询结果保留，未尝试数据库登录。'};
+    await context.store.transact(s=>{
+      const j=s.jobs.find(x=>x.id===job.id),t=s.conversations.find(x=>x.id===turn.id),q=s.questions?.[turn.questionId];
+      j.connectionEnrollmentHandled=true;
+      if(q?.latestTurnId===turn.id) {t.outcome=outcome;t.response=outcome.notice;t.status='ready';t.sentParts=0;q.generation++;}
+    });
+  }
+  state = await context.store.read();
   for (const e of Object.values(state.environmentEnrollments ?? {})) {
     if (!["requested", "opening", "login_required"].includes(e.status))
       continue;
@@ -222,6 +240,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
           },
           requiresSourceInspection: false,
         };
+        original.environmentResumeKey = e.id;
         original.status = "decided";
         original.outcome = null;
         original.retryAt = null;

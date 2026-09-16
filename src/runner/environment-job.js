@@ -1,3 +1,4 @@
+import { connectionEndpoints } from '../shared/connection-endpoints.js';
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { presentEnvironmentResult } from './environment-result-presentation.js';
 import { investigateEnvironment } from './environment-investigator.js';
@@ -33,5 +34,5 @@ export async function executeEnvironmentJob(job, config, emit) {
   finally { await engine.close(); }
   const scopeDetails = publicText(`查询范围与授权\n环境：${plan.environmentId} (${plan.tier}) · 模板：${plan.queryId}\n参数：${JSON.stringify(plan.parameters)}\n最多 ${plan.maxRows} 条 · 超时 ${plan.timeoutMs} ms\n授权截止：${plan.expiresAt}\n仅本次只读查询，不授权修改。`);
   return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, presented.details, result.summary, explanation, (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
-    environmentEvidence: result.evidence, memorySafeSummary: safeSummary, verification: [] };
+    connectionEndpoints: connectionEndpoints(result.rows), environmentEvidence: result.evidence, memorySafeSummary: safeSummary, verification: [] };
 }

@@ -11,6 +11,7 @@ export function conversationTerminalMention(turn) {
 }
 
 export function jobTerminalMention(job, projects = {}) {
+  if(job.connectionEnrollmentPending && !job.connectionEnrollmentHandled && job.status === 'completed') return null;
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
   if (job.status === 'awaiting_environment_approval') {
     const ids = job.environmentAccess?.approvalOwnerIds ?? [];

@@ -58,6 +58,7 @@ export class JsonStore {
       const job = {
         id: createId('JOB'),
         ...(input.questionId ? { questionId: input.questionId } : {}),
+        ...(input.connectionEnrollmentPending ? {connectionEnrollmentPending:true} : {}),
         ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
         missionId: input.missionId ?? createId('MISSION'),
         projectId: input.projectId,

@@ -138,3 +138,11 @@ MySQL 删除 `browser`（仅 Nacos 支持），将 `namespaces` 换为 `tables: 
 失败卡片显示固定错误码、失败环节、脱敏原因和操作建议。RESULT_CONTRACT 表示 AgentOS 结果协议拒绝；AUTH_REQUIRED、READ_PERMISSION、TIMEOUT、NETWORK、SCOPE_LIMIT、PAGE_REFERENCE、HTTP_RESPONSE 分别帮助定位登录、权限、等待、网络、范围、页面引用与接口响应。无法分类时显示 EXECUTION_ERROR 并请维护者按任务编号检查本机日志，不猜测原因。错误分类只是诊断线索，不替代真实连接验证。
 
 实现入口：src/shared/failure-diagnostic.js、src/shared/store.js、src/runner/environment-job.js 和 src/control-plane/message-cards.js。外部异常只用于匹配已审核类别，不直接复制到卡片；密码、令牌和原始响应不展示。无需新增配置，更新运行实例后对新任务生效；旧卡片不自动重发。
+
+## 从配置结果接续数据库接入
+
+在配置排查后回复“连接一下”：已登记MySQL时选择其受控工具；未登记时负责人申请MySQL接入，environmentSetup的url可为空，表示由程序解析已有连接元数据，而非凭空生成地址。Runner只保存结构化host/port/database和证据来源，不保存配置账号密码。候选仅来自同群、同项目、同profile、当前问题及父问题链、24小时内完成且证据范围匹配的任务；原始查询明细仍不进入共享记忆。
+
+唯一候选自动预填；多个候选提示选择库名。没有候选（包括旧版本结果）时，程序从唯一同环境Nacos的investigate入口创建受控发现任务，沿用原发起人的审批身份。发现完成后持久化、幂等地生成接入申请；没有完整地址或仍有多个候选则解释缺口或提示选择。不会跨环境猜测，也不会使用Nacos业务数据库账号自动连接。
+
+流程：用户要求连接 → 复用连接元数据或受控发现 → 管理员确认具体数据库入口 → Mac本机录入只读账号及表范围 → MySQL连接和只读授权核验 → 保存配置并按原身份继续。管理员接入确认、成员PRD查询审批继续分开。首次本机账号录入仍需真人；不要求在聊天里复制地址或密码。运行实例更新后生效；旧任务不自动重跑。现有接入流程图的确认、本机认证、验证、原身份续跑节点不变，本节补充其地址来源和接续规则。
