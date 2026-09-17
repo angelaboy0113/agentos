@@ -51,6 +51,12 @@ export function runLarkCli(args, options = {}) {
   });
 }
 
+// Preserve existing valid keys; hash longer business effect IDs deterministically.
+export function larkIdempotencyKey(value) {
+  if (typeof value !== 'string' || value.length <= 50) return value;
+  return `agentos-${createHash('sha256').update(value).digest('hex').slice(0, 40)}`;
+}
+
 export class LarkCliFeishuClient {
   constructor(config = {}) {
     this.cliEntry = config.cliEntry;
@@ -63,7 +69,7 @@ export class LarkCliFeishuClient {
     return runLarkCli([
       'im', '+messages-reply', '--as', 'bot', '--message-id', messageId,
       ...(options.replyInThread ? ['--reply-in-thread'] : []),
-      '--text', text, '--idempotency-key', options.idempotencyKey ?? `agentos-${digest}`, '--json',
+      '--text', text, '--idempotency-key', larkIdempotencyKey(options.idempotencyKey ?? `agentos-${digest}`), '--json',
     ], { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile, timeoutMs: options.timeoutMs });
   }
 
@@ -80,14 +86,14 @@ export class LarkCliFeishuClient {
     await mkdir(this.cwd, { recursive: true });
     return runLarkCli(['im', '+messages-reply', '--as', 'bot', '--message-id', messageId,
       ...(options.replyInThread ? ['--reply-in-thread'] : []),
-      '--msg-type', 'interactive', '--content', JSON.stringify(card), '--idempotency-key', options.idempotencyKey, '--json'],
+      '--msg-type', 'interactive', '--content', JSON.stringify(card), '--idempotency-key', larkIdempotencyKey(options.idempotencyKey), '--json'],
     { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile, timeoutMs: 15_000 });
   }
 
   async sendCard(chatId, card, options = {}) {
     await mkdir(this.cwd, { recursive: true });
     return runLarkCli(['im', '+messages-send', '--as', 'bot', '--chat-id', chatId,
-      '--msg-type', 'interactive', '--content', JSON.stringify(card), '--idempotency-key', options.idempotencyKey, '--json'],
+      '--msg-type', 'interactive', '--content', JSON.stringify(card), '--idempotency-key', larkIdempotencyKey(options.idempotencyKey), '--json'],
     { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile, timeoutMs: 15_000 });
   }
 

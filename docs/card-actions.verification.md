@@ -22,3 +22,11 @@
 ## 独立问题（未扩大本次范围）
 
 截图任务 JOB-20260905111232-f0631f 要求补充的原因是实际工作树只有根规范仓，未带入 21 个业务子仓。并非目标描述不清晰，也不是卡片故障；本次没有修改工作区挂载策略。
+
+## Callback queue and CLI reply limits
+
+The CLI message idempotency key has a 50-character limit. AgentOS preserves valid existing keys and deterministically hashes longer business effect IDs into 48-character keys for text and card replies/sends. Retries retain the same identity.
+
+A callback transport failure persists its event and schedules a later retry instead of waiting indefinitely in the profile's event queue. Other buttons continue processing. Restart replays pending records; shutdown clears retry timers. Authorization, published card version, environment scope and effect deduplication remain enforced. One HTTP attempt can still take up to 10 seconds; this is not a zero-latency guarantee.
+
+Regression coverage: an old refresh fails while a later approval is delivered, retry uses the same event ID, disk record remains until delivery, shutdown cancels timers, and long notice keys work through the actual CLI adapter. Real Feishu button acceptance must be verified with an authorized user's click; automated tests do not establish console callback configuration or network availability.

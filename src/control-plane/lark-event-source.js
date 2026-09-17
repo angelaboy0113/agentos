@@ -13,6 +13,7 @@ export class LarkEventSource {
     this.child = null;
     this.pendingEvents = Promise.resolve();
     this.retryDelayMs = 3000;
+    this.callbackRetries = new Map();
   }
 
   async start() {
@@ -38,6 +39,8 @@ export class LarkEventSource {
     this.stopped = true;
     this.child?.stdin.end();
     this.editedWatcher?.stop();
+    for (const timer of this.callbackRetries.values()) clearTimeout(timer);
+    this.callbackRetries.clear();
   }
 
   get logPrefix() {
@@ -124,18 +127,26 @@ export class LarkEventSource {
   async deliverCallback(file) {
     let payload;
     try { payload = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
-    while (!this.stopped) {
-      try {
-        const response = await fetch(`${this.config.serverUrl}/api/v1/events/card-action`, {
-          method: 'POST', signal: AbortSignal.timeout(10_000),
-          headers: { authorization: `Bearer ${this.config.adminToken}`, 'content-type': 'application/json' }, body: payload,
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        await unlink(file).catch(() => {});
-        return;
-      } catch {
-        console.warn(this.logPrefix, '卡片回调尚未送达，保留记录并重试');
-        await delay(3000);
+    if (this.stopped) return;
+    try {
+      const response = await fetch(`${this.config.serverUrl}/api/v1/events/card-action`, {
+        method: 'POST', signal: AbortSignal.timeout(10_000),
+        headers: { authorization: `Bearer ${this.config.adminToken}`, 'content-type': 'application/json' }, body: payload,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await unlink(file).catch(() => {});
+      clearTimeout(this.callbackRetries.get(file));
+      this.callbackRetries.delete(file);
+    } catch {
+      console.warn(this.logPrefix, '卡片回调尚未送达，保留记录并稍后重试；继续处理其他按钮');
+      if (!this.stopped && !this.callbackRetries.has(file)) {
+        const timer = setTimeout(() => {
+          this.callbackRetries.delete(file);
+          this.pendingEvents = this.pendingEvents.then(() => this.deliverCallback(file))
+            .catch(() => console.error(this.logPrefix, '卡片回调重试失败，已保留本地记录'));
+        }, this.config.callbackRetryMs ?? 3000);
+        timer.unref?.();
+        this.callbackRetries.set(file, timer);
       }
     }
   }
