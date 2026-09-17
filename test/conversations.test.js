@@ -330,3 +330,11 @@ test('source environment is selected from local catalog, missing/unknown environ
   assert.equal(evidence.applicability,'historical_snapshot_not_current_check');
   assert.equal(evidence.sourceEnvironment,'uat');
 });
+
+test('late mention edit accepts previously ignored message exactly once', async t => {
+ const {send,app,inputs}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'只读查系统逻辑'}));
+ await send(message('edited-source','initial question',{mentions:[]}));assert.equal(inputs.length,0);
+ await send(message('edited-source','updated @owner question',{edited_mention:true}));
+ await send(message('edited-source','another edit',{edited_mention:true}));
+ assert.equal(inputs.length,1);assert.equal((await app.store.read()).jobs.length,1);
+});

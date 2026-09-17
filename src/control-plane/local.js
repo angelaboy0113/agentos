@@ -1,3 +1,4 @@
+import { loadConversationSettings } from './conversation-settings.js';
 import { randomBytes } from 'node:crypto';
 import { createControlPlane } from './server.js';
 import { startLarkEventSources } from './lark-event-source.js';
@@ -18,6 +19,8 @@ async function main() {
     serverUrl: `http://${config.host}:${config.port}`,
     adminToken: config.adminToken,
     dataDir: config.dataDir,
+    editedMentions: (await loadConversationSettings(config.conversationFile)).editedMentions,
+    watchedChatIds: Object.keys(projects.chatProjectMap ?? {}).filter(id=>!projects.retiredChatIds?.includes(id)),
     cliEntry: config.feishu.cliEntry,
   }, agents.agents);
   const localRunner = new AgentRunner(await runnerConfig({

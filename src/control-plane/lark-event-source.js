@@ -1,3 +1,4 @@
+import { EditedMentionWatcher } from './edited-mentions.js';
 import { copyFile, mkdir, readdir, stat, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
@@ -36,6 +37,7 @@ export class LarkEventSource {
   stop() {
     this.stopped = true;
     this.child?.stdin.end();
+    this.editedWatcher?.stop();
   }
 
   get logPrefix() {
@@ -171,6 +173,10 @@ export async function startLarkEventSource(config) {
   const source = new LarkEventSource({ ...config, cwd, configDir });
   console.log(`[lark-event] starting ${config.role ?? 'default'} via profile ${config.profile ?? 'default'} in ${configDir}`);
   const running = source.start();
+  if(config.eventKey!=='card.action.trigger' && config.editedMentions?.enabled && config.editedMentions.profiles.includes(config.profile) && config.botOpenId) {
+    source.editedWatcher=new EditedMentionWatcher(source,config.watchedChatIds ?? [],config.editedMentions);
+    source.editedWatcher.start();
+  }
   return { source, running };
 }
 

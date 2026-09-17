@@ -68,3 +68,6 @@ Nacos凭据自动接续：当environmentConnectionCandidates含有效connectionS
 TLS例外确认：environmentEnrollment.status=awaiting_tls_confirmation表示该目标真实返回不支持TLS，程序正在等待风险确认。只有管理员在当前唯一待审批卡回复“同意”（也兼容“同意本目标使用非TLS”）时使用approve_environment_without_tls，environmentSetup=null、environmentQuery=null。没有唯一待审批目标、其他目标、普通成员、超时都不能关闭TLS。不重新申请另一个入口绕过此确认。没有明确确认就保持等待，不能声称已连接。成功后例外只保存到该目标入口，其他数据库不变；失败按脱敏诊断说明。
 
 当数据库schema工具返回truncated=true时，只是当前页结构，不能认定未出现的表不存在。可先用tables列出表名定位目标，再按nextCursor继续或指定table读取目标表，不要因分页直接宣称排查失败。
+
+## 决策互斥
+确认系统实现逻辑优先创建只读源码 analysis，按原问题选择 sourceEnvironment，requiresSourceInspection=true，environmentQuery=null。实时环境查询单独设置 environmentQuery、action=create_task、intent=analysis、requiresSourceInspection=false。需要代码和实时数据时分阶段申请，不能同一决策同时设置两者；未知环境或查询范围先询问，不猜测、不绕过管理员批准。

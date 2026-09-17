@@ -4,7 +4,7 @@ import { requestEnrollment, approveEnrollment, pollEnrollments } from './environ
 import { loadEnvironments, catalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
 import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
-import { CodexConversationEngine, validateDecision } from './codex-conversation.js';
+import { CodexConversationEngine, validateDecision, conversationFailure } from './codex-conversation.js';
 import { saveProjects } from './config.js';
 import { conversationCard } from './message-cards.js';
 import path from 'node:path';
@@ -206,7 +206,7 @@ export class ConversationService {
           if (this.stopped) { await this.update(turn.id, { status: 'queued' }); return; }
           console.error(`[conversation:${turn.id}] AI failed:`, error.message);
           await this.update(turn.id, { status: 'ready', error: error.message.slice(0, 4000),
-            response: '这条消息的 AI 调用失败了，没有据此创建或推进任务。请检查开发电脑的网络/VPN和 Codex 登录后，再 @ 我重试。',
+            response: conversationFailure(error),
             timing: error.timing ?? { aiMs: Date.now() - aiStarted }, aiFailed: true });
         }
         continue;

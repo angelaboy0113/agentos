@@ -1,4 +1,12 @@
 {
   "groupSessions": true,
-  "questionCards": true
+  "questionCards": true,
+  "editedMentions": {
+    "enabled": false,
+    "profiles": [
+      "agentos-owner"
+    ],
+    "intervalMs": 30000,
+    "lookbackMinutes": 60
+  }
 }

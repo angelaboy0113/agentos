@@ -73,7 +73,7 @@ export class CodexConversationEngine {
     const preparedMs = Date.now() - began;
     session.active = true;
     try {
-      const result = await this.app.turn({
+      const result = await decisionTurn(this.app, {
         threadId: session.id, effort: 'low', approvalPolicy: 'never',
         input: [{ type: 'text', text: `本轮最新上下文（状态以此为准，历史里的操作不可重复执行）：\n${JSON.stringify(input)}` },
           ...(input.attachments ?? []).filter((item) => item.type === 'image').slice(-5).map((item) => ({ type: 'localImage', path: item.path }))],
@@ -106,7 +106,7 @@ export class CodexConversationEngine {
         if (idle) this.releaseSession(...idle);
       }
       const params = { cwd: this.cwd, sandbox: 'read-only', approvalPolicy: 'never',
-        developerInstructions: `${this.rules}\n${role}\n这是群聊共享会话。每条消息的当前发起人和administrator以本轮输入为准；历史授权不能转授。不同问题分别处理，耗时任务交给Runner，聊天不执行工具。` };
+        developerInstructions: `${this.rules}\n${role}\n这是当前问题的独立会话。每条消息的当前发起人和administrator以本轮输入为准；历史授权不能转授。不同问题分别处理，耗时任务交给Runner，聊天不执行工具。` };
       // Only confirmed missing sessions may start fresh; auth/transport errors must not fork silently.
       let thread;
       if (compatible) {
@@ -121,7 +121,7 @@ export class CodexConversationEngine {
     try {
       await this.registry.set(key, baseline);
       const payload = { ...input, history: resumed ? [] : input.history };
-      const result = await this.app.turn({ threadId: session.id, effort: 'low', approvalPolicy: 'never',
+      const result = await decisionTurn(this.app, { threadId: session.id, effort: 'low', approvalPolicy: 'never',
         input: [{ type: 'text', text: `当前真实发起人、权限、问题与任务状态：\n${JSON.stringify(payload)}` },
           ...(input.attachments ?? []).filter((item) => item.type === 'image').slice(-5).map((item) => ({ type: 'localImage', path: item.path }))],
         outputSchema: this.schema }, { signal: options.signal, timeoutMs: this.options.timeoutMs ?? 90_000, onEvent: options.onEvent });
@@ -153,7 +153,29 @@ export async function decideWithCodex(input, options = {}) {
   try { return await engine.decide(input, options); } finally { await engine.close(); }
 }
 
+export class DecisionProtocolError extends Error { constructor(message) { super(message); this.code = 'DECISION_PROTOCOL'; } }
+export async function decisionTurn(app, params, options) {
+  let result = await app.turn(params, options);
+  for (let attempt = 0; ; attempt++) {
+    try { validateDecision(JSON.parse(result.text)); return { ...result, timing: { ...result.timing, decisionRepairs: attempt } }; }
+    catch (error) {
+      if (!(error instanceof DecisionProtocolError) && !(error instanceof SyntaxError)) throw error;
+      if (attempt === 1) throw new DecisionProtocolError('AI返回的任务决策仍不符合协议，尚未创建或推进任务');
+      result = await app.turn({ ...params, input: [{ type:'text', text:
+        '上一轮决策字段不兼容，请修正并重新返回完整JSON。源码检查与environmentQuery不能同时请求；确认业务实现逻辑应先创建analysis源码任务并选择原问题的sourceEnvironment，environmentQuery=null。需要实时环境数据时单独请求已配置范围，requiresSourceInspection=false。只修正决策，不执行工具、不扩大原意或权限；不确定先回复询问。所有管理员和环境审批仍由程序验证。' }] }, options);
+    }
+  }
+}
+export function conversationFailure(error) {
+  if (error?.code === 'DECISION_PROTOCOL') return 'AI返回的任务安排有冲突，自动修正后仍未通过校验。本次没有创建或推进任务；这不是网络或登录错误，请维护者检查决策协议。';
+  if (/timeout|timed out|超时/i.test(String(error?.message))) return '等待AI响应超时，本次没有创建或推进任务，请稍后重新 @ 发起。';
+  return 'AI 调用失败，本次没有创建或推进任务。请维护者检查本机诊断记录，确认具体原因后重试；尚不能判断是网络还是登录问题。';
+}
 export function validateDecision(value) {
+  try { return validateDecisionValue(value); }
+  catch (error) { throw new DecisionProtocolError(error.message); }
+}
+function validateDecisionValue(value) {
   const actions = ['reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];
   const intents = ['none', 'implementation', 'planning', 'analysis', 'verification', 'audit'];
   if (!value || !actions.includes(value.action) || !intents.includes(value.intent)) throw new Error('Unknown action or intent');
