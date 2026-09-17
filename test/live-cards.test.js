@@ -163,7 +163,7 @@ test('terminal job card mentions the original requester through the origin profi
   assert.equal(mentions.length, 1);
   assert.equal(mentions[0].id, 'om_origin');
   assert.equal(mentions[0].options.profile, 'owner');
-  assert.equal(mentions[0].text, '<at user_id="ou_requester1"></at> 任务已结束，请查看上方结果。');
+  assert.equal(mentions[0].text, '<at user_id="ou_requester1"></at> 本次排查受阻，请查看上方原因和下一步。');
   assert.equal(calls.find((call) => call.type === 'send').options.profile, 'dev');
 });
 

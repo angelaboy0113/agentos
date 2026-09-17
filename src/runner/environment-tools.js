@@ -116,5 +116,5 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     } catch (error) { if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
-  return { spec, run, close: async () => { active = false; token = null; await browser?.close(); if (conn) { try { await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
+  return { spec, run, close: async ({ abort = false } = {}) => { active = false; token = null; await browser?.close(); if (conn) { try { if (!abort) await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
 }

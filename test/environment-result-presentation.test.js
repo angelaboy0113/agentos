@@ -27,9 +27,19 @@ test('completed query puts answers first while approval still exposes full scope
 
 test('environment results separate key data and pending evidence into readable blocks',()=>{
  const p=presentEnvironmentResult({...plan,kind:'mysql'},{rows:[{activity_code:'EP-example',amount:'10',status:32}],partial:true,summary:'主单已找到；关联明细仍待核实。',evidence:{readAt:'2026-09-16'}});
- assert.match(p.summary,/关键数据\n/);assert.match(p.summary,/\n\n待核实\n/);assert.match(p.summary,/activity_code：EP-example\namount：10/);
+ assert.match(p.summary,/本次发现/);assert.match(p.summary,/主单已找到/);assert.doesNotMatch(p.summary,/activity_code|status：32/);assert.match(p.details,/activity_code：EP-example/);
 });
 test('narrow-card summaries split numbered prose without changing amounts or claims',async()=>{
  const {summaryParagraphs}=await import('../src/control-plane/result-presentation.js');
  assert.deepEqual(summaryParagraphs('只读结果：1）连接成功。 2）金额1422.0100。 3）明细未确认。'),['只读结果：1）连接成功。','2） 金额1422.0100。','3） 明细未确认。']);
+});
+
+ test('timeout front explains interruption rather than exposing raw rows or claiming root cause',()=>{
+ const p=presentEnvironmentResult({...plan,kind:'mysql'},{partial:true,rows:[{id:123,doc_number:'DOC-1',s_ord_item:50}],summary:'错误码：TIMEOUT\n失败环节：数据库只读查询',evidence:{readAt:'today'}},'已有业务解释');
+ const visible=conciseSummary(p.summary);
+ assert.match(visible,/排查尚未完成/);assert.match(visible,/不能作为用户所报问题的原因/);assert.match(visible,/下一步/);assert.doesNotMatch(visible,/doc_number|DOC-1|s_ord_item|TIMEOUT/);assert.match(p.details,/DOC-1/);
+});
+test('business explanation is visible before evidence without turning rows into document totals',()=>{
+ const p=presentEnvironmentResult({...plan,kind:'mysql'},{rows:[{id:1}],summary:'raw finding',evidence:{readAt:'today'}},'已确认：报表筛选范围内未查到记录。尚未确认：页面报错原因。下一步：核对应用日志。');
+ assert.match(p.summary,/报表筛选范围内未查到记录/);assert.doesNotMatch(p.summary,/id：1|raw finding/);
 });

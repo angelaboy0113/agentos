@@ -85,3 +85,11 @@
 源码检查与实时环境查询必须分阶段。模型同时设置 `requiresSourceInspection` 和 `environmentQuery` 等冲突字段时，同一只读会话最多追加一次修正，不先创建Job、不放宽权限；修正失败报告决策协议错误。传输/认证异常不当成协议错误重试，也不统一归咎VPN。已创建任务、卡片审批与环境范围核验保持原样。
 
 ![编辑补@与决策修正](images/agentos-edited-mentions.png)
+
+### Business-readable investigation results
+
+Environment result cards put the business explanation before query records. The summary explains confirmed findings, unresolved questions and next steps; raw database rows remain in details as evidence, with separate bullet lines for fields. Connection-address requests still show host, port and database directly. Returned row counts must not be described as total business document counts without an aggregate query.
+
+If an investigation stops with a timeout after collecting evidence, the first screen says the investigation is incomplete and distinguishes its timeout from the user's reported error. It recommends continuing from the interrupted query without claiming that a retry has happened. Partial/blocked task notifications no longer say the investigation has finished. Existing completed cards are not automatically rewritten or replayed; this presentation applies to newly generated results. All authorization and read-only execution rules remain unchanged.
+
+MySQL investigation SELECT timeouts now close the old connection immediately and return a recoverable error to the planner. It must adjust filters or pursue other evidence; an identical timed-out request is not executed again in the same investigation. Recreated tools repeat account/read-only transaction checks and require schema discovery again. Scope and approval expiry are checked before each operation. There is no fixed total tool-call budget. Three consecutive business-query timeouts without a successful business query, or three attempts to repeat an unchanged timed-out request, pause with evidence and a clear blocker. Connection/login, browser, permission and scope failures are not automatically retried by this policy. Single-operation timeout remains the approved template limit; this release does not silently extend existing grants or raise database execution time. Final synthesis cannot query tools, and its zero remaining calls must not be described as exhausted query quota.

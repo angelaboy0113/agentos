@@ -29,7 +29,10 @@ export function jobTerminalMention(job, projects = {}) {
     return { replyTo, profile: job.originProfile ?? null,
       text: `${ids.map((id) => `<at user_id="${id}"></at>`).join(' ')} 源码同步受阻，请管理员查看上方原因并决定处理方式；未自动解决冲突。` };
   }
-  return mention(replyTo, job.originProfile, job.senderId, '任务已结束，请查看上方结果。');
+  const message = job.result?.outcome === 'partial' ? '排查尚未完成，请查看上方已确认内容、缺口和下一步。'
+    : ['blocked', 'failed'].includes(job.status) || job.result?.outcome === 'blocked' ? '本次排查受阻，请查看上方原因和下一步。'
+    : job.status === 'cancelled' ? '任务已取消。' : '任务已结束，请查看上方结果。';
+  return mention(replyTo, job.originProfile, job.senderId, message);
 }
 
 function mention(replyTo, profile, userId, message) {

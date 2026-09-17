@@ -48,3 +48,10 @@ test('successful task actions defer chat mentions to final task outcome, while r
   assert.ok(conversationTerminalMention({ ...turn, outcome: {} }));
   assert.equal(jobTerminalMention({ originChatType: 'group', status: 'completed', nextJobId: 'report' }), null);
 });
+
+test('partial results and failed tasks notify requester without implying investigation completed',()=>{
+ const job={status:'completed',originChatType:'group',originMessageId:'origin',originProfile:'owner',senderId:'ou_abc123',result:{outcome:'partial'}};
+ assert.match(jobTerminalMention(job).text,/排查尚未完成/);
+ assert.doesNotMatch(jobTerminalMention(job).text,/任务已结束/);
+ assert.match(jobTerminalMention({...job,status:'failed',result:{}}).text,/排查受阻/);
+});

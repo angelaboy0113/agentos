@@ -188,3 +188,23 @@ test('first tool timeout remains blocked and preserves safe operation metadata',
  const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['排查']},'demo',{profile:'owner',senderId:'ou_member'});
  await assert.rejects(investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{throw new Error('timeout');},close:async()=>{}}),planner:async()=>({next:async()=>{throw new Error('must not plan');},close:async()=>{}})}),e=>e.diagnosticStage==='connection');
 });
+
+for (const scenario of ['recover','repeat','persistent']) test(`mysql timeout recovery: ${scenario}`,async()=>{
+ const env={...environment,kind:'mysql',host:'fake',port:3306,database:'demo',queries:{investigate:query}};
+ const cfg={version:1,environments:{env}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['查指定记录']},'demo',{profile:'owner',senderId:'ou_member'});
+ let attempts=0,opened=0,abortClosed=0,n=0;const progress=[];
+ const r=await investigateEnvironment(plan,async e=>progress.push(e),{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>{opened++;return{spec:[{tool:'connection'},{tool:'select'}],run:async tool=>{
+ if(tool==='connection')return{stage:'connected'};
+ attempts++;if(scenario==='recover'&&attempts===2)return{table:'orders',rows:[{id:'found'}]};throw new Error('环境工具超时');
+ },close:async opts=>{if(opts?.abort)abortClosed++;}};},
+ planner:async()=>({next:async input=>{
+ if(input.remainingCalls===0)return{tool:'finish',complete:true,summary:'仅已有证据'};
+ if(scenario==='recover'&&attempts===2)return{tool:'finish',complete:true,summary:'已取得缩小范围后的查询结果'};
+ return{tool:'select',arguments:JSON.stringify({filter:scenario==='repeat'?1:++n})};
+ },close:async()=>{}})});
+ if(scenario==='recover'){assert.equal(r.partial,false);assert.equal(attempts,2);assert.equal(opened,2);assert.match(r.summary,/缩小范围/);}
+ if(scenario==='repeat'){assert.equal(attempts,1);assert.equal(r.partial,true);assert.match(r.summary,/未调整已超时查询/);}
+ if(scenario==='persistent'){assert.equal(attempts,3);assert.equal(r.partial,true);assert.match(r.summary,/连续3次业务查询超时/);}
+ assert.ok(abortClosed>=1);assert.ok(progress.some(e=>e.activity?.current.includes('调整条件')));
+});

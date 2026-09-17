@@ -17,13 +17,11 @@ export async function executeEnvironmentJob(job, config, emit) {
   let result;
   try { const cfg = await loadEnvironments(); result = cfg.environments[plan.environmentId]?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit) : await readEnvironment(plan); }
   catch (error) { return { outcome: 'blocked', summary: failureDiagnostic(error), finalMessage: failureDiagnostic(error), verification: [] }; }
-  const presented = presentEnvironmentResult(plan, result);
-  const safeSummary = presented.metadata;
   let explanation = '';
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });
   try {
     const answer = await engine.decide({ role: 'developer', administrator: false, memory: { enabled: true }, history: [], jobs: [], attachments: [],
-      message: '只解释这次受控查询的脱敏结果与缺口，不执行工具、不建立任务、不推断未知事实。',
+      message: '用业务用户能懂的中文直接回答原问题，控制在200字内，分为“已确认”“尚未确认”“下一步”。先说明是否找到原因；记录数量不是业务单据总数，字段值不是根因。超时是本次排查中断，不得当作用户报错的原因。解释关键术语，不罗列原始字段。不执行工具、不建立任务、不推断未知事实、不承诺已重试。',
       queryPurpose: plan.description,
       originalQuestion: String(job.instruction ?? '').slice(0, 4000),
       priorSourceEvidence: (job.context ?? []).filter(x => !x.result?.environmentEvidence).slice(-1).map(x => ({ stage: x.stage,
@@ -32,7 +30,9 @@ export async function executeEnvironmentJob(job, config, emit) {
     if (answer.action === 'reply') explanation = publicText(answer.reply);
   } catch { explanation = '自动解释暂不可用，以下为本次实际查询结果。'; }
   finally { await engine.close(); }
+  const presented = presentEnvironmentResult(plan, result, explanation);
+  const safeSummary = presented.metadata;
   const scopeDetails = publicText(`查询范围与授权\n环境：${plan.environmentId} (${plan.tier}) · 模板：${plan.queryId}\n参数：${JSON.stringify(plan.parameters)}\n最多 ${plan.maxRows} 条 · 超时 ${plan.timeoutMs} ms\n授权截止：${plan.expiresAt}\n仅本次只读查询，不授权修改。`);
-  return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, presented.details, result.summary, explanation, (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
+  return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, explanation ? `业务解释\n${explanation}` : '', result.summary ? `排查记录\n${result.summary}` : '', presented.details, (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
     connectionEndpoints: connectionEndpoints(result.rows), environmentEvidence: result.evidence, memorySafeSummary: safeSummary, verification: [] };
 }

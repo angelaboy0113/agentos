@@ -24,9 +24,10 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
   let cfg = await load(), e = verifyApprovedPlan(cfg, plan), q = e.queries[plan.queryId];
   if (q.mode !== 'investigate') throw new Error('未批准工具排查范围');
   const cred = await (adapters.credential ?? credential)(e.credentialRef);
-  const tools = await (adapters.tools ?? createEnvironmentTools)(e, q, cred);
+  let tools = await (adapters.tools ?? createEnvironmentTools)(e, q, cred);
   let planner; const steps = [], results = []; let summary = '', complete = false, unresolvedInput = false, stalled = 0, stopReason = '';
   const seen = new Set();
+  const timedOutQueries = new Set(); let timeoutStreak = 0, unresolvedTimeout = false;
   try {
     planner = await (adapters.planner ?? createToolPlanner)();
     let diagnosticStage = 'planning';
@@ -45,8 +46,25 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       await emit({ type: 'progress', phase: 'tool_activity', activity: { current: `只读工具：${choice.tool}`, total: i + 1, completed: i, recent: steps.slice(-3).map(text => ({ text })) } });
       diagnosticStage = choice.tool;
       let result;
+      const queryKey = fingerprint(args);
+      if (e.kind === 'mysql' && choice.tool === 'select' && timedOutQueries.has(queryKey)) {
+        results.push({ tool: 'select', error: { code: 'TIMEOUT_REPEAT', message: '此查询已超时，未重复执行。请缩小时间范围、增加单号条件或换用其他证据路径。' }, executed: false });
+        if (++stalled >= 3) { stopReason = '连续3次未调整已超时查询，排查暂停；需要更具体的筛选条件。'; break; }
+        continue;
+      }
       try { result = await tools.run(choice.tool, args); }
       catch (error) {
+        if (e.kind === 'mysql' && choice.tool === 'select' && /^错误码：TIMEOUT\b/m.test(failureDiagnostic(error))) {
+          unresolvedTimeout = true; timedOutQueries.add(queryKey);
+          results.push({ tool: 'select', error: { code: 'TIMEOUT', message: '本次查询超时，连接已关闭；不是业务故障根因。重新读取目标表结构，缩小时间范围、增加单号等条件或选择其他证据路径。保持原授权和单次等待上限。' }, completed: false });
+          steps.push('select：查询超时，保留已有证据，正在调整查询');
+          await tools.close({ abort: true });
+          if (++timeoutStreak >= 3) { stopReason = '连续3次业务查询超时且未取得新的业务查询结果，排查暂停；建议核对索引、数据库负载或补充精确单号。'; break; }
+          verifyApprovedPlan(await load(), plan);
+          tools = await (adapters.tools ?? createEnvironmentTools)(e, q, cred);
+          await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '查询超时，正在调整条件继续排查', total: i + 1, completed: i, recent: [] } });
+          continue;
+        }
         // Only fixed, local SELECT input errors can be corrected. Scope/auth failures still stop.
         if (!(error instanceof QueryInputError) || choice.tool !== 'select') throw error;
         unresolvedInput = true;
@@ -55,7 +73,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
         if (++stalled >= 3) { stopReason = error.message + '；连续3次未取得新增证据，已暂停。'; break; }
         continue;
       }
-      if (choice.tool === 'select') unresolvedInput = false;
+      if (choice.tool === 'select') { unresolvedInput = false; unresolvedTimeout = false; timeoutStreak = 0; }
       const encoded = JSON.stringify(result); if (Buffer.byteLength(encoded) > 24000) throw new Error('工具结果超出大小限制，请缩小范围');
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
       const hash = fingerprint({ tool: choice.tool, result });
@@ -75,13 +93,14 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       // Final synthesis uses existing evidence only; it cannot execute another query.
       try {
         const final = await planner.next({ purpose: plan.parameters[0], tools: [], results: results.slice(-20), remainingCalls: 0, stopReason,
+          completionPolicy: '没有固定调用次数上限；remainingCalls=0仅表示本次进入只汇总阶段，不表示调用额度耗尽。仅依据stopReason解释暂停原因。',
           instruction: '排查已暂停。仅返回finish汇总已有证据、来源表与未查明原因，不执行工具、不把查到记录等同根因已确认。' });
         if (final.tool === 'finish') { summary = String(final.summary ?? '').slice(0,6000); complete = final.complete === true; }
       } catch { /* Preserve gathered evidence if summary generation fails. */ }
     }
     if (!summary) summary = '本次排查未完成；以下为已取得的证据。';
     // A planner cannot turn unresolved extraction or an empty evidence trail into success.
-    if (stopReason || results.filter(x => x.result).length < 2 || unresolvedInput || results.some(x => x.result?.partial)) complete = false;
+    if (stopReason || results.filter(x => x.result).length < 2 || unresolvedInput || unresolvedTimeout || results.some(x => x.result?.partial)) complete = false;
     if (unresolvedInput) summary = '查询参数尚未修正完成，未取得本次业务查询结果。';
     if (stopReason) summary = `${stopReason}\n\n${summary}`;
     const serialized = JSON.stringify(results);
