@@ -1,5 +1,6 @@
 import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/source-environments.js';
 import { connectionCandidates } from '../shared/connection-endpoints.js';
+import { pollWebsiteLogins } from './website-query.js';
 import { requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
 import { loadEnvironments, catalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
@@ -122,6 +123,7 @@ export class ConversationService {
     while (!this.stopped) {
       this.wakeRequested = false;
       await pollEnrollments(this.context);
+      if(this.context.websiteBrowser)void pollWebsiteLogins(this.context).catch(()=>{});
       const state = await this.context.store.read();
       const heads = new Map();
       for (const turn of state.conversations ?? []) {

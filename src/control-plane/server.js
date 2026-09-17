@@ -1,4 +1,6 @@
-import { loadEnvironments, planQuery } from '../shared/environment-access.js';
+import { WebsiteBrowser } from './website-browser.js';
+import { prepareWebsiteQuery } from './website-query.js';
+import { loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
 import { publishQuestion } from './questions.js';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
@@ -29,7 +31,7 @@ export async function createControlPlane(overrides = {}) {
     ? new LarkCliFeishuClient({ ...config.feishu, dataDir: config.dataDir })
     : new FeishuClient({ ...config.feishu, dataDir: config.dataDir }));
 
-  const context = { config, projects, agents, store, feishu };
+  const context = { config, projects, agents, store, feishu, websiteBrowser: new WebsiteBrowser(config.dataDir,undefined,async (initial,waiting,request)=>{const current=await store.getJob(initial.id);if(current?.status==='awaiting_clarification'&&current?.result?.browserLoginRequired){const type=request.resourceType();const tail=new URL(request.url()).pathname.split('/').at(-1);return type==='document'||['script','stylesheet','image','font'].includes(type)||/^(login|signin|authenticate|auth|captcha|verify)$/i.test(tail);}if(current?.status!=='running')return false;verifyApprovedPlan(await loadEnvironments(),current.environmentAccess);return true;}) };
   const cards = new LiveCards(store, feishu);
   context.cards = cards;
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
@@ -59,7 +61,7 @@ export async function createControlPlane(overrides = {}) {
   });
 
   server.once('listening', () => { cards.start(); conversations.start().catch((error) => console.error('[conversation-start]', error.message)); });
-  server.once('close', () => { conversations.stop(); cards.stop(); });
+  server.once('close', () => { conversations.stop(); cards.stop(); void context.websiteBrowser.close(); });
   return { server, config, projects, agents, store, conversations, cards };
 }
 
@@ -147,6 +149,13 @@ async function route(context) {
     return json(response, 200, { ok: true, job });
   }
 
+  const websiteMatch=url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/website-tool$/);
+  if(request.method==='POST'&&websiteMatch){
+    requireBearer(request,config.runnerToken,'runner');const body=await readJson(request);const job=await store.getJob(decodeURIComponent(websiteMatch[1]));
+    if(job?.status!=='running'||!job.lease?.id||body.leaseId!==job.lease.id||body.runnerId!==job.lease.runnerId)return json(response,409,{error:'Stale or foreign Runner lease'});
+    const e=verifyApprovedPlan(await loadEnvironments(),job.environmentAccess??{});if(e.kind!=='website')throw new Error('Not a website grant');
+    const result=await context.websiteBrowser.run(job,e,body.tool,body.args);return json(response,200,{result});
+  }
   const eventMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/events$/);
   if (request.method === 'POST' && eventMatch) {
     requireBearer(request, config.runnerToken, 'runner');
@@ -156,6 +165,10 @@ async function route(context) {
       return json(response, 409, { ok: false, error: 'Stale or foreign Runner lease' });
     }
     let routing = agentRouting(context, nextStage(job.workflow, job.stage));
+    if(body.type==='completed'&&body.result?.websiteQuery){
+      if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.questionId||job.environmentAccess||body.result.outcome!=='needs_clarification'||body.result.environmentQuery)throw new Error('当前阶段不能申请网页排查');
+      body.result.environmentQuery=await prepareWebsiteQuery(context,job,body.result.websiteQuery);
+    }
     if (body.type === 'completed' && body.result?.environmentQuery) {
       try {
         if (job.taskIntent !== 'analysis' || !['developer', 'owner_report'].includes(job.stage) || !job.questionId || job.environmentAccess
@@ -170,7 +183,7 @@ async function route(context) {
         const plan = planQuery(await loadEnvironments(), body.result.environmentQuery, job.projectId,
           { senderId: job.senderId, profile: job.originProfile });
         routing = { ...agentRouting(context, 'developer'), environmentPlan: { ...plan,
-          approvalRequired: true, approvedBy: null, approvedAt: null } };
+          ...(plan.kind==='website'?{}:{approvalRequired: true, approvedBy: null, approvedAt: null}) } };
         if (!routing.agentProfile) throw new Error('开发角色未配置');
       } catch (error) {
         const repeated = error.message === '重复环境查询，需要调整范围或补充新证据';
@@ -189,6 +202,7 @@ async function route(context) {
       else body.result.summary = '连续三轮环境调查没有新增证据，已暂停。需要调整调查路径或补充缺失工具。' + (body.result.summary ?? '');
     }
     const result = await store.appendEvent(job.id, body, routing);
+    if(['completed','failed','cancelled'].includes(body.type)&&!body.result?.browserLoginRequired)await context.websiteBrowser.release(job.id);
     setImmediate(() => notifyJobEvent(context, result).catch((error) => console.error('[notify]', error)));
     return json(response, 200, { ok: true, job: result.job });
   }

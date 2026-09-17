@@ -69,7 +69,7 @@ export function jobCard(job, now = Date.now()) {
     awaiting_approval: ['待真人确认', 'orange'], awaiting_clarification: ['待补充信息', 'orange'],
     blocked: ['任务受阻 / 未通过', 'red'], failed: ['执行失败', 'red'], cancelled: ['已取消 / 已停止', 'grey'],
     cancelling: ['正在停止', 'orange'], resubmitted: ['补充已提交', 'blue'] };
-  const [label, color] = job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
+  const [label, color] = job.result?.browserLoginRequired ? ['等待本机登录 · 登录后自动继续', 'orange'] : job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
     ? ['部分分析完成 · 有待核实', 'orange'] : labels[job.status] ?? ['等待更新', 'grey'];
   const active = ['running', 'queued', 'cancelling'].includes(job.status);
   const events = job.events ?? [];
@@ -97,7 +97,7 @@ export function jobCard(job, now = Date.now()) {
   if (job.taskIntent === 'analysis') elements[0].columns[0].elements.push(md(job.environmentAccess ? '环境只读查询 · 不修改数据库或配置' : '只读分析 · 不修改代码', true));
   if (job.nextJobId) elements[0].columns[0].elements.push(md(`已交给项目负责人汇总 · ${publicText(job.nextJobId)}`, true));
   if (job.delegation) elements[0].columns[0].elements.push(md(`协作：${stageLabel(job.delegation.fromStage)} → ${stageLabel(job.delegation.toStage)}`, true));
-  if (job.status === 'awaiting_clarification') elements.push({ tag: 'form', name: 'clarification_form', elements: [
+  if (job.status === 'awaiting_clarification' && !job.result?.browserLoginRequired) elements.push({ tag: 'form', name: 'clarification_form', elements: [
     { tag: 'input', name: 'clarification', input_type: 'multiline_text', rows: 3, max_length: 1000, required: true,
       width: 'fill', placeholder: { tag: 'plain_text', content: '填写需要补充的范围、路径或验收要求…' } },
     { tag: 'button', name: `clarify_${jobActionVersion(job)}`, form_action_type: 'submit', type: 'primary_filled',

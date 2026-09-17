@@ -312,10 +312,14 @@ git pull --ff-only
 
 所有成员均可发起只读排查；PRD 成员查询仍需指定负责人批准。新增 Codex 按范围选择 Nacos API、独立浏览器列表/搜索/详情及 MySQL 结构化查询工具，本机向导可弹出 Nacos 登录窗口，自动发现命名空间并验证连接。固定模板继续兼容。首次凭据仍本机录入，Nacos 业务账号不复用为数据库登录。见 [环境工具说明](environment-access.md)。
 
-浏览器依赖与完整测试：`npm ci` 后运行 `npx playwright install chromium`，再运行 `npm run check`。Linux 使用 `npx playwright install --with-deps chromium` 安装系统依赖。仅启用 Nacos 已适配的只读网页能力；未知网站需另行适配。
+浏览器依赖与完整测试：`npm ci` 后运行 `npx playwright install chromium`，再运行 `npm run check`。Linux 使用 `npx playwright install --with-deps chromium` 安装系统依赖。Nacos 使用专用适配器；其他业务网站使用通用网页链路，特殊登录/接口仍可能需要适配。
 
 首次环境查询可直接在群里给出明确 Nacos 或 MySQL 入口和排查目的，再由管理员回复原卡同意接入。AgentOS 会在当前已登录的 Mac 打开本机登录/凭据窗口；确认范围后自动继续原问题。需管理员真人映射、Chromium和Keychain，不能把密码发进群。详见 environment-access.md 的群内接入说明。
 
 ## 环境源码快照
 
 可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。每次调查与负责人汇总复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
+
+## 按问题发现业务网站
+
+支持从问题与环境源码查找入口，打开本机独立浏览器并复用会话；等待登录时保留任务、登录后自动恢复。配置、权限、存储与兼容边界见[通用网页排查](query-driven-websites.md)。

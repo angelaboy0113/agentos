@@ -13,6 +13,10 @@ export function conversationTerminalMention(turn) {
 export function jobTerminalMention(job, projects = {}) {
   if(job.connectionEnrollmentPending && !job.connectionEnrollmentHandled && job.status === 'completed') return null;
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
+  if(job.status==='awaiting_clarification'&&job.result?.browserLoginRequired){
+    const ids=(job.environmentAccess?.approvalOwnerIds??[]).filter(id=>OPEN_ID.test(id));
+    return ids.length?{kind:'browser_login',replyTo:job.originMessageId??job.replyToMessageId,profile:job.originProfile,text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+' 请在运行AgentOS的电脑上完成网页登录；登录后自动继续原问题，不用在群里发密码或回复继续。'}:null;
+  }
   if (job.status === 'awaiting_environment_approval') {
     const ids = job.environmentAccess?.approvalOwnerIds ?? [];
     if (!ids.length) return null;

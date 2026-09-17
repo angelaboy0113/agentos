@@ -6,7 +6,8 @@
     "summary",
     "finalMessage",
     "handoff",
-    "environmentQuery"
+    "environmentQuery",
+    "websiteQuery"
   ],
   "properties": {
     "outcome": {
@@ -142,6 +143,38 @@
               "items": {
                 "type": "string"
               }
+            }
+          }
+        }
+      ]
+    },
+    "websiteQuery": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url",
+            "tier",
+            "purpose"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "uat",
+                "prd"
+              ]
+            },
+            "purpose": {
+              "type": "string",
+              "maxLength": 200
             }
           }
         }

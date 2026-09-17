@@ -1,3 +1,4 @@
+import { websiteUrl } from './website-policy.js';
 import { validateAccountPolicy } from './database-account-policy.js';
 import { validateToolQuery } from './environment-tool-policy.js';
 import { readFile } from 'node:fs/promises';
@@ -13,9 +14,10 @@ export async function loadEnvironments(file = environmentFile()) {
   catch (e) { if (e.code === 'ENOENT') return { version: 1, environments: {} }; throw new Error('环境配置无法读取或解析；未执行查询'); }
   if (v.version !== 1 || !v.environments || typeof v.environments !== 'object' || Array.isArray(v.environments)) throw new Error('环境配置版本错误');
   for (const [key, e] of Object.entries(v.environments)) {
-    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos'].includes(e.kind)
+    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos', 'website'].includes(e.kind)
       || !id(e.credentialRef) || typeof e.membersRead !== 'boolean' || !e.ownerOpenIdsByProfile || !e.queries) throw new Error('环境配置字段无效');
     validateAccountPolicy(e);
+    if(e.kind==='website')websiteUrl(e.baseUrl);
     if (e.tier === 'prd' && e.membersRead) throw new Error('PRD 不允许免审批成员访问');
     if (Object.values(e.ownerOpenIdsByProfile).some((ids) => !Array.isArray(ids) || ids.some((x) => !/^ou_[A-Za-z0-9]+$/.test(x)))) throw new Error('环境审批人配置无效');
     if (e.kind === 'mysql' && (!/^[a-zA-Z0-9.:-]+$/.test(e.host) || !Number.isInteger(e.port) || e.port < 1 || e.port > 65535 || !id(e.database))) throw new Error('数据库目标配置无效');
@@ -37,7 +39,7 @@ export async function loadEnvironments(file = environmentFile()) {
 export function isEnvironmentOwner(e, actor) { return (e.ownerOpenIdsByProfile?.[actor.profile] ?? []).includes(actor.senderId); }
 export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
-    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
+    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin} : e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const e = config.environments[request?.environmentId], q = e?.queries?.[request?.queryId];
@@ -52,7 +54,7 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
   if (!(e.ownerOpenIdsByProfile[actor.profile] ?? []).length) throw new Error('本环境未配置当前机器人对应的查询审批人');
   const scope = { expiresAt: new Date(now + 15 * 60000).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: q.timeoutMs };
   const owner = isEnvironmentOwner(e, actor), approvalRequired = !owner && (e.tier === 'prd' || !e.membersRead);
-  return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；按证据推进，无固定调用次数上限；连续3次无新增证据暂停` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
+  return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'website' ? new URL(e.baseUrl).origin : e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；按证据推进，无固定调用次数上限；连续3次无新增证据暂停` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
     approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: owner ? actor.senderId : approvalRequired ? null : 'policy:uat-read', approvedAt: approvalRequired ? null : new Date(now).toISOString() };
 }
 export function verifyPlan(config, plan, now = Date.now()) {

@@ -23,9 +23,9 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
   const load = adapters.load ?? loadEnvironments;
   let cfg = await load(), e = verifyApprovedPlan(cfg, plan), q = e.queries[plan.queryId];
   if (q.mode !== 'investigate') throw new Error('未批准工具排查范围');
-  const cred = await (adapters.credential ?? credential)(e.credentialRef);
+  const cred = e.kind==='website' ? {} : await (adapters.credential ?? credential)(e.credentialRef);
   let tools = await (adapters.tools ?? createEnvironmentTools)(e, q, cred);
-  let planner; const steps = [], results = []; let summary = '', complete = false, unresolvedInput = false, stalled = 0, stopReason = '';
+  let planner; const steps = [...(adapters.checkpoint?.steps??[])], results = [...(adapters.checkpoint?.results??[])]; let summary = '', complete = false, unresolvedInput = false, stalled = 0, stopReason = '';
   const seen = new Set();
   const timedOutQueries = new Set(); let timeoutStreak = 0, unresolvedTimeout = false;
   try {
@@ -74,6 +74,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
         continue;
       }
       if (['select', 'count'].includes(choice.tool)) { unresolvedInput = false; unresolvedTimeout = false; timeoutStreak = 0; }
+      if(result.loginRequired) return {loginRequired:true,summary:result.message??result.stage,checkpoint:{steps,results},rows:[],partial:true};
       const encoded = JSON.stringify(result); if (Buffer.byteLength(encoded) > 24000) throw new Error('工具结果超出大小限制，请缩小范围');
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
       const hash = fingerprint({ tool: choice.tool, result });
@@ -107,7 +108,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     for (const secret of [cred.username, cred.password].filter(Boolean)) summary = summary.split(secret).join('[已隐藏]');
     const uniqueResults = [...new Map(results.filter(x => x.result).map(x => [fingerprint(x), x])).values()];
     return { rows: uniqueResults.filter(x => x.result?.rows).flatMap(x => x.result.rows.map(row => x.result.table ? { ...row, '来源表': x.result.table } : row)), steps, summary, partial: !complete,
-      note: e.kind === 'nacos' ? 'Nacos 读取与数据库连接是两步；本次未连接数据库。' : '仅本次范围内的数据库只读工具。',
+      note: e.kind === 'website' ? '本次读取业务网页，未执行修改。' : e.kind === 'nacos' ? 'Nacos 读取与数据库连接是两步；本次未连接数据库。' : '仅本次范围内的数据库只读工具。',
       evidence: { environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash, readAt: new Date().toISOString(), toolCount: results.length, rowCount: uniqueResults.filter(x => x.result?.rows).reduce((n,x) => n+x.result?.rows.length, 0), resultHash: fingerprint(serialized) } };
   } finally { await tools.close(); await planner?.close(); }
 }

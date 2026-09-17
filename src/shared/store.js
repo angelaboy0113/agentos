@@ -257,7 +257,7 @@ export class JsonStore {
         && job.taskIntent === 'analysis' && ['developer', 'owner_report'].includes(job.stage) && job.questionId && !job.environmentAccess
         && event.result?.environmentQuery && completionRouting.environmentPlan && completionRouting.agentProfile) {
         nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);
-        Object.assign(nextJob, { workflow: 'single_developer', status: 'awaiting_environment_approval',
+        Object.assign(nextJob, { workflow: 'single_developer', status: completionRouting.environmentPlan.approvalRequired ? 'awaiting_environment_approval' : 'queued',
           environmentAccess: completionRouting.environmentPlan,
           delegation: { fromStage: 'developer', toStage: 'developer', reason: '源码排查需要环境证据，等待负责人批准具体查询范围' } });
         job.status = 'completed'; job.nextJobId = nextJob.id;

@@ -55,7 +55,7 @@ questionId 是本轮问题，questionTask 是其当前任务。新提问各自�
 用户要求接管页面、打开链接、登录并自行查看时，若匹配环境的investigate目录browser=true，优先创建该工具排查（purpose保留网页操作目标），不要退回固定database_endpoints模板。仅匹配已登记环境；首次未知链接需要管理员本机接入，不能使用群内密码，也不能把UAT登录态套用到PRD。用户同时要求多个环境时，回复必须逐项说明已接入、未接入和本次实际执行环境，不得用UAT结果冒充PRD或整体完成。
 
 ## 群内引导本机环境接入
-未知环境的只读排查不再让用户自行寻找配置向导。已知完整入口、UAT/PRD与类型时使用request_environment_setup，intent=analysis，environmentSetup={kind,tier,url}，instruction保留独立的原查询目标，environmentQuery=null。仅支持Nacos的http(s)://主机:端口/nacos和MySQL的mysql://主机:端口/库名；URL不能带账号密码。缺环境类型先追问，不猜测；MySQL缺地址时按下述数据库连接接续规则发现，其他入口缺失才追问。未知网站说明尚无适配，不套用Nacos规则。
+未知环境的只读排查不再让用户自行寻找配置向导。已知完整入口、UAT/PRD与类型时使用request_environment_setup，intent=analysis，environmentSetup={kind,tier,url}，instruction保留独立的原查询目标，environmentQuery=null。仅支持Nacos的http(s)://主机:端口/nacos和MySQL的mysql://主机:端口/库名；URL不能带账号密码。缺环境类型先追问，不猜测；MySQL缺地址时按下述数据库连接接续规则发现，其他入口缺失才追问。其他业务网站通过只读源码分析发现入口并申请websiteQuery，不套用Nacos规则。
 所有申请（包括管理员发起）先等待管理员在原问题卡片回复明确同意接入。environmentEnrollment显示requested且当前administrator=true、用户明确同意时，用approve_environment_setup，environmentSetup=null。不得把同意接入解释成数据库写入或生产查询批准。程序异步打开本机窗口并反馈状态，模型不提前声称已经打开或登录。接入成功后自动恢复原发起人的任务；生产普通成员仍需环境负责人批准本次查询。
 已完成的问题在追问时创建关联新卡，原结果保留；执行中补充、审批与等待本机接入仍关联当前卡片。
 
@@ -73,3 +73,5 @@ TLS例外确认：environmentEnrollment.status=awaiting_tls_confirmation表示�
 确认系统实现逻辑优先创建只读源码 analysis，按原问题选择 sourceEnvironment，requiresSourceInspection=true，environmentQuery=null。实时环境查询单独设置 environmentQuery、action=create_task、intent=analysis、requiresSourceInspection=false。需要代码和实时数据时分阶段申请，不能同一决策同时设置两者；未知环境或查询范围先询问，不猜测、不绕过管理员批准。
 
 持续调查：创建任务时阶段instruction描述第一步，不把用户的完整问题永久限定为“只看源码”。源码与环境分阶段执行，但仍服务同一问题。已有程序会保留用户原文，源码/负责人阶段可申请后续环境查询；有源码入口的环境部分结果返回源码核对。缺少业务网页/日志适配时如实说明并索要所需入口，不能宣称有完整桌面工具能力。
+
+通用网页排查：用户要核对业务网站、报表页面、定时任务或页面日志时，不要求用户先指定网站或复制配置。已有website环境可选择其investigate；没有入口则创建本环境的只读源码分析，requiresSourceInspection=true，让开发从项目源码、文档及当前问题线索找到真实入口，再返回websiteQuery接续网页工具。不能因目录只有Nacos就直接回复能力缺失。网站登录由运行AgentOS的电脑上的独立浏览器完成，有效会话自动复用；模型不提前声称已登录。
