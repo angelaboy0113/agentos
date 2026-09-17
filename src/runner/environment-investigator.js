@@ -29,7 +29,10 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
   const seen = new Set();
   try {
     planner = await (adapters.planner ?? createToolPlanner)();
+    let diagnosticStage = 'planning';
+    try {
     for (let i = 0; ; i++) {
+      diagnosticStage = 'planning';
       // Recheck scope/expiry before every tool, not just at job claim.
       try { cfg = await load(); e = verifyApprovedPlan(cfg, plan); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
@@ -40,6 +43,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       try { verifyApprovedPlan(await load(), plan); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
       await emit({ type: 'progress', phase: 'tool_activity', activity: { current: `只读工具：${choice.tool}`, total: i + 1, completed: i, recent: steps.slice(-3).map(text => ({ text })) } });
+      diagnosticStage = choice.tool;
       let result;
       try { result = await tools.run(choice.tool, args); }
       catch (error) {
@@ -57,6 +61,15 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       const hash = fingerprint({ tool: choice.tool, result });
       stalled = seen.has(hash) ? stalled + 1 : 0; seen.add(hash);
       if (stalled >= 3) { stopReason = '连续3次工具调用未取得新增证据，已暂停重复排查；需要调整查询思路或补充线索。'; break; }
+    }
+    } catch (error) {
+      const failure = Object.assign(new Error(String(error?.message ?? error)), {
+        diagnosticStage: error?.diagnosticStage ?? diagnosticStage
+      });
+      if (!results.some(x => x.result)) throw failure;
+      stopReason = failureDiagnostic(failure);
+      steps.push(stopReason);
+      // Do not retry a failed operation or expand scope. Summarize only prior evidence.
     }
     if (!summary) {
       // Final synthesis uses existing evidence only; it cannot execute another query.

@@ -251,6 +251,15 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
       phase = "launch";
       await ensure();
       if (tool === "browser_open") {
+        if (loggedIn) {
+          phase = "reuse-session";
+          if (await page.locator('input[type="password"]').first().isVisible()) {
+            loggedIn = false;
+            throw new Error("Login required");
+          }
+          // Return current controls with fresh references; never navigate back to login.
+          return manual ? { stage: "本机独立浏览器登录已验证" } : await snapshot();
+        }
         phase = "open-login";
         loggingIn = true;
         await page.goto(e.baseUrl.replace(/\/$/, "") + "/#/login", {
@@ -303,6 +312,7 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
         await settle();
         return await snapshot();
       }
+      phase = ({browser_click:"click",browser_search:"search",browser_snapshot:"snapshot"})[tool] ?? "operation";
       if (!loggedIn) throw new Error("先执行browser_open");
       if (tool === "browser_snapshot") return await snapshot();
       const target = refs.get(args.ref);
@@ -332,11 +342,11 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
       await adapters.onError?.({ phase, name: error.name, blocked });
       loggingIn = false;
       await close();
-      throw new Error(
+      throw Object.assign(new Error(
         safeExecutionError(error).message + "\n浏览器只读操作未完成：阶段：" +
           phase +
           "；可能需要本机重新登录、页面版本不支持、引用失效或请求超出范围。未放开写入或其他网址。",
-      );
+      ), { diagnosticStage: `browser.${phase}` });
     }
   }
   async function run(tool, args = {}) {
@@ -348,7 +358,7 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
           timer = setTimeout(
             () => {
               void close().catch(() => {});
-              reject(new Error("浏览器操作超时，已关闭独立会话"));
+              reject(Object.assign(new Error("浏览器操作超时，已关闭独立会话"), { diagnosticStage: `browser.${phase}` }));
             },
             manual ? 310000 : 30000,
           );

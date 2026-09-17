@@ -1,3 +1,14 @@
+const stages = Object.freeze({
+  'browser.launch': '启动后台浏览器', 'browser.open-login': '打开登录页面',
+  'browser.login-form': '等待登录表单', 'browser.login-submit': '提交浏览器登录',
+  'browser.login-result': '核验浏览器登录', 'browser.open-config': '打开配置列表',
+  'browser.click': '点击页面控件', 'browser.search': '搜索页面', 'browser.snapshot': '读取页面', 'browser.operation': '浏览器操作',
+  'browser.reuse-session': '复用已登录页面',
+  connection: '环境连接检查', discover: '发现配置', read_config: '读取配置',
+  browser_open: '打开后台浏览器页面', browser_click: '点击页面控件',
+  browser_snapshot: '读取页面', browser_search: '搜索页面',
+  select: '数据库只读查询', schema: '读取表结构', tables: '发现数据表', planning: '规划下一步排查'
+});
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
   ['COLUMN_LIMIT', /\[COLUMN_LIMIT\]/, '查询字段校验', '单次查询字段超过12个，查询未执行；不是授权不足。', '减少为相关字段后继续，可按相同筛选条件分次查询。'],
@@ -21,10 +32,10 @@ export function failureDiagnostic(error) {
   const message = typeof error === 'string' ? error : `${String(error?.code ?? '')} ${String(error?.message ?? '')}`;
   const matched = rules.find(([code, pattern]) => message.trimStart().startsWith(`[${code}]`) || pattern.test(message));
   const [code, , phase, cause, next] = matched ?? ['EXECUTION_ERROR', null, '任务执行', '执行器遇到未分类错误，原因尚未确认。', '请维护者按任务编号检查本机日志；不要在群内发送原始日志或凭据。'];
-  return `错误码：${code}\n失败环节：${phase}\n原因：${cause}\n建议：${next}`;
+  return `错误码：${code}\n失败环节：${Object.hasOwn(stages, error?.diagnosticStage) ? stages[error.diagnosticStage] : phase}\n原因：${cause}\n建议：${next}`;
 }
 export function safeExecutionError(error) {
   const message = failureDiagnostic(error);
   const code = /^错误码：(\w+)/.exec(message)[1];
-  return new Error(`[${code}] ${message}`);
+  return Object.assign(new Error(`[${code}] ${message}`), Object.hasOwn(stages, error?.diagnosticStage) ? { diagnosticStage: error.diagnosticStage } : {});
 }

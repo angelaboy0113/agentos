@@ -229,3 +229,20 @@ test("local browser login captures only successful credentials without querying 
   assert.equal(cred.password, "local-password");
   assert.equal(f.writes(), 0);
 });
+
+test('reopening authenticated browser reuses current page and refreshes controls without another login', async t => {
+  const f = await fixture(t); let page;
+  const tools = await createNacosBrowser({baseUrl:f.baseUrl},q,{username:'fixture-user',password:'fixture-password'},{onPage:p=>{page=p;}});
+  t.after(()=>tools.close());
+  const first = await tools.run('browser_open');
+  const url = page.url(); let navigations=0;
+  page.on('framenavigated',()=>navigations++);
+  const reopened = await tools.run('browser_open');
+  assert.equal(page.url(),url); assert.equal(navigations,0);
+  assert.ok(reopened.controls.some(x=>x.label==='详情'));
+  assert.notEqual(first.controls.find(x=>x.label==='详情').ref,reopened.controls.find(x=>x.label==='详情').ref);
+  const result=await tools.run('browser_click',{ref:reopened.controls.find(x=>x.label==='详情').ref});
+  assert.equal(result.rows[0].database,'demo');
+  await page.evaluate(()=>{document.body.innerHTML='<input type="password">';});
+  await assert.rejects(tools.run('browser_open'),error=>error.diagnosticStage==='browser.reuse-session' && /AUTH_REQUIRED/.test(error.message));
+});

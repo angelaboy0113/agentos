@@ -135,9 +135,9 @@ test('recoverable input attempts are bounded and unresolved finish cannot become
 });
 test('scope failures never enter parameter correction loop',async()=>{
  const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['查指定记录']},'demo',{profile:'owner',senderId:'ou_member'});let attempts=0;
- await assert.rejects(investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ const result = await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
  tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async t=>{if(t==='connection')return{};attempts++;throw new Error('[SCOPE_LIMIT] denied');},close:async()=>{}}),
- planner:async()=>({next:async()=>({tool:'select',arguments:'{}'}),close:async()=>{}})}));assert.equal(attempts,1);
+ planner:async()=>({next:async()=>({tool:'select',arguments:'{}'}),close:async()=>{}})});assert.equal(attempts,1);assert.equal(result.partial,true);assert.match(result.summary,/SCOPE_LIMIT/);
 });
 
 test('last tool result receives final synthesis with provenance and no extra query',async()=>{
@@ -172,4 +172,19 @@ test('MySQL tool layer no longer enforces legacy call count',async()=>{
  const t=await createEnvironmentTools({...environment,kind:'mysql'}, {...query,maxCalls:1}, credentials,{mysql:{createConnection:async()=>c}});
  try{for(let i=0;i<16;i++)await t.run('connection');}finally{await t.close();}
  await assert.rejects(t.run('connection'));
+});
+
+test('later browser timeout retains prior evidence and safe failure stage without retry', async()=>{
+ const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['排查']},'demo',{profile:'owner',senderId:'ou_member'});
+ let calls=0,closed=0;
+ const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'browser_open'}],run:async tool=>{calls++;if(tool==='connection')return{stage:'connected',rows:[{host:'db.example',database:'demo'}]};throw Object.assign(new Error('timeout fake-secret secret-url'),{diagnosticStage:'browser.login-form'});},close:async()=>{closed++;}}),
+ planner:async()=>({next:async input=>{if(input.tools.length)return{tool:'browser_open',arguments:'{}'};assert.equal(calls,2);assert.deepEqual(input.tools,[]);return{tool:'finish',complete:true,summary:'已有连接证据'};},close:async()=>{closed++;}})});
+ assert.equal(result.partial,true);assert.equal(calls,2);assert.equal(closed,2);
+ assert.equal(result.rows[0].host,'db.example');assert.match(result.summary,/等待登录表单/);assert.match(result.summary,/TIMEOUT/);assert.doesNotMatch(JSON.stringify(result),/fake-secret|secret-url/);
+});
+
+test('first tool timeout remains blocked and preserves safe operation metadata', async()=>{
+ const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['排查']},'demo',{profile:'owner',senderId:'ou_member'});
+ await assert.rejects(investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{throw new Error('timeout');},close:async()=>{}}),planner:async()=>({next:async()=>{throw new Error('must not plan');},close:async()=>{}})}),e=>e.diagnosticStage==='connection');
 });
