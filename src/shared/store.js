@@ -76,6 +76,7 @@ export class JsonStore {
         workflow: input.workflow,
         stage: input.stage,
         instruction: input.instruction,
+        originalQuestion: input.originalQuestion ?? input.instruction,
         taskIntent: input.taskIntent ?? 'implementation',
         ...(input.sourceEnvironment ? { sourceEnvironment: input.sourceEnvironment } : {}),
         originProfile: input.originProfile ?? input.requestedAgentProfile ?? input.agentProfile ?? null,
@@ -253,7 +254,7 @@ export class JsonStore {
       job.updatedAt = new Date().toISOString();
       let nextJob = null;
       if (event.type === 'completed' && job.status === 'awaiting_clarification'
-        && job.taskIntent === 'analysis' && job.stage === 'developer' && job.questionId && !job.environmentAccess
+        && job.taskIntent === 'analysis' && ['developer', 'owner_report'].includes(job.stage) && job.questionId && !job.environmentAccess
         && event.result?.environmentQuery && completionRouting.environmentPlan && completionRouting.agentProfile) {
         nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);
         Object.assign(nextJob, { workflow: 'single_developer', status: 'awaiting_environment_approval',
@@ -261,6 +262,21 @@ export class JsonStore {
           delegation: { fromStage: 'developer', toStage: 'developer', reason: '源码排查需要环境证据，等待负责人批准具体查询范围' } });
         job.status = 'completed'; job.nextJobId = nextJob.id;
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'environment_approval_requested', nextJobId: nextJob.id });
+        state.jobs.push(nextJob);
+      }
+      // Runtime evidence returns to source investigation on the same question, without
+      // carrying an environment grant into the source worker or dispatching a write job.
+      if (event.type === 'completed' && job.status === 'completed' && job.taskIntent === 'analysis'
+        && job.environmentAccess && job.questionId && event.result?.outcome === 'partial'
+        && completionRouting.resumeInvestigation && completionRouting.agentRole === 'developer'
+        && completionRouting.agentProfile) {
+        nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);
+        delete nextJob.environmentAccess;
+        Object.assign(nextJob, { workflow: 'analysis_review', sourceEnvironment: job.environmentAccess.tier,
+          instruction: job.originalQuestion ?? job.instruction,
+          delegation: { fromStage: job.stage, toStage: 'developer', reason: '结合环境证据继续调查原问题，按缺口选择下一步工具' } });
+        job.nextJobId = nextJob.id;
+        job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'investigation_resumed', nextJobId: nextJob.id });
         state.jobs.push(nextJob);
       }
       // Only this explicitly read-only edge may bypass the human delivery gate.

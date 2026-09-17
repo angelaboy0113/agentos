@@ -46,17 +46,17 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       await emit({ type: 'progress', phase: 'tool_activity', activity: { current: `只读工具：${choice.tool}`, total: i + 1, completed: i, recent: steps.slice(-3).map(text => ({ text })) } });
       diagnosticStage = choice.tool;
       let result;
-      const queryKey = fingerprint(args);
-      if (e.kind === 'mysql' && choice.tool === 'select' && timedOutQueries.has(queryKey)) {
-        results.push({ tool: 'select', error: { code: 'TIMEOUT_REPEAT', message: '此查询已超时，未重复执行。请缩小时间范围、增加单号条件或换用其他证据路径。' }, executed: false });
+      const queryKey = fingerprint({ tool: choice.tool, args });
+      if (e.kind === 'mysql' && ['select', 'count'].includes(choice.tool) && timedOutQueries.has(queryKey)) {
+        results.push({ tool: choice.tool, error: { code: 'TIMEOUT_REPEAT', message: '此查询已超时，未重复执行。请缩小时间范围、增加单号条件或换用其他证据路径。' }, executed: false });
         if (++stalled >= 3) { stopReason = '连续3次未调整已超时查询，排查暂停；需要更具体的筛选条件。'; break; }
         continue;
       }
       try { result = await tools.run(choice.tool, args); }
       catch (error) {
-        if (e.kind === 'mysql' && choice.tool === 'select' && /^错误码：TIMEOUT\b/m.test(failureDiagnostic(error))) {
+        if (e.kind === 'mysql' && ['select', 'count'].includes(choice.tool) && /^错误码：TIMEOUT\b/m.test(failureDiagnostic(error))) {
           unresolvedTimeout = true; timedOutQueries.add(queryKey);
-          results.push({ tool: 'select', error: { code: 'TIMEOUT', message: '本次查询超时，连接已关闭；不是业务故障根因。重新读取目标表结构，缩小时间范围、增加单号等条件或选择其他证据路径。保持原授权和单次等待上限。' }, completed: false });
+          results.push({ tool: choice.tool, error: { code: 'TIMEOUT', message: '本次查询超时，连接已关闭；不是业务故障根因。重新读取目标表结构，缩小时间范围、增加单号等条件或选择其他证据路径。保持原授权和单次等待上限。' }, completed: false });
           steps.push('select：查询超时，保留已有证据，正在调整查询');
           await tools.close({ abort: true });
           if (++timeoutStreak >= 3) { stopReason = '连续3次业务查询超时且未取得新的业务查询结果，排查暂停；建议核对索引、数据库负载或补充精确单号。'; break; }
@@ -66,14 +66,14 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
           continue;
         }
         // Only fixed, local SELECT input errors can be corrected. Scope/auth failures still stop.
-        if (!(error instanceof QueryInputError) || choice.tool !== 'select') throw error;
+        if (!(error instanceof QueryInputError) || !['select', 'count'].includes(choice.tool)) throw error;
         unresolvedInput = true;
         results.push({ tool: choice.tool, error: { code: error.code, message: error.message }, executed: false });
         steps.push(`${choice.tool}：${error.code}，未执行查询，正在修正参数`);
         if (++stalled >= 3) { stopReason = error.message + '；连续3次未取得新增证据，已暂停。'; break; }
         continue;
       }
-      if (choice.tool === 'select') { unresolvedInput = false; unresolvedTimeout = false; timeoutStreak = 0; }
+      if (['select', 'count'].includes(choice.tool)) { unresolvedInput = false; unresolvedTimeout = false; timeoutStreak = 0; }
       const encoded = JSON.stringify(result); if (Buffer.byteLength(encoded) > 24000) throw new Error('工具结果超出大小限制，请缩小范围');
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
       const hash = fingerprint({ tool: choice.tool, result });

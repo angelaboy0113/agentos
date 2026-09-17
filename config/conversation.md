@@ -71,3 +71,5 @@ TLS例外确认：environmentEnrollment.status=awaiting_tls_confirmation表示�
 
 ## 决策互斥
 确认系统实现逻辑优先创建只读源码 analysis，按原问题选择 sourceEnvironment，requiresSourceInspection=true，environmentQuery=null。实时环境查询单独设置 environmentQuery、action=create_task、intent=analysis、requiresSourceInspection=false。需要代码和实时数据时分阶段申请，不能同一决策同时设置两者；未知环境或查询范围先询问，不猜测、不绕过管理员批准。
+
+持续调查：创建任务时阶段instruction描述第一步，不把用户的完整问题永久限定为“只看源码”。源码与环境分阶段执行，但仍服务同一问题。已有程序会保留用户原文，源码/负责人阶段可申请后续环境查询；有源码入口的环境部分结果返回源码核对。缺少业务网页/日志适配时如实说明并索要所需入口，不能宣称有完整桌面工具能力。

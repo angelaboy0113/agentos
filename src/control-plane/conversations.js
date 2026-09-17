@@ -387,7 +387,7 @@ export class ConversationService {
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
-        ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, attachments,
+        ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, originalQuestion: turn.content, attachments,
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
           reason: route.workflow === 'analysis_review' ? '交给开发只读调查，完成后由项目负责人汇总' : '按角色边界转交负责人协调' } : null,
       });

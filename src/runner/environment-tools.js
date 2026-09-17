@@ -28,6 +28,16 @@ export function selectStatement(args, tables, q) {
   }).join(' AND ');
   return { sql: `SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`${table}\` WHERE ${where} LIMIT ${q.maxRows + 1}`, params, columns };
 }
+// Count only validated base-table fields and filters; no model-provided SQL.
+export function countStatement(args, tables, q) {
+  const distinct = args.distinctColumns ?? [];
+  if (!Array.isArray(distinct) || distinct.length > 12) throw new QueryInputError('QUERY_INPUT', 'distinctColumns应为最多12个字段的数组。');
+  const columns = distinct.length ? distinct : (tables.get(args.table) ?? []).slice(0, 1);
+  const base = selectStatement({ table: args.table, columns, filters: args.filters }, tables, q);
+  const from = base.sql.slice(base.sql.indexOf(' FROM ')).replace(/ LIMIT \d+$/, '');
+  return { sql: `SELECT COUNT(${distinct.length ? 'DISTINCT ' + distinct.map(c => '`' + c + '`').join(', ') : '*'}) AS total${from}`, params: base.params };
+}
+
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map();
@@ -58,6 +68,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'connection', args: {}, description: '测试数据库连接、只读账号授权与只读事务' },
     { tool: 'tables', args: {cursor:'可选：nextCursor，默认0'}, description:'分页列出允许的基础表名称，先定位目标表再用schema读取列' },
     { tool: 'schema', args: { table: '可选：限定基础表名', cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段，不读取业务数据' },
+    { tool: 'count', args: { table: 'schema返回的表', distinctColumns: '可选：去重字段数组；空数组统计行数，非空按这些字段组合去重（不计含NULL的组合）', filters: '与select相同的明确筛选条件' }, description: '统计批准基础表筛选范围内的完整行数或指定字段组合去重数，不用样本行数代替总数，不支持任意SQL或联表' },
     { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=', value: '筛选值' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件且op仅支持=、>、>=、<、<=；仅基础表，不允许SQL、函数、联表或写入` }
   ];
   let browser;
@@ -108,6 +119,11 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const result = {tables:Object.fromEntries(visible),truncated:rows.length>100,nextCursor:rows.length>100?offset+100:null};
           if(result.truncated) result.note='仅当前页表结构；可用schema的nextCursor继续，或指定table读取目标表。';
           return result;
+        }
+        if (tool === 'count') {
+          const statement = countStatement(args, tables, q);
+          const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
+          return { table: args.table, rows: [{ total: String(rows[0].total), countMode: args.distinctColumns?.length ? 'distinct' : 'rows', distinctColumns: (args.distinctColumns ?? []).join(',') }], truncated: false };
         }
         const statement = selectStatement(args, tables, q);
         const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);

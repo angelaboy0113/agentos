@@ -158,18 +158,35 @@ async function route(context) {
     let routing = agentRouting(context, nextStage(job.workflow, job.stage));
     if (body.type === 'completed' && body.result?.environmentQuery) {
       try {
-        if (job.taskIntent !== 'analysis' || job.stage !== 'developer' || !job.questionId || job.environmentAccess
+        if (job.taskIntent !== 'analysis' || !['developer', 'owner_report'].includes(job.stage) || !job.questionId || job.environmentAccess
           || body.result.outcome !== 'needs_clarification') throw new Error('当前阶段不允许申请环境查询');
+        const earlier = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess);
+        const request = body.result.environmentQuery;
+        if (earlier.some(j => j.environmentAccess.environmentId === request.environmentId
+          && j.environmentAccess.queryId === request.queryId
+          && JSON.stringify(j.environmentAccess.parameters) === JSON.stringify(request.parameters))) {
+          throw new Error('重复环境查询，需要调整范围或补充新证据');
+        }
         const plan = planQuery(await loadEnvironments(), body.result.environmentQuery, job.projectId,
           { senderId: job.senderId, profile: job.originProfile });
         routing = { ...agentRouting(context, 'developer'), environmentPlan: { ...plan,
           approvalRequired: true, approvedBy: null, approvedAt: null } };
         if (!routing.agentProfile) throw new Error('开发角色未配置');
-      } catch {
+      } catch (error) {
+        const repeated = error.message === '重复环境查询，需要调整范围或补充新证据';
         body.result = { ...body.result, outcome: 'blocked', environmentQuery: null,
-          summary: '本次环境查询申请未通过范围检查；未访问环境。请在本机核对模板、参数、项目和审批人。',
+          summary: repeated ? '该范围已在本问题查询过，本次未重复执行。请结合已有结果调整查询目标或补充新证据。' : '本次环境查询申请未通过范围检查；未访问环境。请在本机核对模板、参数、项目和审批人。',
           finalMessage: '源码阶段提出的环境查询申请无效；未访问环境，原始源码证据保留在阶段记录中。' };
       }
+    }
+    if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
+      && job.environmentAccess && body.result?.outcome === 'partial'
+      && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
+      const prior = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess && j.id !== job.id && j.result?.environmentEvidence);
+      const hash = body.result.environmentEvidence?.resultHash;
+      const stalled = hash && prior.length >= 2 && prior.slice(-2).every(j => j.result.environmentEvidence.resultHash === hash);
+      if (!stalled) routing = { ...agentRouting(context, 'developer'), resumeInvestigation: true };
+      else body.result.summary = '连续三轮环境调查没有新增证据，已暂停。需要调整调查路径或补充缺失工具。' + (body.result.summary ?? '');
     }
     const result = await store.appendEvent(job.id, body, routing);
     setImmediate(() => notifyJobEvent(context, result).catch((error) => console.error('[notify]', error)));

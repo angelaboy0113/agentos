@@ -170,3 +170,37 @@ test('connector rejects an approver outside the current environment owner map', 
   await assert.rejects(readEnvironment({ ...plan, approvedBy: 'ou_otherAdmin' }, { config: config(), credential: async () => { lookedUp = true; } }));
   assert.equal(lookedUp, false);
 });
+
+test('owner report can request runtime evidence rather than ending a partial source investigation', async t => {
+ const {app,send}=await fixture(t,()=>decision({environmentQuery:null,requiresSourceInspection:true}));
+ await send('ou_owner');
+ await app.store.transact(s=>{s.jobs[0].stage='owner_report';s.jobs[0].workflow='owner_report';});
+ const job=await app.store.leaseNext('r');
+ await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+ const post=()=>fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${job.id}/events`,{method:'POST',headers:{authorization:`Bearer ${app.config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({type:'completed',leaseId:job.lease.id,runnerId:'r',result:{outcome:'needs_clarification',environmentQuery:request,summary:'需要实时数据',finalMessage:'源码已确认，需要环境验证'}})});
+ assert.equal((await post()).status,200);const state=await app.store.read();assert.equal(state.jobs.length,2);
+ assert.equal(state.jobs[1].status,'awaiting_environment_approval');assert.equal(state.jobs[1].questionId,job.questionId);
+ assert.equal(state.jobs[1].originalQuestion,'查询订单');assert.equal(state.jobs[1].environmentAccess.approvedBy,null);
+ assert.equal((await post()).status,409);
+});
+
+test('partial runtime evidence resumes source investigation with original question and without a copied grant',async t=>{
+ const {app,send}=await fixture(t);app.projects.projects.demo.analysisRepositories=[{path:'configured',branch:'prd'}];
+ await send('ou_owner');const job=await app.store.leaseNext('r');
+ const p=await app.store.claimEnvironment(job.id,{runnerId:'r',leaseId:job.lease.id});
+ await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+ const post=()=>fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${job.id}/events`,{method:'POST',headers:{authorization:`Bearer ${app.config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({type:'completed',leaseId:job.lease.id,runnerId:'r',result:{outcome:'partial',summary:'仍需结合代码',finalMessage:'已查到订单，原因未明',environmentEvidence:{environmentId:p.environmentId,queryId:p.queryId,scopeHash:p.scopeHash,readAt:new Date().toISOString(),rowCount:1,resultHash:'a'.repeat(64)}}})});
+ assert.equal((await post()).status,200);const state=await app.store.read();const next=state.jobs[1];
+ assert.equal(next.stage,'developer');assert.equal(next.workflow,'analysis_review');assert.equal(next.status,'queued');assert.equal(next.environmentAccess,undefined);
+ assert.equal(next.sourceEnvironment,'prd');assert.equal(next.instruction,'查询订单');assert.equal(next.questionId,job.questionId);
+ assert.equal(next.context.at(-1).result.environmentEvidence.resultHash,'a'.repeat(64));
+ assert.equal((await post()).status,409);
+});
+
+test('continuation cannot re-request identical environment scope from the same question',async t=>{
+ const {app,send}=await fixture(t,()=>decision({environmentQuery:null,requiresSourceInspection:true}));await send('ou_owner');
+ await app.store.transact(s=>{s.jobs.push({...structuredClone(s.jobs[0]),id:'prior-runtime',status:'completed',environmentAccess:{...request},result:{summary:'prior evidence'}});});
+ const job=await app.store.leaseNext('r');await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+ const r=await fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${job.id}/events`,{method:'POST',headers:{authorization:`Bearer ${app.config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({type:'completed',leaseId:job.lease.id,runnerId:'r',result:{outcome:'needs_clarification',environmentQuery:request}})});
+ assert.equal(r.status,200);const state=await app.store.read();assert.equal(state.jobs.length,2);assert.equal(state.jobs[0].status,'blocked');assert.match(state.jobs[0].result.summary,/未重复执行/);
+});

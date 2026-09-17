@@ -27,7 +27,7 @@ export async function loadHarness(job, directory = CONFIG) {
 export function handoffContext(job) {
   const independent = ['qa', 'owner_audit'].includes(job.stage);
   return (job.context ?? []).slice(-8).map(({ stage, result = {} }) => ({ stage,
-    outcome: result.outcome, workspace: result.workspace,
+    outcome: result.outcome, environmentEvidence: result.environmentEvidence, workspace: result.workspace,
     harness: result.harness,
     handoff: result.handoff,
     verifiedArtifacts: result.verifiedArtifacts,

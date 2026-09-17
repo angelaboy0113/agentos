@@ -208,3 +208,19 @@ for (const scenario of ['recover','repeat','persistent']) test(`mysql timeout re
  if(scenario==='persistent'){assert.equal(attempts,3);assert.equal(r.partial,true);assert.match(r.summary,/连续3次业务查询超时/);}
  assert.ok(abortClosed>=1);assert.ok(progress.some(e=>e.activity?.current.includes('调整条件')));
 });
+
+test('aggregate counts validate same table fields and filters without sample limits or arbitrary SQL',async()=>{
+ const {countStatement}=await import('../src/runner/environment-tools.js');const tables=new Map([['orders',['id','line','status']]]);
+ const args={table:'orders',filters:[{column:'status',op:'=',value:'ready'}]};
+ const all=countStatement(args,tables,query);assert.match(all.sql,/COUNT\(\*\)/);assert.doesNotMatch(all.sql,/LIMIT/);assert.deepEqual(all.params,['ready']);
+ assert.match(countStatement({...args,distinctColumns:['id','line']},tables,query).sql,/COUNT\(DISTINCT `id`, `line`\)/);
+ assert.throws(()=>countStatement({...args,table:'other'},tables,query));
+ assert.throws(()=>countStatement({...args,distinctColumns:['id); DROP TABLE orders']},tables,query));
+ assert.throws(()=>countStatement({...args,filters:[]},tables,query));
+});
+
+test('count tool returns database aggregate rather than returned-row length',async()=>{
+ const queries=[];const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async stmt=>{queries.push(stmt.sql);return stmt.sql.includes('information_schema')?[[{table_name:'orders',column_name:'id'},{table_name:'orders',column_name:'status'}]]:[[{total:'28119'}]];},rollback:async()=>{},destroy:()=>{}})};
+ const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'fake',port:3306,database:'demo'},query,credentials,{mysql:driver});
+ try{await tools.run('schema',{table:'orders'});const r=await tools.run('count',{table:'orders',filters:[{column:'status',op:'=',value:'ready'}]});assert.equal(r.rows[0].total,'28119');assert.equal(r.rows[0].countMode,'rows');assert.doesNotMatch(queries.at(-1),/LIMIT/);}finally{await tools.close();}
+});
