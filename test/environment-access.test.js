@@ -202,5 +202,5 @@ test('continuation cannot re-request identical environment scope from the same q
  await app.store.transact(s=>{s.jobs.push({...structuredClone(s.jobs[0]),id:'prior-runtime',status:'completed',environmentAccess:{...request},result:{summary:'prior evidence'}});});
  const job=await app.store.leaseNext('r');await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
  const r=await fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${job.id}/events`,{method:'POST',headers:{authorization:`Bearer ${app.config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({type:'completed',leaseId:job.lease.id,runnerId:'r',result:{outcome:'needs_clarification',environmentQuery:request}})});
- assert.equal(r.status,200);const state=await app.store.read();assert.equal(state.jobs.length,2);assert.equal(state.jobs[0].status,'blocked');assert.match(state.jobs[0].result.summary,/未重复执行/);
+ assert.equal(r.status,200);const state=await app.store.read();assert.equal(state.jobs.length,3);assert.equal(state.jobs[0].status,'completed');assert.equal(state.jobs[0].result.queryRejection.code,'DUPLICATE_QUERY');assert.equal(state.jobs[2].status,'queued');assert.equal(state.jobs[2].environmentAccess,undefined);assert.equal(state.jobs.filter(j=>j.environmentAccess).length,1);
 });

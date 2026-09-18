@@ -55,11 +55,11 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
   }
   const e = config.environments[request?.environmentId], q = e?.queries?.[request?.queryId];
   if (!e || e.projectId !== projectId || !q) throw new Error('环境或查询模板未配置；请管理员在本机配置');
-  if (!Array.isArray(request.parameters) || request.parameters.length !== q.parameters.length) throw new Error('查询参数不完整');
+  if (!Array.isArray(request.parameters) || request.parameters.length !== q.parameters.length) throw Object.assign(new Error('查询参数不完整'), {queryDiagnostic:{code:'PARAMETER_COUNT',expected:q.parameters.length,actual:Array.isArray(request.parameters)?request.parameters.length:null}});
   const parameters = q.parameters.map((p, i) => {
     const v = request.parameters[i];
-    if (p.type === 'integer') { if (!/^-?\d+$/.test(String(v)) || !Number.isSafeInteger(Number(v)) || Number(v) < (p.min ?? 0) || Number(v) > (p.max ?? 1000000000)) throw new Error('查询数值参数超出范围'); return Number(v); }
-    if (typeof v !== 'string' || !v.length || v.length > Math.min(p.maxLength ?? 100, 200) || /[\x00-\x1f\x7f]/.test(v)) throw new Error('查询文本参数无效');
+    if (p.type === 'integer') { if (!/^-?\d+$/.test(String(v)) || !Number.isSafeInteger(Number(v)) || Number(v) < (p.min ?? 0) || Number(v) > (p.max ?? 1000000000)) throw Object.assign(new Error('查询数值参数超出范围'),{queryDiagnostic:{code:'INTEGER_PARAMETER',index:i,min:p.min??0,max:p.max??1000000000}}); return Number(v); }
+    if (typeof v !== 'string' || !v.length || v.length > Math.min(p.maxLength ?? 100, 200) || /[\x00-\x1f\x7f]/.test(v)) throw Object.assign(new Error('查询文本参数无效'),{queryDiagnostic:{code:'TEXT_PARAMETER',index:i,maxLength:Math.min(p.maxLength??100,200),length:typeof v==='string'?v.length:null,reason:typeof v!=='string'?'type':!v.length?'empty':/[\x00-\x1f\x7f]/.test(v)?'control_characters':'length'}});
     return v;
   });
   if (!(e.ownerOpenIdsByProfile[actor.profile] ?? []).length) throw new Error('本环境未配置当前机器人对应的查询审批人');

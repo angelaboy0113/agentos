@@ -318,6 +318,19 @@ export class JsonStore {
           job.events.push({id:createId('EVT'),at:job.updatedAt,type:'investigation_setup_requested',turnId:id});
         }
       }
+      // Repair an invalid plan in source analysis; no environment request is executed here.
+      if(event.type==='completed' && completionRouting.repairQuery && event.result?.queryRejection?.retry
+        && job.taskIntent==='analysis' && !job.environmentAccess && job.questionId
+        && ['awaiting_clarification','awaiting_approval','completed'].includes(job.status) && completionRouting.agentProfile){
+        job.status='completed';
+        nextJob=makeNextJob(job,'developer',completionRouting,job.updatedAt);
+        delete nextJob.environmentAccess;
+        Object.assign(nextJob,{workflow:'analysis_review',instruction:job.originalQuestion??job.instruction,
+          delegation:{fromStage:job.stage,toStage:'developer',reason:'修正查询申请参数，保留原目标与既有证据'}});
+        job.nextJobId=nextJob.id;
+        job.events.push({id:createId('EVT'),at:job.updatedAt,type:'query_plan_repair_requested',code:event.result.queryRejection.code,nextJobId:nextJob.id});
+        state.jobs.push(nextJob);
+      }
       // Runtime evidence returns to source investigation on the same question, without
       // carrying an environment grant into the source worker or dispatching a write job.
       if (event.type === 'completed' && job.status === 'completed' && job.taskIntent === 'analysis'

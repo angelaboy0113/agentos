@@ -1,3 +1,4 @@
+import { queryRejection } from '../shared/query-repair.js';
 import { enrollmentTarget } from './environment-enrollment.js';
 import { SharedChromeBrowser } from './shared-chrome-browser.js';
 import { WebsiteBrowser } from './website-browser.js';
@@ -199,10 +200,14 @@ async function route(context) {
           ...(plan.kind==='website'?{}:{approvalRequired: true, approvedBy: null, approvedAt: null}) } };
         if (!routing.agentProfile) throw new Error('开发角色未配置');
       } catch (error) {
-        const repeated = error.message === '重复环境查询，需要调整范围或补充新证据';
-        body.result = { ...body.result, outcome: 'blocked', environmentQuery: null,
-          summary: repeated ? '该范围已在本问题查询过，本次未重复执行。请结合已有结果调整查询目标或补充新证据。' : '本次环境查询申请未通过范围检查；未访问环境。请在本机核对模板、参数、项目和审批人。',
-          finalMessage: '源码阶段提出的环境查询申请无效；未访问环境，原始源码证据保留在阶段记录中。' };
+        const diagnostic=queryRejection(error,job);
+        const repairable=diagnostic.retry && job.taskIntent==='analysis' && job.questionId && !job.environmentAccess
+          && ['developer','owner_report'].includes(job.stage) && agentRouting(context,'developer').agentProfile;
+        diagnostic.retry=Boolean(repairable);
+        const message=`本次追加查询尚未执行：${diagnostic.reason} ${diagnostic.pause??(repairable?'正在自动修正申请并继续原问题。':diagnostic.correction)} 已有排查证据保留。`;
+        body.result = {...body.result,outcome:repairable?'needs_clarification':'blocked',environmentQuery:null,websiteQuery:null,
+          queryRejection:diagnostic,summary:message,finalMessage:`${message}\n\n${diagnostic.correction}`};
+        routing=repairable?{...agentRouting(context,'developer'),repairQuery:true}:{};
       }
     }
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
