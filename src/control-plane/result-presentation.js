@@ -3,6 +3,7 @@ import { cardMarkdownEmphasis } from './card-markdown-emphasis.js';
 import { cardMarkdownTables } from './card-markdown-tables.js';
 
 const clip = (text, size) => Array.from(text).slice(0, size).join('');
+export const PRIMARY_RESPONSE_LIMIT = 1200;
 export function publicText(text) {
   // Decode legacy escaping before redaction, then escape markup exactly once.
   return String(text ?? '').replace(/&amp;/g, '&')
@@ -29,10 +30,10 @@ export function readableMarkdown(text) {
 export function conciseSummary(text) {
   const cleaned = readableMarkdown(text).replace(/```[\s\S]*?```/g, '[代码示例见详情]')
     .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1').replace(/[*`]/g, '').trim();
-  if (Array.from(cleaned).length <= 360) return cleaned;
-  const prefix = clip(cleaned, 330);
+  if (Array.from(cleaned).length <= PRIMARY_RESPONSE_LIMIT) return cleaned;
+  const prefix = clip(cleaned, PRIMARY_RESPONSE_LIMIT - 40);
   const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('\n'));
-  return `${boundary > 120 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n详情含完整证据与未验证事项。`;
+  return `${boundary > 400 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n详情含完整证据与未验证事项。`;
 }
 
 // Split compact numbered prose for narrow message cards without changing its claims.

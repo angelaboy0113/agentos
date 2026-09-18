@@ -1,7 +1,7 @@
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { stageLabel } from '../shared/protocol.js';
 import { createHash } from 'node:crypto';
-import { publicText, conciseSummary, summaryParagraphs, resultPages, resultPanel } from './result-presentation.js';
+import { publicText, conciseSummary, summaryParagraphs, resultPages, resultPanel, PRIMARY_RESPONSE_LIMIT } from './result-presentation.js';
 export { publicText } from './result-presentation.js';
 
 export function jobActionVersion(job) {
@@ -54,7 +54,7 @@ export function conversationCard(turn, now = Date.now()) {
   const content = final ? conciseSummary(turn.response) : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
     : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const elements = [block([md(content)], color)];
-  if (final && turn.response?.length > 360) elements.push(resultPanel(resultPages(turn.response)));
+  if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));
   elements.push(md(final ? '可以继续回复这条卡片；详情翻页只更新展示，不执行任务。'
     : `已等待 ${elapsed(turn.createdAt, now)} · 本卡持续更新`, true));
   return card(`${stageLabel(turn.role)} · ${state}`, 'AgentOS / Codex', color, elements);

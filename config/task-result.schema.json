@@ -23,7 +23,7 @@
     },
     "summary": {
       "type": "string",
-      "maxLength": 360
+      "maxLength": 1200
     },
     "finalMessage": {
       "type": "string"

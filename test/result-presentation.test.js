@@ -10,7 +10,7 @@ import { JsonStore } from '../src/shared/store.js';
 import { LiveCards } from '../src/control-plane/live-cards.js';
 import { buildPrompt } from '../src/runner/codex-executor.js';
 
-test('all roles lead with a short answer and keep full technical evidence folded', async () => {
+test('all roles lead with a readable answer and keep full technical evidence folded', async () => {
   for (const stage of ['owner_intake', 'pm', 'developer', 'qa', 'owner_audit', 'owner_report']) {
     const job = { id: 'J', stage, projectName: '测试', status: 'completed', result: {
       summary: '已找到登录校验入口；只查了源码，没有改代码。线上配置尚未验证。',
@@ -18,11 +18,11 @@ test('all roles lead with a short answer and keep full technical evidence folded
     }, events: [] };
     const card = jobCard(job);
     assert.match(card.body.elements[0].columns[0].elements[1].content, /线上配置尚未验证/);
-    assert.ok(card.body.elements[0].columns[0].elements[1].content.length < 360);
+    assert.ok(card.body.elements[0].columns[0].elements[1].content.length < 1200);
     assert.equal(card.body.elements.find((e) => e.tag === 'collapsible_panel').expanded, false);
     assert.ok(Buffer.byteLength(JSON.stringify(card)) < 28000);
     assert.doesNotMatch(JSON.stringify(card), /结论续文|D:\\|^###/);
-    assert.match(await buildPrompt(job, {}), /summary 用 2–4 句/);
+    assert.match(await buildPrompt(job, {}), /通常 300–900 字，最多 1200 字/);
   }
 });
 

@@ -106,7 +106,7 @@ export function preserveAnalysisGaps(job, result) {
   if (investigationComplete(job, result)) return result;
   const risks = [...new Set([...(prior.handoff?.risks ?? []), ...(result.handoff.risks ?? [])])];
   return { ...result, outcome: 'partial',
-    summary: `部分分析完成，仍有待核实项。${result.summary ?? ''}`.slice(0, 360),
+    summary: `部分分析完成，仍有待核实项。${result.summary ?? ''}`.slice(0, 1200),
     finalMessage: `${result.finalMessage}\n\n仍未核实（沿用本轮调查）：\n${risks.map((risk) => `- ${risk}`).join('\n')}`,
     handoff: { ...result.handoff, risks,
       artifacts: result.handoff.artifacts?.length ? result.handoff.artifacts : prior.handoff?.artifacts ?? [] } };

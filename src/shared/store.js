@@ -362,7 +362,7 @@ export class JsonStore {
           state.jobs.push(nextJob);
         } else {
           job.result = { ...job.result, investigationPause: decision.reason,
-            summary: `${decision.reason} ${job.result.summary ?? ''}`.slice(0, 360) };
+            summary: `${decision.reason} ${job.result.summary ?? ''}`.slice(0, 1200) };
         }
       }
       // Only this explicitly read-only edge may bypass the human delivery gate.

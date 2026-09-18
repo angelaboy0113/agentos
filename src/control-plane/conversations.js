@@ -13,6 +13,7 @@ import path from 'node:path';
 import { MemoryService, fitContext } from './memory.js';
 import { canContinueTask, canCreateTask, isAdministrator, isTaskCreator } from './authorization.js';
 import { conversationTerminalMention } from './requester-mention.js';
+import { PRIMARY_RESPONSE_LIMIT } from './result-presentation.js';
 export { isAdministrator } from './authorization.js';
 
 export function sourceEvidence(job, sourceDirectory) {
@@ -236,7 +237,7 @@ export class ConversationService {
         if (this.context.cards?.enabled) {
           const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
             { replyTo: turn.messageId, profile: turn.profile, ...(turn.replyInThread ? { replyInThread: true } : {}) }, { terminal: true, immediate: true,
-              resultText: turn.response?.length > 360 ? turn.response : '', terminalMention: conversationTerminalMention(turn) });
+              resultText: Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT ? turn.response : '', terminalMention: conversationTerminalMention(turn) });
           if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
           parts = [];
         } else {
