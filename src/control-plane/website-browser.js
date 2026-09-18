@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright';
 import { mkdir, chmod } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteKey, websiteRequestAllowed, writeAction, cleanWebsiteText } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteRequestAllowed, writeAction, cleanWebsiteText } from '../shared/website-policy.js';
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
  constructor(dataDir, driver=chromium, authorize=async()=>true){this.authorize=authorize;this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
  async session(e) {
-  const key=websiteKey(e.projectId,e.tier,e.baseUrl);
+  const key=websiteSessionKey(e.projectId,e.tier,e.baseUrl);
   if(this.contexts.has(key))return this.contexts.get(key);
   if(this.opening.has(key))return this.opening.get(key);
   const p=(async()=>{

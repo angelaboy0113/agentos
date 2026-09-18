@@ -10,6 +10,7 @@ export function prepareWebsiteQuery(context,job,request){
   if(job.sourceEnvironment&&job.sourceEnvironment!==request.tier)throw new Error('网页环境必须与本问题环境一致');
   const baseUrl=websiteUrl(request.url),environmentId=websiteKey(job.projectId,request.tier,baseUrl);
   const cfg=await loadEnvironments();
+  if(cfg.environments[environmentId] && websiteUrl(cfg.environments[environmentId].baseUrl)!==baseUrl)throw new Error('网页入口登记冲突，未复用其他页面');
   if(!cfg.environments[environmentId]){
    const owners=context.projects.ownerOpenIdsByProfile??{};
    if(!(owners[job.originProfile]??[]).length)throw new Error('本项目没有配置管理员身份');

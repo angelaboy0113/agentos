@@ -6,7 +6,9 @@ export function websiteUrl(input) {
  if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.search||(u.hostname==='localhost'||u.hostname.endsWith('.localhost'))||/^(127\.|0\.|169\.254\.|\[?::1\]?)/.test(u.hostname)) throw new Error('网页入口必须是不含凭据的业务HTTP(S)地址，不能是本机管理或链路本地地址');
  u.hash=''; return u.toString();
 }
-export const websiteKey = (project,tier,url) => 'web-'+createHash('sha256').update(JSON.stringify([project,tier,new URL(websiteUrl(url)).origin])).digest('hex').slice(0,24);
+export const websiteSessionKey = (project,tier,url) => 'web-'+createHash('sha256').update(JSON.stringify([project,tier,new URL(websiteUrl(url)).origin])).digest('hex').slice(0,24);
+// Registration identifies the requested application entry; session storage remains origin-scoped.
+export const websiteKey = (project,tier,url) => 'web-entry-'+createHash('sha256').update(JSON.stringify([project,tier,websiteUrl(url)])).digest('hex').slice(0,24);
 export function websiteRequestAllowed(base, request, manualLogin=false) {
  let u; try {u=new URL(request.url);}catch{return false;}
  if(u.origin!==new URL(base).origin || !['GET','HEAD','POST','OPTIONS'].includes(request.method))return false;

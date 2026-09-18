@@ -12,7 +12,7 @@
 
 依赖仍为 Node 22、`npm ci`、`npx playwright install chromium`。更新后在空闲时重启 AgentOS。使用当前登录桌面的操作系统账号运行；无图形会话的服务器不能弹出可见浏览器。网页不需要逐个填写配置。
 
-系统在私有 `config/environments.local.json` 自动登记：项目、UAT/PRD、站点入口、`kind: website`、查询目的模板和当前管理员映射。入口必须是无账号密码、无查询参数的 HTTP(S) 地址；不允许 localhost、回环或链路本地地址。自动登记不表示已连接或已登录。PRD 成员查询仍需环境负责人批准；UAT 成员按成员只读规则执行。首次发现入口保存在当前项目，不能跨项目借用授权。
+系统在私有 `config/environments.local.json` 自动登记：项目、UAT/PRD、站点入口、`kind: website`、查询目的模板和当前管理员映射。入口必须是无账号密码、无查询参数的 HTTP(S) 地址；不允许 localhost、回环或链路本地地址。自动登记不表示已连接或已登录。PRD 成员查询仍需环境负责人批准；UAT 成员按成员只读规则执行。首次发现入口保存在当前项目，不能跨项目借用授权。同源不同应用按完整入口路径分别登记，登录会话仍按origin复用；入口匹配与纠偏见 [网站目标识别](website-target.md)。
 
 `data/website-sessions/<项目+环境+origin的哈希>/` 保存独立 Chromium 用户配置（Cookie、站点存储）。目录权限 0700，不进 Git，不发群、不送给模型；这不是 Keychain 加密文件承诺。不要共享整个 data 目录。删除对应目录可清除会话，需先停止 AgentOS/浏览器。不同项目、环境、origin 使用不同配置；同一站点的各问题使用不同页面和随机操作引用。
 

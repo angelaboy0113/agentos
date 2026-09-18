@@ -39,7 +39,7 @@ export async function loadEnvironments(file = environmentFile()) {
 export function isEnvironmentOwner(e, actor) { return (e.ownerOpenIdsByProfile?.[actor.profile] ?? []).includes(actor.senderId); }
 export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
-    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据'] } : {}), parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin} : e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
+    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据'] } : {}), parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin,entryUrl:e.baseUrl} : e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const e = config.environments[request?.environmentId], q = e?.queries?.[request?.queryId];
