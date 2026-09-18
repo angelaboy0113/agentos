@@ -1,3 +1,4 @@
+import { SharedChromeBrowser } from './shared-chrome-browser.js';
 import { WebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
 import { loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
@@ -31,7 +32,10 @@ export async function createControlPlane(overrides = {}) {
     ? new LarkCliFeishuClient({ ...config.feishu, dataDir: config.dataDir })
     : new FeishuClient({ ...config.feishu, dataDir: config.dataDir }));
 
-  const context = { config, projects, agents, store, feishu, websiteBrowser: new WebsiteBrowser(config.dataDir,undefined,async (initial,waiting,request)=>{const current=await store.getJob(initial.id);if(current?.status==='awaiting_clarification'&&current?.result?.browserLoginRequired){const type=request.resourceType();const tail=new URL(request.url()).pathname.split('/').at(-1);return type==='document'||['script','stylesheet','image','font'].includes(type)||/^(login|signin|authenticate|auth|captcha|verify)$/i.test(tail);}if(current?.status!=='running')return false;verifyApprovedPlan(await loadEnvironments(),current.environmentAccess);return true;}) };
+  const authorizeBrowser = async (initial,waiting,request)=>{const current=await store.getJob(initial.id);if(current?.status==='awaiting_clarification'&&current?.result?.browserLoginRequired){const type=request.resourceType();const tail=new URL(request.url()).pathname.split('/').at(-1);return type==='document'||['script','stylesheet','image','font'].includes(type)||/^(login|signin|authenticate|auth|captcha|verify)$/i.test(tail);}if(current?.status!=='running')return false;verifyApprovedPlan(await loadEnvironments(),current.environmentAccess);return true;};
+  const browserMode = process.env.AGENTOS_BROWSER_MODE ?? (process.platform === 'darwin' ? 'shared-chrome' : 'isolated');
+  if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
+  const context = { config, projects, agents, store, feishu, websiteBrowser: browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser) };
   const cards = new LiveCards(store, feishu);
   context.cards = cards;
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);

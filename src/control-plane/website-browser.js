@@ -61,7 +61,7 @@ export class WebsiteBrowser {
  }
  async snapshot(s){
   s.refs.clear();s.generation++;
-  const text=await s.page.locator('body').evaluate(body=>{const c=body.cloneNode(true);c.querySelectorAll('script,style,input,textarea,[contenteditable]').forEach(n=>n.remove());return c.innerText||c.textContent||'';});
+  const text=await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
   const loc=s.page.locator('a,button,select,[role="button"],input:not([type="password"]):not([type="hidden"])');const controls=[];
   for(let i=0,n=Math.min(await loc.count(),150);i<n;i++){
    const el=loc.nth(i);if(!await el.isVisible()||!await el.isEnabled())continue;

@@ -11,6 +11,8 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['BROWSER_BRIDGE', /Chrome自动化|Apple.*JavaScript|通过 AppleScript|日常Google Chrome|Chrome窗口|日常Chrome接管/, '日常浏览器接管', '日常Chrome自动化通道未就绪，并非业务账号无权限。', '在Mac打开Chrome，开启查看→开发者→允许Apple事件中的JavaScript，并确认系统自动化权限。'],
+  ['BROWSER_SCOPE', /浏览器已离开本次批准|原Chrome标签页已关闭/, '浏览器页面范围', '原标签页已关闭或离开本次批准的应用，未读取其他页面。', '打开正确应用页面后重试；不要重复申请业务账号权限。'],
   ['QUERY_ALREADY_STARTED', /QUERY_ALREADY_STARTED/, '任务接续校验', '任务已启动，但本次领取没有有效的登录接续凭证；未继续访问网站。', '请维护者检查登录接续状态，不需要用户补充查询范围。'],
   ['LEASE_EXPIRED', /查询租约已失效/, '任务领取校验', '当前执行器的任务租约已失效，未继续查询。', '检查任务恢复与执行器状态，不能通过重复批准解决。'],
   ['COLUMN_LIMIT', /\[COLUMN_LIMIT\]/, '查询字段校验', '单次查询字段超过12个，查询未执行；不是授权不足。', '减少为相关字段后继续，可按相同筛选条件分次查询。'],
