@@ -134,3 +134,18 @@ test('card shows real blocker on first screen with sanitized content and visible
   assert.doesNotMatch(first, /需要补充信息，尚未通过/);
   assert.match(JSON.stringify(jobCard({ ...job, status: 'completed', nextJobId: 'JOB-report' })), /已交给项目负责人汇总/);
 });
+
+test('ready environment substep returns to original investigation through HTTP and drops query grant',async t=>{
+ const dir=await fixture(t);
+ const app=await createControlPlane({dataDir:dir,storeFile:path.join(dir,'store.json'),conversationFile:path.join(dir,'conversation.json'),memoryFile:path.join(dir,'memory.json'),runnerToken:'test',projects:{projects:{demo:{repoPath:dir,analysisRepositories:[{path:'.'}]}},ownerOpenIdsByProfile:{owner:['ou_admin']}},agents:{agents:{developer:{profile:'dev'},owner_report:{profile:'owner'}}},feishuClient:{enabled:false},conversationOptions:{enabled:false}});
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));t.after(async()=>{app.server.closeAllConnections();await new Promise(r=>app.server.close(r));});
+ const {job}=await app.store.createJob({...input,workflow:'single_developer',questionId:'q',senderId:'ou_member',instruction:'核对实际单据',originalQuestion:'核对实际单据'});
+ await app.store.transact(s=>{s.jobs[0].environmentAccess={tier:'uat',environmentId:'nacos',scopeHash:'scope',approvedBy:'ou_admin',startedAt:new Date().toISOString()};});
+ const lease=await app.store.leaseNext('runner');
+ const body={type:'completed',runnerId:'runner',leaseId:lease.lease.id,result:{outcome:'ready',summary:'仅找到数据库入口',finalMessage:'未查询实际单据',environmentEvidence:{resultHash:'a'.repeat(64)}}};
+ const endpoint=`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${job.id}/events`;
+ const send=()=>fetch(endpoint,{method:'POST',headers:{authorization:'Bearer test','content-type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await send()).status,200);const state=await app.store.read();assert.equal(state.jobs.length,2);
+ const next=state.jobs[1];assert.equal(next.stage,'developer');assert.equal(next.workflow,'analysis_review');assert.equal(next.questionId,'q');assert.equal(next.senderId,'ou_member');assert.equal(next.instruction,'核对实际单据');assert.equal(next.environmentAccess,undefined);assert.equal(next.sourceEnvironment,'uat');assert.equal(next.context.at(-1).result.summary,'仅找到数据库入口');
+ assert.equal((await send()).status,409);assert.equal((await app.store.read()).jobs.length,2);
+});

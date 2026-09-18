@@ -6,7 +6,7 @@
 
 若入口位于 Nacos，使用 [调度入口发现](scheduler-discovery.md) 的 `read_runtime_config` 获取非敏感 XXL-JOB 配置，并将 `runtimeDiscoveries` 交给后续源码阶段提出 `websiteQuery`，无需用户重复提供已经发现的网址。
 
-控制面建立 `kind=website` 环境，复用原问题、原发起人和当前审批规则；网页证据不足时继续返回源码调查。此次接入没有给源码 Codex 开放任意联网、桌面控制或个人浏览器 Cookie 读取权限。
+控制面建立 `kind=website` 环境，复用原问题、原发起人和当前审批规则；网页步骤成功或证据不足都会返回源码调查，结合原问题判断是否完成；见 [原问题完成判断](investigation-completion.md)。此次接入没有给源码 Codex 开放任意联网、桌面控制或个人浏览器 Cookie 读取权限。
 
 ## 部署
 

@@ -26,7 +26,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });
   try {
     const answer = await engine.decide({ role: 'developer', administrator: false, memory: { enabled: true }, history: [], jobs: [], attachments: [],
-      message: '用业务用户能懂的中文直接回答原问题，控制在200字内，分为“已确认”“尚未确认”“下一步”。先说明是否找到原因；记录数量不是业务单据总数，字段值不是根因。超时是本次排查中断，不得当作用户报错的原因。解释关键术语，不罗列原始字段。不执行工具、不建立任务、不推断未知事实、不承诺已重试。',
+      message: '用业务用户能懂的中文直接回答原问题，控制在200字内，分为“已确认”“尚未确认”“下一步”。先说明是否找到原因；记录数量不是业务单据总数，字段值不是根因。超时是本次排查中断，不得当作用户报错的原因。解释关键术语，不罗列原始字段。除非原问题就是询问连接地址，否则不要把主机端口库名当作业务答案；仅发现入口而未查实际单据时明确“实际单据尚未核实”。只陈述本次确实存在的缺口，不套用无关的记录数、超时、根因提醒。不执行工具、不建立任务、不推断未知事实、不承诺已重试。',
       queryPurpose: plan.description,
       originalQuestion: String(job.instruction ?? '').slice(0, 4000),
       priorSourceEvidence: (job.context ?? []).filter(x => !x.result?.environmentEvidence).slice(-1).map(x => ({ stage: x.stage,

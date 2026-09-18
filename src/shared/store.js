@@ -286,7 +286,7 @@ export class JsonStore {
       // Runtime evidence returns to source investigation on the same question, without
       // carrying an environment grant into the source worker or dispatching a write job.
       if (event.type === 'completed' && job.status === 'completed' && job.taskIntent === 'analysis'
-        && job.environmentAccess && job.questionId && event.result?.outcome === 'partial'
+        && job.environmentAccess && job.questionId && ['partial', 'ready'].includes(event.result?.outcome)
         && completionRouting.resumeInvestigation && completionRouting.agentRole === 'developer'
         && completionRouting.agentProfile) {
         nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);

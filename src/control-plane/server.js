@@ -193,7 +193,7 @@ async function route(context) {
       }
     }
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
-      && job.environmentAccess && body.result?.outcome === 'partial'
+      && job.environmentAccess && ['partial', 'ready'].includes(body.result?.outcome)
       && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
       const prior = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess && j.id !== job.id && j.result?.environmentEvidence);
       const hash = body.result.environmentEvidence?.resultHash;

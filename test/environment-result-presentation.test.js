@@ -43,3 +43,8 @@ test('business explanation is visible before evidence without turning rows into 
  const p=presentEnvironmentResult({...plan,kind:'mysql'},{rows:[{id:1}],summary:'raw finding',evidence:{readAt:'today'}},'已确认：报表筛选范围内未查到记录。尚未确认：页面报错原因。下一步：核对应用日志。');
  assert.match(p.summary,/报表筛选范围内未查到记录/);assert.doesNotMatch(p.summary,/id：1|raw finding/);
 });
+
+test('endpoint discovery for business investigation shows explanation rather than database coordinates',()=>{
+ const p=presentEnvironmentResult(plan,result,'实际单据尚未核实。已找到数据库入口，但本次未连接数据库，尚不能确认金额差异原因。');
+ const front=conciseSummary(p.summary);assert.match(front,/实际单据尚未核实/);assert.doesNotMatch(front,/db.example|3306|主机\/IP/);assert.match(p.details,/db.example/);
+});

@@ -16,7 +16,7 @@ export function presentEnvironmentResult(plan, result, explanation = '') {
   const note = plan.kind === 'mysql' ? (result.note ?? '') : (result.note ?? '以上来自配置读取，未验证数据库连接。');
   const timeout = /^错误码：TIMEOUT\b/m.test(String(result.summary ?? ''));
   const finding = publicText(explanation || result.summary || '当前结果尚未形成业务结论，请查看详情中的证据与缺口。');
-  const summary = endpoints
+  const summary = endpoints && !explanation
     ? [heading, preview ? `连接信息\n${preview}` : '', unique.length > 2 ? `另有 ${unique.length - 2} 条，展开详情查看。` : '', note].filter(Boolean).join('\n\n')
     : [result.partial ? '排查尚未完成，目前不能给出完整结论。' : heading,
       timeout ? '本次进展\n已取得部分查询证据，但后续操作等待超时，排查中断。中间记录不等于问题原因。'
