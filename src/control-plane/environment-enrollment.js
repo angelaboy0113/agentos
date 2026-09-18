@@ -176,10 +176,16 @@ export async function pollEnrollments(context, load = loadEnvironments) {
   // Resume metadata discovery without borrowing another user's PRD authority.
   for (const job of state.jobs ?? []) {
     const turn = (state.conversations ?? []).find(t=>t.id===job.sourceMessageId);
-    if (!turn || job.connectionEnrollmentHandled || job.status!=='completed' || !job.environmentAccess
+    if (!turn || job.status!=='completed' || !job.environmentAccess
       || turn.decision?.environmentSetup?.kind!=='mysql' || turn.decision.environmentSetup.url
       || turn.decision.action!=='create_task') continue;
     const candidates=connectionCandidates(state,turn,job.projectId).filter(e=>e.tier===turn.decision.environmentSetup.tier && e.connectionSource && (!turn.setupTargetUrl||e.url===turn.setupTargetUrl));
+    // Recover only the old incomplete-metadata wait, never replay an enrollment or query.
+    if(job.connectionEnrollmentHandled && !(candidates.length===1 && turn.setupPending
+      && turn.response?.startsWith('尚未取得完整数据库地址；')
+      && state.questions?.[turn.questionId]?.latestTurnId===turn.id
+      && (state.jobs??[]).filter(j=>j.questionId===turn.questionId).at(-1)?.id===job.id
+      && !Object.values(state.environmentEnrollments??{}).some(e=>e.turnId===turn.id)))continue;
     let outcome;
     if(candidates.length===1) outcome=await requestEnrollment(context,{...turn,decision:{...turn.decision,environmentSetup:{...turn.decision.environmentSetup,url:candidates[0].url}}});
     else outcome={notice:candidates.length ? '发现多个数据库入口，请选择目标库名：'+candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') : '尚未取得完整数据库地址；请补充目标配置或命名空间，已有查询结果保留，未尝试数据库登录。'};

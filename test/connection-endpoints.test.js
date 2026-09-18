@@ -39,3 +39,33 @@ test('missing metadata schedules approved-scope Nacos discovery under original m
  const resumed=await store.read();assert.equal(resumed.jobs.length,2);assert.notEqual(resumed.jobs[0].sourceMessageId,resumed.jobs[1].sourceMessageId);assert.equal(resumed.jobs[1].status,'awaiting_environment_approval');
 
 });
+
+test('duplicate endpoints retain complete provenance and its matching source job regardless of discovery order',()=>{
+ const bare=job();bare.id='bare';bare.updatedAt=new Date(Date.now()-2000).toISOString();delete bare.result.connectionEndpoints[0].connectionSource;
+ const proven=job();proven.id='proven';proven.environmentAccess.configHash='proof-config';proven.environmentAccess.queryId='investigate';
+ const state={questions:{parent:{id:'parent'}},jobs:[bare,proven]},turn={questionId:'parent',chatId:'c',profile:'o'};
+ for(const jobs of [[bare,proven],[proven,bare]]){
+  const result=connectionCandidates({...state,jobs},turn,'p');assert.equal(result.length,1);assert.equal(result[0].sourceJobId,'proven');assert.equal(result[0].sourceConfigHash,'proof-config');assert.equal(result[0].connectionSource.dataId,'d');
+ }
+ const newerBare=structuredClone(bare);newerBare.updatedAt=new Date(Date.now()+1000).toISOString();
+ assert.equal(connectionCandidates({...state,jobs:[proven,newerBare]},turn,'p')[0].sourceJobId,'proven');
+ const newerProof=structuredClone(proven);newerProof.id='newer';newerProof.updatedAt=new Date(Date.now()+2000).toISOString();newerProof.environmentAccess.configHash='new-config';newerProof.result.connectionEndpoints[0].connectionSource.contentHash='b'.repeat(64);
+ const selected=connectionCandidates({...state,jobs:[newerProof,proven,bare]},turn,'p')[0];assert.equal(selected.sourceJobId,'newer');assert.equal(selected.sourceConfigHash,'new-config');assert.equal(selected.connectionSource.contentHash,'b'.repeat(64));
+ for(const rows of [[bare.result.connectionEndpoints[0],proven.result.connectionEndpoints[0]],[proven.result.connectionEndpoints[0],bare.result.connectionEndpoints[0]]])assert.equal(connectionEndpoints(rows)[0].connectionSource.dataId,'d');
+});
+
+test('discovery polling proceeds to one approval after a bare endpoint is enriched, without asking for known configuration',async t=>{
+ const {pollEnrollments}=await import('../src/control-plane/environment-enrollment.js');
+ const {mkdtemp,rm}=await import('node:fs/promises');const os=await import('node:os');const path=await import('node:path');const {JsonStore}=await import('../src/shared/store.js');
+ const dir=await mkdtemp(path.join(os.tmpdir(),'endpoint-enrichment-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new JsonStore(path.join(dir,'state.json'));
+ const bare=job();bare.id='bare';delete bare.result.connectionEndpoints[0].connectionSource;
+ const proven=job();proven.id='proven';proven.sourceMessageId='turn';proven.connectionEnrollmentPending=true;
+ const turn={id:'turn',questionId:'parent',chatId:'c',profile:'o',senderId:'member',setupPending:true,setupTargetUrl:'mysql://db.test:3306/demo',decision:{action:'create_task',environmentSetup:{kind:'mysql',tier:'prd',url:''}}};
+ await store.transact(s=>{s.jobs=[bare,proven];s.conversations=[turn];s.questions={parent:{id:'parent',latestTurnId:'turn',generation:1}};});
+ const context={store,config:{dataDir:dir},projects:{chatProjectMap:{c:'p'},projects:{p:{}}}};
+ // Simulate the already-handled wait left by the old first-wins deduplication.
+ await store.transact(s=>{s.jobs[1].connectionEnrollmentHandled=true;s.conversations[0].response='尚未取得完整数据库地址；请补充目标配置或命名空间';s.conversations[0].status='sent';});
+ await pollEnrollments(context);await pollEnrollments(context);
+ const s=await store.read(),requests=Object.values(s.environmentEnrollments);assert.equal(requests.length,1);assert.equal(requests[0].status,'requested');assert.equal(requests[0].databaseSource.sourceJobId,'proven');assert.equal(requests[0].senderId,'member');
+ assert.match(s.conversations[0].response,/同意/);assert.doesNotMatch(s.conversations[0].response,/补充目标配置|尚未取得/);assert.equal(s.jobs[1].connectionEnrollmentHandled,true);
+});
