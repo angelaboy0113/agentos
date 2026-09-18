@@ -5,7 +5,7 @@ import { publicText, conciseSummary, summaryParagraphs, resultPages, resultPanel
 export { publicText } from './result-presentation.js';
 
 export function jobActionVersion(job) {
-  return createHash('sha256').update((job.questionId ? `${job.id}|${job.environmentAccess ? `${job.environmentAccess.scopeHash}|` : ''}` : '') + (job.events ?? []).filter((e) => ['started', 'clarification_received'].includes(e.type))
+  return createHash('sha256').update((job.questionId ? `${job.id}|${job.environmentAccess ? `${job.environmentAccess.scopeHash}|` : ''}` : '') + (job.events ?? []).filter((e) => ['started', 'clarification_received', 'environment_renewal_requested'].includes(e.type))
     .map((e) => e.id ?? e.at).join('|')).digest('hex').slice(0, 16);
 }
 
@@ -64,12 +64,13 @@ export function elapsed(start, end = Date.now()) {
   return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 export function jobCard(job, now = Date.now()) {
+  const expired=job.status==='awaiting_environment_approval' && !(Date.parse(job.environmentAccess?.expiresAt)>now);
   const labels = { running: ['执行中', 'blue'], queued: ['等待执行', 'blue'], completed: ['当前阶段已完成', 'green'],
     awaiting_environment_approval: ['待环境负责人批准查询', 'orange'],
     awaiting_approval: ['待真人确认', 'orange'], awaiting_clarification: ['待补充信息', 'orange'],
     blocked: ['任务受阻 / 未通过', 'red'], failed: ['执行失败', 'red'], cancelled: ['已取消 / 已停止', 'grey'],
     cancelling: ['正在停止', 'orange'], resubmitted: ['补充已提交', 'blue'] };
-  const [label, color] = job.result?.browserLoginRequired ? ['等待本机登录 · 登录后自动继续', 'orange'] : job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
+  const [label, color] = expired ? ['查询申请已过期 · 可重新申请', 'orange'] : job.result?.browserLoginRequired ? ['等待本机登录 · 登录后自动继续', 'orange'] : job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
     ? ['部分分析完成 · 有待核实', 'orange'] : labels[job.status] ?? ['等待更新', 'grey'];
   const active = ['running', 'queued', 'cancelling'].includes(job.status);
   const events = job.events ?? [];
@@ -81,7 +82,7 @@ export function jobCard(job, now = Date.now()) {
     : phase === 'verification' ? '正在运行项目验证命令' : phase === 'connection_retry' ? '连接异常，Codex 正在重试'
     : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
-  const summary = !active && job.result?.finalMessage ? resultSummary(job.result.summary || job.result.finalMessage) : '';
+  const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : !active && job.result?.finalMessage ? resultSummary(job.result.summary || job.result.finalMessage) : '';
   const elements = [block([md(`**${active ? '当前操作' : '结论'}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'
@@ -108,7 +109,7 @@ export function jobCard(job, now = Date.now()) {
     elements[0].columns[0].elements.push(md(publicText(`环境：${p.environmentId} (${p.tier}) · 模板：${p.queryId}\n范围：${p.description}\n参数：${JSON.stringify(p.parameters)}\n最多 ${p.maxRows} 条 · 超时 ${p.timeoutMs} ms\n授权截止：${p.expiresAt}\n结果在本问题卡片向群内展示；仅本次查询，不授权修改。`), true));
   }
   const buttons = [];
-  if (job.status === 'awaiting_environment_approval') buttons.push(actionButton(job, 'approve_environment', '批准本次只读查询', 'primary_filled'));
+  if (job.status === 'awaiting_environment_approval') buttons.push(actionButton(job, expired ? 'renew_environment' : 'approve_environment', expired ? '重新申请本次查询' : '批准本次只读查询', 'primary_filled'));
   if (job.status === 'awaiting_approval') buttons.push(actionButton(job, 'approve', '确认进入下一阶段', 'primary_filled'));
   if (['running', 'queued', 'awaiting_clarification', 'awaiting_approval', 'awaiting_environment_approval'].includes(job.status)) {
     buttons.push(actionButton(job, 'cancel', job.status === 'running' ? '停止任务' : '取消任务', 'danger'));

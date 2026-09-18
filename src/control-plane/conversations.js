@@ -1,3 +1,4 @@
+import { refreshExpiredApprovalCards } from './approval-expiry.js';
 import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/source-environments.js';
 import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { pollWebsiteLogins } from './website-query.js';
@@ -123,6 +124,7 @@ export class ConversationService {
     while (!this.stopped) {
       this.wakeRequested = false;
       await pollEnrollments(this.context);
+      void refreshExpiredApprovalCards(this.context).catch(()=>{});
       if(this.context.websiteBrowser)void pollWebsiteLogins(this.context).catch(()=>{});
       const state = await this.context.store.read();
       const heads = new Map();

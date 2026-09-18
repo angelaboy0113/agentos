@@ -161,3 +161,32 @@ test('HTTP callback -> cancellation poll -> actual worker AND descendant exit ->
   assert.equal((await app.store.getJob(job.id)).status, 'cancelled');
   for (const pid of [pids.parentPid, pids.childPid]) assert.throws(() => process.kill(pid, 0), /ESRCH/);
 });
+
+test('owned card actions work without optional remote card_content; missing ownership still fails closed',async t=>{
+ const {context,create,store}=await setup(t);const {job,event}=await create('awaiting_clarification','analysis');
+ assert.equal((await handleCardAction(context,event('refresh',{card_content:''}))).ok,true);
+ assert.equal((await handleCardAction(context,event('cancel',{card_content:undefined,message_id:'unowned-card'}))).ignored,true);
+ assert.equal((await store.getJob(job.id)).status,'awaiting_clarification');
+ assert.equal((await handleCardAction(context,event('cancel',{card_content:undefined}))).ok,true);
+ const audit=(await store.read()).cardCallbackAudit;assert.equal(audit.at(-1).outcome,'accepted');assert.equal(audit.at(-1).cardContentPresent,false);assert.equal(audit.at(-2).outcome,'ignored');
+});
+
+test('expired approval becomes renewal; renewal is idempotent, preserves scope and never approves',async t=>{
+ const {writeFile}=await import('node:fs/promises');const {planQuery}=await import('../src/shared/environment-access.js');const {refreshExpiredApprovalCards}=await import('../src/control-plane/approval-expiry.js');
+ const {context,create,store,cards,directory}=await setup(t);const old=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(directory,'env.json');t.after(()=>{if(old)process.env.AGENTOS_ENVIRONMENTS_FILE=old;else delete process.env.AGENTOS_ENVIRONMENTS_FILE;});
+ const config={version:1,environments:{uat:{projectId:'demo',tier:'uat',kind:'nacos',baseUrl:'http://example.test/nacos',credentialRef:'fixture',membersRead:true,ownerOpenIdsByProfile:{owner:['ou_admin']},queries:{investigate:{reviewed:true,mode:'investigate',description:'test only',namespaces:['uat'],maxRows:20,timeoutMs:5000,parameters:[{name:'purpose',type:'string'}]}}}}};await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(config));
+ const plan=planQuery(config,{environmentId:'uat',queryId:'investigate',parameters:['查看配置']},'demo',{profile:'owner',senderId:'creator'},Date.now()-16*60000);
+ const {job,key,event}=await create('awaiting_environment_approval','analysis');await store.transact(s=>{const j=s.jobs.find(x=>x.id===job.id);j.environmentAccess={...plan,approvalRequired:true,approvedBy:null,approvedAt:null};});
+ const current=await store.getJob(job.id);const originalMessage=(await store.read()).cardMessages[key].messageId;
+ await cards.upsert(key,jobCard(current,Date.parse(plan.expiresAt)-1000),{chatId:'group',replyTo:null,profile:'owner'},{terminal:true,immediate:true});
+ await refreshExpiredApprovalCards(context);
+ let state=await store.read();assert.match(JSON.stringify(state.cardMessages[key].card),/renew_environment/);assert.doesNotMatch(JSON.stringify(state.cardMessages[key].card),/"action":"approve_environment"/);assert.equal(state.jobs[0].environmentAccess.scopeHash,plan.scopeHash);assert.equal(state.jobs[0].status,'awaiting_environment_approval');
+ const renewal=event('renew_environment',{card_content:'',message_id:originalMessage,action_value:JSON.stringify({action:'renew_environment',version:jobActionVersion(current)})});
+ assert.equal((await handleCardAction(context,renewal)).ok,true);assert.equal((await handleCardAction(context,renewal)).ok,true);
+ const renewed=await store.getJob(job.id);assert.equal(renewed.status,'awaiting_environment_approval');assert.equal(renewed.environmentAccess.approvedBy,null);assert.deepEqual(renewed.environmentAccess.parameters,plan.parameters);assert.notEqual(renewed.environmentAccess.scopeHash,plan.scopeHash);assert.equal(renewed.events.filter(e=>e.type==='environment_renewal_requested').length,1);
+ context.projects.ownerOpenIdsByProfile.owner.push('ou_admin');
+ const approve=event('approve_environment',{operator_id:'ou_admin',card_content:'',action_value:JSON.stringify({action:'approve_environment',version:jobActionVersion(renewed)})});
+ assert.equal((await handleCardAction(context,approve)).ok,true);assert.equal((await handleCardAction(context,approve)).ok,true);assert.equal((await store.getJob(job.id)).status,'queued');assert.equal((await store.getJob(job.id)).events.filter(e=>e.type==='environment_approved').length,1);
+
+ assert.equal((await handleCardAction(context,event('approve_environment',{card_content:'',action_value:JSON.stringify({action:'approve_environment',version:jobActionVersion(current)})}))).ok,false);
+});

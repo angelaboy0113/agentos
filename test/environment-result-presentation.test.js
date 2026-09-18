@@ -20,7 +20,7 @@ test('empty and partial queries do not claim complete; overflow points to full e
 import { jobCard } from '../src/control-plane/message-cards.js';
 test('completed query puts answers first while approval still exposes full scope',()=>{
  const presented=presentEnvironmentResult(plan,result);
- const job={id:'job-demo',stage:'developer',status:'completed',taskIntent:'analysis',createdAt:'2026-09-16',updatedAt:'2026-09-16',environmentAccess:{...plan,environmentId:'env',queryId:'investigate',parameters:['purpose'],maxRows:20,timeoutMs:5000,expiresAt:'expiry'},result:{summary:presented.summary,finalMessage:presented.details}};
+ const job={id:'job-demo',stage:'developer',status:'completed',taskIntent:'analysis',createdAt:'2026-09-16',updatedAt:'2026-09-16',environmentAccess:{...plan,environmentId:'env',queryId:'investigate',parameters:['purpose'],maxRows:20,timeoutMs:5000,expiresAt:new Date(Date.now()+60000).toISOString()},result:{summary:presented.summary,finalMessage:presented.details}};
  const front=JSON.stringify(jobCard(job).body.elements[0]);assert.match(front,/db.example/);assert.doesNotMatch(front,/授权截止|模板：/);
  const approval=JSON.stringify(jobCard({...job,status:'awaiting_environment_approval',result:null}));assert.match(approval,/授权截止/);assert.match(approval,/批准本次只读查询/);
 });

@@ -1,4 +1,4 @@
-import { loadEnvironments, verifyApprovedPlan } from './environment-access.js';
+import { loadEnvironments, verifyApprovedPlan, planQuery, fingerprint } from './environment-access.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createId, nextStage } from './protocol.js';
@@ -94,6 +94,21 @@ export class JsonStore {
       state.jobs.push(job);
       if (input.sourceMessageId) state.processedMessages[input.sourceMessageId] = job.id;
       return { job, duplicate: false };
+    });
+  }
+
+  async renewEnvironment(id,effectKey,guard=()=>{}) {
+    const config=await loadEnvironments();
+    return this.transactEffect(effectKey,state=>{
+      const job=requireJob(state,id);guard(state,job);const old=job.environmentAccess;
+      if(job.status!=='awaiting_environment_approval'||!old||Date.parse(old.expiresAt)>Date.now())throw new Error('查询申请尚未过期或状态已改变');
+      const e=config.environments[old.environmentId];
+      if(!e||fingerprint(e)!==old.configHash)throw new Error('查询申请的配置已改变，请重新发起排查并核对新范围');
+      const plan=planQuery(config,{environmentId:old.environmentId,queryId:old.queryId,parameters:old.parameters},job.projectId,{profile:old.approvalProfile,senderId:job.senderId});
+      job.environmentAccess={...plan,approvalRequired:true,approvedBy:null,approvedAt:null};
+      job.updatedAt=new Date().toISOString();job.events.push({id:createId('EVT'),type:'environment_renewal_requested',at:job.updatedAt,previousScopeHash:old.scopeHash,scopeHash:plan.scopeHash});
+      const question=state.questions?.[job.questionId];if(question)question.generation++;
+      return structuredClone(job);
     });
   }
 

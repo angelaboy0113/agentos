@@ -4,7 +4,7 @@ import { isAdministrator, isTaskCreator } from './authorization.js';
 
 // Presentation-only callbacks: no Job mutation, Runner dispatch or model invocation.
 export async function handleResultPage(context, event) {
-  if (!event.card_content) return { ignored: true };
+  // Verify the locally persisted sent card below; optional CLI user_dsl enrichment is not authority.
   let value;
   try { value = typeof event.action_value === 'string' ? JSON.parse(event.action_value) : event.action_value; }
   catch { return { ignored: true }; }
