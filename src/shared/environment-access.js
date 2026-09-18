@@ -1,3 +1,4 @@
+import { canonicalWebsite, validateWebsiteAliases } from './website-aliases.js';
 import { websiteUrl } from './website-policy.js';
 import { validateAccountPolicy } from './database-account-policy.js';
 import { validateToolQuery } from './environment-tool-policy.js';
@@ -13,6 +14,7 @@ export async function loadEnvironments(file = environmentFile()) {
   try { v = JSON.parse(await readFile(file, 'utf8')); }
   catch (e) { if (e.code === 'ENOENT') return { version: 1, environments: {} }; throw new Error('环境配置无法读取或解析；未执行查询'); }
   if (v.version !== 1 || !v.environments || typeof v.environments !== 'object' || Array.isArray(v.environments)) throw new Error('环境配置版本错误');
+  validateWebsiteAliases(v);
   for (const [key, e] of Object.entries(v.environments)) {
     if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos', 'website'].includes(e.kind)
       || !id(e.credentialRef) || typeof e.membersRead !== 'boolean' || !e.ownerOpenIdsByProfile || !e.queries) throw new Error('环境配置字段无效');
@@ -38,10 +40,19 @@ export async function loadEnvironments(file = environmentFile()) {
 }
 export function isEnvironmentOwner(e, actor) { return (e.ownerOpenIdsByProfile?.[actor.profile] ?? []).includes(actor.senderId); }
 export function catalog(config, projectId) {
-  return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
+  return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId && (e.kind !== 'website' || canonicalWebsite(config, projectId, e.tier, e.baseUrl) === websiteUrl(e.baseUrl))).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
     queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据'] } : {}), parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin,entryUrl:e.baseUrl} : e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
+  const original = config.environments[request?.environmentId];
+  if(original?.projectId===projectId && original.kind==='website'){
+    const url=canonicalWebsite(config,projectId,original.tier,original.baseUrl);
+    if(url!==websiteUrl(original.baseUrl)){
+      const target=Object.entries(config.environments).find(([,e])=>e.projectId===projectId&&e.tier===original.tier&&e.kind==='website'&&websiteUrl(e.baseUrl)===url);
+      if(!target)throw new Error('正确业务域名尚未登记；需发现并登记更正后的入口');
+      request={...request,environmentId:target[0]};
+    }
+  }
   const e = config.environments[request?.environmentId], q = e?.queries?.[request?.queryId];
   if (!e || e.projectId !== projectId || !q) throw new Error('环境或查询模板未配置；请管理员在本机配置');
   if (!Array.isArray(request.parameters) || request.parameters.length !== q.parameters.length) throw new Error('查询参数不完整');

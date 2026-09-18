@@ -1,3 +1,4 @@
+import { canonicalWebsite } from '../shared/website-aliases.js';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { environmentFile, loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
@@ -8,8 +9,8 @@ export function prepareWebsiteQuery(context,job,request){
  const pending=updates.then(async()=>{
   if(!request||!['uat','prd'].includes(request.tier)||typeof request.purpose!=='string'||!request.purpose.trim()||request.purpose.length>200)throw new Error('网页排查需要明确环境、目的和发现的入口');
   if(job.sourceEnvironment&&job.sourceEnvironment!==request.tier)throw new Error('网页环境必须与本问题环境一致');
-  const baseUrl=websiteUrl(request.url),environmentId=websiteKey(job.projectId,request.tier,baseUrl);
   const cfg=await loadEnvironments();
+  const baseUrl=canonicalWebsite(cfg,job.projectId,request.tier,request.url),environmentId=websiteKey(job.projectId,request.tier,baseUrl);
   if(cfg.environments[environmentId] && websiteUrl(cfg.environments[environmentId].baseUrl)!==baseUrl)throw new Error('网页入口登记冲突，未复用其他页面');
   if(!cfg.environments[environmentId]){
    const owners=context.projects.ownerOpenIdsByProfile??{};

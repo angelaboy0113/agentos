@@ -2,7 +2,7 @@
 
 ## 用途与入口
 
-群成员直接提出问题，例如“核对 UAT 报表定时任务最近是否成功”。不需要维护网站白名单，也不必先提供 URL。负责人创建原环境的源码分析，开发从问题、当前环境源码和文档查找实际入口，返回 `websiteQuery: {url,tier,purpose}`。找不到可信入口或存在环境歧义时才需要补充线索，禁止猜地址。
+群成员直接提出问题，例如“核对 UAT 报表定时任务最近是否成功”。不需要维护网站白名单，也不必先提供 URL。负责人创建原环境的源码分析，开发从问题、当前环境源码和文档查找实际入口，返回 `websiteQuery: {url,tier,purpose}`。找不到可信入口或存在环境歧义时才需要补充线索，禁止猜地址。业务网页优先使用本环境域名，用户确认的旧入口更正保存方式见 [域名入口更正](canonical-websites.md)。
 
 若入口位于 Nacos，使用 [调度入口发现](scheduler-discovery.md) 的 `read_runtime_config` 获取非敏感 XXL-JOB 配置，并将 `runtimeDiscoveries` 交给后续源码阶段提出 `websiteQuery`，无需用户重复提供已经发现的网址。
 
