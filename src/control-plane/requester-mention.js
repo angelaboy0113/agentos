@@ -6,11 +6,13 @@ export function requesterMentionText(userId, message) {
 }
 
 export function conversationTerminalMention(turn) {
+  if (turn.setupPending) return null;
   if (turn?.chatType !== 'group' || turn.outcome?.jobId || turn.outcome?.nextJobId) return null;
   return mention(turn.messageId, turn.profile, turn.senderId, '本次回复已完成，请查看上方结果。');
 }
 
 export function jobTerminalMention(job, projects = {}) {
+  if(job.setupTurnId)return null;
   if(job.connectionEnrollmentPending && !job.connectionEnrollmentHandled && job.status === 'completed') return null;
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
   if(job.status==='awaiting_clarification'&&job.result?.browserLoginRequired){

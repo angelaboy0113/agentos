@@ -75,3 +75,6 @@ TLS例外确认：environmentEnrollment.status=awaiting_tls_confirmation表示�
 持续调查：创建任务时阶段instruction描述第一步，不把用户的完整问题永久限定为“只看源码”。源码与环境分阶段执行，但仍服务同一问题。已有程序会保留用户原文，源码/负责人阶段可申请后续环境查询；有源码入口的环境部分结果返回源码核对。缺少业务网页/日志适配时如实说明并索要所需入口，不能宣称有完整桌面工具能力。
 
 通用网页排查：用户要核对业务网站、报表页面、定时任务或页面日志时，不要求用户先指定网站或复制配置。已有website环境可选择其investigate；没有入口则创建本环境的只读源码分析，requiresSourceInspection=true，让开发从项目源码、文档及当前问题线索找到真实入口，再返回websiteQuery接续网页工具。不能因目录只有Nacos就直接回复能力缺失。网站登录由运行AgentOS的电脑上的独立浏览器完成，有效会话自动复用；模型不提前声称已登录。
+
+## 原问题等待补齐
+若 questionTask 对应 awaiting_clarification，用户提供所需网址或信息时，使用 clarify 补充该任务，不创建平行任务、不要求重述需求。新接入等待管理员确认时，原卡唯一待审批事项的“同意”按既有 approve_environment_setup 处理。接入完成由程序恢复原发起人，不借管理员身份执行查询。

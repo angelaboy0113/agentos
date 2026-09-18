@@ -48,9 +48,9 @@ export function resultParts(text) {
 export function conversationCard(turn, now = Date.now()) {
   const final = ['ready', 'sent'].includes(turn.status);
   const failed = turn.aiFailed || turn.actionError;
-  const state = final ? (failed ? '未执行' : '已回复') : turn.status === 'queued' ? '排队中'
+  const state = final ? (failed ? '未执行' : turn.setupPending ? '等待补齐接入' : '已回复') : turn.status === 'queued' ? '排队中'
     : turn.connectionWillRetry ? '连接重试中' : '正在处理';
-  const color = failed ? 'red' : final ? 'green' : 'blue';
+  const color = failed ? 'red' : turn.setupPending ? 'orange' : final ? 'green' : 'blue';
   const content = final ? conciseSummary(turn.response) : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
     : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const elements = [block([md(content)], color)];

@@ -2,7 +2,7 @@ import { refreshExpiredApprovalCards } from './approval-expiry.js';
 import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/source-environments.js';
 import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { pollWebsiteLogins } from './website-query.js';
-import { requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
+import { enrollmentTarget, requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
 import { loadEnvironments, catalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
 import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
@@ -334,16 +334,32 @@ export class ConversationService {
     const attachments = (turn.attachmentPool ?? []).filter((item) => attachmentIds.has(item.id));
     if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');
     if (decision.action === 'request_environment_setup') {
+      if(decision.environmentSetup?.url)decision.environmentSetup=enrollmentTarget(decision.environmentSetup);
+      // A bare endpoint cannot authorize local credential extraction: discover its source first.
+      if(decision.environmentSetup?.kind==='mysql'&&decision.environmentSetup.url){
+        const setup=decision.environmentSetup,u=new URL(setup.url),cfg=await loadEnvironments();
+        const known=Object.values(cfg.environments).some(e=>e.projectId===projectId&&e.tier===setup.tier&&e.kind==='mysql'
+          &&e.host===u.hostname&&e.port===Number(u.port||3306)&&e.database===u.pathname.slice(1)&&e.queries?.investigate?.mode==='investigate');
+        const proven=connectionCandidates(await store.read(),turn,projectId).some(c=>c.url===setup.url&&c.tier===setup.tier&&c.connectionSource);
+        if(!known&&!proven){turn.setupTargetUrl=setup.url;await this.update(turn.id,{setupTargetUrl:setup.url});setup.url='';}
+      }
+
       if (decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url) {
-        const candidates = connectionCandidates(await store.read(), turn, projectId).filter(e=>e.tier===decision.environmentSetup.tier && e.connectionSource);
+        const candidates = connectionCandidates(await store.read(), turn, projectId).filter(e=>e.tier===decision.environmentSetup.tier && e.connectionSource && (!turn.setupTargetUrl||e.url===turn.setupTargetUrl));
         if (candidates.length === 1) decision.environmentSetup.url = candidates[0].url;
         else if (candidates.length > 1) return { notice: '发现多个数据库入口，请选择目标库名：' + candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') + '。无需提供密码。' };
         else {
           const sources = catalog(await loadEnvironments(), projectId).filter(e=>e.kind==='nacos' && e.tier===decision.environmentSetup.tier && e.queries.some(q=>q.queryId==='investigate'));
           if (sources.length !== 1) return { notice: '需要先确定用于发现数据库地址的 Nacos 入口；请指出环境或目标配置，不需要手动复制数据库地址。' };
           decision.action = 'create_task'; decision.intent = 'analysis';
-          decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:['使用discover和read_config获取公共数据库配置的地址及来源，用于管理员确认后在本机接续凭据。不要连接数据库，不返回账号密码。']};
+          decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:[`使用discover和read_config获取${turn.setupTargetUrl??'公共数据库'}配置的地址及来源，用于管理员确认后本机接续凭据；不连接数据库、不返回账号密码。`.slice(0,200)]};
         }
+      }
+      if(decision.action==='request_environment_setup'&&decision.environmentSetup?.url){
+        const setup=decision.environmentSetup,u=new URL(setup.url),config=await loadEnvironments();
+        const known=Object.entries(config.environments).find(([,e])=>e.projectId===projectId&&e.tier===setup.tier&&e.kind===setup.kind
+          &&e.queries?.investigate?.mode==='investigate'&&(e.kind==='mysql'?e.host===u.hostname&&e.port===Number(u.port||3306)&&e.database===u.pathname.slice(1):e.baseUrl.replace(/\/$/,'')===setup.url.replace(/\/$/,'')));
+        if(known){decision.action='create_task';decision.intent='analysis';decision.environmentQuery={environmentId:known[0],queryId:'investigate',parameters:[decision.instruction.slice(0,200)]};decision.environmentSetup=null;}
       }
       if (decision.action === 'request_environment_setup') return requestEnrollment(this.context, turn);
     }
@@ -385,16 +401,18 @@ export class ConversationService {
       await store.transact(s => { const t = (s.conversations ?? []).find(x=>x.id===turn.id); if(t) t.decision=structuredClone(decision); });
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
+        ...(turn.setupSourceJobId?{context:turn.investigationContext??[],missionId:turn.resumeMissionId}:{}),
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
         originChatType: turn.chatType, questionId: turn.questionId, environmentAccess, sourceEnvironment,
         connectionEnrollmentPending: decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url,
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
-        ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, originalQuestion: turn.content, attachments,
+        ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, originalQuestion: turn.content, attachments: [...(turn.resumeAttachments??[]),...attachments],
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
           reason: route.workflow === 'analysis_review' ? '交给开发只读调查，完成后由项目负责人汇总' : '按角色边界转交负责人协调' } : null,
       });
+      if(turn.setupPending && !decision.environmentSetup)await this.update(turn.id,{setupPending:false});
       return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${route.workflow === 'analysis_review' ? '协作：开发只读调查 → 项目负责人汇总（不修改代码）\n' : ''}状态：${created.job.status === 'awaiting_environment_approval' ? '等待环境负责人批准本次查询' : '等待执行'}` };
     }
     const job = await store.getJob(decision.jobId);

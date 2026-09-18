@@ -9,6 +9,9 @@ export function investigationComplete(job, result) {
  return (job.context??[]).every(x=>(x.result?.investigation?.goals??[]).every(g=>ids.has(g.id)));
 }
 export function assessInvestigation(job,result){
+ if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
+   && (result.environmentSetup || result.investigation?.status==='wait'&&['login','user_input'].includes(result.investigation?.blocker?.kind)))
+  return {...result,outcome:'needs_clarification'};
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!['ready','partial'].includes(result.outcome))return result;
  if(investigationComplete(job,result))return result;
  const note='原问题仍有待核实目标，继续自查；尚不能认定排查完成。';

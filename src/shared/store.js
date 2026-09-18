@@ -284,6 +284,27 @@ export class JsonStore {
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'environment_approval_requested', nextJobId: nextJob.id });
         state.jobs.push(nextJob);
       }
+      // Queue a same-question enrollment conversation atomically with source completion.
+      if(event.type==='completed'&&job.status==='awaiting_clarification'&&job.taskIntent==='analysis'
+        &&job.questionId&&!job.environmentAccess&&event.result?.environmentSetup&&completionRouting.setupInvestigation){
+        const q=state.questions?.[job.questionId];
+        const root=(state.conversations??[]).find(t=>t.id===q?.rootTurnId);
+        if(q&&root&&q.chatId===job.chatId&&q.projectId===job.projectId){
+          const id=createId('CHAT');
+          const turn={...structuredClone(root),id,questionId:job.questionId,senderId:job.senderId,profile:job.originProfile,
+            content:job.originalQuestion??job.instruction,status:'decided',createdAt:job.updatedAt,
+            completedAt:undefined,response:undefined,responseIds:[],sentParts:0,outcome:null,actionError:null,aiFailed:false,retryAt:null,
+            setupPending:true,setupSourceJobId:job.id,resumeMissionId:job.missionId,resumeAttachments:structuredClone(job.attachments),
+            investigationContext:[...structuredClone(job.context),{stage:job.stage,result:structuredClone(job.result)}],
+            decision:{action:'request_environment_setup',intent:'analysis',projectId:job.projectId,jobId:null,
+              instruction:job.originalQuestion??job.instruction,reply:'调查证据已保留，正在为原问题补齐环境接入；无需重述需求。',
+              attachmentIds:[],requiresSourceInspection:false,environmentQuery:null,
+              environmentSetup:structuredClone(event.result.environmentSetup),sourceEnvironment:job.sourceEnvironment??null}};
+          state.conversations.push(turn);q.latestTurnId=id;q.generation++;
+          job.status='completed';job.setupTurnId=id;
+          job.events.push({id:createId('EVT'),at:job.updatedAt,type:'investigation_setup_requested',turnId:id});
+        }
+      }
       // Runtime evidence returns to source investigation on the same question, without
       // carrying an environment grant into the source worker or dispatching a write job.
       if (event.type === 'completed' && job.status === 'completed' && job.taskIntent === 'analysis'

@@ -8,7 +8,8 @@
     "handoff",
     "environmentQuery",
     "websiteQuery",
-    "investigation"
+    "investigation",
+    "environmentSetup"
   ],
   "properties": {
     "outcome": {
@@ -276,6 +277,41 @@
                   }
                 }
               ]
+            }
+          }
+        }
+      ]
+    },
+    "environmentSetup": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "tier",
+            "url"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "nacos",
+                "mysql"
+              ]
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "uat",
+                "prd"
+              ]
+            },
+            "url": {
+              "type": "string"
             }
           }
         }

@@ -1,3 +1,4 @@
+import { enrollmentTarget } from './environment-enrollment.js';
 import { SharedChromeBrowser } from './shared-chrome-browser.js';
 import { WebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
@@ -169,6 +170,14 @@ async function route(context) {
       return json(response, 409, { ok: false, error: 'Stale or foreign Runner lease' });
     }
     let routing = agentRouting(context, nextStage(job.workflow, job.stage));
+    if(body.type==='completed'&&body.result?.environmentSetup){
+      if(job.taskIntent!=='analysis'||!job.questionId||job.environmentAccess||!['developer','owner_report'].includes(job.stage)
+        ||body.result.outcome!=='needs_clarification'||body.result.environmentQuery||body.result.websiteQuery)throw new Error('当前阶段不能申请环境接入');
+      const setup=body.result.environmentSetup;
+      if(!['nacos','mysql'].includes(setup.kind)||!['uat','prd'].includes(setup.tier)||typeof setup.url!=='string')throw new Error('接入参数无效');
+      if(setup.url)enrollmentTarget(setup);
+      if(setup.kind==='mysql'||setup.url)routing={...routing,setupInvestigation:true};
+    }
     if(body.type==='completed'&&body.result?.websiteQuery){
       if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.questionId||job.environmentAccess||body.result.outcome!=='needs_clarification'||body.result.environmentQuery)throw new Error('当前阶段不能申请网页排查');
       body.result.environmentQuery=await prepareWebsiteQuery(context,job,body.result.websiteQuery);
@@ -197,7 +206,7 @@ async function route(context) {
       }
     }
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
-      && job.environmentAccess && ['partial', 'ready'].includes(body.result?.outcome)
+      && job.environmentAccess && !job.connectionEnrollmentPending && ['partial', 'ready'].includes(body.result?.outcome)
       && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
       const prior = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess && j.id !== job.id && j.result?.environmentEvidence);
       const hash = body.result.environmentEvidence?.resultHash;

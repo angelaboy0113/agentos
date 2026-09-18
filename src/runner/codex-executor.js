@@ -59,7 +59,7 @@ export async function executeJob(job, config, emit) {
   // Recheck final files after verification commands may have generated/changed artifacts.
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace));
   return { workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
-    investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate,
+    environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate,
     timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };
 }
 
@@ -213,6 +213,7 @@ ${job.taskIntent === 'analysis' ? '本次是只读分析，Runner 已同步 anal
 ${prior}
 执行要求：
 1. 开始前读取仓库内AGENTS.md、进度和相关Spec。
+2. 缺少已登记的数据库/Nacos接入时，先检查本问题已有入口和证据；返回environmentSetup={kind:mysql或nacos,tier:uat或prd,url:已知无凭据入口}、outcome=needs_clarification，environmentQuery和websiteQuery均为null。MySQL地址可来自本问题Nacos证据；尚未发现地址时url为空，系统会复用本问题候选或申请Nacos发现，不要求用户抄凭据。Nacos网址确实未知时url为空，finalMessage明确请用户提供对应环境网址；已有网址不要重复询问。系统在原问题申请管理员确认，接入完成自动继续，不能只写缺连接就blocked。其他缺网址、登录、用户必需信息使用investigation.status=wait并说明具体配合动作、outcome=needs_clarification；不要求重述需求。不需要接入时environmentSetup=null。
 2. analysis 必须返回 investigation 自查清单；其他任务填null。先把原始问题拆成稳定id的验收目标(goals)，逐项标明verified/open及实际证据(evidence)，后续轮次保留目标id，不能删掉未解决目标来完成。status=complete只在所有目标有核实证据时使用；还有可执行路径时status=continue，nextStep写具体行动。attempts记载实际尝试与失败证据，不把计划说成执行过。缺少数据库入口时先核对本环境目录、已有Nacos发现、前序接入与网页证据，不能仅因当前工具没直接给出就停止；禁止绕过受控接入。自查环境/协议/应用路径/参数/前序结果是否选错，失败后更换有依据的路径。确实需要外部配合才status=wait，blocker明确login/approval/user_input/unavailable、需要谁做什么(needed)和实际阻碍证据(evidence)；不要笼统写缺入口。无需用户介入时blocker=null，不能要求反复回复继续。负责人须复核未解决目标并将可执行调查退回开发；新证据已关闭旧缺口时在同id goal中说明证据，不永久继承过期缺口。不为变绿捏造结论。
 2. 事实不充分时，先根据证据缺口选择可用的源码或受控环境工具继续调查。需要环境证据且目录匹配时必须返回environmentQuery申请后续阶段，不以列出缺口代替可执行的调查。只有缺少实际工具、权限或用户必需信息时暂停并明确需要谁提供什么，不要编造。
 3. 不输出或提交任何密钥，不执行生产部署，不合并主分支。

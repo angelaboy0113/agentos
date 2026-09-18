@@ -79,7 +79,7 @@ export async function requestEnrollment(context, turn) {
     };
     return {
       enrollmentId: id,
-      notice: source ? `请管理员回复此卡“同意自动连接”，确认 ${target.tier.toUpperCase()} 数据库 ${target.url}。将从本次Nacos配置在Mac本机提取业务凭据、验证TLS证书与只读事务，并开放本库基础表的受控查询；账号本身可能有写权限。凭据不交给模型、不发群。接入不代替成员PRD查询审批。` : `该环境尚未接入。请本群管理员回复此卡“同意本机接入”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；接入不等于批准生产查询，密码不要发到群里。`,
+      notice: source ? `请管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 数据库 ${target.url}。将从本次Nacos配置在Mac本机提取业务凭据、验证TLS证书与只读事务，并开放本库基础表的受控查询；账号本身可能有写权限。凭据不交给模型、不发群。接入不代替成员PRD查询审批。` : `该环境尚未接入。请本群管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；接入不等于批准生产查询，密码不要发到群里。`,
     };
   });
 }
@@ -179,7 +179,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
     if (!turn || job.connectionEnrollmentHandled || job.status!=='completed' || !job.environmentAccess
       || turn.decision?.environmentSetup?.kind!=='mysql' || turn.decision.environmentSetup.url
       || turn.decision.action!=='create_task') continue;
-    const candidates=connectionCandidates(state,turn,job.projectId).filter(e=>e.tier===turn.decision.environmentSetup.tier && e.connectionSource);
+    const candidates=connectionCandidates(state,turn,job.projectId).filter(e=>e.tier===turn.decision.environmentSetup.tier && e.connectionSource && (!turn.setupTargetUrl||e.url===turn.setupTargetUrl));
     let outcome;
     if(candidates.length===1) outcome=await requestEnrollment(context,{...turn,decision:{...turn.decision,environmentSetup:{...turn.decision.environmentSetup,url:candidates[0].url}}});
     else outcome={notice:candidates.length ? '发现多个数据库入口，请选择目标库名：'+candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') : '尚未取得完整数据库地址；请补充目标配置或命名空间，已有查询结果保留，未尝试数据库登录。'};
@@ -259,12 +259,14 @@ export async function pollEnrollments(context, load = loadEnvironments) {
           },
           requiresSourceInspection: false,
         };
+        original.setupPending = false;
         original.environmentResumeKey = e.id;
         original.status = "decided";
         original.outcome = null;
         original.retryAt = null;
         original.actionError = null;
       } else {
+        original.setupPending = current.status === "login_required";
         original.status = "ready";
         original.response =
           current.status === "login_required"
