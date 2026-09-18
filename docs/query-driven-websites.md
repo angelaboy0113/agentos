@@ -4,6 +4,8 @@
 
 群成员直接提出问题，例如“核对 UAT 报表定时任务最近是否成功”。不需要维护网站白名单，也不必先提供 URL。负责人创建原环境的源码分析，开发从问题、当前环境源码和文档查找实际入口，返回 `websiteQuery: {url,tier,purpose}`。找不到可信入口或存在环境歧义时才需要补充线索，禁止猜地址。
 
+若入口位于 Nacos，使用 [调度入口发现](scheduler-discovery.md) 的 `read_runtime_config` 获取非敏感 XXL-JOB 配置，并将 `runtimeDiscoveries` 交给后续源码阶段提出 `websiteQuery`，无需用户重复提供已经发现的网址。
+
 控制面建立 `kind=website` 环境，复用原问题、原发起人和当前审批规则；网页证据不足时继续返回源码调查。此次接入没有给源码 Codex 开放任意联网、桌面控制或个人浏览器 Cookie 读取权限。
 
 ## 部署

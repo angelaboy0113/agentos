@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { createNacosBrowser } from './environment-browser.js';
 import { boundedFetch, checkAccountGrants } from './environment-connector.js';
-import { databaseEndpoints } from './config-endpoints.js';
+import { databaseEndpoints, schedulerConfiguration } from './config-endpoints.js';
 const secretName = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 const bounded = (x, secrets = []) => { let s = String(x ?? '').slice(0, 500); for (const v of secrets.filter(Boolean)) s = s.split(v).join('[已隐藏]'); return s; };
@@ -63,6 +63,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const spec = e.kind === 'nacos' ? [
     { tool: 'connection', args: {}, description: '测试固定 Nacos 入口的 HTTP 登录，凭据留在本机' },
     { tool: 'discover', args: {}, description: '列出批准的命名空间内最多100条配置的引用和名称，不返回正文' },
+    { tool: 'read_runtime_config', args: { ref: '从discover返回的ref' }, description: '读取已发现配置中的XXL-JOB管理台地址、启用开关和执行器名称；不返回正文或凭据。定时任务排查使用此工具，发现入口后由原问题继续网页调查。' },
     { tool: 'read_config', args: { ref: '从discover返回的ref' }, description: '读取一个已发现配置并解析同文件变量，仅返回数据库端点与解析状态' }
   ] : [
     { tool: 'connection', args: {}, description: '测试数据库连接、只读账号授权与只读事务' },
@@ -95,6 +96,13 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           }
           const x = configs.get(args.ref); if (!x) throw new Error('仅可读取本次发现的配置引用');
           const content = await nacos('/v1/cs/configs', { tenant: x.namespace, group: x.group, dataId: x.dataId });
+          if (tool === 'read_runtime_config') {
+            const runtime = schedulerConfiguration(content);
+            const source = { ...x, contentHash: createHash('sha256').update(content).digest('hex') };
+            return { config: args.ref, runtimeDiscovery: { ...runtime, source },
+              partial: true, stage: runtime.websites.length ? '已发现XXL-JOB管理台入口，尚未访问或验证调度' : '未解析出XXL-JOB管理台入口；不能据此断言未启用',
+              nextStep: '入口仅为配置证据，不代表已登录或任务已运行。交由原问题的websiteQuery继续查看Cron、启停状态与执行记录；多个入口时结合当前环境证据选择，不猜测。' };
+          }
           const found = databaseEndpoints(content);
           return { config: args.ref, rows: found.slice(0, q.maxRows).map(row=>({...row,connectionSource:{...x,contentHash:createHash('sha256').update(content).digest('hex')}})), truncated: found.length > q.maxRows, partial: found.unresolved || !found.length, stage: found.length ? '配置已读取，数据库地址已解析' : '配置已读取，未解析出数据库地址', databaseConnection: '未测试；管理员确认后可在本机提取凭据并通过受控只读模式验证' };
         }

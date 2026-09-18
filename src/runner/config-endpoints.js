@@ -1,4 +1,5 @@
 import { parseAllDocuments } from 'yaml';
+import { websiteUrl } from '../shared/website-policy.js';
 const sensitive = /password|passwd|secret|token|credential|private.?key|username/i;
 // Parse data only: no custom tags, merges, environment variables, files or evaluation.
 function configurationValues(source) {
@@ -7,7 +8,7 @@ function configurationValues(source) {
   const collect = (v, prefix = '', depth = 0) => {
     if (depth > 30 || values.size > 10000) throw new Error('配置结构超过限制');
     if (v && typeof v === 'object') { for (const [k, x] of Object.entries(v)) if (!['__proto__','prototype','constructor'].includes(k)) collect(x, prefix ? `${prefix}.${k}` : k, depth + 1); }
-    else if (typeof v === 'string' || typeof v === 'number') values.set(prefix, String(v));
+    else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') values.set(prefix, String(v));
   };
   // Properties and YAML are distinct formats. Never fall back to raw text after malformed YAML.
   if (/^\s*[^#!\s][^\n=:]*\s*=/m.test(source) && !/^\s*\w+:\s*$/m.test(source)) {
@@ -66,4 +67,36 @@ export function databaseCredential(source, target) {
  }
  const unique=[...new Map(found.map(x=>[JSON.stringify(x),x])).values()];
  if(unique.length!==1)throw new Error('目标数据库凭据缺失或存在多个不同账号');return unique[0];
+}
+
+// Only publish named scheduler fields, never raw config or arbitrary URL fields.
+export function schedulerConfiguration(source) {
+  const values = configurationValues(source), entries = [], websites = [];
+  let unresolved = false;
+  const resolve = (value, seen = []) => {
+    if (seen.length > 16 || value.length > 16000) throw new Error('reference limit');
+    return value.replace(/\$\{([^{}]+)\}/g, (_, key) => {
+      if (sensitive.test(key) || !values.has(key) || seen.includes(key)) throw new Error('unresolved');
+      return resolve(values.get(key), [...seen, key]);
+    });
+  };
+  for (const [key, raw] of values) {
+    if (!/^xxl\.job\.(admin\.addresses|enabled|enable|executor\.appname)$/.test(key)) continue;
+    let value; try { value = resolve(raw); } catch { unresolved = true; continue; }
+    if (key === 'xxl.job.admin.addresses') {
+      for (const address of value.split(',').slice(0, 10)) {
+        try {
+          // Reject credential-bearing addresses rather than sanitize and guess a target.
+          if (/[?#]|\$\{|ENC\(/.test(address)) throw new Error('unsafe address');
+          const url = websiteUrl(address.trim());
+          websites.push({ kind: 'xxl-job', key, url });
+        } catch { unresolved = true; }
+      }
+    } else if (key === 'xxl.job.executor.appname') {
+      if (/^[a-zA-Z0-9_-]{1,100}$/.test(value)) entries.push({ key, value });
+      else unresolved = true;
+    } else if (/^(true|false|0|1)$/i.test(value)) entries.push({ key, value });
+    else unresolved = true;
+  }
+  return { entries, websites: [...new Map(websites.map(x => [x.url,x])).values()], unresolved };
 }
