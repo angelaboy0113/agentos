@@ -1,3 +1,4 @@
+import { investigationComplete } from '../shared/investigation-review.js';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -28,7 +29,7 @@ export function handoffContext(job) {
   const independent = ['qa', 'owner_audit'].includes(job.stage);
   return (job.context ?? []).slice(-8).map(({ stage, result = {} }) => ({ stage,
     outcome: result.outcome, environmentEvidence: result.environmentEvidence, workspace: result.workspace,
-    harness: result.harness,
+    harness: result.harness, investigation: result.investigation, investigationPause: result.investigationPause,
     runtimeDiscoveries: result.runtimeDiscoveries, websiteMismatch: result.websiteMismatch,
     handoff: result.handoff,
     verifiedArtifacts: result.verifiedArtifacts,
@@ -102,6 +103,7 @@ export function preserveAnalysisGaps(job, result) {
   if (job.taskIntent !== 'analysis' || job.stage !== 'owner_report' || !['ready', 'partial'].includes(result.outcome)) return result;
   const prior = [...(job.context ?? [])].reverse().find((entry) => entry.result?.outcome === 'partial')?.result;
   if (!prior || !result.handoff) return result;
+  if (investigationComplete(job, result)) return result;
   const risks = [...new Set([...(prior.handoff?.risks ?? []), ...(result.handoff.risks ?? [])])];
   return { ...result, outcome: 'partial',
     summary: `部分分析完成，仍有待核实项。${result.summary ?? ''}`.slice(0, 360),

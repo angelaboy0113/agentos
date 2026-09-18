@@ -201,6 +201,11 @@ async function route(context) {
       if (!stalled) routing = { ...agentRouting(context, 'developer'), resumeInvestigation: true };
       else body.result.summary = '连续三轮环境调查没有新增证据，已暂停。需要调整调查路径或补充缺失工具。' + (body.result.summary ?? '');
     }
+    if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
+      && !job.environmentAccess && job.stage === 'owner_report' && body.result?.outcome === 'partial'
+      && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
+      routing = { ...agentRouting(context, 'developer'), reviewInvestigation: true };
+    }
     const result = await store.appendEvent(job.id, body, routing);
     if(['completed','failed','cancelled'].includes(body.type)&&!body.result?.browserLoginRequired)await context.websiteBrowser.release(job.id);
     setImmediate(() => notifyJobEvent(context, result).catch((error) => console.error('[notify]', error)));

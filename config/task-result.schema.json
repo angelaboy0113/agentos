@@ -7,7 +7,8 @@
     "finalMessage",
     "handoff",
     "environmentQuery",
-    "websiteQuery"
+    "websiteQuery",
+    "investigation"
   ],
   "properties": {
     "outcome": {
@@ -175,6 +176,106 @@
             "purpose": {
               "type": "string",
               "maxLength": 200
+            }
+          }
+        }
+      ]
+    },
+    "investigation": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "goals",
+            "attempts",
+            "nextStep",
+            "blocker"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "continue",
+                "wait"
+              ]
+            },
+            "goals": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 30,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "status",
+                  "evidence"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "verified",
+                      "open"
+                    ]
+                  },
+                  "evidence": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "attempts": {
+              "type": "array",
+              "maxItems": 30,
+              "items": {
+                "type": "string"
+              }
+            },
+            "nextStep": {
+              "type": "string"
+            },
+            "blocker": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "needed",
+                    "evidence"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "login",
+                        "approval",
+                        "user_input",
+                        "unavailable"
+                      ]
+                    },
+                    "needed": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
             }
           }
         }

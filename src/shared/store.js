@@ -1,3 +1,4 @@
+import { reviewDecision } from './investigation-review.js';
 import { loadEnvironments, verifyApprovedPlan, planQuery, fingerprint } from './environment-access.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -297,6 +298,25 @@ export class JsonStore {
         job.nextJobId = nextJob.id;
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'investigation_resumed', nextJobId: nextJob.id });
         state.jobs.push(nextJob);
+      }
+      // Reopen unresolved source findings under the original question, never with an environment grant.
+      if (event.type === 'completed' && job.status === 'completed' && job.taskIntent === 'analysis'
+        && job.questionId && !job.environmentAccess && job.stage === 'owner_report'
+        && event.result?.outcome === 'partial' && completionRouting.reviewInvestigation
+        && completionRouting.agentRole === 'developer' && completionRouting.agentProfile) {
+        const decision = reviewDecision(job, event.result);
+        if (decision.continue) {
+          nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);
+          delete nextJob.environmentAccess;
+          Object.assign(nextJob, { workflow: 'analysis_review', instruction: job.originalQuestion ?? job.instruction,
+            delegation: { fromStage: 'owner_report', toStage: 'developer', reason: '原问题仍有未核实目标，自动自查并继续调查' } });
+          job.nextJobId = nextJob.id;
+          job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'investigation_self_review', nextJobId: nextJob.id });
+          state.jobs.push(nextJob);
+        } else {
+          job.result = { ...job.result, investigationPause: decision.reason,
+            summary: `${decision.reason} ${job.result.summary ?? ''}`.slice(0, 360) };
+        }
       }
       // Only this explicitly read-only edge may bypass the human delivery gate.
       // Persist completion and successor together; duplicate/late leases are rejected above.
