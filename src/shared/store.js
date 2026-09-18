@@ -55,6 +55,19 @@ export class JsonStore {
         const existing = state.jobs.find((job) => job.id === state.processedMessages[input.sourceMessageId]);
         return { job: existing, duplicate: true };
       }
+      // A same-question supplement adds execution context; it cannot replace the root request.
+      const question = input.questionId && state.questions?.[input.questionId];
+      if (input.taskIntent === 'analysis' && question && question.projectId === input.projectId && question.chatId === input.chatId) {
+        const root = (state.conversations ?? []).find(t => t.id === question.rootTurnId);
+        const prior = state.jobs.filter(j => j.questionId === question.id && j.projectId === input.projectId && j.chatId === input.chatId && j.taskIntent === 'analysis');
+        const original = prior[0]?.originalQuestion ?? root?.content;
+        const evidence = [...prior.flatMap(j => [...(j.context ?? []), ...(j.result ? [{stage:j.stage,result:j.result}] : [])]), ...(input.context ?? [])];
+        const seen = new Set();
+        const context = evidence.filter(entry => { const key=JSON.stringify([entry.stage,entry.result]); if(seen.has(key))return false;seen.add(key);return true; });
+        const attachments = [...new Map([...prior.flatMap(j=>j.attachments??[]), ...(input.attachments??[])].map(a=>[a.id,a])).values()];
+        input = {...input, ...(original ? {originalQuestion:original} : {}), context, attachments,
+          ...(prior[0] ? {missionId:prior[0].missionId} : {})};
+      }
       const now = new Date().toISOString();
       const job = {
         id: createId('JOB'),

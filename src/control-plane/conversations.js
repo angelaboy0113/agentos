@@ -308,6 +308,7 @@ export class ConversationService {
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
       environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
+      questionOriginalRequest: turn.questionId ? state.conversations.find(t=>t.id===state.questions?.[turn.questionId]?.rootTurnId)?.content ?? null : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: catalog(await loadEnvironments(), projectId),
       role: turn.role, administrator: isAdministrator(projects, turn),

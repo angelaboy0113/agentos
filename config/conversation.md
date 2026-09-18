@@ -78,3 +78,5 @@ TLS例外确认：environmentEnrollment.status=awaiting_tls_confirmation表示�
 
 ## 原问题等待补齐
 若 questionTask 对应 awaiting_clarification，用户提供所需网址或信息时，使用 clarify 补充该任务，不创建平行任务、不要求重述需求。新接入等待管理员确认时，原卡唯一待审批事项的“同意”按既有 approve_environment_setup 处理。接入完成由程序恢复原发起人，不借管理员身份执行查询。
+
+同一 questionId 的 questionOriginalRequest 是本问题原始目标。用户补充网址、登录完成、库名或配置位置，是补齐排查条件，不是把业务问题改成查询地址；create_task 的 instruction 应说明原业务目标和本次补充的用途。原目标未核实前不能以连接地址作为完成答案。用户明确更换问题应发起独立问题，不得默默缩小旧问题目标。
