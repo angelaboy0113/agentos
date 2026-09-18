@@ -11,7 +11,11 @@ export async function executeEnvironmentJob(job, config, emit) {
   const response = await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/environment-claim`, {
     method: 'POST', signal: AbortSignal.timeout(10000), headers: { authorization: `Bearer ${config.runnerToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ leaseId: job.lease.id, runnerId: job.lease.runnerId }) });
-  if (!response.ok) throw new Error('查询授权、有效期或执行租约未通过；未访问环境');
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    // Only the fixed classifier output reaches the result, never the raw HTTP body.
+    throw new Error(failureDiagnostic(detail.error ?? '环境接口未成功响应'));
+  }
   const { plan } = await response.json();
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
   let result;

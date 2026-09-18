@@ -11,6 +11,8 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['QUERY_ALREADY_STARTED', /QUERY_ALREADY_STARTED/, '任务接续校验', '任务已启动，但本次领取没有有效的登录接续凭证；未继续访问网站。', '请维护者检查登录接续状态，不需要用户补充查询范围。'],
+  ['LEASE_EXPIRED', /查询租约已失效/, '任务领取校验', '当前执行器的任务租约已失效，未继续查询。', '检查任务恢复与执行器状态，不能通过重复批准解决。'],
   ['COLUMN_LIMIT', /\[COLUMN_LIMIT\]/, '查询字段校验', '单次查询字段超过12个，查询未执行；不是授权不足。', '减少为相关字段后继续，可按相同筛选条件分次查询。'],
   ['SCHEMA_REQUIRED', /\[SCHEMA_REQUIRED\]/, '查询结构校验', '尚未读取目标表结构，查询未执行。', '先读取目标表schema，再使用返回字段查询。'],
   ['SCHEMA_FIELDS', /\[SCHEMA_FIELDS\]/, '查询字段校验', '查询字段尚未在已读取结构中确认，查询未执行。', '读取目标表结构或下一页，并使用实际字段。'],

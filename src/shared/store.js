@@ -130,9 +130,13 @@ export class JsonStore {
       const job = requireJob(state, id);
       if (job.status !== 'running' || job.lease?.id !== identity.leaseId || job.lease?.runnerId !== identity.runnerId || !(Date.parse(job.lease?.expiresAt) > Date.now())) throw new Error('查询租约已失效');
       verifyApprovedPlan(config, job.environmentAccess ?? {});
-      if (!job.environmentAccess.approvedBy || job.environmentAccess.startedAt) throw new Error('查询未批准或已经执行；不自动重试');
-      job.environmentAccess.startedAt = new Date().toISOString();
-      job.events.push({ id: createId('EVT'), type: 'environment_query_started', at: job.environmentAccess.startedAt, scopeHash: job.environmentAccess.scopeHash });
+      const plan = job.environmentAccess, resume = job.browserResumeClaim;
+      if (!plan.approvedBy) throw new Error('查询尚未批准');
+      const continuing = plan.kind === 'website' && plan.startedAt && resume?.scopeHash === plan.scopeHash && resume?.startedAt === plan.startedAt;
+      if (plan.startedAt && !continuing) throw new Error('[QUERY_ALREADY_STARTED] 查询已经执行；没有可用的登录接续凭证');
+      delete job.browserResumeClaim;
+      if (!continuing) plan.startedAt = new Date().toISOString();
+      job.events.push({ id: createId('EVT'), type: continuing ? 'environment_query_resumed' : 'environment_query_started', at: new Date().toISOString(), scopeHash: plan.scopeHash, leaseId: job.lease.id });
       return structuredClone(job.environmentAccess);
     });
   }

@@ -29,11 +29,16 @@ async function resumeWebsiteLogins(context){
   try{
    const cfg=await loadEnvironments(),e=cfg.environments[job.environmentAccess.environmentId];if(!e)continue;
    if(!await context.websiteBrowser.loginReady(job,e))continue;
-   let valid=true;try{verifyApprovedPlan(cfg,job.environmentAccess);}catch{valid=false;}
    await context.store.transact(state=>{
     const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired)return;
+    let valid=true;try{verifyApprovedPlan(cfg,current.environmentAccess);}catch{valid=false;}
     current.browserCheckpoint=current.result.browserCheckpoint;
-    if(valid){current.status='queued';current.result=null;}
+    delete current.browserResumeClaim;
+    if(valid){
+     // A one-use continuation issued only by the login detector, not by the Runner.
+     current.browserResumeClaim={scopeHash:current.environmentAccess.scopeHash,startedAt:current.environmentAccess.startedAt};
+     current.status='queued';current.result=null;
+    }
     else{const old=current.environmentAccess;const plan=planQuery(cfg,{environmentId:old.environmentId,queryId:old.queryId,parameters:old.parameters},current.projectId,{profile:current.originProfile,senderId:current.senderId});current.environmentAccess={...plan,approvalRequired:true,approvedBy:null,approvedAt:null};current.status='awaiting_environment_approval';current.result=null;}
     current.updatedAt=new Date().toISOString();current.events.push({type:'browser_login_resumed',at:current.updatedAt});
     const question=state.questions?.[current.questionId];if(question)question.generation++;
