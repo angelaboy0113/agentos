@@ -5,6 +5,28 @@ import path from 'node:path';
 import { createId, nextStage } from './protocol.js';
 
 const emptyState = () => ({ version: 1, jobs: [], runners: {}, processedMessages: {} });
+const MAX_CONTEXT_ENTRIES = 8;
+
+function compactContext(entries) {
+  const unique = [], seen = new Set();
+  for (const entry of entries ?? []) {
+    if (!entry?.result) continue;
+    const key = JSON.stringify([entry.stage, entry.result]);
+    if (seen.has(key)) continue;
+    seen.add(key); unique.push(entry);
+  }
+  if (unique.length <= MAX_CONTEXT_ENTRIES) return structuredClone(unique);
+  const root = unique.find(entry => entry.result?.investigation?.goals?.length);
+  const tail = unique.slice(-(MAX_CONTEXT_ENTRIES - (root ? 1 : 0)));
+  return structuredClone(root && !tail.includes(root) ? [root, ...tail] : unique.slice(-MAX_CONTEXT_ENTRIES));
+}
+
+function questionEvidence(prior, supplied = []) {
+  return compactContext([
+    ...prior.filter(job => job.result).map(job => ({ stage: job.stage, result: job.result })),
+    ...supplied,
+  ]);
+}
 
 export class JsonStore {
   constructor(file) {
@@ -45,7 +67,7 @@ export class JsonStore {
   async write(state) {
     await mkdir(path.dirname(this.file), { recursive: true });
     const temporary = `${this.file}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    await writeFile(temporary, `${JSON.stringify(state)}\n`, 'utf8');
     await rename(temporary, this.file);
   }
 
@@ -61,9 +83,7 @@ export class JsonStore {
         const root = (state.conversations ?? []).find(t => t.id === question.rootTurnId);
         const prior = state.jobs.filter(j => j.questionId === question.id && j.projectId === input.projectId && j.chatId === input.chatId && j.taskIntent === 'analysis');
         const original = prior[0]?.originalQuestion ?? root?.content;
-        const evidence = [...prior.flatMap(j => [...(j.context ?? []), ...(j.result ? [{stage:j.stage,result:j.result}] : [])]), ...(input.context ?? [])];
-        const seen = new Set();
-        const context = evidence.filter(entry => { const key=JSON.stringify([entry.stage,entry.result]); if(seen.has(key))return false;seen.add(key);return true; });
+        const context = questionEvidence(prior, input.context ?? []);
         const attachments = [...new Map([...prior.flatMap(j=>j.attachments??[]), ...(input.attachments??[])].map(a=>[a.id,a])).values()];
         input = {...input, ...(original ? {originalQuestion:original} : {}), context, attachments,
           ...(prior[0] ? {missionId:prior[0].missionId} : {})};
@@ -147,6 +167,39 @@ export class JsonStore {
         } catch { /* Keep invalid or removed legacy scopes paused for manual correction. */ }
       }
       return { resumed };
+    });
+  }
+
+  async reconcileInvestigationState(ownerProfile = null) {
+    return this.transact((state) => {
+      state.migrations ??= {};
+      if (state.migrations.boundedInvestigationContextV1) return { compacted: 0, finalized: 0 };
+      let compacted = 0, finalized = 0;
+      const groups = new Map();
+      for (const job of state.jobs) if (job.questionId) {
+        if (!groups.has(job.questionId)) groups.set(job.questionId, []);
+        groups.get(job.questionId).push(job);
+      }
+      for (const jobs of groups.values()) {
+        const latest = jobs.at(-1);
+        const evidence = questionEvidence(jobs, latest?.context ?? []);
+        for (const job of jobs.slice(0, -1)) if (job.context?.length) { job.context = []; compacted++; }
+        if (latest) { latest.context = evidence; compacted++; }
+        if (jobs.length < 12 || latest?.taskIntent !== 'analysis'
+          || !['queued','running','cancelling'].includes(latest.status)) continue;
+        const now = new Date().toISOString();
+        latest.status = 'completed'; latest.lease = null; latest.updatedAt = now;
+        latest.result = { outcome: 'partial', investigationPause: '旧版本产生了重复调查循环，已在升级时停止。',
+          summary: '已停止旧版本的重复调查循环，现由项目负责人根据已保留证据做一次最终汇总。',
+          finalMessage: '旧版本在源码分析与环境查询之间重复启动任务。循环已停止，既有证据已保留，正在形成最终汇总。' };
+        latest.events.push({ id:createId('EVT'), type:'investigation_convergence_reconciled', at:now });
+        const next = makeNextJob(latest, 'owner_report', { agentProfile: ownerProfile }, now);
+        Object.assign(next, { workflow:'owner_report', convergenceFinal:true,
+          instruction:`${latest.originalQuestion ?? latest.instruction}\n\n这是收敛后的最终汇总轮次：只使用现有证据回答原问题，说明确定结论、依据和仍未确认项；不要再申请新的环境或源码子任务。` });
+        latest.context = []; latest.nextJobId = next.id; state.jobs.push(next); finalized++;
+      }
+      state.migrations.boundedInvestigationContextV1 = new Date().toISOString();
+      return { compacted, finalized };
     });
   }
 
@@ -319,7 +372,7 @@ export class JsonStore {
           delegation: { fromStage: 'developer', toStage: 'developer', reason: completionRouting.environmentPlan.approvalRequired ? '源码排查需要环境证据，等待负责人批准具体查询范围' : '源码排查需要环境证据，已按只读策略自动继续' } });
         job.status = 'completed'; job.nextJobId = nextJob.id;
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'environment_approval_requested', nextJobId: nextJob.id });
-        state.jobs.push(nextJob);
+        state.jobs.push(nextJob); job.context = [];
       }
       // Queue a same-question enrollment conversation atomically with source completion.
       if(event.type==='completed'&&job.status==='awaiting_clarification'&&job.taskIntent==='analysis'
@@ -353,7 +406,7 @@ export class JsonStore {
           delegation:{fromStage:job.stage,toStage:'developer',reason:'修正查询申请参数，保留原目标与既有证据'}});
         job.nextJobId=nextJob.id;
         job.events.push({id:createId('EVT'),at:job.updatedAt,type:'query_plan_repair_requested',code:event.result.queryRejection.code,nextJobId:nextJob.id});
-        state.jobs.push(nextJob);
+        state.jobs.push(nextJob); job.context = [];
       }
       // Runtime evidence returns to source investigation on the same question, without
       // carrying an environment grant into the source worker or dispatching a write job.
@@ -368,12 +421,12 @@ export class JsonStore {
           delegation: { fromStage: job.stage, toStage: 'developer', reason: '结合环境证据继续调查原问题，按缺口选择下一步工具' } });
         job.nextJobId = nextJob.id;
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'investigation_resumed', nextJobId: nextJob.id });
-        state.jobs.push(nextJob);
+        state.jobs.push(nextJob); job.context = [];
       }
       // Reopen unresolved source findings under the original question, never with an environment grant.
       if (event.type === 'completed' && job.status === 'completed' && job.taskIntent === 'analysis'
         && job.questionId && !job.environmentAccess && job.stage === 'owner_report'
-        && event.result?.outcome === 'partial' && completionRouting.reviewInvestigation
+        && event.result?.outcome === 'partial' && completionRouting.reviewInvestigation && !job.convergenceFinal
         && completionRouting.agentRole === 'developer' && completionRouting.agentProfile) {
         const decision = reviewDecision(job, event.result);
         if (decision.continue) {
@@ -383,7 +436,7 @@ export class JsonStore {
             delegation: { fromStage: 'owner_report', toStage: 'developer', reason: '原问题仍有未核实目标，自动自查并继续调查' } });
           job.nextJobId = nextJob.id;
           job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'investigation_self_review', nextJobId: nextJob.id });
-          state.jobs.push(nextJob);
+          state.jobs.push(nextJob); job.context = [];
         } else {
           job.result = { ...job.result, investigationPause: decision.reason,
             summary: `${decision.reason} ${job.result.summary ?? ''}`.slice(0, 1200) };
@@ -396,10 +449,12 @@ export class JsonStore {
         && ['ready', 'partial'].includes(event.result?.outcome) && completionRouting.agentRole === 'owner_report'
         && completionRouting.agentProfile) {
         nextJob = makeNextJob(job, 'owner_report', completionRouting, job.updatedAt);
+        if (completionRouting.convergenceFinal) Object.assign(nextJob, { workflow:'owner_report', convergenceFinal:true,
+          instruction:`${job.originalQuestion ?? job.instruction}\n\n这是自动调查的最终汇总轮次：基于已有证据直接回答原问题，清楚区分确定结论与剩余缺口；不要再发起环境、网页或源码子任务。` });
         job.status = 'completed';
         job.nextJobId = nextJob.id;
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'analysis_handoff', nextJobId: nextJob.id });
-        state.jobs.push(nextJob);
+        state.jobs.push(nextJob); job.context = [];
       }
       return { job: structuredClone(job), event: entry, nextJob: nextJob ? structuredClone(nextJob) : null };
     });
@@ -425,7 +480,7 @@ export class JsonStore {
         stage,
         agentRole: routing.agentRole ?? stage,
         agentProfile: routing.agentProfile ?? null,
-        context: [...job.context, { stage: job.stage, result: job.result }],
+        context: compactContext([...job.context, { stage: job.stage, result: job.result }]),
         attachmentRefs: [],
         attachments: job.attachments,
         status: 'queued',
@@ -437,7 +492,7 @@ export class JsonStore {
         createdAt: now,
         updatedAt: now,
       };
-      state.jobs.push(nextJob);
+      state.jobs.push(nextJob); job.context = [];
       return { job: structuredClone(job), nextJob: structuredClone(nextJob) };
     });
   }
@@ -450,7 +505,7 @@ export class JsonStore {
         throw new Error(`Job ${jobId} is not awaiting clarification`);
       }
       const now = new Date().toISOString();
-      job.context.push({ stage: job.stage, result: job.result, kind: 'clarification_requested' });
+      job.context = compactContext([...job.context, { stage: job.stage, result: job.result, kind: 'clarification_requested' }]);
       job.instruction = `${job.instruction}\n\n用户补充信息：${input.instruction}`.trim();
       job.attachments.push(...(input.attachments ?? []).filter((item) => !job.attachments.some((old) => old.id === item.id)));
       job.sourceInstructionMessageId = input.sourceMessageId ?? job.sourceInstructionMessageId ?? null;
@@ -485,7 +540,7 @@ function makeNextJob(job, stage, routing, now) {
   return { ...structuredClone(job), id: createId('JOB'), sourceMessageId: null,
     stage, agentRole: stage, agentProfile: routing.agentProfile,
     delegation: { fromStage: job.stage, toStage: stage, reason: '只读分析完成，交给项目负责人汇总' },
-    context: [...job.context, { stage: job.stage, result: job.result }],
+    context: compactContext([...job.context, { stage: job.stage, result: job.result }]),
     status: 'queued', lease: null, events: [], result: null, notificationIds: [],
     nextJobId: undefined, approvedBy: undefined, approvedAt: undefined,
     createdAt: now, updatedAt: now };

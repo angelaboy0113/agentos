@@ -67,11 +67,14 @@ export function questionView(state, questionId, projects = {}) {
   const currentResult=useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '';
   const priorJobs=state.jobs.filter(j=>j.questionId===q.id && j.id!== (useJob?job.id:null) && j.result?.finalMessage);
   const priorTurns=state.conversations.filter(t=>t.questionId===q.id && t.id!==turn.id && t.status==='sent' && t.response && !t.outcome?.jobId && !t.outcome?.nextJobId);
-  const history=[...priorJobs.map(j=>`已完成阶段 · ${j.id}\n${j.result.finalMessage}`),...priorTurns.map(t=>`此前回复 · ${t.createdAt ?? ''}\n${t.response}`)];
-  const resultText=[currentResult,...history.length?['—— 此前结果与回复（保留） ——',...history]:[]].join('\n\n');
-  if(history.length) {
+  const allHistory=[...priorJobs.map(j=>`已完成阶段 · ${j.id}\n${j.result.finalMessage}`),...priorTurns.map(t=>`此前回复 · ${t.createdAt ?? ''}\n${t.response}`)];
+  const seenHistory=new Set();
+  const history=allHistory.filter(item=>{const body=item.split('\n').slice(1).join('\n');if(seenHistory.has(body))return false;seenHistory.add(body);return true;}).slice(-6);
+  const omitted=Math.max(0,allHistory.length-history.length);
+  const resultText=[currentResult,...history.length?['—— 最近结果与回复 ——',...history]:[],...(omitted?[`另有 ${omitted} 项历史执行记录保存在本机审计数据中。`]:[])].join('\n\n');
+  if(allHistory.length) {
     card=withResultPage(card,resultPages(resultText));
-    card.body.elements.push({tag:'markdown',text_size:'notation',content:`此前 ${history.length} 项结果与回复已保留，可在“详细结果与证据”中翻阅。`});
+    card.body.elements.push({tag:'markdown',text_size:'notation',content:`此前 ${allHistory.length} 项历史执行记录均已保留在本机；卡片展示最近 ${history.length} 项有效结果。`});
   }
   return { question: q, job: useJob ? job : null, card, terminal, mention,
     resultText,

@@ -35,3 +35,20 @@ export function reviewDecision(job,result){
   return {continue:false,reason:'自动自查后仍未取得新证据，已暂停重复排查；请查看详情中的已尝试路径与剩余目标。'};
  return {continue:true};
 }
+
+const targetKey = value => `${value?.environmentId ?? ''}:${value?.queryId ?? ''}`;
+const verifiedGoals = result => new Set((result?.investigation?.goals ?? [])
+ .filter(goal => goal.status === 'verified' && nonempty(goal.id) && nonempty(goal.evidence)).map(goal => goal.id));
+
+// One environment worker may perform many tool calls. Starting more workers for the
+// same target without closing another goal is a stalled orchestration loop.
+export function environmentContinuation(state,job,request,currentResult){
+ const jobs=(state.jobs??[]).filter(item=>item.questionId===job.questionId&&item.taskIntent==='analysis');
+ const current=verifiedGoals(currentResult);
+ let priorBest=new Set();
+ for(const item of jobs){const found=verifiedGoals(item.result);if(found.size>priorBest.size)priorBest=found;}
+ if([...current].some(id=>!priorBest.has(id)))return {continue:true};
+ const sameTarget=jobs.filter(item=>item.environmentAccess&&targetKey(item.environmentAccess)===targetKey(request));
+ if(sameTarget.length<2)return {continue:true};
+ return {continue:false,reason:'同一环境调查目标已经完成两轮独立执行，但原问题的已核实目标没有增加。继续重启任务只会重复已有路径。'};
+}

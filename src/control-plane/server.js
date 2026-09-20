@@ -13,6 +13,7 @@ import { controlConfig, loadAgents, loadProjects, saveProjects } from './config.
 import { FeishuClient, parseFeishuMessage } from './feishu.js';
 import { LarkCliFeishuClient } from './lark-cli.js';
 import { JsonStore } from '../shared/store.js';
+import { environmentContinuation } from '../shared/investigation-review.js';
 import { nextStage, routeInstruction, routeInstructionForStage, stageLabel } from '../shared/protocol.js';
 
 import { loadConversationSettings } from './conversation-settings.js';
@@ -30,6 +31,7 @@ export async function createControlPlane(overrides = {}) {
   const agents = overrides.agents ?? await loadAgents(config.agentsFile);
   const store = new JsonStore(config.storeFile);
   await store.reconcileLegacyResults();
+  await store.reconcileInvestigationState(agents.agents?.owner_intake?.profile ?? null);
   await store.reconcileReadOnlyApprovals();
   const feishu = overrides.feishuClient ?? (config.feishu.transport === 'lark-cli'
     ? new LarkCliFeishuClient({ ...config.feishu, dataDir: config.dataDir })
@@ -80,6 +82,7 @@ async function route(context) {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
+      investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1',
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
@@ -175,6 +178,7 @@ async function route(context) {
     if(body.type==='completed'&&body.result?.environmentSetup){
       if(job.taskIntent!=='analysis'||!job.questionId||job.environmentAccess||!['developer','owner_report'].includes(job.stage)
         ||body.result.outcome!=='needs_clarification'||body.result.environmentQuery||body.result.websiteQuery)throw new Error('当前阶段不能申请环境接入');
+      if(job.convergenceFinal)throw new Error('最终汇总阶段不能再申请环境接入');
       const setup=body.result.environmentSetup;
       if(!['nacos','mysql'].includes(setup.kind)||!['uat','prd'].includes(setup.tier)||typeof setup.url!=='string')throw new Error('接入参数无效');
       if(setup.url)enrollmentTarget(setup);
@@ -182,14 +186,19 @@ async function route(context) {
     }
     if(body.type==='completed'&&body.result?.websiteQuery){
       if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.questionId||job.environmentAccess||body.result.outcome!=='needs_clarification'||body.result.environmentQuery)throw new Error('当前阶段不能申请网页排查');
+      if(job.convergenceFinal)throw new Error('最终汇总阶段不能再申请网页排查');
       body.result.environmentQuery=await prepareWebsiteQuery(context,job,body.result.websiteQuery);
     }
     if (body.type === 'completed' && body.result?.environmentQuery) {
       try {
         if (job.taskIntent !== 'analysis' || !['developer', 'owner_report'].includes(job.stage) || !job.questionId || job.environmentAccess
           || body.result.outcome !== 'needs_clarification') throw new Error('当前阶段不允许申请环境查询');
-        const earlier = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess);
+        if(job.convergenceFinal)throw new Error('最终汇总阶段不能再申请环境查询');
+        const snapshot = await store.read();
+        const earlier = snapshot.jobs.filter(j => j.questionId === job.questionId && j.environmentAccess);
         const request = body.result.environmentQuery;
+        const continuation=environmentContinuation(snapshot,job,request,body.result);
+        if(!continuation.continue){const error=new Error('自动调查未产生新增证据');error.queryDiagnostic={code:'CONVERGENCE_STALLED',reason:continuation.reason};throw error;}
         if (earlier.some(j => j.environmentAccess.environmentId === request.environmentId
           && j.environmentAccess.queryId === request.queryId
           && JSON.stringify(j.environmentAccess.parameters) === JSON.stringify(request.parameters))) {
@@ -201,6 +210,11 @@ async function route(context) {
         if (!routing.agentProfile) throw new Error('开发角色未配置');
       } catch (error) {
         const diagnostic=queryRejection(error,job);
+        if(diagnostic.code==='CONVERGENCE_STALLED'){
+          const message=`${diagnostic.reason} 已停止重复启动子任务，现交由项目负责人根据已有证据完成最终汇总。`;
+          body.result={...body.result,outcome:'ready',environmentQuery:null,websiteQuery:null,queryRejection:diagnostic,summary:message,finalMessage:`${message}\n\n${diagnostic.correction}`};
+          routing={...agentRouting(context,'owner_report'),convergenceFinal:true};
+        } else {
         const repairable=diagnostic.retry && job.taskIntent==='analysis' && job.questionId && !job.environmentAccess
           && ['developer','owner_report'].includes(job.stage) && agentRouting(context,'developer').agentProfile;
         diagnostic.retry=Boolean(repairable);
@@ -208,6 +222,7 @@ async function route(context) {
         body.result = {...body.result,outcome:repairable?'needs_clarification':'blocked',environmentQuery:null,websiteQuery:null,
           queryRejection:diagnostic,summary:message,finalMessage:`${message}\n\n${diagnostic.correction}`};
         routing=repairable?{...agentRouting(context,'developer'),repairQuery:true}:{};
+        }
       }
     }
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
@@ -220,7 +235,7 @@ async function route(context) {
       else body.result.summary = '连续三轮环境调查没有新增证据，已暂停。需要调整调查路径或补充缺失工具。' + (body.result.summary ?? '');
     }
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
-      && !job.environmentAccess && job.stage === 'owner_report' && body.result?.outcome === 'partial'
+      && !job.environmentAccess && job.stage === 'owner_report' && body.result?.outcome === 'partial' && !job.convergenceFinal
       && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
       routing = { ...agentRouting(context, 'developer'), reviewInvestigation: true };
     }

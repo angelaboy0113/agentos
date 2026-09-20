@@ -9,6 +9,8 @@ export function queryRejection(error, job) {
   code=d.code;reason=`查询参数数量不符，需要${d.expected}个，收到${d.actual??'非数组'}。`;correction='按当前环境目录的模板参数定义重新生成申请。';recoverable=true;
  }else if(d?.code==='INTEGER_PARAMETER'){
   code=d.code;reason=`第${d.index+1}个查询参数需要${d.min}至${d.max}之间的整数。`;correction='核对模板和业务含义后修正数值；不要为了通过校验任意截断或改变查询范围。';recoverable=true;
+ }else if(d?.code==='CONVERGENCE_STALLED'){
+  code=d.code;reason=d.reason;correction='停止创建新的环境子任务，保留已有证据并交由项目负责人形成最终结论、明确剩余缺口。';recoverable=false;
  }else{
   const known={
    '重复环境查询，需要调整范围或补充新证据':['DUPLICATE_QUERY','相同查询已在本问题申请过。','先检查已有申请、审批和结果；复用证据或针对剩余缺口提出不同查询，不能重复申请。',true],
