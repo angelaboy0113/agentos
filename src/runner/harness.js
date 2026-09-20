@@ -73,7 +73,8 @@ export async function validateHandoff(job, result, workspace) {
     if (!check || typeof check !== 'object') { issues.push('验收项格式无效'); continue; }
     if (!nonempty(check.id) || seen.has(check.id) || typeof check.required !== 'boolean' || !statuses.has(check.status) || !nonempty(check.evidence)) issues.push('验收项需唯一编号、明确状态与非空证据');
     seen.add(check.id);
-    if (['ready', 'partial'].includes(result.outcome) && check.required && check.status !== 'passed') issues.push(`必需验收项未通过：${check.id}`);
+    if (result.outcome === 'ready' && check.required && check.status !== 'passed') issues.push(`必需验收项未通过：${check.id}`);
+    if (result.outcome === 'partial' && check.required && check.status === 'failed') issues.push(`必需验收项失败：${check.id}`);
   }
   if (['ready', 'partial'].includes(result.outcome)) {
     if (h.returnTo !== 'none') issues.push('存在退回责任时不能标记ready');

@@ -198,8 +198,17 @@ async function prepareIsolatedConfig(configDir, explicitSource) {
 }
 
 export async function startLarkEventSources(config, agents = {}) {
-  const entries = Object.keys(agents).length ? Object.entries(agents) : [[config.role ?? 'owner_intake', { profile: config.profile }]];
   const sources = [];
+  for (const plan of larkEventSourcePlans(config, agents)) {
+    sources.push(await startLarkEventSource(plan));
+    if (plan.eventKey !== 'card.action.trigger') await delay(1_000);
+  }
+  return sources;
+}
+
+export function larkEventSourcePlans(config, agents = {}) {
+  const entries = Object.keys(agents).length ? Object.entries(agents) : [[config.role ?? 'owner_intake', { profile: config.profile }]];
+  const plans = [];
   for (const [role, agent] of entries) {
     const scoped = {
       ...config,
@@ -207,12 +216,12 @@ export async function startLarkEventSources(config, agents = {}) {
       profile: agent.profile || null,
       botOpenId: agent.openId,
     };
-    sources.push(await startLarkEventSource(scoped));
-    await delay(1_000);
+    plans.push(scoped);
     // Both subscriptions share this bot's bus and isolated auth, never another bot's profile.
-    sources.push(await startLarkEventSource({ ...scoped, eventKey: 'card.action.trigger', reuseIsolatedConfig: true }));
+    // A route-only legacy identity has no app/profile and cannot own card callbacks.
+    if (scoped.profile) plans.push({ ...scoped, eventKey: 'card.action.trigger', reuseIsolatedConfig: true });
   }
-  return sources;
+  return plans;
 }
 
 export function isForThisBot(event, botOpenId) {

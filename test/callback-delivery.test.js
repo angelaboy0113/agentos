@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { LarkEventSource } from '../src/control-plane/lark-event-source.js';
+import { LarkEventSource, larkEventSourcePlans } from '../src/control-plane/lark-event-source.js';
 import { LarkCliFeishuClient } from '../src/control-plane/lark-cli.js';
 
 test('long callback notice keys pass CLI limit and preserve retry identity across text and cards', async t => {
@@ -37,4 +37,16 @@ test('failed callback persists without blocking later approval; retry keeps same
   assert.equal(calls[2].event_id, 'old-refresh');
   fail = true; await source.handleLine(JSON.stringify({ type: 'card.action.trigger', event_id: 'old-refresh' }));
   source.stop(); assert.equal(source.callbackRetries.size, 0);
+});
+
+test('route-only legacy identity skips an unsubscribed card callback consumer', () => {
+  const plans = larkEventSourcePlans({ role: 'owner_intake' }, {
+    legacy: { routeFromText: true },
+    owner_intake: { profile: 'agentos-owner', openId: 'ou_owner' },
+  });
+  assert.deepEqual(plans.map(({ role, profile, eventKey }) => ({ role, profile, eventKey: eventKey ?? 'im.message.receive_v1' })), [
+    { role: null, profile: null, eventKey: 'im.message.receive_v1' },
+    { role: 'owner_intake', profile: 'agentos-owner', eventKey: 'im.message.receive_v1' },
+    { role: 'owner_intake', profile: 'agentos-owner', eventKey: 'card.action.trigger' },
+  ]);
 });

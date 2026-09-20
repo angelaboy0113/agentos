@@ -29,6 +29,20 @@ test('partial analysis requires verified source and gaps without weakening manda
   }
   assert.ok((await validateHandoff({ ...job, taskIntent: 'implementation' }, result, root)).issues.length);
 });
+test('partial analysis may preserve a required check as not run when other required evidence passed', async (t) => {
+  const root = await fixture(t), job = { taskIntent: 'analysis', stage: 'developer' };
+  const h = handoff(); h.checks[1].required = true;
+  const result = { outcome: 'partial', summary: '核心原因已核实，审计时间待补齐',
+    finalMessage: '已确认金额关系；释放流水精确时间受工具字段限制。', handoff: h };
+  const gate = await validateHandoff(job, result, root);
+  assert.deepEqual(gate.issues, []);
+  const enforced = enforceHandoff(result, gate);
+  assert.equal(enforced.outcome, 'partial');
+  assert.equal(enforced.handoffGate.passed, true);
+  assert.equal(enforced.handoff.checks[1].status, 'not_run');
+  assert.match(enforced.finalMessage, /释放流水/);
+  assert.equal(jobCard({ status: 'completed', taskIntent: 'analysis', result: enforced, events: [], createdAt: new Date().toISOString(), id: 'JOB-partial' }).header.template, 'orange');
+});
 test('partial developer findings continue to owner exactly once, retain gaps and mention only final report', async (t) => {
   const root = await fixture(t), store = new JsonStore(path.join(root, 'state.json'));
   const result = { outcome: 'partial', summary: 'Known finding; remaining gap', finalMessage: 'Evidence and gaps', handoff: handoff(),
