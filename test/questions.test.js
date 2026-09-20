@@ -103,6 +103,18 @@ test('question callback resolves current stage on original bot; creator can canc
   assert.equal((await app.store.getJob(job.id)).status, 'cancelled');
   assert.equal(Object.keys((await app.store.read()).cardMessages).length, 1);
 });
+test('card refresh failure is recorded without replaying an accepted business callback', async (t) => {
+  const { app, context, send } = await setup(t, () => decision({ action: 'create_task', intent: 'analysis', instruction: '检查' }));
+  await send('m'); const state = await app.store.read(), job = state.jobs[0], card = Object.values(state.cardMessages)[0];
+  context.cards.upsert = async () => { throw new Error('Requester mention identity cannot change'); };
+  const result = await handleCardAction(context, { type: 'card.action.trigger', event_id: 'refresh-once', operator_id: 'ou_asker', agent_profile: 'owner',
+    message_id: card.messageId, chat_id: 'group', card_content: JSON.stringify(card.card),
+    action_value: { action: 'refresh', version: jobActionVersion(job) } });
+  assert.equal(result.ok, true);
+  const updated = await app.store.read();
+  assert.equal(updated.cardCallbackAudit.at(-1).outcome, 'accepted');
+  assert.equal(updated.cardActionPresentationFailures.at(-1).reason, 'card_refresh_failed');
+});
 test('old question-stage button cannot operate a successor with same empty event history', async (t) => {
   const { app, context, send } = await setup(t, () => decision({ action: 'create_task', intent: 'analysis', instruction: '检查' }));
   await send('m'); const state = await app.store.read(), job = state.jobs[0], card = Object.values(state.cardMessages)[0];

@@ -7,6 +7,28 @@ import { handleResultPage } from './result-page-actions.js';
 
 const parse = (value) => typeof value === 'string' ? JSON.parse(value || '{}') : value ?? {};
 
+async function refreshActionCard(context, { questionId, key, job, savedCard, shown, event }) {
+  try {
+    if (questionId) await publishQuestion(context, questionId);
+    else await context.cards.upsert(key, jobCard(shown ?? await context.store.getJob(job.id)), savedCard.destination, {
+      terminal: shown ? !['queued', 'running', 'cancelling'].includes(shown.status) : true,
+      immediate: true,
+      resultText: shown?.result?.finalMessage,
+    });
+    return true;
+  } catch {
+    // The business action is already effect-idempotent. A stale card identity or
+    // transient Feishu delivery failure must not keep replaying the callback.
+    await context.store.transact((state) => {
+      state.cardActionPresentationFailures ??= [];
+      state.cardActionPresentationFailures.push({ at: new Date().toISOString(), profile: event.agent_profile ?? null,
+        eventId: event.event_id ?? null, messageId: event.message_id ?? null, reason: 'card_refresh_failed' });
+      state.cardActionPresentationFailures = state.cardActionPresentationFailures.slice(-100);
+    });
+    return false;
+  }
+}
+
 // Called ONLY by the authenticated, profile-scoped CLI event ingress, never by the public webhook.
 export async function handleCardAction(context, event) {
   let result;
@@ -92,11 +114,7 @@ async function applyCardAction(context, event) {
     // Re-delivery retries only presentation. The business mutation above is effect-idempotent.
     const latest = await store.getJob(job.id);
     const shown = result.resubmitted || (action !== 'renew_environment' && jobActionVersion(latest) !== version) ? { ...latest, status: 'resubmitted' } : latest;
-    if (questionId) await publishQuestion(context, questionId);
-    else await cards.upsert(key, jobCard(shown), savedCard.destination, {
-      terminal: !['queued', 'running', 'cancelling'].includes(shown.status), immediate: true,
-      resultText: shown.result?.finalMessage,
-    });
+    await refreshActionCard(context, { questionId, key, job, savedCard, shown, event });
     await store.transact((fresh) => {
       fresh.cardCallbackChecks ??= {};
       fresh.cardCallbackChecks[profile ?? 'default'] = { at: new Date().toISOString(), action, messageId: event.message_id };
@@ -106,8 +124,7 @@ async function applyCardAction(context, event) {
     // Do not echo arbitrary callback input, tokens or raw errors into the group.
     const known = /^(只有|这张卡片|请填写|不支持|当前任务|查询授权|查询申请)/.test(error.message) ? error.message : '操作未完成：任务状态可能已变化，请刷新后重试。';
     // Refresh the known owned card even when an approval has expired; no grant is renewed here.
-    if(questionId) await publishQuestion(context,questionId);
-    else await cards.upsert(key,jobCard(await store.getJob(job.id)),savedCard.destination,{terminal:true,immediate:true});
+    await refreshActionCard(context, { questionId, key, job, savedCard, event });
     const noticeKey = `${effectKey}:notice`;
     const accepted = await store.transactEffect(noticeKey, () => ({ message: known }));
     const delivered = (await store.read()).cardActionNotices?.[noticeKey];
