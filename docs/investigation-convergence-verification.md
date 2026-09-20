@@ -18,5 +18,6 @@
 - 全量 `npm test`：274/274 通过，包含本机端口、浏览器、租约、环境查询、卡片和状态恢复。
 - 用故障发生前的脱敏本机副本模拟迁移：61,260,773 字节降至 19,657,443 字节（32.1%），耗时约 404 ms；47 轮旧链生成且只生成一个 `owner_report` 最终汇总任务。
 - 部署后检查 `/health` 的 `investigationConvergence=evidence-progress-v1`、`stateStorage=bounded-context-json-v1`，并确认只有一个 Control Plane/Runner 实例和六路消息消费者。
+- macOS/NVM 启动时从 Node 安装前缀的 `lib/node_modules` 解析全局 lark-cli；仍允许 `LARK_CLI_ENTRY` 显式覆盖。该回归避免不同启动外壳把路径误解析成 `bin/node_modules`，导致健康接口在线但消息消费者离线。
 
 该回归证明编排和存储边界生效，不等于重新核实原 PRD 业务结论。原问题的最终答案由升级后创建的负责人汇总 Job 根据已保留证据生成。

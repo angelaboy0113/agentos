@@ -1,12 +1,17 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-export function resolveLarkCliEntry(explicit = '') {
-  return path.resolve(explicit || path.join(
-    path.dirname(process.execPath), 'node_modules', '@larksuite', 'cli', 'scripts', 'run.js',
-  ));
+export function resolveLarkCliEntry(explicit = '', executable = process.execPath) {
+  if (explicit) return path.resolve(explicit);
+  const relative = path.join('@larksuite', 'cli', 'scripts', 'run.js');
+  const directory = path.dirname(executable);
+  const candidates = process.platform === 'win32'
+    ? [path.join(directory, 'node_modules', relative)]
+    : [path.join(path.dirname(directory), 'lib', 'node_modules', relative), path.join(directory, 'node_modules', relative)];
+  return path.resolve(candidates.find(existsSync) ?? candidates[0]);
 }
 
 export function spawnLarkCli(args, options = {}) {
