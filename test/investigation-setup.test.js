@@ -58,7 +58,7 @@ test('setup apply reuses a known connector and discovers provenance before enrol
    const context={store,projects:{projects:{p:{}},chatProjectMap:{group:'p'}},agents:{agents:{developer:{profile:'dev'}}}};
    const service={context,update:async(id,patch)=>store.transact(s=>Object.assign(s.conversations.find(x=>x.id===id),patch))};
    const out=await ConversationService.prototype.apply.call(service,turn),created=await store.getJob(out.jobId);
-   assert.equal(created.senderId,'ou_member');assert.equal(created.questionId,'q');assert.equal(created.status,'awaiting_environment_approval');assert.equal(created.environmentAccess.environmentId,'uat');assert.equal(created.context.length,2);assert.equal(created.attachments[0].id,'image');
+   assert.equal(created.senderId,'ou_member');assert.equal(created.questionId,'q');assert.equal(created.status,'queued');assert.equal(created.environmentAccess.environmentId,'uat');assert.equal(created.environmentAccess.approvedBy,'policy:read-only');assert.equal(created.context.length,2);assert.equal(created.attachments[0].id,'image');
    assert.equal(Boolean(created.connectionEnrollmentPending),kind==='mysql');assert.equal((await store.read()).environmentEnrollments,undefined);
    if(kind==='mysql')assert.equal((await store.read()).conversations.at(-1).setupTargetUrl,'mysql://db.example:3306/uat_db');
   } finally {if(previous===undefined)delete process.env.AGENTOS_ENVIRONMENTS_FILE;else process.env.AGENTOS_ENVIRONMENTS_FILE=previous;}

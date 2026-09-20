@@ -25,10 +25,10 @@ async function fixture(t){
  const send=async(j,parameters)=>fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${j.id}/events`,{method:'POST',headers:{authorization:'Bearer test','content-type':'application/json'},body:JSON.stringify({type:'completed',runnerId:'r',leaseId:j.lease.id,result:{outcome:'needs_clarification',environmentQuery:request(parameters)}})});
  return {app,send,job};
 }
-test('HTTP rejected plan resumes original source task once, and corrected request still needs approval',async t=>{
+test('HTTP rejected plan resumes original source task once, and corrected read request auto-runs',async t=>{
  const {app,send,job}=await fixture(t);const leased=await app.store.leaseNext('r');assert.equal((await send(leased,['x'.repeat(201)])).status,200);assert.equal((await send(leased,['x'.repeat(201)])).status,409);
  let s=await app.store.read();assert.equal(s.jobs.length,2);const next=s.jobs[1];assert.equal(next.status,'queued');assert.equal(next.originalQuestion,job.originalQuestion);assert.equal(next.senderId,'member');assert.equal(next.attachments[0].id,'image');assert.equal(next.environmentAccess,undefined);assert.equal(next.context.at(-1).result.queryRejection.code,'TEXT_PARAMETER');assert.equal(next.context[0].result.investigation.goals[0].id,'amounts');
- const retry=await app.store.leaseNext('r');assert.equal((await send(retry,['核对预算金额'])).status,200);s=await app.store.read();assert.equal(s.jobs.length,3);assert.equal(s.jobs[2].status,'awaiting_environment_approval');assert.equal(s.jobs[2].environmentAccess.approvedBy,null);assert.equal(s.jobs[2].senderId,'member');assert.equal(await app.store.leaseNext('r'),null);
+ const retry=await app.store.leaseNext('r');assert.equal((await send(retry,['核对预算金额'])).status,200);s=await app.store.read();assert.equal(s.jobs.length,3);assert.equal(s.jobs[2].status,'queued');assert.equal(s.jobs[2].environmentAccess.approvedBy,'policy:read-only');assert.equal(s.jobs[2].senderId,'member');assert.equal((await app.store.leaseNext('r')).id,s.jobs[2].id);
 });
 test('repeated invalid plans stop without executing or granting a query',async t=>{
  const {app,send}=await fixture(t);

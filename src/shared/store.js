@@ -119,10 +119,34 @@ export class JsonStore {
       const e=config.environments[old.environmentId];
       if(!e||fingerprint(e)!==old.configHash)throw new Error('查询申请的配置已改变，请重新发起排查并核对新范围');
       const plan=planQuery(config,{environmentId:old.environmentId,queryId:old.queryId,parameters:old.parameters},job.projectId,{profile:old.approvalProfile,senderId:job.senderId});
-      job.environmentAccess={...plan,approvalRequired:true,approvedBy:null,approvedAt:null};
-      job.updatedAt=new Date().toISOString();job.events.push({id:createId('EVT'),type:'environment_renewal_requested',at:job.updatedAt,previousScopeHash:old.scopeHash,scopeHash:plan.scopeHash});
+      job.environmentAccess=plan;
+      job.status=plan.approvalRequired?'awaiting_environment_approval':'queued';
+      job.updatedAt=new Date().toISOString();job.events.push({id:createId('EVT'),type:plan.approvalRequired?'environment_renewal_requested':'environment_policy_authorized',at:job.updatedAt,previousScopeHash:old.scopeHash,scopeHash:plan.scopeHash});
       const question=state.questions?.[job.questionId];if(question)question.generation++;
       return structuredClone(job);
+    });
+  }
+
+  async reconcileReadOnlyApprovals() {
+    const config = await loadEnvironments();
+    return this.transact((state) => {
+      let resumed = 0;
+      for (const job of state.jobs) {
+        const old = job.environmentAccess;
+        if (job.status !== 'awaiting_environment_approval' || !old) continue;
+        try {
+          const plan = planQuery(config, { environmentId: old.environmentId, queryId: old.queryId, parameters: old.parameters }, job.projectId, { profile: old.approvalProfile ?? job.originProfile, senderId: job.senderId });
+          if (plan.approvalRequired) continue;
+          job.environmentAccess = plan;
+          job.status = 'queued';
+          job.updatedAt = new Date().toISOString();
+          job.events.push({ id: createId('EVT'), type: 'environment_policy_authorized', at: job.updatedAt, previousScopeHash: old.scopeHash, scopeHash: plan.scopeHash });
+          const question = state.questions?.[job.questionId];
+          if (question) question.generation++;
+          resumed++;
+        } catch { /* Keep invalid or removed legacy scopes paused for manual correction. */ }
+      }
+      return { resumed };
     });
   }
 
@@ -292,7 +316,7 @@ export class JsonStore {
         nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);
         Object.assign(nextJob, { workflow: 'single_developer', status: completionRouting.environmentPlan.approvalRequired ? 'awaiting_environment_approval' : 'queued',
           environmentAccess: completionRouting.environmentPlan,
-          delegation: { fromStage: 'developer', toStage: 'developer', reason: '源码排查需要环境证据，等待负责人批准具体查询范围' } });
+          delegation: { fromStage: 'developer', toStage: 'developer', reason: completionRouting.environmentPlan.approvalRequired ? '源码排查需要环境证据，等待负责人批准具体查询范围' : '源码排查需要环境证据，已按只读策略自动继续' } });
         job.status = 'completed'; job.nextJobId = nextJob.id;
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'environment_approval_requested', nextJobId: nextJob.id });
         state.jobs.push(nextJob);

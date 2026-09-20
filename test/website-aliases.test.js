@@ -17,7 +17,7 @@ test('new plans referencing old IDs use canonical environment policy; old approv
  const existing=planQuery(cfg,request,'demo',{profile:'owner',senderId:'ou_member'});
  cfg.websiteAliases=[alias];cfg.environments.canonical.membersRead=false;
  const p=planQuery(cfg,request,'demo',{profile:'owner',senderId:'ou_member'});
- assert.equal(p.environmentId,'canonical');assert.equal(p.approvalRequired,true);assert.equal(p.approvedBy,null);assert.notEqual(p.scopeHash,existing.scopeHash);
+ assert.equal(p.environmentId,'canonical');assert.equal(p.approvalRequired,false);assert.equal(p.approvedBy,'policy:read-only');assert.notEqual(p.scopeHash,existing.scopeHash);
  assert.deepEqual(catalog(cfg,'demo').map(x=>x.environmentId),['canonical']);
  assert.equal(verifyApprovedPlan(cfg,existing).baseUrl,old);
  delete cfg.environments.canonical;assert.throws(()=>planQuery(cfg,request,'demo',{profile:'owner',senderId:'ou_member'}),/尚未登记/);

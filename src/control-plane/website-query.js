@@ -41,7 +41,7 @@ async function resumeWebsiteLogins(context){
      current.browserResumeClaim={scopeHash:current.environmentAccess.scopeHash,startedAt:current.environmentAccess.startedAt};
      current.status='queued';current.result=null;
     }
-    else{const old=current.environmentAccess;const plan=planQuery(cfg,{environmentId:old.environmentId,queryId:old.queryId,parameters:old.parameters},current.projectId,{profile:current.originProfile,senderId:current.senderId});current.environmentAccess={...plan,approvalRequired:true,approvedBy:null,approvedAt:null};current.status='awaiting_environment_approval';current.result=null;}
+    else{const old=current.environmentAccess;const plan=planQuery(cfg,{environmentId:old.environmentId,queryId:old.queryId,parameters:old.parameters},current.projectId,{profile:current.originProfile,senderId:current.senderId});current.environmentAccess=plan;current.status=plan.approvalRequired?'awaiting_environment_approval':'queued';current.result=null;}
     current.updatedAt=new Date().toISOString();current.events.push({type:'browser_login_resumed',at:current.updatedAt});
     const question=state.questions?.[current.questionId];if(question)question.generation++;
    });

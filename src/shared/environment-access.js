@@ -20,7 +20,6 @@ export async function loadEnvironments(file = environmentFile()) {
       || !id(e.credentialRef) || typeof e.membersRead !== 'boolean' || !e.ownerOpenIdsByProfile || !e.queries) throw new Error('环境配置字段无效');
     validateAccountPolicy(e);
     if(e.kind==='website')websiteUrl(e.baseUrl);
-    if (e.tier === 'prd' && e.membersRead) throw new Error('PRD 不允许免审批成员访问');
     if (Object.values(e.ownerOpenIdsByProfile).some((ids) => !Array.isArray(ids) || ids.some((x) => !/^ou_[A-Za-z0-9]+$/.test(x)))) throw new Error('环境审批人配置无效');
     if (e.kind === 'mysql' && (!/^[a-zA-Z0-9.:-]+$/.test(e.host) || !Number.isInteger(e.port) || e.port < 1 || e.port > 65535 || !id(e.database))) throw new Error('数据库目标配置无效');
     if (e.kind === 'nacos') { const u = new URL(e.baseUrl); if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.search || u.hash || u.pathname.replace(/\/$/, '') !== '/nacos') throw new Error('Nacos 地址必须是固定 /nacos 根路径'); }
@@ -62,11 +61,10 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
     if (typeof v !== 'string' || !v.length || v.length > Math.min(p.maxLength ?? 100, 200) || /[\x00-\x1f\x7f]/.test(v)) throw Object.assign(new Error('查询文本参数无效'),{queryDiagnostic:{code:'TEXT_PARAMETER',index:i,maxLength:Math.min(p.maxLength??100,200),length:typeof v==='string'?v.length:null,reason:typeof v!=='string'?'type':!v.length?'empty':/[\x00-\x1f\x7f]/.test(v)?'control_characters':'length'}});
     return v;
   });
-  if (!(e.ownerOpenIdsByProfile[actor.profile] ?? []).length) throw new Error('本环境未配置当前机器人对应的查询审批人');
   const scope = { expiresAt: new Date(now + 15 * 60000).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: q.timeoutMs };
-  const owner = isEnvironmentOwner(e, actor), approvalRequired = !owner && (e.tier === 'prd' || !e.membersRead);
+  const approvalRequired = false;
   return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'website' ? new URL(e.baseUrl).origin : e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；按证据推进，无固定调用次数上限；连续3次无新增证据暂停` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
-    approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: owner ? actor.senderId : approvalRequired ? null : 'policy:uat-read', approvedAt: approvalRequired ? null : new Date(now).toISOString() };
+    approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: 'policy:read-only', approvedAt: new Date(now).toISOString() };
 }
 export function verifyPlan(config, plan, now = Date.now()) {
   const e = config.environments[plan.environmentId];
@@ -79,7 +77,8 @@ export function verifyPlan(config, plan, now = Date.now()) {
 export function verifyApprovedPlan(config, plan, now = Date.now()) {
   const e = verifyPlan(config, plan, now);
   const owner = (e.ownerOpenIdsByProfile[plan.approvalProfile] ?? []).includes(plan.approvedBy);
-  const policy = plan.approvedBy === 'policy:uat-read' && e.tier === 'uat' && e.membersRead && !plan.approvalRequired;
-  if (!owner && !policy) throw new Error('查询尚未批准或批准人不属于当前环境负责人');
+  const policy = plan.approvedBy === 'policy:read-only' && !plan.approvalRequired;
+  const legacyPolicy = plan.approvedBy === 'policy:uat-read' && e.tier === 'uat' && e.membersRead && !plan.approvalRequired;
+  if (!owner && !policy && !legacyPolicy) throw new Error('查询尚未批准或批准人不属于当前环境负责人');
   return e;
 }

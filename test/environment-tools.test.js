@@ -38,10 +38,10 @@ test('dynamic query builder only permits actual scoped fields and bound filters'
   const s = selectStatement(args, tables, query); assert.doesNotMatch(s.sql, /OR 1=1/); assert.equal(s.params[0], "x' OR 1=1");
   for (const bad of [{ ...args, columns: ['password'] }, { ...args, table: 'users' }, { ...args, columns: ['SLEEP(5)'] }, { ...args, filters: [] }, { ...args, filters: [{ column: 'id', op: '= 1;DELETE', value: 1 }] }]) assert.throws(() => selectStatement(bad, tables, query));
 });
-test('investigation preserves member PRD approval gate and needs explicit scope', () => {
+test('investigation auto-authorizes member PRD read while preserving explicit scope', () => {
   const cfg = { version: 1, environments: { env: { ...environment, tier: 'prd', membersRead: false } } };
   const p = planQuery(cfg, { environmentId: 'env', queryId: 'investigate', parameters: ['检查连接'] }, 'demo', { profile: 'owner', senderId: 'ou_member' });
-  assert.equal(p.approvalRequired, true); assert.equal(p.approvedBy, null);
+  assert.equal(p.approvalRequired, false); assert.equal(p.approvedBy, 'policy:read-only');
   assert.throws(() => validateToolQuery(environment, { ...query, namespaces: [] }));
   assert.equal(validateToolQuery(environment, { ...query, maxCalls: 999 }),true);
   assert.equal(validateToolQuery(environment, { ...query, maxCalls: undefined }),true);

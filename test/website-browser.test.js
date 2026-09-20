@@ -42,16 +42,16 @@ test('real browser waits for login, reuses persistent session, isolates pages an
  assert.equal((await stat(path.join(dir,'website-sessions'))).mode&0o777,0o700);
  await browser.close();browser=new WebsiteBrowser(dir,driver);assert.equal((await browser.run({id:'three'},e,'connection')).loginRequired,undefined);
 });
-test('query-discovered websites produce scoped configs without manual site list; PRD remains approval-bound',async t=>{
+test('query-discovered websites produce scoped configs and PRD stays read-only without manual approval',async t=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'agentos-web-cfg-')),old=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(dir,'env.json');t.after(async()=>{if(old)process.env.AGENTOS_ENVIRONMENTS_FILE=old;else delete process.env.AGENTOS_ENVIRONMENTS_FILE;await rm(dir,{recursive:true,force:true});});
  const context={projects:{ownerOpenIdsByProfile:{owner:['ou_admin']}}},job={projectId:'demo',originProfile:'owner',sourceEnvironment:'prd'};
  const req=await prepareWebsiteQuery(context,job,{url:base,tier:'prd',purpose:'查看调度记录'});const cfg=await loadEnvironments();assert.equal(cfg.environments[req.environmentId].kind,'website');
- const plan=planQuery(cfg,req,'demo',{profile:'owner',senderId:'ou_member'});assert.equal(plan.approvalRequired,true);
+ const plan=planQuery(cfg,req,'demo',{profile:'owner',senderId:'ou_member'});assert.equal(plan.approvalRequired,false);assert.equal(plan.approvedBy,'policy:read-only');
  await assert.rejects(prepareWebsiteQuery(context,job,{url:base,tier:'uat',purpose:'看日志'}),/环境/);
  const running={id:'pending',projectId:'demo',originProfile:'owner',senderId:'ou_member',status:'awaiting_clarification',result:{browserLoginRequired:true},environmentAccess:{...plan,approvedBy:'ou_admin'},events:[]};const state={jobs:[running]};
  const polling={store:{read:async()=>structuredClone(state),transact:async fn=>fn(state)},websiteBrowser:{loginReady:async()=>true}};
  await pollWebsiteLogins(polling);assert.equal(running.status,'queued');assert.equal(running.result,null);assert.equal(running.senderId,'ou_member');
- running.status='awaiting_clarification';running.result={browserLoginRequired:true};running.environmentAccess.expiresAt='2000-01-01T00:00:00Z';await pollWebsiteLogins(polling);assert.equal(running.status,'awaiting_environment_approval');assert.equal(running.environmentAccess.approvedBy,null);
+ running.status='awaiting_clarification';running.result={browserLoginRequired:true};running.environmentAccess.expiresAt='2000-01-01T00:00:00Z';await pollWebsiteLogins(polling);assert.equal(running.status,'queued');assert.equal(running.environmentAccess.approvedBy,'policy:read-only');
 });
 test('waiting login card explains local cooperation without demanding text clarification',()=>{
  const card=JSON.stringify(jobCard({id:'job',status:'awaiting_clarification',stage:'developer',taskIntent:'analysis',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),events:[],result:{browserLoginRequired:true,summary:'等待本机登录，完成后自动继续',finalMessage:'任务已保留'}}));
@@ -66,6 +66,6 @@ test('HTTP source handoff keeps requester and question, rejects stale lease befo
  const leased=await app.store.leaseNext('runner');const endpoint=`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${created.job.id}/events`;
  const post=leaseId=>fetch(endpoint,{method:'POST',headers:{authorization:'Bearer test-only','content-type':'application/json'},body:JSON.stringify({type:'completed',runnerId:'runner',leaseId,result:{outcome:'needs_clarification',summary:'源码找到调度入口，需要网页证据',finalMessage:'源码入口证据',websiteQuery:{url:base,tier:'prd',purpose:'查看任务日志'},environmentQuery:null}})});
  assert.equal((await post('stale')).status,409);assert.deepEqual((await loadEnvironments()).environments,{});
- assert.equal((await post(leased.lease.id)).status,200);const state=await app.store.read();assert.equal(state.jobs.length,2);const next=state.jobs[1];assert.equal(next.senderId,'ou_member');assert.equal(next.questionId,'question-one');assert.equal(next.status,'awaiting_environment_approval');assert.equal(next.environmentAccess.kind,'website');assert.equal(next.environmentAccess.approvedBy,null);
+ assert.equal((await post(leased.lease.id)).status,200);const state=await app.store.read();assert.equal(state.jobs.length,2);const next=state.jobs[1];assert.equal(next.senderId,'ou_member');assert.equal(next.questionId,'question-one');assert.equal(next.status,'queued');assert.equal(next.environmentAccess.kind,'website');assert.equal(next.environmentAccess.approvedBy,'policy:read-only');
  const unauthorized=await fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${next.id}/website-tool`,{method:'POST',headers:{authorization:'Bearer test-only','content-type':'application/json'},body:JSON.stringify({leaseId:'stale',runnerId:'runner',tool:'connection'})});assert.equal(unauthorized.status,409);
 });

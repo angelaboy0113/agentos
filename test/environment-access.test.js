@@ -34,13 +34,23 @@ async function fixture(t, responder = () => decision()) {
     await app.conversations.stop(); await app.cards.stop(); if (previous === undefined) delete process.env.AGENTOS_ENVIRONMENTS_FILE; else process.env.AGENTOS_ENVIRONMENTS_FILE = previous; await rm(dir, { recursive: true, force: true }); });
   return { app, context, calls, send, cfg, dir };
 }
-test('member PRD needs approval, owner explicit query and configured UAT read do not', () => {
+test('reviewed read-only queries auto-authorize for members in UAT and PRD', () => {
   const cfg = config(); const plan = planQuery(cfg, request, 'demo', actor, 1000);
-  assert.equal(plan.approvalRequired, true); assert.equal(plan.approvedBy, null);
-  assert.equal(planQuery(cfg, request, 'demo', { ...actor, senderId: 'ou_owner' }).approvalRequired, false);
+  assert.equal(plan.approvalRequired, false); assert.equal(plan.approvedBy, 'policy:read-only');
+  assert.equal(planQuery(cfg, request, 'demo', { ...actor, senderId: 'ou_owner' }).approvedBy, 'policy:read-only');
   cfg.environments.prd.tier = 'uat'; cfg.environments.prd.membersRead = true;
-  assert.equal(planQuery(cfg, request, 'demo', actor).approvedBy, 'policy:uat-read');
+  assert.equal(planQuery(cfg, request, 'demo', actor).approvedBy, 'policy:read-only');
   assert.throws(() => planQuery(cfg, request, 'other', actor));
+});
+test('startup reconciliation resumes legacy read-only approval jobs once', async (t) => {
+  const { app, cfg } = await fixture(t);
+  const plan = planQuery(cfg, request, 'demo', actor);
+  const { job } = await app.store.createJob({ projectId: 'demo', chatId: 'group', senderId: 'ou_member', originProfile: 'owner', questionId: 'q', stage: 'developer', workflow: 'single_developer', taskIntent: 'analysis', instruction: '查询订单', status: 'awaiting_environment_approval', environmentAccess: { ...plan, approvalRequired: true, approvedBy: null, approvedAt: null } });
+  assert.deepEqual(await app.store.reconcileReadOnlyApprovals(), { resumed: 1 });
+  const resumed = await app.store.getJob(job.id);
+  assert.equal(resumed.status, 'queued'); assert.equal(resumed.environmentAccess.approvedBy, 'policy:read-only');
+  assert.equal(resumed.events.filter(e => e.type === 'environment_policy_authorized').length, 1);
+  assert.deepEqual(await app.store.reconcileReadOnlyApprovals(), { resumed: 0 });
 });
 test('approval scope binds parameters, configuration and deadline', () => {
   const cfg = config(), plan = planQuery(cfg, request, 'demo', actor, 1000);
@@ -52,39 +62,24 @@ test('approval scope binds parameters, configuration and deadline', () => {
   cfg.environments.prd.host = 'another-host'; assert.throws(() => verifyPlan(cfg, plan, 2000));
   assert.throws(() => planQuery(config(), { ...request, parameters: [{ sql: 'SELECT anything' }] }, 'demo', actor));
 });
-test('configuration rejects PRD member bypass, secrets, SQL writes and unreviewed templates', async (t) => {
+test('configuration accepts PRD read policy but rejects secrets, SQL writes and unreviewed templates', async (t) => {
   const { dir } = await fixture(t); const file = path.join(dir, 'invalid.json');
-  for (const mutate of [c => c.environments.prd.membersRead = true, c => c.environments.prd.password = 'synthetic', c => c.environments.prd.queries.order.reviewed = false,
+  const allowed = config(); allowed.environments.prd.membersRead = true; await writeFile(file, JSON.stringify(allowed)); await loadEnvironments(file);
+  for (const mutate of [c => c.environments.prd.password = 'synthetic', c => c.environments.prd.queries.order.reviewed = false,
     c => c.environments.prd.queries.order.sql = 'SELECT * FROM orders; DELETE FROM orders', c => c.environments.prd.queries.order.outputColumns = ['password']]) {
     const c = config(); mutate(c); await writeFile(file, JSON.stringify(c)); await assert.rejects(loadEnvironments(file));
   }
   const view = JSON.stringify(catalog(config(), 'demo')); assert.doesNotMatch(view, /127\.0|credentialRef|ou_owner|FROM orders/);
 });
-test('PRD request is not leasable, notifies owner, rejects other admin and approves once on original card', async (t) => {
-  const { app, context, send, calls } = await fixture(t); await send();
-  let state = await app.store.read(); const job = state.jobs[0], key = `question:${job.questionId}`, card = state.cardMessages[key];
-  assert.equal(job.status, 'awaiting_environment_approval'); assert.equal(await app.store.leaseNext('r'), null);
-  assert.match(calls.find(c => c.type === 'text').text, /ou_owner/); assert.doesNotMatch(calls.find(c => c.type === 'text').text, /已结束/);
-  const event = { type: 'card.action.trigger', event_id: 'wrong', agent_profile: 'owner', operator_id: 'ou_otherAdmin', chat_id: 'group', message_id: card.messageId,
-    card_content: JSON.stringify(card.card), action_value: { action: 'approve_environment', version: jobActionVersion(job) } };
-  assert.equal((await handleCardAction(context, event)).ok, false);
-  assert.equal((await app.store.getJob(job.id)).status, 'awaiting_environment_approval');
-  assert.equal((await handleCardAction(context, { ...event, event_id: 'approved', operator_id: 'ou_owner' })).ok, true);
-  assert.equal((await handleCardAction(context, { ...event, event_id: 'approved', operator_id: 'ou_owner' })).ok, true);
-  state = await app.store.read(); assert.equal(state.jobs.length, 1); assert.equal(state.jobs[0].status, 'queued'); assert.equal(state.cardMessages[key].terminal, false);
+test('member PRD read request is immediately leasable and can only be claimed once', async (t) => {
+  const { app, send, calls } = await fixture(t); await send();
+  const state = await app.store.read(); const job = state.jobs[0];
+  assert.equal(job.status, 'queued'); assert.equal(job.environmentAccess.approvedBy, 'policy:read-only');
+  assert.doesNotMatch(JSON.stringify(calls), /批准本次只读查询|请审核原卡中的环境/);
   const leased = await app.store.leaseNext('r'); const identity = { leaseId: leased.lease.id, runnerId: 'r' };
   const plan = await app.store.claimEnvironment(job.id, identity); assert.ok(plan.startedAt);
   await assert.rejects(app.store.claimEnvironment(job.id, identity));
   assert.equal((await app.store.read()).jobs[0].events.filter(e => e.type === 'environment_query_started').length, 1);
-});
-test('owner natural approval must reply to exact question; generic approval cannot start environment access', async (t) => {
-  let answer = decision(); const { app, send } = await fixture(t, () => answer); await send();
-  let state = await app.store.read(); const job = state.jobs[0], card = Object.values(state.cardMessages)[0];
-  answer = decision({ action: 'approve', intent: 'none', environmentQuery: null, jobId: job.id });
-  await send('ou_owner', { reply_to: card.messageId }); assert.equal((await app.store.getJob(job.id)).status, 'awaiting_environment_approval');
-  answer = decision({ action: 'approve_environment', intent: 'none', environmentQuery: null, jobId: job.id });
-  await send('ou_owner'); assert.equal((await app.store.getJob(job.id)).status, 'awaiting_environment_approval');
-  await send('ou_owner', { reply_to: card.messageId }); assert.equal((await app.store.getJob(job.id)).status, 'queued');
 });
 test('cancel, changed config, expired grant and wrong lease never reach connector claim', async (t) => {
   const { app, send, cfg } = await fixture(t); await send('ou_owner'); const j = (await app.store.read()).jobs[0];
@@ -116,11 +111,10 @@ test('Nacos connector only authenticates and reads exact config, never returns p
   assert.doesNotMatch(JSON.stringify(r), /synthetic-password|synthetic-token/);
   assert.deepEqual(databaseEndpoints('password=do-not-return'), []);
 });
-test('connector failures redact remote errors; no approval performs no credential lookup', async () => {
+test('connector failures redact remote errors; invalid policy performs no credential lookup', async () => {
   const cfg = config(), plan = planQuery(cfg, request, 'demo', actor); let reads = 0;
-  await assert.rejects(readEnvironment(plan, { config: cfg, credential: async () => { reads++; } }), /尚未批准/); assert.equal(reads, 0);
-  const approved = planQuery(cfg, request, 'demo', { ...actor, senderId: 'ou_owner' });
-  await assert.rejects(readEnvironment(approved, { config: cfg, credential: async () => { throw new Error('remote password=SYNTHETIC_SECRET'); } }), e => !e.message.includes('SYNTHETIC_SECRET'));
+  await assert.rejects(readEnvironment({ ...plan, approvedBy: null }, { config: cfg, credential: async () => { reads++; } }), /尚未批准/); assert.equal(reads, 0);
+  await assert.rejects(readEnvironment(plan, { config: cfg, credential: async () => { throw new Error('remote password=SYNTHETIC_SECRET'); } }), e => !e.message.includes('SYNTHETIC_SECRET'));
 });
 test('environment rows are excluded from legacy memory and shared group task context', async (t) => {
   const { app, send } = await fixture(t); await send('ou_owner');
@@ -129,7 +123,7 @@ test('environment rows are excluded from legacy memory and shared group task con
   assert.doesNotMatch(JSON.stringify(memorySources(s, turn, 'demo')), /sensitive-row-marker/);
   const input = await app.conversations.buildInput(turn); assert.doesNotMatch(JSON.stringify(input), /sensitive-row-marker/);
 });
-test('source analysis escalates atomically to approval on same question, including owner-origin analysis', async (t) => {
+test('source analysis atomically continues into an auto-authorized read query', async (t) => {
   const { app, send } = await fixture(t, () => decision({ environmentQuery: null, requiresSourceInspection: true }));
   await send('ou_owner'); const source = (await app.store.read()).jobs[0];
   const leased = await app.store.leaseNext('r');
@@ -141,9 +135,9 @@ test('source analysis escalates atomically to approval on same question, includi
   assert.equal((await post()).status, 200);
   let state = await app.store.read(); assert.equal(state.jobs.length, 2);
   const next = state.jobs[1]; assert.equal(next.questionId, source.questionId); assert.equal(next.senderId, 'ou_owner');
-  assert.equal(next.status, 'awaiting_environment_approval'); assert.equal(next.environmentAccess.approvedBy, null);
+  assert.equal(next.status, 'queued'); assert.equal(next.environmentAccess.approvedBy, 'policy:read-only');
   assert.equal(state.jobs[0].nextJobId, next.id); assert.equal(state.jobs[0].status, 'completed');
-  assert.equal(await app.store.leaseNext('r'), null); assert.equal((await post()).status, 409);
+  assert.equal((await app.store.leaseNext('r')).id, next.id); assert.equal((await post()).status, 409);
   state = await app.store.read(); assert.equal(state.jobs.length, 2);
 });
 test('invalid analysis escalation fails closed without creating a query successor', async (t) => {
@@ -179,8 +173,8 @@ test('owner report can request runtime evidence rather than ending a partial sou
  await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
  const post=()=>fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${job.id}/events`,{method:'POST',headers:{authorization:`Bearer ${app.config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({type:'completed',leaseId:job.lease.id,runnerId:'r',result:{outcome:'needs_clarification',environmentQuery:request,summary:'需要实时数据',finalMessage:'源码已确认，需要环境验证'}})});
  assert.equal((await post()).status,200);const state=await app.store.read();assert.equal(state.jobs.length,2);
- assert.equal(state.jobs[1].status,'awaiting_environment_approval');assert.equal(state.jobs[1].questionId,job.questionId);
- assert.equal(state.jobs[1].originalQuestion,'查询订单');assert.equal(state.jobs[1].environmentAccess.approvedBy,null);
+ assert.equal(state.jobs[1].status,'queued');assert.equal(state.jobs[1].questionId,job.questionId);
+ assert.equal(state.jobs[1].originalQuestion,'查询订单');assert.equal(state.jobs[1].environmentAccess.approvedBy,'policy:read-only');
  assert.equal((await post()).status,409);
 });
 

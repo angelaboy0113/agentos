@@ -39,10 +39,10 @@ test('real store login continuation survives restart, accepts one new lease, rej
  await f.wait();await pollWebsiteLogins({store:restarted,websiteBrowser:{loginReady:async()=>true}});
  const again=await restarted.leaseNext('runner');await restarted.claimEnvironment(f.id,{leaseId:again.lease.id,runnerId:'runner'});
 });
-test('expired approval at login requires fresh approval; cancellation never resumes',async t=>{
+test('expired read scope at login refreshes policy authorization; cancellation never resumes',async t=>{
  const f=await fixture(t);await f.store.transact(s=>{s.jobs[0].environmentAccess.expiresAt='2000-01-01T00:00:00Z';});
  const context={store:f.store,websiteBrowser:{loginReady:async()=>true}};await pollWebsiteLogins(context);
- const j=await f.store.getJob(f.id);assert.equal(j.status,'awaiting_environment_approval');assert.equal(j.environmentAccess.approvedBy,null);assert.equal(j.browserResumeClaim,undefined);assert.equal(await f.store.leaseNext('runner'),null);
+ const j=await f.store.getJob(f.id);assert.equal(j.status,'queued');assert.equal(j.environmentAccess.approvedBy,'policy:read-only');assert.equal(j.browserResumeClaim,undefined);assert.equal((await f.store.leaseNext('runner')).id,f.id);
  await f.store.transact(s=>{s.jobs[0].status='cancelled';});await pollWebsiteLogins(context);assert.equal((await f.store.getJob(f.id)).status,'cancelled');
 });
 test('scope changes after login detection invalidate continuation before claim',async t=>{

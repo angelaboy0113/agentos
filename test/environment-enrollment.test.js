@@ -98,7 +98,7 @@ test("member request never opens browser; approval requires exact thread and adm
     "opening",
   );
 });
-test("successful local setup resumes original member once and retains PRD query approval", async (t) => {
+test("successful local setup resumes original member once with automatic read-only policy", async (t) => {
   const { context, state, turn, admin } = await fixture(t);
   await requestEnrollment(context, turn);
   await approveEnrollment(context, admin, async () => {});
@@ -149,7 +149,8 @@ test("successful local setup resumes original member once and retains PRD query 
   assert.ok(turn.environmentResumeKey);
   assert.equal(turn.decision.action, "create_task");
   const plan = planQuery(cfg, turn.decision.environmentQuery, "demo", turn);
-  assert.equal(plan.approvalRequired, true);
+  assert.equal(plan.approvalRequired, false);
+  assert.equal(plan.approvedBy, "policy:read-only");
   const snapshot = JSON.stringify(state);
   await pollEnrollments(context, async () => cfg);
   assert.equal(JSON.stringify(state), snapshot);

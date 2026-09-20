@@ -30,6 +30,7 @@ export async function createControlPlane(overrides = {}) {
   const agents = overrides.agents ?? await loadAgents(config.agentsFile);
   const store = new JsonStore(config.storeFile);
   await store.reconcileLegacyResults();
+  await store.reconcileReadOnlyApprovals();
   const feishu = overrides.feishuClient ?? (config.feishu.transport === 'lark-cli'
     ? new LarkCliFeishuClient({ ...config.feishu, dataDir: config.dataDir })
     : new FeishuClient({ ...config.feishu, dataDir: config.dataDir }));
@@ -78,7 +79,7 @@ async function route(context) {
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',
-      questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-query-approval-v1',
+      questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
@@ -196,8 +197,7 @@ async function route(context) {
         }
         const plan = planQuery(await loadEnvironments(), body.result.environmentQuery, job.projectId,
           { senderId: job.senderId, profile: job.originProfile });
-        routing = { ...agentRouting(context, 'developer'), environmentPlan: { ...plan,
-          ...(plan.kind==='website'?{}:{approvalRequired: true, approvedBy: null, approvedAt: null}) } };
+        routing = { ...agentRouting(context, 'developer'), environmentPlan: plan };
         if (!routing.agentProfile) throw new Error('开发角色未配置');
       } catch (error) {
         const diagnostic=queryRejection(error,job);

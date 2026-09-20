@@ -32,11 +32,11 @@ test('missing metadata schedules approved-scope Nacos discovery under original m
  await store.transact(s=>{s.conversations=[turn];s.questions={q:{id:'q'}};});
  const context={store,projects:{chatProjectMap:{c:'p'},projects:{p:{}},ownerOpenIdsByProfile:{o:['ou_admin']}},agents:{agents:{developer:{profile:'dev'}}}};
  await ConversationService.prototype.apply.call({context},turn);
- const state=await store.read(), j=state.jobs[0];assert.equal(j.status,'awaiting_environment_approval');assert.equal(j.senderId,'ou_member');assert.equal(j.connectionEnrollmentPending,true);assert.equal(state.conversations[0].decision.environmentSetup.url,'');assert.equal(j.environmentAccess.environmentId,'source');assert.equal(await store.leaseNext('r'),null);
+ const state=await store.read(), j=state.jobs[0];assert.equal(j.status,'queued');assert.equal(j.senderId,'ou_member');assert.equal(j.connectionEnrollmentPending,true);assert.equal(state.conversations[0].decision.environmentSetup.url,'');assert.equal(j.environmentAccess.environmentId,'source');assert.equal(j.environmentAccess.approvedBy,'policy:read-only');assert.equal((await store.leaseNext('r')).id,j.id);
  await store.transact(s=>{s.jobs[0].status='completed';});
  turn.environmentResumeKey='ENR-synthetic';turn.decision.environmentSetup=null;
  await ConversationService.prototype.apply.call({context},turn);
- const resumed=await store.read();assert.equal(resumed.jobs.length,2);assert.notEqual(resumed.jobs[0].sourceMessageId,resumed.jobs[1].sourceMessageId);assert.equal(resumed.jobs[1].status,'awaiting_environment_approval');
+ const resumed=await store.read();assert.equal(resumed.jobs.length,2);assert.notEqual(resumed.jobs[0].sourceMessageId,resumed.jobs[1].sourceMessageId);assert.equal(resumed.jobs[1].status,'queued');assert.equal(resumed.jobs[1].environmentAccess.approvedBy,'policy:read-only');
 
 });
 

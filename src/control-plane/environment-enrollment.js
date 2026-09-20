@@ -79,7 +79,7 @@ export async function requestEnrollment(context, turn) {
     };
     return {
       enrollmentId: id,
-      notice: source ? `请管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 数据库 ${target.url}。将从本次Nacos配置在Mac本机提取业务凭据、验证TLS证书与只读事务，并开放本库基础表的受控查询；账号本身可能有写权限。凭据不交给模型、不发群。接入不代替成员PRD查询审批。` : `该环境尚未接入。请本群管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；接入不等于批准生产查询，密码不要发到群里。`,
+      notice: source ? `请管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 数据库 ${target.url}。将从本次Nacos配置在Mac本机提取业务凭据、验证TLS证书与只读事务，并开放本库基础表的受控查询；账号本身可能有写权限。凭据不交给模型、不发群。接入成功后的受控只读查询自动执行，任何写操作仍需另行审批。` : `该环境尚未接入。请本群管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；这是本机接入配置确认，接入后的受控只读查询自动执行，密码不要发到群里。`,
     };
   });
 }
@@ -130,7 +130,7 @@ export async function approveEnrollment(
       s.environmentEnrollments[e.id].status = needsTlsConsent ? "awaiting_tls_confirmation" : "failed";
       s.environmentEnrollments[e.id].diagnostic = diagnostic;
     });
-    if(needsTlsConsent) return {enrollmentId:e.id,notice:`${diagnostic}\n\n目标：${e.tier.toUpperCase()} · ${e.url}。若接受此目标失去TLS传输保护，请管理员回复本卡“同意”。仅此数据库例外，保留只读事务、查询限制及PRD审批；未确认前不重试。`};
+    if(needsTlsConsent) return {enrollmentId:e.id,notice:`${diagnostic}\n\n目标：${e.tier.toUpperCase()} · ${e.url}。若接受此目标失去TLS传输保护，请管理员回复本卡“同意”。仅此数据库例外，保留只读事务、查询模板与参数限制；未确认前不重试。`};
     throw new Error(e.databaseSource ? "自动连接未完成。\n"+failureDiagnostic(error) : "本机窗口未能启动；需要已登录的macOS桌面，未保存新环境");
   }
   return {

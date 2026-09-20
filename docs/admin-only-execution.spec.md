@@ -29,4 +29,4 @@
 
 ## 可选环境查询边界
 
-详见[受控环境查询](environment-access.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。PRD 成员请求及源码排查新增查询先进入 `awaiting_environment_approval`，获指定环境负责人对本次范围批准后才允许 Runner 单次领取。审批不授予代码或数据库写入权限，普通 analysis 沙箱保持只读。查询结果归属原问题卡片，不注入共享长期记忆；真实环境验收须在本机配置后完成。
+详见[受控环境查询](environment-access.md)和[只读排查自动授权](read-only-auto-authorization.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。查看源码、配置、日志、数据库和网页的受控只读操作自动执行；修改代码、数据、配置、部署或业务状态仍由管理员门控。查询结果归属原问题卡片，不注入共享长期记忆。
