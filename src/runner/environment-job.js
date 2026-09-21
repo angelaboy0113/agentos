@@ -18,8 +18,8 @@ export async function executeEnvironmentJob(job, config, emit) {
   }
   const { plan } = await response.json();
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
-  let result;
-  try { const cfg = await loadEnvironments(); result = cfg.environments[plan.environmentId]?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, cfg.environments[plan.environmentId].kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {}) : await readEnvironment(plan); }
+  let result, environment;
+  try { const cfg = await loadEnvironments(); environment = cfg.environments[plan.environmentId]; result = environment?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, environment.kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {}) : await readEnvironment(plan); }
   catch (error) {
     const diagnostic = failureDiagnostic(error);
     if (/^错误码：BROWSER_BRIDGE\b/.test(diagnostic)) return { outcome:'needs_clarification', browserLoginRequired:true,
@@ -27,7 +27,12 @@ export async function executeEnvironmentJob(job, config, emit) {
       finalMessage:`${diagnostic}\n\n这不是业务账号未登录，也不会丢失原问题和已有证据。`, verification:[] };
     return { outcome: 'blocked', summary: diagnostic, finalMessage: diagnostic, verification: [] };
   }
-  if(result.loginRequired) return {outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:result.checkpoint,summary:'正在等待网页登录。可在运行AgentOS的电脑上手动登录，或私聊当前项目负责人机器人提交网站登录凭据；成功后自动继续原问题。',finalMessage:'账号密码只在私聊凭据入口处理并保存到本机 Mac 钥匙串，不进入模型、任务卡片、日志或长期记忆；验证码、短信或扫码仍在本机 Chrome 完成。',verification:[]};
+  if(result.loginRequired) {
+    const loginUrl = environment?.kind === 'website' ? environment.baseUrl : '';
+    return {outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:result.checkpoint,loginUrl,
+      summary:`正在等待登录：${loginUrl || '当前业务网站'}。可在运行AgentOS的电脑上手动登录，或直接回复本任务卡“账号 / 密码”；成功后自动继续原问题。`,
+      finalMessage:`当前需要登录的网站：${loginUrl || '入口尚未登记，请补充对应环境的网址'}。直接回复本任务卡即可，不要求固定格式；例如“admin / 123456”。凭据写入本机 Mac 钥匙串，不进入模型、任务结果或长期记忆。验证码、短信或扫码仍需在本机 Chrome 完成。`,verification:[]};
+  }
   let explanation = '';
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });
   try {

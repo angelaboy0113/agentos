@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createControlPlane, notifyJobEvent } from '../src/control-plane/server.js';
+import { createControlPlane, notifyJobEvent, repairStaleTerminalQuestionCards } from '../src/control-plane/server.js';
 import { publishQuestion, questionJob, questionView } from '../src/control-plane/questions.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
-import { jobActionVersion } from '../src/control-plane/message-cards.js';
+import { jobActionVersion, jobCard } from '../src/control-plane/message-cards.js';
 import { CodexConversationEngine } from '../src/control-plane/codex-conversation.js';
 import { loadConversationSettings } from '../src/control-plane/conversation-settings.js';
 import { saveCodexRuntimeSettings } from '../src/shared/codex-runtime.js';
@@ -103,6 +103,16 @@ test('question callback resolves current stage on original bot; creator can canc
   assert.equal((await handleCardAction(context, { ...event, event_id: 'accepted', operator_id: 'ou_asker' })).ok, true);
   assert.equal((await app.store.getJob(job.id)).status, 'cancelled');
   assert.equal(Object.keys((await app.store.read()).cardMessages).length, 1);
+});
+test('startup repairs a terminal question card left with stale cancel and refresh buttons',async t=>{
+  const {app,context,send,calls}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'检查'}));
+  await send('m');let state=await app.store.read();const job=state.jobs[0],key=`question:${job.questionId}`;
+  const waiting={...job,status:'awaiting_clarification',result:{browserLoginRequired:true,finalMessage:'等待登录'}};
+  await app.store.transact(s=>{const current=s.jobs[0];current.status='cancelled';current.result=waiting.result;const saved=s.cardMessages[key];saved.card=jobCard(waiting);saved.terminal=true;saved.deliveredRevision=saved.revision;});
+  assert.match(JSON.stringify((await app.store.read()).cardMessages[key].card),/"action":"cancel"/);
+  assert.equal(await repairStaleTerminalQuestionCards(context),1);state=await app.store.read();
+  assert.doesNotMatch(JSON.stringify(state.cardMessages[key].card),/"action":"(?:cancel|refresh)"/);
+  assert.equal(state.jobs[0].status,'cancelled');assert.ok(calls.some(call=>call.type==='patch'));
 });
 test('card refresh failure is recorded without replaying an accepted business callback', async (t) => {
   const { app, context, send } = await setup(t, () => decision({ action: 'create_task', intent: 'analysis', instruction: '检查' }));

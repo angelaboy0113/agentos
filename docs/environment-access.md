@@ -32,7 +32,7 @@ node scripts/configure-environment.mjs
 4. 保存 `config/environments.local.json`（0600），凭据只存 Keychain。已有配置先备份原始只读副本、SHA-256、字节及环境数量，再原子更新。
 5. 新配置每次请求重新加载，无需重启。升级程序本身仍需空闲时单实例重启。
 
-群里提供 URL 是接入线索，不能自动扩大授权，也不能从群聊提取 Nacos/MySQL 密码。当前支持 Nacos 2.x 的实际控制台浏览器适配，在 macOS Nacos 2.5.2 验证；SSO/MFA 仍需本机处理。通用业务网站另有负责人私聊凭据入口，见 [日常 Chrome 复用](shared-chrome.md)，不会把网站凭据交给模型或复用为数据库凭据。新的 PRD 入口需单独接入，UAT 成功不能代表 PRD 已配置。
+群里提供 URL 是接入线索，不能自动扩大授权，也不能从群聊提取 Nacos/MySQL 密码。当前支持 Nacos 2.x 的实际控制台浏览器适配，在 macOS Nacos 2.5.2 验证；SSO/MFA 仍需本机处理。通用业务网站可由负责人直接回复等待登录的任务卡提交凭据，见 [日常 Chrome 复用](shared-chrome.md)；该入口严格绑定已批准网站，不把网站凭据交给模型，也不复用为数据库凭据。新的 PRD 入口需单独接入，UAT 成功不能代表 PRD 已配置。
 
 ## Codex 如何选择工具
 

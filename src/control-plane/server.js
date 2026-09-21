@@ -5,7 +5,7 @@ import { WebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
 import { WebsiteCredentialService } from './website-credentials.js';
 import { loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
-import { publishQuestion } from './questions.js';
+import { publishQuestion, questionJob } from './questions.js';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -77,9 +77,27 @@ export async function createControlPlane(overrides = {}) {
     }
   });
 
-  server.once('listening', () => { cards.start(); conversations.start().catch((error) => console.error('[conversation-start]', error.message)); });
+  server.once('listening', () => {
+    cards.start();
+    repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
+    conversations.start().catch((error) => console.error('[conversation-start]', error.message));
+  });
   server.once('close', () => { conversations.stop(); cards.stop(); void context.websiteBrowser.close(); });
   return { server, config, projects, agents, store, conversations, cards };
+}
+
+export async function repairStaleTerminalQuestionCards(context) {
+  const state = await context.store.read(), repairs = [];
+  for (const [key, saved] of Object.entries(state.cardMessages ?? {})) {
+    if (!key.startsWith('question:') || !saved.messageId) continue;
+    const questionId = key.slice('question:'.length), job = questionJob(state, questionId);
+    if (!job || !['completed', 'blocked', 'failed', 'cancelled'].includes(job.status)) continue;
+    const serialized = JSON.stringify(saved.card ?? {});
+    if (!/"action":"(?:cancel|refresh)"/.test(serialized)) continue;
+    repairs.push(publishQuestion(context, questionId));
+  }
+  await Promise.all(repairs);
+  return repairs.length;
 }
 
 async function route(context) {
