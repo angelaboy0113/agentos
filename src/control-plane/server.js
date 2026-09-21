@@ -5,7 +5,7 @@ import { WebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
 import { WebsiteCredentialService } from './website-credentials.js';
 import { loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
-import { publishQuestion, questionJob } from './questions.js';
+import { publishQuestion, questionJob, questionView } from './questions.js';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -96,9 +96,15 @@ export async function repairStaleTerminalQuestionCards(context) {
     const serialized = JSON.stringify(saved.card ?? {});
     const header = saved.card?.header?.subtitle?.content ?? saved.card?.header?.title?.content ?? '';
     if (!/"action":"(?:cancel|refresh)"/.test(serialized) && header.includes(terminalLabels[job.status])) continue;
-    repairs.push(publishQuestion(context, questionId));
+    if (saved.terminalMention && !saved.terminalMention.kind) {
+      const view = questionView(state, questionId, context.projects);
+      repairs.push(context.cards.upsert(key, view.card, view.destination, { terminal: true, immediate: true,
+        resultText: view.resultText, terminalMention: saved.terminalMention, generation: saved.generation ?? 1 }));
+    } else repairs.push(publishQuestion(context, questionId));
   }
-  await Promise.all(repairs);
+  const results = await Promise.allSettled(repairs);
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed) throw failed.reason;
   return repairs.length;
 }
 
