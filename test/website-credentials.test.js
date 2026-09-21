@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WebsiteCredentialService, parseWebsiteCredentialMessage } from '../src/control-plane/website-credentials.js';
+import { WebsiteCredentialService, parseWebsiteCredentialMessage, stripCredentialMentions } from '../src/control-plane/website-credentials.js';
 
 const environment = { kind:'website', projectId:'demo', tier:'prd', baseUrl:'https://business.example/app/', credentialRef:'web-entry-test',
   ownerOpenIdsByProfile:{owner:['ou_admin']}, membersRead:false, queries:{investigate:{mode:'investigate'}} };
@@ -37,6 +37,25 @@ test('a card or topic reply accepts natural account slash password syntax and bi
   assert.doesNotMatch(JSON.stringify(replies),/123456/);
   saved.length=0;await service.handle({message_id:'m-topic',chat_type:'group',chat_id:'group',root_id:'root-one',agent_profile:'owner',sender_id:'ou_admin',content:'other-user，other-pass'});
   assert.equal(saved[0].value.username,'other-user');assert.equal(saved[0].value.password,'other-pass');
+});
+
+test('credential replies remove the addressed bot mention before parsing account and password',async()=>{
+  const saved=[],replies=[];const context={store:{read:async()=>threadedState()},feishu:{reply:async(id,text)=>replies.push(text)},
+    websiteBrowser:{submitCredentials:async()=>({authenticated:true})}};
+  const service=new WebsiteCredentialService(context,{load:async()=>({environments:{site:environment}}),save:async(ref,value)=>saved.push({ref,value})});
+  await service.handle({message_id:'m-mentioned',chat_type:'group',chat_id:'group',reply_to:'card-one',agent_profile:'owner',sender_id:'ou_admin',
+    mentions:[{key:'@_user_1',name:'项目负责人'}],content:'@项目负责人 synthetic-admin / synthetic-password'});
+  assert.deepEqual(saved,[{ref:'web-entry-test',value:{username:'synthetic-admin',password:'synthetic-password'}}]);
+  assert.doesNotMatch(JSON.stringify(replies),/synthetic-admin|synthetic-password/);
+  assert.equal(stripCredentialMentions('@_user_1 synthetic-admin / synthetic-password',[{key:'@_user_1',name:'项目负责人'}]),'synthetic-admin / synthetic-password');
+});
+
+test('credential submission reports a rejected password form separately from verification',async()=>{
+  const replies=[];const context={store:{read:async()=>threadedState()},feishu:{reply:async(id,text)=>replies.push(text)},
+    websiteBrowser:{submitCredentials:async()=>({authenticated:false,credentialRejected:true})}};
+  const service=new WebsiteCredentialService(context,{load:async()=>({environments:{site:environment}}),save:async()=>{}});
+  await service.handle({message_id:'m-rejected',chat_type:'group',chat_id:'group',reply_to:'card-one',agent_profile:'owner',sender_id:'ou_admin',content:'synthetic-admin / synthetic-password'});
+  assert.match(replies[0],/账号或密码未通过/);assert.doesNotMatch(replies[0],/验证码|synthetic-admin|synthetic-password/);
 });
 
 test('private credential intake requires the configured website owner and supports one pending site without URL',async()=>{
