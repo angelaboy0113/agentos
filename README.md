@@ -168,6 +168,22 @@ Set-Location D:\projects\agentos
 
 只发图片也会调用 AI 理解，缺少任务意图时自然追问；后续可引用历史图片。聊天图片通过 app-server 的 `localImage` 交给 Codex，研发任务仍通过 `codex exec --image`。`start:local` 默认启用真实 Codex，可用 `AGENTOS_RUNNER_EXECUTOR=mock` 做无代码变更演练（聊天仍是真实 AI）。
 
+## macOS 登录后自动启动
+
+AgentOS 依赖当前 macOS 用户的飞书、Codex、Keychain 和浏览器登录态，因此使用当前用户的 LaunchAgent。先手工启动并确认健康，再安装：
+
+```bash
+./scripts/install-autostart.sh
+```
+
+它会记录当前 Node 22 和 Codex 可执行文件目录，登录后自动运行，异常退出时自动拉起；日志位于 `data/logs/agentos-launchd.log`。切换本机 Codex 账号后，重新执行安装脚本或运行 `launchctl kickstart -k gui/$(id -u)/com.agentos.local`，新进程会读取当前账号的缓存登录态。飞书应用和项目配置无需重做。服务离线期间未投递到长连接的旧消息不会自动补发，需要用户重新发送原问题。
+
+移除自启：
+
+```bash
+./scripts/uninstall-autostart.sh
+```
+
 ## Windows 登录后自动启动
 
 AgentOS 依赖当前 Windows 用户的飞书配置、Codex 登录态和本地仓库，因此使用当前用户的 `HKCU Run` 登录启动项，而不是计划任务或无人登录的系统服务会话：

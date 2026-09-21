@@ -241,17 +241,32 @@ Invoke-RestMethod http://127.0.0.1:8787/health
 
 预期依次经历负责人 → PM → 开发 → 测试 → 审计 → 负责人汇报，并在需要时等待真人补充或确认。AgentOS 不会自动合并、推送或部署业务代码。
 
-## 12. 安装 Windows 登录后自启
+## 12. 安装登录后自启
 
-先手工启动成功，再执行：
+AgentOS 必须运行在保存了飞书、Codex、Keychain和浏览器会话的同一个桌面用户下。先手工启动成功并检查 `/health`，再安装当前平台的登录自启。
+
+### macOS
+
+```bash
+./scripts/install-autostart.sh
+```
+
+脚本创建当前用户的 `com.agentos.local` LaunchAgent，固定已验证的 Node 22 路径，登录后自动运行，异常退出后自动拉起。日志位于 `data/logs/agentos-launchd.log` 和 `data/logs/agentos-launchd-error.log`。验证：
+
+```bash
+launchctl print gui/$(id -u)/com.agentos.local
+curl http://127.0.0.1:8787/health
+```
+
+切换 Codex 账号后，执行 `launchctl kickstart -k gui/$(id -u)/com.agentos.local`，让新进程读取当前账号缓存。官方 Codex CLI 可用 `codex login status` 确认登录方式；无需重建飞书应用、项目映射或历史数据。服务离线时已发送但没有进入本地状态的消息不会自动补发，需要重新发送。移除自启：`./scripts/uninstall-autostart.sh`。
+
+### Windows
 
 ```powershell
 .\scripts\install-autostart.ps1
 ```
 
-它注册当前 Windows 用户的 `HKCU Run` 启动项。关机重启后必须登录这个 Windows 用户，且电脑不能休眠；Codex 与 lark-cli 登录也必须仍有效。日志写入 `data/logs/`。
-
-移除自启：
+它注册当前 Windows 用户的 `HKCU Run` 启动项。关机重启后必须登录这个 Windows 用户，且电脑不能休眠；Codex 与 lark-cli 登录也必须仍有效。日志写入 `data/logs/`。移除自启：
 
 ```powershell
 .\scripts\uninstall-autostart.ps1
