@@ -10,6 +10,7 @@ export function controlConfig(overrides = {}) {
     dataDir,
     conversationFile: overrides.conversationFile ?? process.env.AGENTOS_CONVERSATION_FILE ?? './config/conversation.local.json',
     memoryFile: overrides.memoryFile ?? process.env.AGENTOS_MEMORY_FILE ?? './config/memory.local.json',
+    codexRuntimeFile: overrides.codexRuntimeFile ?? process.env.AGENTOS_CODEX_RUNTIME_FILE ?? './config/codex-runtime.local.json',
     storeFile: overrides.storeFile ?? path.join(dataDir, 'agentos.json'),
     projectsFile: overrides.projectsFile ?? process.env.AGENTOS_PROJECTS_FILE ?? './config/projects.local.json',
     agentsFile: overrides.agentsFile ?? process.env.AGENTOS_AGENTS_FILE ?? './config/agents.local.json',

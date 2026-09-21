@@ -7,6 +7,7 @@ import { loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/envir
 import { publishQuestion } from './questions.js';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { controlConfig, loadAgents, loadProjects, saveProjects } from './config.js';
@@ -23,6 +24,10 @@ import { LiveCards } from './live-cards.js';
 import { jobCard, resultSummary } from './message-cards.js';
 import { handleCardAction } from './card-actions.js';
 import { jobTerminalMention } from './requester-mention.js';
+import { adminOverview, adminRecordDetail, adminRecords } from './admin-view.js';
+import { CODEX_MODELS, CODEX_REASONING_EFFORTS, loadCodexRuntimeSettings, saveCodexRuntimeSettings } from '../shared/codex-runtime.js';
+
+const adminDirectory = fileURLToPath(new URL('./admin/', import.meta.url));
 
 export async function createControlPlane(overrides = {}) {
   const config = controlConfig(overrides);
@@ -40,7 +45,8 @@ export async function createControlPlane(overrides = {}) {
   const authorizeBrowser = async (initial,waiting,request)=>{const current=await store.getJob(initial.id);if(current?.status==='awaiting_clarification'&&current?.result?.browserLoginRequired){const type=request.resourceType();const tail=new URL(request.url()).pathname.split('/').at(-1);return type==='document'||['script','stylesheet','image','font'].includes(type)||/^(login|signin|authenticate|auth|captcha|verify)$/i.test(tail);}if(current?.status!=='running')return false;verifyApprovedPlan(await loadEnvironments(),current.environmentAccess);return true;};
   const browserMode = process.env.AGENTOS_BROWSER_MODE ?? (process.platform === 'darwin' ? 'shared-chrome' : 'isolated');
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
-  const context = { config, projects, agents, store, feishu, websiteBrowser: browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser) };
+  const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
+    websiteBrowser: browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser) };
   const cards = new LiveCards(store, feishu);
   context.cards = cards;
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
@@ -77,6 +83,47 @@ export async function createControlPlane(overrides = {}) {
 async function route(context) {
   const { request, response, config, store } = context;
   const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
+
+  if (request.method === 'GET' && ['/admin', '/admin/'].includes(url.pathname)) {
+    return serveAdmin(context, response, 'index.html', true);
+  }
+  const assetMatch = url.pathname.match(/^\/admin\/(app\.js|styles\.css)$/);
+  if (request.method === 'GET' && assetMatch) return serveAdmin(context, response, assetMatch[1]);
+
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/overview') {
+    requireAdminSession(context, request, false);
+    const state = await store.read();
+    const runtime = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
+    return json(response, 200, { ok: true, overview: adminOverview(state, runtime) }, { 'cache-control': 'no-store' });
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/records') {
+    requireAdminSession(context, request, false);
+    const state = await store.read();
+    return json(response, 200, { ok: true, records: adminRecords(state, {
+      kind: url.searchParams.get('kind'), status: url.searchParams.get('status'),
+      search: url.searchParams.get('q'), limit: url.searchParams.get('limit'),
+    }) }, { 'cache-control': 'no-store' });
+  }
+  const adminRecordMatch = url.pathname.match(/^\/api\/v1\/admin\/records\/([^/]+)$/);
+  if (request.method === 'GET' && adminRecordMatch) {
+    requireAdminSession(context, request, false);
+    const record = adminRecordDetail(await store.read(), decodeURIComponent(adminRecordMatch[1]));
+    return record ? json(response, 200, { ok: true, record }, { 'cache-control': 'no-store' })
+      : json(response, 404, { ok: false, error: 'Record not found' });
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/settings/runtime') {
+    requireAdminSession(context, request, false);
+    const runtime = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
+    return json(response, 200, { ok: true, runtime, models: CODEX_MODELS, efforts: CODEX_REASONING_EFFORTS }, { 'cache-control': 'no-store' });
+  }
+  if (request.method === 'PUT' && url.pathname === '/api/v1/admin/settings/runtime') {
+    requireAdminSession(context, request, true);
+    const before = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
+    const after = await saveCodexRuntimeSettings(await readJson(request, 16 * 1024), { file: config.codexRuntimeFile });
+    await store.recordAdminAudit({ actor: 'local-console', action: 'runtime_settings_changed', before, after });
+    return json(response, 200, { ok: true, runtime: after,
+      message: '已保存。新任务和新会话使用新设置，正在执行的任务不受影响。' }, { 'cache-control': 'no-store' });
+  }
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
@@ -516,10 +563,47 @@ async function readJson(request, limit = 5 * 1024 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-function json(response, status, body) {
+function json(response, status, body, headers = {}) {
   const encoded = Buffer.from(JSON.stringify(body));
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': encoded.length });
+  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': encoded.length, ...headers });
   response.end(encoded);
+}
+
+async function serveAdmin(context, response, file, establishSession = false) {
+  if (!isLoopback(context.config.host)) return json(response, 404, { ok: false, error: 'Admin console is available on loopback only' });
+  const target = `${adminDirectory}${file}`;
+  const info = await stat(target);
+  const headers = {
+    'content-type': file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8',
+    'content-length': info.size,
+    'cache-control': file === 'index.html' ? 'no-store' : 'public, max-age=300',
+    'content-security-policy': "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',
+  };
+  if (establishSession) headers['set-cookie'] = `agentos_admin=${context.adminSessionToken}; HttpOnly; SameSite=Strict; Path=/`;
+  response.writeHead(200, headers);
+  return createReadStream(target).pipe(response);
+}
+
+function requireAdminSession(context, request, mutation) {
+  if (!isLoopback(context.config.host)) unauthorized();
+  const value = String(request.headers.cookie ?? '').split(';').map((part) => part.trim())
+    .find((part) => part.startsWith('agentos_admin='))?.slice('agentos_admin='.length) ?? '';
+  const actual = Buffer.from(value), expected = Buffer.from(context.adminSessionToken);
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) unauthorized();
+  if (mutation) {
+    const origin = request.headers.origin;
+    const expectedOrigin = `http://${request.headers.host}`;
+    if (origin !== expectedOrigin || request.headers['x-agentos-admin'] !== '1') unauthorized();
+  }
+}
+
+function unauthorized() {
+  const error = new Error('Unauthorized'); error.statusCode = 401; throw error;
+}
+
+function isLoopback(host) {
+  return ['127.0.0.1', 'localhost', '::1'].includes(String(host).replace(/^\[|\]$/g, ''));
 }
 
 async function main() {

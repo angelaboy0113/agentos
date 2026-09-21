@@ -36,7 +36,7 @@ export class ConversationService {
     this.groupSessions = options.groupSessions === true;
     this.questionCards = options.questionCards === true;
     this.memory = new MemoryService({ dataDir: context.config.dataDir, settings: options.memorySettings });
-    this.engine = options.decide ? null : new CodexConversationEngine({ dataDir: context.config.dataDir });
+    this.engine = options.decide ? null : new CodexConversationEngine({ dataDir: context.config.dataDir, file: context.config.codexRuntimeFile });
     this.decide = options.decide ?? ((input, signal, detail) => this.engine.decide(input, { ...detail, signal }));
     this.concurrency = options.concurrency ?? 3;
     this.feedbackMs = options.feedbackMs ?? 3000;

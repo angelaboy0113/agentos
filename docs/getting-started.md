@@ -189,9 +189,13 @@ lark-cli --profile agentos-owner event consume im.message.receive_v1 --as bot
 ```json
 {
   "proxyUrl": "",
-  "codexBin": "codex"
+  "codexBin": "codex",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "high"
 }
 ```
+
+`model` 和 `reasoningEffort` 也可以在 AgentOS 启动后的本机管理控制台修改。留空或删除字段时继承本机 Codex 默认设置；可选模型最终仍受当前 ChatGPT 账号权限约束。
 
 - `proxyUrl` 留空：Codex 子进程直连，并清除继承的代理变量。
 - 确有代理时填写本机实际可用的 URL；不要复制别人的端口。
@@ -218,6 +222,8 @@ Invoke-RestMethod http://127.0.0.1:8787/health
 ```
 
 默认只监听 `127.0.0.1:8787`。不要为了飞书长连接把 8787 暴露到公网。
+
+启动完成后，在同一台电脑打开 `http://127.0.0.1:8787/admin`。页面用于管理和查看已经运行的 AgentOS，不用于启动服务。可以在其中查看服务与 Runner 状态、任务及普通回复记录、模型、耗时、工具调用、失败原因，并修改后续任务使用的模型和推理强度。正在执行的任务保持原设置。参见 [本机管理控制台](admin-console.md)。
 
 ## 11. 拉机器人进群并发送第一条消息
 

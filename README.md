@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.0.2** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.1.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -21,6 +21,8 @@ npm ci
 .\scripts\use-node22.ps1 npm run check
 .\scripts\use-node22.ps1 npm run start:local
 ```
+
+启动成功后，在运行 AgentOS 的同一台电脑打开 <http://127.0.0.1:8787/admin>。这是本机管理入口，用于查看运行状态、任务与回复记录、处理耗时，并调整 AgentOS 使用的 Codex 模型和推理强度。管理页面不负责启动 AgentOS；服务未运行时页面也不会打开。模型设置对新任务和新会话生效，正在执行的任务不会被中途切换。详细说明见 [本机管理控制台](docs/admin-console.md)。
 
 项目修改须遵循 [AGENTS.md](./AGENTS.md) 的角色、验证和文档一致性要求；公开仓库不包含本机运行数据或内部飞书同步快照。
 
@@ -243,7 +245,7 @@ Runner 不会自动合并、推送或部署。Codex 只在任务 worktree 内修
 
 ## Codex 网络出口（更新于 2026-09-11）
 
-保持现有 Codex 模型和 ChatGPT 订阅登录，不使用 API Key。`config/codex-runtime.local.json` 的 `proxyUrl` 或环境变量 `AGENTOS_CODEX_PROXY_URL` 只影响 AgentOS 启动的 Codex 子进程（聊天、研发共用），不修改系统、飞书或全局 Codex 配置。该本地配置被 Git 忽略；迁移到另一台电脑时按那台电脑的实际出口配置，不照搬端口。
+保持 ChatGPT 订阅登录，不使用 API Key。`config/codex-runtime.local.json` 的 `model`、`reasoningEffort` 和 `proxyUrl` 只影响 AgentOS 启动的 Codex 子进程（聊天、研发与环境排查共用），不修改系统、飞书或全局 Codex 配置。管理员可在本机控制台修改模型与推理强度；该本地配置被 Git 忽略。迁移到另一台电脑时按那台电脑的账号权限和实际出口配置，不照搬模型权限、代理端口或登录态。
 
 `proxyUrl` 显式留空表示直连，并清除 AgentOS 子进程继承到的 HTTP(S)/ALL_PROXY 环境变量；填写代理 URL 才强制使用该代理。本机已于 2026-09-11 通过真实 ChatGPT 登录完成两轮直连烟测，0 次重试，因此当前本地配置不再依赖 VPN。若换到无法直连的网络，再填写该网络实际可用的代理并重启 AgentOS。
 

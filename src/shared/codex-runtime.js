@@ -1,16 +1,67 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const localFile = fileURLToPath(new URL('../../config/codex-runtime.local.json', import.meta.url));
+export const CODEX_MODELS = [
+  { id: 'gpt-6-astra', label: 'GPT-6 Astra', description: '复杂排查与高要求交付' },
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', description: '日常开发与稳定执行' },
+  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', description: '速度与能力均衡' },
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', description: '快速、轻量的日常任务' },
+  { id: 'gpt-5.5', label: 'GPT-5.5', description: '上一代稳定模型' },
+];
+export const CODEX_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+
+async function readLocal(file = localFile) {
+  try { return JSON.parse(await readFile(file, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
+}
+
+export async function loadCodexRuntimeSettings(options = {}) {
+  const local = await readLocal(options.file ?? localFile);
+  const model = options.model ?? process.env.AGENTOS_CODEX_MODEL ?? local.model ?? null;
+  const reasoningEffort = options.reasoningEffort ?? process.env.AGENTOS_CODEX_REASONING_EFFORT ?? local.reasoningEffort ?? null;
+  validateRuntimeSelection({ model, reasoningEffort });
+  return { model, reasoningEffort };
+}
+
+export async function saveCodexRuntimeSettings(selection, options = {}) {
+  const file = options.file ?? localFile;
+  const current = await readLocal(file);
+  const model = selection.model || null;
+  const reasoningEffort = selection.reasoningEffort || null;
+  validateRuntimeSelection({ model, reasoningEffort });
+  const next = { ...current };
+  if (model) next.model = model; else delete next.model;
+  if (reasoningEffort) next.reasoningEffort = reasoningEffort; else delete next.reasoningEffort;
+  await mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  await rename(temporary, file);
+  return { model, reasoningEffort };
+}
+
+export function codexRuntimeArgs(settings = {}) {
+  return [
+    ...(settings.model ? ['--model', settings.model] : []),
+    ...(settings.reasoningEffort ? ['-c', `model_reasoning_effort=${JSON.stringify(settings.reasoningEffort)}`] : []),
+  ];
+}
+
+function validateRuntimeSelection({ model, reasoningEffort }) {
+  if (model !== null && (typeof model !== 'string' || !/^[a-z0-9][a-z0-9._-]{1,79}$/i.test(model))) {
+    throw new Error('Invalid Codex model');
+  }
+  if (reasoningEffort !== null && !CODEX_REASONING_EFFORTS.includes(reasoningEffort)) {
+    throw new Error('Invalid Codex reasoning effort');
+  }
+}
 
 export async function resolveCodexBinary(explicit, options = {}) {
   if (explicit && explicit !== 'codex') return explicit;
   if (process.env.CODEX_BIN && process.env.CODEX_BIN !== 'codex') return process.env.CODEX_BIN;
-  let local = {};
-  try { local = JSON.parse(await readFile(localFile, 'utf8')); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const local = await readLocal(localFile);
   if (local.codexBin && local.codexBin !== 'codex') {
     try { if ((await stat(local.codexBin)).isFile()) return local.codexBin; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -39,9 +90,7 @@ export async function discoverWindowsCodexBinary(root = null) {
 
 // Scoped only to Codex children. Never changes Windows, Feishu, model or auth.
 export async function codexEnvironment(options = {}) {
-  let local = {};
-  try { local = JSON.parse(await readFile(options.file ?? localFile, 'utf8')); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const local = await readLocal(options.file ?? localFile);
   const proxyConfigured = Object.hasOwn(options, 'proxyUrl')
     || process.env.AGENTOS_CODEX_PROXY_URL !== undefined || Object.hasOwn(local, 'proxyUrl');
   const proxy = options.proxyUrl ?? process.env.AGENTOS_CODEX_PROXY_URL ?? local.proxyUrl;

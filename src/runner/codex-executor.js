@@ -8,7 +8,7 @@ import { readProjectLedger } from './project-ledger.js';
 import { stageLabel } from '../shared/protocol.js';
 import { prepareWorkspace, runVerification } from './workspace.js';
 import { prepareAnalysisSources, verifyAnalysisSources } from './source-sync.js';
-import { codexEnvironment, resolveCodexBinary } from '../shared/codex-runtime.js';
+import { codexEnvironment, codexRuntimeArgs, loadCodexRuntimeSettings, resolveCodexBinary } from '../shared/codex-runtime.js';
 import { ExecutionActivity } from '../shared/execution-activity.js';
 import { loadHarness, handoffContext, validateHandoff, enforceHandoff, preserveAnalysisGaps } from './harness.js';
 
@@ -58,7 +58,7 @@ export async function executeJob(job, config, emit) {
     (text) => emit({ type: 'progress', message: text.slice(-500) }).catch(() => undefined));
   // Recheck final files after verification commands may have generated/changed artifacts.
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace));
-  return { workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate,
     timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };
 }
@@ -84,10 +84,11 @@ function executeMock(job, emit) {
 
 async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit }) {
   const env = await codexEnvironment();
+  const runtime = await loadCodexRuntimeSettings();
   const codexBin = await resolveCodexBinary(config.codexBin);
   return new Promise((resolve, reject) => {
     const readOnly = job.taskIntent === 'analysis' || ['owner_intake', 'owner_audit', 'owner_report'].includes(job.stage);
-    const args = buildCodexArgs(workspace, attachmentPaths, { readOnly });
+    const args = buildCodexArgs(workspace, attachmentPaths, { readOnly, runtime });
 
     const child = spawn(codexBin, args, { cwd: workspace, env, windowsHide: true, shell: false });
     let pending = '';
@@ -149,15 +150,16 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit 
       try {
         const result = JSON.parse(finalMessage);
         if (!['ready', 'needs_clarification', 'blocked', ...(job.taskIntent === 'analysis' ? ['partial'] : [])].includes(result.outcome) || !result.finalMessage?.trim()) throw new Error('Missing valid outcome');
-        resolve({ threadId, ...result });
+        resolve({ threadId, model: runtime.model, reasoningEffort: runtime.reasoningEffort, ...result });
       } catch (error) { reject(new Error(`Codex result invalid: ${error.message}`)); }
     });
   });
 }
 
-export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false } = {}) {
+export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false, runtime = {} } = {}) {
   const args = [
     'exec', '-C', workspace,
+    ...codexRuntimeArgs(runtime),
     '-c', 'features.unbounded_connection_retries=false',
     ...(readOnly ? ['--skip-git-repo-check', '--sandbox', 'read-only', '-c', 'approval_policy="never"'] : ['--approve-for-me']),
     '--output-schema', RESULT_SCHEMA,
