@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadStageInstruction } from '../runner/codex-executor.js';
 import { CodexAppServer } from '../shared/codex-app-server.js';
-import { codexEnvironment, conversationServerArgs, resolveCodexBinary } from '../shared/codex-runtime.js';
+import { codexEnvironment, conversationServerArgs, loadCodexRuntimeSettings, resolveCodexBinary } from '../shared/codex-runtime.js';
 
 import { SessionRegistry } from './session-registry.js';
 
@@ -51,10 +51,13 @@ export class CodexConversationEngine {
     await this.start();
     await this.app.start();
     if (options.signal?.aborted || this.closed) throw new Error('Conversation stopped');
+    const runtime = await loadCodexRuntimeSettings(this.options);
+    const runtimeSignature = JSON.stringify(runtime);
     const key = options.sessionKey ?? `${input.role}:${input.project?.id ?? ''}`;
-    if (input.nativeSession) return this.decidePersistent(input, options, key, began);
+    if (input.nativeSession) return this.decidePersistent(input, options, key, began, runtime, runtimeSignature);
     let session = this.sessions.get(key);
-    const reused = Boolean(!input.memory?.enabled && session && session.generation === this.app.generation && session.count < 20);
+    const reused = Boolean(!input.memory?.enabled && session && session.generation === this.app.generation
+      && session.runtimeSignature === runtimeSignature && session.count < 20);
     if (!reused) {
       if (session) this.releaseSession(key, session);
       if (this.sessions.size >= 24) {
@@ -64,17 +67,17 @@ export class CodexConversationEngine {
       const role = await loadStageInstruction(input.role);
       const thread = await this.app.request('thread/start', {
         cwd: this.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true,
+        ...(runtime.model ? { model: runtime.model } : {}),
         developerInstructions: `${this.rules}\n角色职责（仅理解与决策，不能执行工具或角色任务）：\n${role}`,
       });
-      session = { id: thread.thread.id, generation: this.app.generation, count: 0, touched: Date.now() };
-      this.model = thread.model;
+      session = { id: thread.thread.id, model: thread.model, runtimeSignature, generation: this.app.generation, count: 0, touched: Date.now() };
       this.sessions.set(key, session);
     }
     const preparedMs = Date.now() - began;
     session.active = true;
     try {
       const result = await decisionTurn(this.app, {
-        threadId: session.id, effort: 'low', approvalPolicy: 'never',
+        threadId: session.id, effort: runtime.reasoningEffort ?? 'low', approvalPolicy: 'never',
         input: [{ type: 'text', text: `本轮最新上下文（状态以此为准，历史里的操作不可重复执行）：\n${JSON.stringify(input)}` },
           ...(input.attachments ?? []).filter((item) => item.type === 'image').slice(-5).map((item) => ({ type: 'localImage', path: item.path }))],
         outputSchema: this.schema,
@@ -83,7 +86,8 @@ export class CodexConversationEngine {
       session.active = false;
       session.touched = Date.now();
       return { ...validateDecision(JSON.parse(result.text)), threadId: result.threadId,
-        timing: { ...result.timing, preparedMs, aiMs: Date.now() - began, sessionReused: reused, model: this.model } };
+        timing: { ...result.timing, preparedMs, aiMs: Date.now() - began, sessionReused: reused, model: session.model,
+          reasoningEffort: runtime.reasoningEffort ?? 'low' } };
     } catch (error) {
       // Discard uncertain read-only threads; never overlap a possibly active turn.
       this.releaseSession(key, session);
@@ -91,10 +95,10 @@ export class CodexConversationEngine {
     }
   }
 
-  async decidePersistent(input, options, key, began) {
+  async decidePersistent(input, options, key, began, runtime, runtimeSignature) {
     if (!input.requestId) throw new Error('Persistent session requires request identity');
     const role = await loadStageInstruction(input.role);
-    const rulesHash = createHash('sha256').update(`${this.rules}\n${role}`).digest('hex');
+    const rulesHash = createHash('sha256').update(`${this.rules}\n${role}\n${runtimeSignature}`).digest('hex');
     const saved = await this.registry.get(key);
     if (saved?.lastRequestId === input.requestId && saved.decision) return saved.decision;
     let session = this.sessions.get(key), resumed = false;
@@ -106,13 +110,14 @@ export class CodexConversationEngine {
         if (idle) this.releaseSession(...idle);
       }
       const params = { cwd: this.cwd, sandbox: 'read-only', approvalPolicy: 'never',
+        ...(runtime.model ? { model: runtime.model } : {}),
         developerInstructions: `${this.rules}\n${role}\n这是当前问题的独立会话。每条消息的当前发起人和administrator以本轮输入为准；历史授权不能转授。不同问题分别处理，耗时任务交给Runner，聊天不执行工具。` };
       // Only confirmed missing sessions may start fresh; auth/transport errors must not fork silently.
       let thread;
       if (compatible) {
         thread = await this.app.request('thread/resume', { ...params, threadId: saved.threadId }); resumed = true;
       } else thread = await this.app.request('thread/start', { ...params, ephemeral: false });
-      session = { id: thread.thread.id, model: thread.model, generation: this.app.generation, active: false, count: 0, touched: Date.now() };
+      session = { id: thread.thread.id, model: thread.model, runtimeSignature, generation: this.app.generation, active: false, count: 0, touched: Date.now() };
       this.sessions.set(key, session);
     } else resumed = true;
     if (session.active) throw new Error('Concurrent group session turn rejected');
@@ -121,12 +126,13 @@ export class CodexConversationEngine {
     try {
       await this.registry.set(key, baseline);
       const payload = { ...input, history: resumed ? [] : input.history };
-      const result = await decisionTurn(this.app, { threadId: session.id, effort: 'low', approvalPolicy: 'never',
+      const result = await decisionTurn(this.app, { threadId: session.id, effort: runtime.reasoningEffort ?? 'low', approvalPolicy: 'never',
         input: [{ type: 'text', text: `当前真实发起人、权限、问题与任务状态：\n${JSON.stringify(payload)}` },
           ...(input.attachments ?? []).filter((item) => item.type === 'image').slice(-5).map((item) => ({ type: 'localImage', path: item.path }))],
         outputSchema: this.schema }, { signal: options.signal, timeoutMs: this.options.timeoutMs ?? 90_000, onEvent: options.onEvent });
       const decision = { ...validateDecision(JSON.parse(result.text)), threadId: session.id,
-        timing: { ...result.timing, aiMs: Date.now() - began, sessionReused: resumed, model: session.model, nativeSession: true } };
+        timing: { ...result.timing, aiMs: Date.now() - began, sessionReused: resumed, model: session.model,
+          reasoningEffort: runtime.reasoningEffort ?? 'low', nativeSession: true } };
       await this.registry.set(key, { ...baseline, pending: null, lastRequestId: input.requestId, decision });
       session.active = false; session.touched = Date.now();
       return decision;

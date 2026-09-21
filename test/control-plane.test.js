@@ -15,6 +15,11 @@ test('Codex runner uses automatic review without a conflicting sandbox flag', ()
   assert.deepEqual(args.slice(-2), ['--json', '-']);
 });
 
+test('Codex runner applies the AgentOS model and reasoning selection to new jobs', () => {
+  const args = buildCodexArgs('/workspace', [], { runtime: { model: 'gpt-6-astra', reasoningEffort: 'xhigh' } });
+  assert.deepEqual(args.slice(0, 7), ['exec', '-C', '/workspace', '--model', 'gpt-6-astra', '-c', 'model_reasoning_effort="xhigh"']);
+});
+
 test('only explicit role commands are recognized for execution', () => {
   assert.equal(routeInstruction('大家下午好').matched, false);
   assert.equal(routeInstruction('开发：修复登录接口').matched, true);

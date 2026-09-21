@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentOS 控制台</title>
+  <link rel="stylesheet" href="/admin/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div><strong>AgentOS</strong><small>本机控制台</small></div>
+      </div>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-view="overview"><span>概览</span><kbd>1</kbd></button>
+        <button class="nav-item" data-view="records"><span>任务记录</span><kbd>2</kbd></button>
+        <button class="nav-item" data-view="settings"><span>模型设置</span><kbd>3</kbd></button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="status-dot" id="service-dot"></span>
+        <div><strong id="service-label">正在连接</strong><small>仅限本机访问</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <p class="context">Mac mini 工作台</p>
+          <h1 id="page-title">运行概览</h1>
+        </div>
+        <div class="top-actions">
+          <span class="updated" id="updated-at">尚未刷新</span>
+          <button class="icon-button" id="refresh" title="刷新数据" aria-label="刷新数据">↻</button>
+        </div>
+      </header>
+
+      <section class="view active" id="view-overview">
+        <div class="hero-panel">
+          <div>
+            <span class="eyebrow">当前运行模型</span>
+            <h2 id="hero-model">读取中</h2>
+            <p id="hero-effort">正在读取 AgentOS 的模型配置</p>
+          </div>
+          <button class="text-button" data-goto="settings">调整模型设置</button>
+        </div>
+
+        <div class="metrics" aria-label="运行指标">
+          <article><span>执行中</span><strong id="metric-active">—</strong><small>排队与运行任务</small></article>
+          <article><span>今日完成</span><strong id="metric-completed">—</strong><small>最近 24 小时</small></article>
+          <article><span>成功率</span><strong id="metric-success">—</strong><small>最近 24 小时</small></article>
+          <article><span>中位回复</span><strong id="metric-median">—</strong><small>完成记录</small></article>
+        </div>
+
+        <div class="overview-grid">
+          <section class="panel recent-panel">
+            <div class="panel-heading"><div><h3>最近处理</h3><p>任务与普通回复统一记录</p></div><button class="text-button" data-goto="records">查看全部</button></div>
+            <div class="record-list" id="recent-list"><div class="loading-row">正在读取记录…</div></div>
+          </section>
+          <section class="panel health-panel">
+            <div class="panel-heading"><div><h3>运行状态</h3><p>服务与执行器</p></div></div>
+            <dl class="health-list">
+              <div><dt>控制服务</dt><dd><span class="mini-dot good"></span>正常</dd></div>
+              <div><dt>Runner</dt><dd id="runner-state">读取中</dd></div>
+              <div><dt>当前模型</dt><dd id="health-model">—</dd></div>
+              <div><dt>失败记录</dt><dd id="health-failed">—</dd></div>
+            </dl>
+            <div class="audit-block"><h4>最近设置变更</h4><div id="audit-list" class="audit-list"><p>暂无变更</p></div></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-records">
+        <div class="toolbar panel">
+          <label class="search"><span>搜索</span><input id="record-search" type="search" placeholder="任务编号、问题或项目"></label>
+          <label><span>类型</span><select id="record-kind"><option value="all">全部</option><option value="job">执行任务</option><option value="conversation">普通回复</option></select></label>
+          <label><span>状态</span><select id="record-status"><option value="all">全部状态</option><option value="running">执行中</option><option value="queued">排队中</option><option value="completed">已完成</option><option value="sent">已回复</option><option value="failed">失败</option><option value="blocked">受阻</option></select></label>
+        </div>
+        <section class="panel table-panel">
+          <div class="table-wrap">
+            <table><thead><tr><th>问题 / 任务</th><th>状态</th><th>模型</th><th>耗时</th><th>时间</th></tr></thead><tbody id="records-body"><tr><td colspan="5" class="empty">正在读取记录…</td></tr></tbody></table>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="settings-layout">
+          <section class="panel settings-card">
+            <div class="panel-heading"><div><h3>Codex 模型</h3><p>AgentOS 新任务和新会话采用这里的设置</p></div></div>
+            <form id="runtime-form">
+              <fieldset><legend>选择模型</legend><div id="model-options" class="model-options"><div class="loading-row">正在读取可用选项…</div></div></fieldset>
+              <label class="effort-field"><span>推理强度</span><select id="reasoning-effort"></select><small>强度越高，复杂排查更充分，通常也会使用更多时间。</small></label>
+              <div class="setting-note"><strong>生效规则</strong><p>保存后，新任务和新会话立即使用新设置。正在执行的任务继续使用原模型，不会被中途打断。</p></div>
+              <div class="form-actions"><span id="save-message" role="status"></span><button type="submit" class="primary-button">保存模型设置</button></div>
+            </form>
+          </section>
+          <aside class="panel boundary-card">
+            <h3>控制台边界</h3>
+            <ul><li>页面不会启动或停止 AgentOS。</li><li>只在本机 <code>127.0.0.1</code> 提供访问。</li><li>不会展示 Token、密码或数据库凭据。</li><li>模型是否可用取决于当前 Codex 账号权限。</li></ul>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+  <aside class="drawer" id="record-drawer" aria-hidden="true" aria-label="记录详情">
+    <div class="drawer-head"><div><span class="eyebrow">处理详情</span><h2 id="detail-title">任务详情</h2></div><button class="icon-button" id="close-drawer" aria-label="关闭">×</button></div>
+    <div class="drawer-body" id="detail-body"></div>
+  </aside>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script src="/admin/app.js" type="module"></script>
+</body>
+</html>

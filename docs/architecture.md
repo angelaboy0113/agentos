@@ -46,7 +46,8 @@ agentos/
 ├─ docs/                   架构、部署、数据地图和功能规范
 ├─ scripts/                初始化、诊断、启动、自启和烟测
 ├─ src/
-│  ├─ control-plane/       飞书接入、对话、任务、卡片和 HTTP
+│  ├─ control-plane/       飞书接入、对话、任务、卡片、管理页面和 HTTP
+│  │  └─ admin/            本机管理控制台静态页面
 │  ├─ runner/              租约、工作树、Codex 执行和验证
 │  └─ shared/              状态、协议、Codex app-server/runtime
 ├─ test/                   Node 内置测试运行器的完整回归
@@ -59,6 +60,7 @@ agentos/
 ## 状态和一致性
 
 - `JsonStore` 把状态写入临时文件后原子重命名为 `data/agentos.json`，并在单进程内串行事务。
+- 同一个控制面在 `/admin` 提供本机管理页面，并在 `/api/v1/admin/*` 提供脱敏记录与模型设置接口。页面先建立本机同源会话；写配置还要通过 Origin 和专用请求头检查。非回环监听时管理页面关闭。
 - 飞书消息用 source message ID 去重；卡片动作还有事件、消息、角色、群、状态和 action version 校验。
 - Runner 通过租约避免同一 Job 被重复领取；取消必须等待实际任务进程树退出。
 - 卡片投递失败只重试投递，不重新运行 Codex；未送达动作先保存在 `pending-card-actions/`。

@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, utimes } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { CodexAppServer } from '../src/shared/codex-app-server.js';
-import { codexEnvironment, discoverWindowsCodexBinary, resolveCodexBinary } from '../src/shared/codex-runtime.js';
+import { codexEnvironment, discoverWindowsCodexBinary, loadCodexRuntimeSettings, resolveCodexBinary, saveCodexRuntimeSettings } from '../src/shared/codex-runtime.js';
 
 function fakeServer() {
   const requests = [], children = [];
@@ -100,6 +100,19 @@ test('an explicit empty proxy uses direct networking without mutating the parent
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
   }
+});
+
+test('AgentOS runtime settings preserve non-model Codex options and validate effort', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agentos-codex-runtime-'));
+  const file = path.join(directory, 'runtime.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(file, JSON.stringify({ proxyUrl: '', codexBin: '/opt/codex' }));
+  await saveCodexRuntimeSettings({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }, { file });
+  assert.deepEqual(await loadCodexRuntimeSettings({ file }), { model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), {
+    proxyUrl: '', codexBin: '/opt/codex', model: 'gpt-5.6-sol', reasoningEffort: 'high',
+  });
+  await assert.rejects(saveCodexRuntimeSettings({ model: 'gpt-5.6-sol', reasoningEffort: 'impossible' }, { file }), /reasoning effort/);
 });
 
 test('desktop Codex discovery selects the newest valid executable directory', async (t) => {

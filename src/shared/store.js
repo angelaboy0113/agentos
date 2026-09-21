@@ -71,6 +71,16 @@ export class JsonStore {
     await rename(temporary, this.file);
   }
 
+  async recordAdminAudit(entry) {
+    return this.transact((state) => {
+      state.adminAudit ??= [];
+      const saved = { id: createId('AUDIT'), at: new Date().toISOString(), ...structuredClone(entry) };
+      state.adminAudit.push(saved);
+      state.adminAudit = state.adminAudit.slice(-200);
+      return saved;
+    });
+  }
+
   async createJob(input) {
     return this.transact((state) => {
       if (input.sourceMessageId && state.processedMessages[input.sourceMessageId]) {

@@ -9,6 +9,7 @@ import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { jobActionVersion } from '../src/control-plane/message-cards.js';
 import { CodexConversationEngine } from '../src/control-plane/codex-conversation.js';
 import { loadConversationSettings } from '../src/control-plane/conversation-settings.js';
+import { saveCodexRuntimeSettings } from '../src/shared/codex-runtime.js';
 const decision = (extra = {}) => ({ action: 'reply', intent: 'none', reply: '收到', instruction: '', projectId: '', jobId: '', attachmentIds: [], ...extra });
 async function setup(t, decide = () => decision()) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'agentos-questions-'));
@@ -143,6 +144,21 @@ test('persistent session resumes across engine restart, caches decisions, and ke
   assert.equal(calls.find((c) => c.name === 'thread/start').args.ephemeral, false);
   assert.match(calls.filter((c) => c.name === 'turn')[1].args.input[0].text, /"history":\[\]/);
   assert.equal((await stat(path.join(directory, 'codex-conversations.json'))).mode & 0o777, 0o600);
+});
+test('changing the console model starts a new conversation thread without reusing the old model', async (t) => {
+  const { directory } = await setup(t); const file = path.join(directory, 'codex-runtime.json'); const calls = [];
+  await saveCodexRuntimeSettings({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }, { file });
+  const e = new CodexConversationEngine({ dataDir: directory, file }); e.cwd = directory; e.rules = 'rules'; e.schema = {};
+  e.start = async () => {}; e.app = { generation: 1, start: async () => {}, close: async () => {},
+    request: async (name, args) => { calls.push({ name, args }); return { thread: { id: `thread-${calls.filter((item) => item.name === 'thread/start').length}`, model: args.model } }; },
+    turn: async (args) => { calls.push({ name: 'turn', args }); return { threadId: args.threadId, text: JSON.stringify(decision()), timing: {} }; } };
+  const input = { role: 'owner_intake', attachments: [] };
+  await e.decide(input, { sessionKey: 'group' });
+  await saveCodexRuntimeSettings({ model: 'gpt-6-astra', reasoningEffort: 'xhigh' }, { file });
+  await e.decide(input, { sessionKey: 'group' });
+  assert.deepEqual(calls.filter((item) => item.name === 'thread/start').map((item) => item.args.model), ['gpt-5.6-sol', 'gpt-6-astra']);
+  assert.deepEqual(calls.filter((item) => item.name === 'turn').map((item) => item.args.effort), ['high', 'xhigh']);
+  await e.close();
 });
 test('invalid opt-in settings or corrupt registry fail closed without overwriting saved sessions', async (t) => {
   const { directory } = await setup(t); const f = path.join(directory, 'settings.json');
