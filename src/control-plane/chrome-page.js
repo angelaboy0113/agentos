@@ -3,11 +3,12 @@ export function chromePage(request) {
  const {baseUrl,token,tool,args={}}=request;
  const base=new URL(baseUrl), current=new URL(location.href);
  const prefix=base.pathname.replace(/\/$/,'');
+ const visible=el=>!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
+ const credentialFormVisible=[...document.querySelectorAll('input[type=password]')].some(visible);
  const authPath=/\/(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[/?#]|$)/i.test(current.pathname+current.hash);
- if(current.origin===base.origin&&authPath)return {loginRequired:true,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在本机登录，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
+ if(current.origin===base.origin&&authPath)return {loginRequired:true,credentialFormVisible,verificationRequired:!credentialFormVisible,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在本机登录，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
  if(current.origin!==base.origin || !(current.pathname===prefix||current.pathname.startsWith(prefix+'/')))
   return {error:'浏览器已离开本次批准的应用范围，请重新确认页面'};
- const visible=el=>!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
  const write=/新增|创建|保存|修改|编辑|删除|启动|停止|执行|触发|重跑|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout)\b/i;
  const read=/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|search|query|view|detail|log|next|previous|refresh/i;
  const label=el=>(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
@@ -39,8 +40,7 @@ export function chromePage(request) {
   }else return {error:'本次只开放查询、查看与分页操作'};
   state.refs={};return {acted:true};
  }
- const login=[...document.querySelectorAll('input[type=password]')].some(visible);
- if(login)return {loginRequired:true,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在此Chrome页面完成，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
+ if(credentialFormVisible)return {loginRequired:true,credentialFormVisible:true,verificationRequired:false,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在此Chrome页面完成，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
  const refs={},controls=[],generation=(state?.generation??0)+1;let n=0;
  for(const el of [...document.querySelectorAll('a,button,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title')].slice(0,500)){
   const t=type(el);if(!t)continue;const ref=token+'-'+generation+'-'+n++;

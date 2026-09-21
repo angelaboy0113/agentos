@@ -38,6 +38,7 @@ test('daily Chrome login status is detected without reading password; native bri
  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();
  await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<input type=password value="private">'}));await page.goto(e.baseUrl);
  const r=await page.evaluate(chromePage,{baseUrl:e.baseUrl,token:'one',tool:'browser_snapshot'});assert.equal(r.loginRequired,true);assert.doesNotMatch(JSON.stringify(r),/private/);
+ assert.equal(r.credentialFormVisible,true);assert.equal(r.verificationRequired,false);
  assert.match(failureDiagnostic(new Error('通过 AppleScript 执行 JavaScript 的功能已关闭')),/BROWSER_BRIDGE/);
 });
 test('fixed daily Chrome login program fills only the scoped login form',async t=>{
@@ -52,4 +53,10 @@ test('fixed login program keeps same-origin verification pages waiting instead o
  await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<h1>请输入短信验证码</h1><input name="otp">'}));
  await page.goto('https://business.example/login');const result=await page.evaluate(chromeLoginPage,{baseUrl:e.baseUrl,username:'alice',password:'private-value'});
  assert.equal(result.loginRequired,true);assert.equal(result.verificationRequired,true);
+});
+test('daily Chrome distinguishes verification routes from a rejected credential form',async t=>{
+ const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();
+ await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<h1>请输入短信验证码</h1><input name="otp">'}));
+ await page.goto('https://business.example/login');const status=await page.evaluate(chromePage,{baseUrl:e.baseUrl,token:'one',tool:'browser_snapshot'});
+ assert.equal(status.loginRequired,true);assert.equal(status.credentialFormVisible,false);assert.equal(status.verificationRequired,true);
 });

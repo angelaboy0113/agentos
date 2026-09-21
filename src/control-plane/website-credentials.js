@@ -7,6 +7,15 @@ const marker = /(?:网址|地址|url|账号|用户名|user(?:name)?|密码|passw
 
 const cleanValue = (value) => String(value ?? '').trim().replace(/^[`'"“”‘’,，;；]+|[`'"“”‘’,，;；]+$/g, '').trim();
 
+export function stripCredentialMentions(value, mentions = []) {
+  let text = String(value ?? '');
+  for (const mention of mentions ?? []) {
+    if (mention?.key) text = text.replaceAll(mention.key, ' ');
+    if (mention?.name) text = text.replaceAll(`@${mention.name}`, ' ');
+  }
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 export function parseWebsiteCredentialMessage(value, { allowLoose = false } = {}) {
   const text = String(value ?? '').trim();
   const credentialShape = /(?:账号|用户名|user(?:name)?)\s*[:：=]?\s*\S+/i.test(text)
@@ -70,7 +79,7 @@ export class WebsiteCredentialService {
     const contextual = related.length > 0;
     if (contextual) candidates = related;
     else if (event.chat_type === 'group') candidates = candidates.filter(({ job }) => job.chatId === event.chat_id && job.agentProfile === profile);
-    const parsed = parseWebsiteCredentialMessage(event.content, { allowLoose: contextual && candidates.length === 1 });
+    const parsed = parseWebsiteCredentialMessage(stripCredentialMentions(event.content, event.mentions), { allowLoose: contextual && candidates.length === 1 });
     if (!parsed) return null;
     if (event.chat_type === 'group' && !contextual) return reply('账号密码只能直接回复对应的“等待网页登录”任务卡；这样 AgentOS 才能确定要登录哪个网站。');
     if (parsed.invalid) {
@@ -95,7 +104,9 @@ export class WebsiteCredentialService {
     try { result = await this.context.websiteBrowser.submitCredentials(job, environment, { username: parsed.username, password: parsed.password }, { force: true }); }
     catch { return reply('凭据已安全保存到 Mac 钥匙串，但页面自动填写暂未完成。AgentOS 会保留原任务；请确认本机 Chrome 页面仍停留在该网站登录页。'); }
     if (result.authenticated) return reply('凭据已保存到 Mac 钥匙串，网页登录成功。AgentOS 将自动继续原问题，无需回复“继续”。');
-    return reply('凭据已保存并提交到登录页。页面仍在等待验证码、短信、扫码或登录结果时，请只在本机 Chrome 完成该步骤；完成后 AgentOS 会自动继续。');
+    if (result.credentialRejected) return reply('账号密码已提交，但页面仍停留在账号密码登录界面，可能是账号或密码未通过。请核对后直接回复本任务卡重新提交；AgentOS 不会在消息或日志中回显凭据。');
+    if (result.verificationRequired) return reply('账号密码已提交，页面正在等待验证码、短信或扫码。请只在本机 Chrome 完成该步骤；完成后 AgentOS 会自动继续原问题。');
+    return reply('账号密码已提交，但网页尚未返回明确的登录结果。AgentOS 会保留原任务并继续检测；如页面出现人工步骤，请只在本机 Chrome 完成。');
   }
 
   async autoLogin(job, environment) {

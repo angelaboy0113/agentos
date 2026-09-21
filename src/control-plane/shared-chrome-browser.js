@@ -44,7 +44,9 @@ export class SharedChromeBrowser{
   if(!raw.submitted&&!raw.loginRequired){s.waiting=false;s.credentialAttempted=false;return {authenticated:true,attempted:false};}
   await new Promise(resolve=>setTimeout(resolve,1200));
   const status=await this.snapshot(job,e,s,'browser_snapshot',{});
-  return {authenticated:!status.loginRequired,attempted:true};
+  return {authenticated:!status.loginRequired,attempted:true,
+   credentialRejected:status.loginRequired===true&&status.credentialFormVisible===true,
+   verificationRequired:status.loginRequired===true&&status.verificationRequired===true};
  });}
  loginReady(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return !(await this.snapshot(job,e,s,'browser_snapshot',{})).loginRequired;});}
  async release(id){this.pages.delete(id);}
