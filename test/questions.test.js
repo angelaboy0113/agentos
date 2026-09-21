@@ -108,10 +108,12 @@ test('startup repairs a terminal question card left with stale cancel and refres
   const {app,context,send,calls}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'检查'}));
   await send('m');let state=await app.store.read();const job=state.jobs[0],key=`question:${job.questionId}`;
   const waiting={...job,status:'awaiting_clarification',result:{browserLoginRequired:true,finalMessage:'等待登录'}};
-  await app.store.transact(s=>{const current=s.jobs[0];current.status='cancelled';current.result=waiting.result;const saved=s.cardMessages[key];saved.card=jobCard(waiting);saved.terminal=true;saved.deliveredRevision=saved.revision;});
-  assert.match(JSON.stringify((await app.store.read()).cardMessages[key].card),/"action":"cancel"/);
+  await app.store.transact(s=>{const current=s.jobs[0];current.status='cancelled';current.result=waiting.result;const saved=s.cardMessages[key];saved.card=jobCard(waiting);saved.card.body.elements=saved.card.body.elements.filter(element=>!JSON.stringify(element).includes('"action":"cancel"'));saved.terminal=true;saved.deliveredRevision=saved.revision;});
+  assert.doesNotMatch(JSON.stringify((await app.store.read()).cardMessages[key].card),/"action":"(?:cancel|refresh)"/);
+  assert.match((await app.store.read()).cardMessages[key].card.header.title.content,/等待本机登录/);
   assert.equal(await repairStaleTerminalQuestionCards(context),1);state=await app.store.read();
   assert.doesNotMatch(JSON.stringify(state.cardMessages[key].card),/"action":"(?:cancel|refresh)"/);
+  assert.match(state.cardMessages[key].card.header.subtitle.content,/已取消/);
   assert.equal(state.jobs[0].status,'cancelled');assert.ok(calls.some(call=>call.type==='patch'));
 });
 test('card refresh failure is recorded without replaying an accepted business callback', async (t) => {
