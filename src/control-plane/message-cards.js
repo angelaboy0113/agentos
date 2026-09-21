@@ -70,7 +70,8 @@ export function jobCard(job, now = Date.now()) {
     awaiting_approval: ['待真人确认', 'orange'], awaiting_clarification: ['待补充信息', 'orange'],
     blocked: ['任务受阻 / 未通过', 'red'], failed: ['执行失败', 'red'], cancelled: ['已取消 / 已停止', 'grey'],
     cancelling: ['正在停止', 'orange'], resubmitted: ['补充已提交', 'blue'] };
-  const [label, color] = expired ? ['查询申请已过期 · 可重新申请', 'orange'] : job.result?.browserActionRequired === 'automation' ? ['等待本机浏览器授权 · 放行后自动继续', 'orange'] : job.result?.browserLoginRequired ? ['等待本机登录 · 登录后自动继续', 'orange'] : job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
+  const terminalState = ['completed', 'blocked', 'failed', 'cancelled'].includes(job.status);
+  const [label, color] = expired ? ['查询申请已过期 · 可重新申请', 'orange'] : !terminalState && job.result?.browserActionRequired === 'automation' ? ['等待本机浏览器授权 · 放行后自动继续', 'orange'] : !terminalState && job.result?.browserLoginRequired ? ['等待本机登录 · 登录后自动继续', 'orange'] : job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
     ? ['部分分析完成 · 有待核实', 'orange'] : labels[job.status] ?? ['等待更新', 'grey'];
   const active = ['running', 'queued', 'cancelling'].includes(job.status);
   const events = job.events ?? [];
@@ -82,7 +83,7 @@ export function jobCard(job, now = Date.now()) {
     : phase === 'verification' ? '正在运行项目验证命令' : phase === 'connection_retry' ? '连接异常，Codex 正在重试'
     : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
-  const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : !active && job.result?.finalMessage ? resultSummary(job.result.summary || job.result.finalMessage) : '';
+  const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : job.status === 'cancelled' ? '任务已取消，已停止继续执行。' : !active && job.result?.finalMessage ? resultSummary(job.result.summary || job.result.finalMessage) : '';
   const elements = [block([md(`**${active ? '当前操作' : '结论'}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'

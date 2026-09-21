@@ -88,12 +88,14 @@ export async function createControlPlane(overrides = {}) {
 
 export async function repairStaleTerminalQuestionCards(context) {
   const state = await context.store.read(), repairs = [];
+  const terminalLabels = { cancelled: '已取消', failed: '执行失败', blocked: '任务受阻', completed: '当前阶段已完成' };
   for (const [key, saved] of Object.entries(state.cardMessages ?? {})) {
     if (!key.startsWith('question:') || !saved.messageId) continue;
     const questionId = key.slice('question:'.length), job = questionJob(state, questionId);
     if (!job || !['completed', 'blocked', 'failed', 'cancelled'].includes(job.status)) continue;
     const serialized = JSON.stringify(saved.card ?? {});
-    if (!/"action":"(?:cancel|refresh)"/.test(serialized)) continue;
+    const header = saved.card?.header?.subtitle?.content ?? saved.card?.header?.title?.content ?? '';
+    if (!/"action":"(?:cancel|refresh)"/.test(serialized) && header.includes(terminalLabels[job.status])) continue;
     repairs.push(publishQuestion(context, questionId));
   }
   await Promise.all(repairs);

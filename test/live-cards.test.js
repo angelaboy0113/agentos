@@ -75,6 +75,8 @@ test('cancelling a waiting-login card replaces its prompt, removes buttons and p
   await cards.upsert('job:login:first',jobCard(cancelled),destination,{terminal:true,immediate:true,terminalMention:{replyTo:'root',profile:'owner',text:'任务已取消。'}});
   const entry=(await store.read()).cardMessages['job:login:first'];
   assert.equal(entry.terminalMention.text,'任务已取消。');assert.equal(entry.mentionDelivered,true);
+  assert.match(entry.card.header.title.content,/已取消/);assert.match(JSON.stringify(entry.card),/任务已取消，已停止继续执行/);
+  assert.doesNotMatch(entry.card.header.title.content,/等待本机登录/);
   assert.doesNotMatch(JSON.stringify(entry.card),/取消任务|刷新状态|"action":"cancel"/);
   assert.deepEqual(calls.map(x=>x.type),['send','text','patch','text']);
 });
