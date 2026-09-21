@@ -55,3 +55,11 @@ test('partial results and failed tasks notify requester without implying investi
  assert.doesNotMatch(jobTerminalMention(job).text,/任务已结束/);
  assert.match(jobTerminalMention({...job,status:'failed',result:{}}).text,/排查受阻/);
 });
+
+test('browser automation wait asks for macOS permission instead of another website login', () => {
+  const mention = jobTerminalMention({ originChatType:'group', status:'awaiting_clarification',
+    result:{browserLoginRequired:true,browserActionRequired:'automation'}, environmentAccess:{approvalOwnerIds:['ou_admin']},
+    originMessageId:'m', originProfile:'owner' });
+  assert.match(mention.text,/放行系统对Chrome的自动化访问/);
+  assert.doesNotMatch(mention.text,/网页登录/);
+});

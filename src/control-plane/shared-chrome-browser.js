@@ -32,6 +32,7 @@ export class SharedChromeBrowser{
   if(r.loginRequired)await this.transport({operation:'focus',tabId:s.tabId,windowId:s.windowId});
   return r;
  });}
+ health(){return this.serial(()=>this.transport({operation:'health',timeoutMs:5000}));}
  loginReady(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return !(await this.snapshot(job,e,s,'browser_snapshot',{})).loginRequired;});}
  async release(id){this.pages.delete(id);}
  async close(){this.pages.clear();} // Never close or quit the user's browser.

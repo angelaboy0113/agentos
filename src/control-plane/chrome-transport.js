@@ -6,6 +6,7 @@ export function chromeTransport(request){
 function main(){
  if(!app.running())return {error:'请先打开日常Google Chrome'};
  var wins=app.windows();
+ if(q.operation==='health')return {ok:true,running:true,windows:wins.length};
  if(q.operation==='find'){
   for(var i=0;i<wins.length;i++){var tabs=wins[i].tabs();for(var j=0;j<tabs.length;j++){
    var u=tabs[j].url();var stem=q.baseUrl.replace(/\\/$/,'');
@@ -23,7 +24,7 @@ function main(){
 try{JSON.stringify(main());}catch(e){JSON.stringify({error:String(e)});}`;
  return new Promise((resolve,reject)=>{
   const child=spawn('/usr/bin/osascript',['-l','JavaScript'],{stdio:['pipe','pipe','pipe']});let out='',err='';
-  const timer=setTimeout(()=>{child.kill();reject(new Error('Chrome自动化等待超时，请检查本机权限提示'));},20000);
+  const timer=setTimeout(()=>{child.kill();reject(new Error('Chrome自动化等待超时；后台AgentOS尚未取得macOS自动化权限'));},request.timeoutMs??20000);
   child.stdout.on('data',b=>{out+=b;if(out.length>1000000)child.kill();});child.stderr.on('data',b=>{err=(err+b).slice(-2000);});
   child.on('error',e=>{clearTimeout(timer);reject(e);});
   child.on('close',code=>{clearTimeout(timer);if(code!==0)return reject(new Error('Chrome自动化不可用，请检查macOS自动化权限和Chrome Apple事件JavaScript开关'));

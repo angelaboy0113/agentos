@@ -52,8 +52,9 @@ export function questionView(state, questionId, projects = {}) {
   card.config.summary.content = `${questionTitle(q.title)} · ${label}`;
   if (useJob) {
     const roles = { developer: '开发', owner_report: '负责人汇总', owner_intake: '负责人', pm: 'PM', qa: '测试', owner_audit: '审计' };
-    const flow = state.jobs.filter((item) => item.questionId === q.id).slice(-6)
-      .map((item) => `${roles[item.stage] ?? '处理'}${item.nextJobId ? ' ✓' : ''}`).join(' → ');
+    const stages = state.jobs.filter((item) => item.questionId === q.id).map((item) => item.stage);
+    const flow = stages.filter((stage, index) => stage !== stages[index - 1]).slice(-6)
+      .map((stage, index, compact) => `${roles[stage] ?? '处理'}${index < compact.length - 1 ? ' ✓' : ''}`).join(' → ');
     card.body.elements[0].columns[0].elements.push({ tag: 'markdown', text_size: 'notation', content: `流程：${flow}` });
     if (outstanding) card.body.elements[0].columns[0].elements.push({ tag: 'markdown', text_size: 'notation', content: '已收到补充，负责人正在处理；任务进度仍显示在本卡。' });
   }

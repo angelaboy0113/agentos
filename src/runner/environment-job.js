@@ -20,7 +20,13 @@ export async function executeEnvironmentJob(job, config, emit) {
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
   let result;
   try { const cfg = await loadEnvironments(); result = cfg.environments[plan.environmentId]?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, cfg.environments[plan.environmentId].kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {}) : await readEnvironment(plan); }
-  catch (error) { return { outcome: 'blocked', summary: failureDiagnostic(error), finalMessage: failureDiagnostic(error), verification: [] }; }
+  catch (error) {
+    const diagnostic = failureDiagnostic(error);
+    if (/^错误码：BROWSER_BRIDGE\b/.test(diagnostic)) return { outcome:'needs_clarification', browserLoginRequired:true,
+      browserActionRequired:'automation', summary:'AgentOS 正在等待 macOS 放行后台 Chrome 自动化。业务网站登录态仍然有效，放行后会自动继续原问题，无需回复“继续”。',
+      finalMessage:`${diagnostic}\n\n这不是业务账号未登录，也不会丢失原问题和已有证据。`, verification:[] };
+    return { outcome: 'blocked', summary: diagnostic, finalMessage: diagnostic, verification: [] };
+  }
   if(result.loginRequired) return {outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:result.checkpoint,summary:'正在等待本机登录。已在运行AgentOS的电脑上打开网页，登录成功后自动继续原问题，无需回复继续。',finalMessage:'登录会话由本机独立浏览器保存；会话失效才需要再次登录。等待期间其他任务可以继续。',verification:[]};
   let explanation = '';
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });

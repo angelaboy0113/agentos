@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.1.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.2.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -62,7 +62,7 @@ npm ci
 
 可手动运行 `node scripts/smoke-source-decision.mjs`（合成上下文的真实 AI 决策）及 `node scripts/smoke-folder-read.mjs`（真实 Codex 读取合成非 Git 父目录和子仓忽略文件）。两者不发送飞书、不创建线上 Job，使用现有 Codex 登录，会消耗订阅额度。
 
-`@项目负责人 帮我查一下登录接口逻辑，不改代码`：AI 判断为 analysis 后，由开发机器人调查，ready 后自动生成同 Mission 的负责人汇总任务，不经过 PM/QA/人工放行。需要已配置开发与负责人 profile；专业测试/审计分析仍由各自执行。失败/环境缺失不自动流转。
+`@项目负责人 帮我查一下登录接口逻辑，不改代码`：AI 判断为 analysis 后，由开发机器人持续调查，ready 后自动生成同 Mission 的负责人汇总任务，不经过 PM/QA/人工放行。调查中需要切换源码、数据库或网页时，仍复用同一份源码快照和同一个 Codex 开发会话；内部工具步骤不会在卡片上重复显示成多个“开发”。需要已配置开发与负责人 profile；专业测试/审计分析仍由各自执行。无法执行的真实缺口会保留在原任务中等待恢复。
 
 分析先按 `projects.local.json` 的 `analysisRepositories` 同步各仓 origin 对应分支；缺少清单或同步失败即阻塞。成功后读取 `repoPath` 内的已同步源码，Codex 使用 read-only/never；不执行 `verifyCommands`，附件只写 Runner 数据区。它不代表根仓 worktree 已具备多仓写入能力。实施任务仍使用原有隔离工作区和人工门。
 
@@ -178,7 +178,9 @@ AgentOS 依赖当前 macOS 用户的飞书、Codex、Keychain 和浏览器登录
 ./scripts/install-autostart.sh
 ```
 
-它会记录当前 Node 22 和 Codex 可执行文件目录，登录后自动运行，异常退出时自动拉起；日志位于 `data/logs/agentos-launchd.log`。切换本机 Codex 账号后，重新执行安装脚本或运行 `launchctl kickstart -k gui/$(id -u)/com.agentos.local`，新进程会读取当前账号的缓存登录态。飞书应用和项目配置无需重做。服务离线期间未投递到长连接的旧消息不会自动补发，需要用户重新发送原问题。
+它会记录当前 Node 22 和 Codex 可执行文件目录，以当前登录用户的 Aqua 图形会话和 Interactive 进程类型运行，登录后自动启动，异常退出时自动拉起；日志位于 `data/logs/agentos-launchd.log`。切换本机 Codex 账号后，重新执行安装脚本或运行 `launchctl kickstart -k gui/$(id -u)/com.agentos.local`，新进程会读取当前账号的缓存登录态。飞书应用和项目配置无需重做。服务离线期间未投递到长连接的旧消息不会自动补发，需要用户重新发送原问题。
+
+共享 Chrome 出现 `BROWSER_BRIDGE` 时，含义是后台 AgentOS 还没有取得 macOS 对 Chrome 的自动化权限，不代表业务网站退出登录。先在 Chrome 开启“查看 → 开发者 → 允许 Apple 事件中的 JavaScript”，再处理系统弹出的自动化授权；原任务保持橙色等待，权限可用后自动继续，无需在群里回复“继续”。
 
 移除自启：
 

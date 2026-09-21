@@ -46,6 +46,8 @@ cat > "$PLIST_PATH" <<PLIST
     <key>PATH</key><string>$PATH_XML</string>
   </dict>
   <key>RunAtLoad</key><true/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>ProcessType</key><string>Interactive</string>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>10</integer>
   <key>StandardOutPath</key><string>$PROJECT_XML/data/logs/agentos-launchd.log</string>

@@ -17,7 +17,10 @@ export function jobTerminalMention(job, projects = {}) {
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
   if(job.status==='awaiting_clarification'&&job.result?.browserLoginRequired){
     const ids=(job.environmentAccess?.approvalOwnerIds??[]).filter(id=>OPEN_ID.test(id));
-    return ids.length?{kind:'browser_login',replyTo:job.originMessageId??job.replyToMessageId,profile:job.originProfile,text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+' 请在运行AgentOS的电脑上完成网页登录；登录后自动继续原问题，不用在群里发密码或回复继续。'}:null;
+    const instruction = job.result?.browserActionRequired === 'automation'
+      ? ' 请在运行AgentOS的Mac上放行系统对Chrome的自动化访问；放行后自动继续原问题，不用回复继续。'
+      : ' 请在运行AgentOS的电脑上完成网页登录；登录后自动继续原问题，不用在群里发密码或回复继续。';
+    return ids.length?{kind:'browser_login',replyTo:job.originMessageId??job.replyToMessageId,profile:job.originProfile,text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+instruction}:null;
   }
   if (job.status === 'awaiting_environment_approval') {
     const ids = job.environmentAccess?.approvalOwnerIds ?? [];

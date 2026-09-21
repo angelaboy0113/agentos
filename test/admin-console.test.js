@@ -25,6 +25,7 @@ test('local admin console serves task records and safely updates runtime setting
     projects: { chatProjectMap: {}, projects: { demo: { displayName: 'Demo' } } },
     agents: { agents: {} }, conversationResponder: async () => ({ action: 'reply', intent: 'none', reply: 'ok' }),
     feishuClient: { enabled: false, reply: async () => {}, send: async () => {} },
+    websiteBrowser: { health: async () => ({ running: true, windows: 2 }), close: async () => {} },
   });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await new Promise((resolve) => app.server.close(resolve)); await app.conversations.stop(); await rm(directory, { recursive: true, force: true }); });
@@ -46,6 +47,9 @@ test('local admin console serves task records and safely updates runtime setting
   const summary = await overview.json();
   assert.equal(summary.overview.counts.completed24h, 1);
   assert.equal(summary.overview.recent[0].model, 'gpt-5.6-sol');
+
+  const browser = await fetch(`${base}/api/v1/admin/browser-health`, { headers: { cookie } });
+  assert.deepEqual(await browser.json(), { ok: true, mode: 'shared-chrome', running: true, windows: 2 });
 
   const denied = await fetch(`${base}/api/v1/admin/settings/runtime`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: '{}' });
   assert.equal(denied.status, 401);

@@ -84,7 +84,13 @@ export async function verifyAnalysisSources(project, report) {
 }
 
 export async function prepareAnalysisSources(job, project) {
-  if (job.stage !== 'owner_report') return project.analysisSourceMode === 'isolated' ? syncSnapshot(project, job.sourceEnvironment) : syncAnalysisSources(project);
   const report = [...(job.context ?? [])].reverse().find((entry) => entry.result?.sourceSync)?.result.sourceSync;
+  // A same-question investigation keeps one immutable source snapshot. Runtime
+  // tools may add evidence between turns, but they must not trigger another
+  // clone/fetch of the same 20+ repositories.
+  if (report && (report.policy !== 'isolated-environment-source-v1' || !job.sourceEnvironment || report.environment === job.sourceEnvironment)) {
+    return verifyAnalysisSources(project, report);
+  }
+  if (job.stage !== 'owner_report') return project.analysisSourceMode === 'isolated' ? syncSnapshot(project, job.sourceEnvironment) : syncAnalysisSources(project);
   return verifyAnalysisSources(project, report);
 }
