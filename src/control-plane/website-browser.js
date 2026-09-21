@@ -45,6 +45,12 @@ export class WebsiteBrowser {
   return s.waiting;
  }
  async loginReady(job,e){const s=await this.state(job,e);return !(await this.needsLogin(s));}
+ async submitCredentials(job,e,cred,{force=false}={}){const s=await this.state(job,e);if(s.credentialAttempted&&!force)return {authenticated:false,attempted:false};s.credentialAttempted=true;
+  const password=s.page.locator('input[type="password"]:visible').first();if(!await password.count()){s.credentialAttempted=false;return {authenticated:true,attempted:false};}
+  const form=password.locator('xpath=ancestor::form[1]');const scope=await form.count()?form:s.page.locator('body');
+  const username=scope.locator('input:not([type="password"]):not([type="hidden"]):not([type="submit"]):visible').first();if(await username.count())await username.fill(cred.username);
+  await password.fill(cred.password);const submit=scope.locator('button[type="submit"],input[type="submit"],button:has-text("登录"),button:has-text("登入")').first();
+  if(await submit.count())await submit.click();else await password.press('Enter');await s.page.waitForTimeout(1200);const waiting=await this.needsLogin(s);if(!waiting)s.credentialAttempted=false;return {authenticated:!waiting,attempted:true};}
  async run(job,e,tool,args={}) {
   const s=await this.state(job,e);
   if(await this.needsLogin(s)){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'已在运行AgentOS的电脑上打开登录页面；登录后自动继续原问题，无需回复继续。'};}

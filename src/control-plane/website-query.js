@@ -30,6 +30,7 @@ async function resumeWebsiteLogins(context){
  for(const job of jobs){
   try{
    const cfg=await loadEnvironments(),e=cfg.environments[job.environmentAccess.environmentId];if(!e)continue;
+   await context.websiteCredentials?.autoLogin(job,e);
    if(!await context.websiteBrowser.loginReady(job,e))continue;
    await context.store.transact(state=>{
     const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired)return;

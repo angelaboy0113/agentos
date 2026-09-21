@@ -27,7 +27,7 @@ export async function executeEnvironmentJob(job, config, emit) {
       finalMessage:`${diagnostic}\n\n这不是业务账号未登录，也不会丢失原问题和已有证据。`, verification:[] };
     return { outcome: 'blocked', summary: diagnostic, finalMessage: diagnostic, verification: [] };
   }
-  if(result.loginRequired) return {outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:result.checkpoint,summary:'正在等待本机登录。已在运行AgentOS的电脑上打开网页，登录成功后自动继续原问题，无需回复继续。',finalMessage:'登录会话由本机独立浏览器保存；会话失效才需要再次登录。等待期间其他任务可以继续。',verification:[]};
+  if(result.loginRequired) return {outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:result.checkpoint,summary:'正在等待网页登录。可在运行AgentOS的电脑上手动登录，或私聊当前项目负责人机器人提交网站登录凭据；成功后自动继续原问题。',finalMessage:'账号密码只在私聊凭据入口处理并保存到本机 Mac 钥匙串，不进入模型、任务卡片、日志或长期记忆；验证码、短信或扫码仍在本机 Chrome 完成。',verification:[]};
   let explanation = '';
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });
   try {
