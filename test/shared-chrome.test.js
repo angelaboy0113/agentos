@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {SharedChromeBrowser} from '../src/control-plane/shared-chrome-browser.js';
 import {chromePage} from '../src/control-plane/chrome-page.js';
+import {chromeLoginPage} from '../src/control-plane/chrome-login-page.js';
 import {failureDiagnostic} from '../src/shared/failure-diagnostic.js';
 const e={baseUrl:'https://business.example/app/',projectId:'p',tier:'uat'};
 test('daily Chrome reuses scoped tabs with per-job locks and rechecks authorization; never closes user tabs',async()=>{
@@ -38,4 +39,17 @@ test('daily Chrome login status is detected without reading password; native bri
  await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<input type=password value="private">'}));await page.goto(e.baseUrl);
  const r=await page.evaluate(chromePage,{baseUrl:e.baseUrl,token:'one',tool:'browser_snapshot'});assert.equal(r.loginRequired,true);assert.doesNotMatch(JSON.stringify(r),/private/);
  assert.match(failureDiagnostic(new Error('通过 AppleScript 执行 JavaScript 的功能已关闭')),/BROWSER_BRIDGE/);
+});
+test('fixed daily Chrome login program fills only the scoped login form',async t=>{
+ const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();
+ await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<form><input name="username"><input type="password"><button type="submit" onclick="event.preventDefault();document.body.dataset.login=this.form.username.value+\':\'+this.form.querySelector(\'input[type=password]\').value">登录</button></form>'}));
+ await page.goto(e.baseUrl);const result=await page.evaluate(chromeLoginPage,{baseUrl:e.baseUrl,username:'alice',password:'private-value'});
+ assert.equal(result.submitted,true);assert.equal(await page.locator('body').getAttribute('data-login'),'alice:private-value');
+ await page.goto('https://other.example/');assert.ok((await page.evaluate(chromeLoginPage,{baseUrl:e.baseUrl,username:'alice',password:'private-value'})).error);
+});
+test('fixed login program keeps same-origin verification pages waiting instead of claiming success',async t=>{
+ const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();
+ await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<h1>请输入短信验证码</h1><input name="otp">'}));
+ await page.goto('https://business.example/login');const result=await page.evaluate(chromeLoginPage,{baseUrl:e.baseUrl,username:'alice',password:'private-value'});
+ assert.equal(result.loginRequired,true);assert.equal(result.verificationRequired,true);
 });

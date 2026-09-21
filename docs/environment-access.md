@@ -32,7 +32,7 @@ node scripts/configure-environment.mjs
 4. 保存 `config/environments.local.json`（0600），凭据只存 Keychain。已有配置先备份原始只读副本、SHA-256、字节及环境数量，再原子更新。
 5. 新配置每次请求重新加载，无需重启。升级程序本身仍需空闲时单实例重启。
 
-群里提供 URL 是接入线索，不能自动扩大授权或从聊天提取密码。当前支持 Nacos 2.x 的实际控制台浏览器适配，在 macOS Nacos 2.5.2 验证；不支持任意网站自动接管、SSO/MFA 或复用个人浏览器登录。新的 PRD 入口需单独接入，UAT 成功不能代表 PRD 已配置。
+群里提供 URL 是接入线索，不能自动扩大授权，也不能从群聊提取 Nacos/MySQL 密码。当前支持 Nacos 2.x 的实际控制台浏览器适配，在 macOS Nacos 2.5.2 验证；SSO/MFA 仍需本机处理。通用业务网站另有负责人私聊凭据入口，见 [日常 Chrome 复用](shared-chrome.md)，不会把网站凭据交给模型或复用为数据库凭据。新的 PRD 入口需单独接入，UAT 成功不能代表 PRD 已配置。
 
 ## Codex 如何选择工具
 
@@ -121,7 +121,7 @@ MySQL 删除 `browser`（仅 Nacos 支持），将 `namespaces` 换为 `tables: 
 
 接入记录保存在 `data/agentos.json.environmentEnrollments`；无密码的申请与状态保存在 `data/environment-enrollments/<申请编号>/`，凭据只存本机 Keychain。配置仍写入被 Git 忽略的 `config/environments.local.json`，先保存原始只读备份、SHA-256及前后数量；如配置在登录期间被其他程序修改则拒绝覆盖。一次只打开一个接入窗口，待接入最多五项，申请30分钟过期；失败、超时不会继续查询。重启后读取已落盘的完成状态，不自动重复打开窗口或重复建任务。
 
-自动弹窗当前需要已登录的 macOS 桌面、Terminal、Node 22、Playwright Chromium、可解锁的本机钥匙串与已配置真人管理员映射。无人登录的服务器、Windows/Linux自动弹窗、其他网站、SSO/MFA不属于此实现。密码不发群，也不会交给模型。实际登录仍由部署电脑旁的人完成，其他群成员不能远程代输。
+Nacos/MySQL 接入弹窗当前需要已登录的 macOS 桌面、Terminal、Node 22、Playwright Chromium、可解锁的本机钥匙串与已配置真人管理员映射。无人登录的服务器、Windows/Linux自动弹窗和 SSO/MFA 不属于此接入向导。Nacos/MySQL 密码不发群，也不会交给模型；数据库接入仍由部署电脑旁的人完成。通用业务网站的负责人私聊登录是独立能力，不会绕过本节数据库接入批准和只读范围。
 
 ## 话题中的答案保留
 

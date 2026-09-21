@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.2.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.3.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -33,6 +33,7 @@ npm ci
 ## 当前能力
 
 - 可选[受控环境查询](docs/environment-access.md)：PRD 按次批准、Mac Keychain、本机 Nacos / MySQL 只读连接器；不开启通用模型网络权限。
+- macOS 网页排查可复用日常 Chrome；等待登录时，网站负责人可以私聊当前项目负责人机器人提交网址、账号和密码。凭据直接进入 Mac Keychain，由固定登录程序填写，不进入模型、任务卡片、日志或长期记忆；验证码、短信和扫码仍在本机完成。
 
 
 - 基于 `config/harness.json` 和 [`config/roles/`](config/roles/) 的共同/岗位约束；部署团队可以指向自己的权威工程规范，STO 为规格、测试、可观测性驱动。

@@ -3,6 +3,7 @@ import { enrollmentTarget } from './environment-enrollment.js';
 import { SharedChromeBrowser } from './shared-chrome-browser.js';
 import { WebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
+import { WebsiteCredentialService } from './website-credentials.js';
 import { loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
 import { publishQuestion } from './questions.js';
 import http from 'node:http';
@@ -47,6 +48,7 @@ export async function createControlPlane(overrides = {}) {
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
     websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
+  context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
   const cards = new LiveCards(store, feishu);
   context.cards = cards;
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
@@ -369,6 +371,8 @@ export async function handleLarkCliEvent(context, event) {
   const messageId = event.message_id ?? event.id;
   const role = event.agent_role ?? 'owner_intake';
   const sourceProfile = event.agent_profile ?? null;
+  const credentialResult = await context.websiteCredentials?.handle(event);
+  if (credentialResult) return credentialResult;
   const agent = Object.values(context.agents.agents ?? {}).find((item) => (item.profile || null) === sourceProfile);
   if (event.agent_role && context.agents.agents?.[role]?.profile
     && context.agents.agents[role].profile !== sourceProfile) throw new Error('Agent role/profile mismatch');
