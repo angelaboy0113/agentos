@@ -8,6 +8,10 @@ export function adminOverview(state, runtime, now = Date.now()) {
   const successful = finished.filter((item) => ['completed', 'sent'].includes(item.status));
   const runners = Object.values(state.runners ?? {}).sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
   const runner = runners[0] ?? null;
+  const runnerHasActiveLease = runner && (state.jobs ?? []).some((job) =>
+    ['running', 'cancelling'].includes(job.status)
+    && job.lease?.runnerId === runner.runnerId
+    && Date.parse(job.lease.expiresAt) > now);
   return {
     runtime,
     counts: {
@@ -21,7 +25,7 @@ export function adminOverview(state, runtime, now = Date.now()) {
       p95Ms: percentile(durations, 0.95),
       successRate: finished.length ? Math.round(successful.length / finished.length * 1000) / 10 : null,
     },
-    runner: runner ? { ...runner, online: now - Date.parse(runner.lastSeenAt) < 30_000 } : null,
+    runner: runner ? { ...runner, online: runnerHasActiveLease || now - Date.parse(runner.lastSeenAt) < 30_000 } : null,
     recent: records.slice(0, 8),
     audit: (state.adminAudit ?? []).slice(-8).reverse(),
   };
