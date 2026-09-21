@@ -4,6 +4,16 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createControlPlane } from '../src/control-plane/server.js';
+import { adminOverview } from '../src/control-plane/admin-view.js';
+
+test('admin overview keeps a runner online while it holds a live job lease', () => {
+  const now = Date.now();
+  const overview = adminOverview({
+    jobs: [{ status: 'running', lease: { runnerId: 'runner-1', expiresAt: new Date(now + 60_000).toISOString() } }],
+    runners: { 'runner-1': { runnerId: 'runner-1', lastSeenAt: new Date(now - 60_000).toISOString() } },
+  }, {}, now);
+  assert.equal(overview.runner.online, true);
+});
 
 test('local admin console serves task records and safely updates runtime settings', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'agentos-admin-'));
