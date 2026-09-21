@@ -14,6 +14,10 @@ test('daily Chrome reuses scoped tabs with per-job locks and rechecks authorizat
  permitted=false;const count=calls.length;await assert.rejects(b.run({id:'a'},e,'browser_snapshot'),/授权/);assert.equal(calls.length,count);
  await b.release('a');await b.close();assert.equal(calls.length,count);
 });
+test('daily Chrome exposes a safe automation health probe',async()=>{
+ const calls=[];const b=new SharedChromeBrowser(async()=>true,async q=>{calls.push(q);return {ok:true,running:true,windows:1};});
+ assert.deepEqual(await b.health(),{ok:true,running:true,windows:1});assert.equal(calls[0].operation,'health');
+});
 test('daily Chrome DOM reads rendered text and rejects stale refs, writes and foreign navigation',async t=>{
  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();
  await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:`<ul role="menu"><li><div class="ant-menu-submenu-title">预算管理</div></li></ul><h1>Actual page</h1><noscript>Enable JavaScript</noscript><div hidden>Hidden secret</div><input type=password value=secret style="display:none"><input placeholder="查询编号"><button onclick="document.querySelector('h1').textContent='Query done'">查询</button><button>保存</button><a href="https://other.example/">Other</a><a href="/app/detail">详情</a>`}));

@@ -36,6 +36,7 @@ test('sync advances clean checkout to explicit origin branch, records proof, and
   assert.ok(report.checkedAt);
   await git(f.repo, 'remote', 'set-url', 'origin', path.join(f.base, 'unavailable'));
   assert.deepEqual(await prepareAnalysisSources({ stage: 'owner_report', context: [{ result: { sourceSync: report } }] }, f.project), report);
+  assert.deepEqual(await prepareAnalysisSources({ stage: 'developer', context: [{ result: { sourceSync: report } }] }, f.project), report);
   await writeFile(path.join(f.repo, 'source.txt'), 'changed during analysis');
   await assert.rejects(verifyAnalysisSources(f.project, report), /本地修改/);
 });

@@ -46,7 +46,7 @@ export async function createControlPlane(overrides = {}) {
   const browserMode = process.env.AGENTOS_BROWSER_MODE ?? (process.platform === 'darwin' ? 'shared-chrome' : 'isolated');
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
-    websiteBrowser: browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser) };
+    websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
   const cards = new LiveCards(store, feishu);
   context.cards = cards;
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
@@ -115,6 +115,16 @@ async function route(context) {
     requireAdminSession(context, request, false);
     const runtime = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
     return json(response, 200, { ok: true, runtime, models: CODEX_MODELS, efforts: CODEX_REASONING_EFFORTS }, { 'cache-control': 'no-store' });
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/browser-health') {
+    requireAdminSession(context, request, false);
+    if (typeof context.websiteBrowser.health !== 'function') return json(response, 200, { ok: true, mode: 'isolated' }, { 'cache-control': 'no-store' });
+    try {
+      const status = await context.websiteBrowser.health();
+      return json(response, 200, { ok: true, mode: 'shared-chrome', running: status.running, windows: status.windows }, { 'cache-control': 'no-store' });
+    } catch {
+      return json(response, 200, { ok: false, mode: 'shared-chrome', code: 'BROWSER_BRIDGE' }, { 'cache-control': 'no-store' });
+    }
   }
   if (request.method === 'PUT' && url.pathname === '/api/v1/admin/settings/runtime') {
     requireAdminSession(context, request, true);

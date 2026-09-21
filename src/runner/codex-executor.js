@@ -88,12 +88,13 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit 
   const codexBin = await resolveCodexBinary(config.codexBin);
   return new Promise((resolve, reject) => {
     const readOnly = job.taskIntent === 'analysis' || ['owner_intake', 'owner_audit', 'owner_report'].includes(job.stage);
-    const args = buildCodexArgs(workspace, attachmentPaths, { readOnly, runtime });
+    const resumeThreadId = analysisThreadId(job, workspace);
+    const args = buildCodexArgs(workspace, attachmentPaths, { readOnly, runtime, resumeThreadId });
 
     const child = spawn(codexBin, args, { cwd: workspace, env, windowsHide: true, shell: false });
     let pending = '';
     let stderr = '';
-    let threadId = null;
+    let threadId = resumeThreadId;
     let finalMessage = '';
     let failure = '';
     const began = Date.now();
@@ -156,8 +157,15 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit 
   });
 }
 
-export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false, runtime = {} } = {}) {
-  const args = [
+export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false, runtime = {}, resumeThreadId = null } = {}) {
+  const args = resumeThreadId ? [
+    'exec', 'resume',
+    ...codexRuntimeArgs(runtime),
+    '-c', 'features.unbounded_connection_retries=false',
+    '-c', 'approval_policy="never"', '--skip-git-repo-check',
+    '--output-schema', RESULT_SCHEMA,
+    '--json',
+  ] : [
     'exec', '-C', workspace,
     ...codexRuntimeArgs(runtime),
     '-c', 'features.unbounded_connection_retries=false',
@@ -166,8 +174,16 @@ export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = fal
     '--json',
   ];
   for (const image of attachmentPaths.filter((item) => item.type === 'image')) args.push('--image', image.path);
+  if (resumeThreadId) args.push(resumeThreadId);
   args.push('-');
   return args;
+}
+
+export function analysisThreadId(job, workspace) {
+  if (job.taskIntent !== 'analysis' || job.stage !== 'developer') return null;
+  return [...(job.context ?? [])].reverse()
+    .find((entry) => entry.stage === 'developer' && entry.result?.threadId
+      && (!workspace || entry.result?.workspace === workspace))?.result.threadId ?? null;
 }
 
 async function downloadAttachments(job, config, workspace) {

@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import { prepareWorkspace } from '../src/runner/workspace.js';
-import { buildCodexArgs, buildPrompt, verificationCommands } from '../src/runner/codex-executor.js';
+import { analysisThreadId, buildCodexArgs, buildPrompt, verificationCommands } from '../src/runner/codex-executor.js';
 import { JsonStore } from '../src/shared/store.js';
 import { createControlPlane } from '../src/control-plane/server.js';
 import { jobCard } from '../src/control-plane/message-cards.js';
@@ -52,6 +52,19 @@ test('analysis enforces read-only CLI, skips side-effecting verification and use
   const report = await buildPrompt({ ...input, stage: 'owner_report', context: [{ stage: 'developer', result: { finalMessage: 'POST /login: sys/login.js:1' } }] }, {});
   assert.match(report, /POST \/login: sys\/login.js:1/);
   assert.match(report, /不要求补齐不适用/);
+});
+
+test('same developer investigation resumes its Codex thread instead of starting another agent', () => {
+  const job = { taskIntent:'analysis', stage:'developer', context:[
+    { stage:'developer', result:{ threadId:'thread-old', workspace:'/snapshot/old' } },
+    { stage:'developer', result:{ threadId:'thread-current', workspace:'/snapshot/current' } },
+  ] };
+  assert.equal(analysisThreadId(job, '/snapshot/current'), 'thread-current');
+  const args = buildCodexArgs('/snapshot/current', [], { readOnly:true, resumeThreadId:'thread-current' });
+  assert.deepEqual(args.slice(0, 2), ['exec', 'resume']);
+  assert.equal(args.at(-2), 'thread-current');
+  assert.equal(args.at(-1), '-');
+  assert.equal(args.includes('-C'), false);
 });
 
 test('analysis accepts a non-Git project folder and sees ignored and untracked files in child repositories', async (t) => {
