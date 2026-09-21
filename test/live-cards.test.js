@@ -112,6 +112,17 @@ test('failed card update survives reconstruction; legacy overflow is never sent'
   assert.ok((await store.read()).cardMessages.x.detailPages.length > 1);
 });
 
+test('a withdrawn historical card stops retrying after Feishu reports message 230011', async (t) => {
+  const { cards, store } = await setup(t, { updateCard: async () => { throw new Error('lark-cli exited 1: code 230011 The message was withdrawn.'); } });
+  await cards.upsert('withdrawn', conversationCard(chat()), destination, { immediate: true });
+  await cards.upsert('withdrawn', conversationCard(chat({ status: 'ready', response: '完成' })), destination, { terminal: true, immediate: true });
+  const entry = (await store.read()).cardMessages.withdrawn;
+  assert.equal(entry.deliveredRevision, entry.revision);
+  assert.equal(entry.retryAt, 0);
+  assert.equal(entry.failures, 0);
+  assert.equal(entry.error, '原消息已撤回，停止更新');
+});
+
 test('uncertain initial send retries the same idempotency key', async (t) => {
   const keys = []; let fail = true;
   const { cards } = await setup(t, { replyCard: async (id, card, options) => {

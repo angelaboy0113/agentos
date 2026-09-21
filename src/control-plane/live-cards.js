@@ -110,11 +110,17 @@ export class LiveCards {
       // Long reports stay in the same card. Never resume legacy plaintext overflow on restart.
       return messageId;
     } catch (error) {
+      const withdrawn = /(?:\b230011\b|message was withdrawn)/i.test(String(error?.message ?? error));
       await this.store.transact((state) => {
-        const current = state.cardMessages[key]; current.failures = (current.failures ?? 0) + 1;
-        current.retryAt = Date.now() + Math.min(60_000, current.failures * 5000);
-        current.error = '消息投递失败，等待重试'; // Never persist raw CLI credentials in public status.
+        const current = state.cardMessages[key];
+        if (withdrawn) Object.assign(current, { deliveredRevision: current.revision, failures: 0, retryAt: 0, error: '原消息已撤回，停止更新' });
+        else {
+          current.failures = (current.failures ?? 0) + 1;
+          current.retryAt = Date.now() + Math.min(60_000, current.failures * 5000);
+          current.error = '消息投递失败，等待重试'; // Never persist raw CLI credentials in public status.
+        }
       });
+      if (withdrawn) return entry.messageId;
       throw error;
     }
   }
