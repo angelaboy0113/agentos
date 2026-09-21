@@ -33,11 +33,13 @@ export class LiveCards {
       const reopening = generation > (existing?.generation ?? 0);
       if (existing?.terminal && !terminal && !reopening) return; // Late progress cannot overwrite a conclusion.
       if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
-      if (!reopening && existing?.terminalMention && terminalMention
+      const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval'].includes(existing?.terminalMention?.kind)
+        && terminalMention && !terminalMention.kind;
+      if (!reopening && !replacingWaitingMention && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
       state.cardMessages[key] = { ...existing, destination, card, terminal, generation, overflow: [],
-        mentionDelivered: reopening ? false : existing?.mentionDelivered,
-        terminalMention: (reopening ? null : existing?.terminalMention) ?? (terminal ? terminalMention : null),
+        mentionDelivered: reopening || replacingWaitingMention ? false : existing?.mentionDelivered,
+        terminalMention: replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });

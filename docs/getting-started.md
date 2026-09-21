@@ -333,7 +333,7 @@ git pull --ff-only
 
 所有成员均可发起只读排查；PRD 成员查询仍需指定负责人批准。新增 Codex 按范围选择 Nacos API、独立浏览器列表/搜索/详情及 MySQL 结构化查询工具，本机向导可弹出 Nacos 登录窗口，自动发现命名空间并验证连接。固定模板继续兼容。首次凭据仍本机录入，Nacos 业务账号不复用为数据库登录。见 [环境工具说明](environment-access.md)。
 
-浏览器依赖与完整测试：`npm ci` 后运行 `npx playwright install chromium`，再运行 `npm run check`。Linux 使用 `npx playwright install --with-deps chromium` 安装系统依赖。Nacos 使用专用适配器；其他业务网站使用通用网页链路。业务网站等待登录时，网站负责人可私聊当前项目负责人机器人发送 `网站登录 网址：… 账号：… 密码：…`，凭据进入 Mac Keychain 后由固定程序填写；验证码、短信、扫码和特殊接口仍可能需要本机配合或适配。
+浏览器依赖与完整测试：`npm ci` 后运行 `npx playwright install chromium`，再运行 `npm run check`。Linux 使用 `npx playwright install --with-deps chromium` 安装系统依赖。Nacos 使用专用适配器；其他业务网站使用通用网页链路。业务网站等待登录时，卡片会写明具体网址；网站负责人可直接回复该卡片，例如 `admin / 123456`，凭据进入 Mac Keychain 后由固定程序填写。群消息对群成员可见并由飞书留存；验证码、短信、扫码和特殊接口仍可能需要本机配合或适配。
 
 首次环境查询可直接在群里给出明确 Nacos 或 MySQL 入口和排查目的，再由管理员回复原卡同意接入。AgentOS 会在当前已登录的 Mac 打开本机登录/凭据窗口；确认范围后自动继续原问题。需管理员真人映射、Chromium和Keychain，不能把密码发进群。详见 environment-access.md 的群内接入说明。
 

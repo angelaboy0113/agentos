@@ -19,7 +19,7 @@ export function jobTerminalMention(job, projects = {}) {
     const ids=(job.environmentAccess?.approvalOwnerIds??[]).filter(id=>OPEN_ID.test(id));
     const instruction = job.result?.browserActionRequired === 'automation'
       ? ' 请在运行AgentOS的Mac上放行系统对Chrome的自动化访问；放行后自动继续原问题，不用回复继续。'
-      : ' 请在运行AgentOS的电脑上完成网页登录，或私聊当前项目负责人机器人发送“网站登录 网址：… 账号：… 密码：…”；登录后自动继续。不要在群里发送密码。';
+      : ` 当前需要登录：${job.result?.loginUrl || '卡片中显示的网站'}。可在运行AgentOS的电脑上登录，或直接回复本任务卡“账号 / 密码”；无需固定格式，登录后自动继续。`;
     return ids.length?{kind:'browser_login',replyTo:job.originMessageId??job.replyToMessageId,profile:job.originProfile,text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+instruction}:null;
   }
   if (job.status === 'awaiting_environment_approval') {

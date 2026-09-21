@@ -4,7 +4,7 @@ export function chromePage(request) {
  const base=new URL(baseUrl), current=new URL(location.href);
  const prefix=base.pathname.replace(/\/$/,'');
  const authPath=/\/(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[/?#]|$)/i.test(current.pathname+current.hash);
- if(current.origin===base.origin&&authPath)return {loginRequired:true,stage:'等待日常Chrome页面登录',message:'可在本机登录，或私聊当前项目负责人机器人提交网站登录凭据；登录后自动继续。'};
+ if(current.origin===base.origin&&authPath)return {loginRequired:true,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在本机登录，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
  if(current.origin!==base.origin || !(current.pathname===prefix||current.pathname.startsWith(prefix+'/')))
   return {error:'浏览器已离开本次批准的应用范围，请重新确认页面'};
  const visible=el=>!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
@@ -40,7 +40,7 @@ export function chromePage(request) {
   state.refs={};return {acted:true};
  }
  const login=[...document.querySelectorAll('input[type=password]')].some(visible);
- if(login)return {loginRequired:true,stage:'等待日常Chrome页面登录',message:'请在此Chrome页面完成登录，登录后自动继续；不在群里发送密码。'};
+ if(login)return {loginRequired:true,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在此Chrome页面完成，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
  const refs={},controls=[],generation=(state?.generation??0)+1;let n=0;
  for(const el of [...document.querySelectorAll('a,button,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title')].slice(0,500)){
   const t=type(el);if(!t)continue;const ref=token+'-'+generation+'-'+n++;

@@ -67,6 +67,18 @@ test('receipt and result update ONE message with a stable sender; terminal canno
   await assert.rejects(cards.upsert('chat:1', conversationCard(chat()), { ...destination, profile: 'qa' }, { terminal: true }), /identity/);
 });
 
+test('cancelling a waiting-login card replaces its prompt, removes buttons and publishes the final state',async t=>{
+  const {cards,calls,store}=await setup(t);const waiting={id:'job-login',stage:'developer',status:'awaiting_clarification',events:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),result:{browserLoginRequired:true,finalMessage:'等待登录'}};
+  const destination={chatId:'group',profile:'owner'};
+  await cards.upsert('job:login:first',jobCard(waiting),destination,{terminal:true,immediate:true,terminalMention:{kind:'browser_login',replyTo:'root',profile:'owner',text:'请登录'}});
+  const cancelled={...waiting,status:'cancelled',updatedAt:new Date().toISOString()};
+  await cards.upsert('job:login:first',jobCard(cancelled),destination,{terminal:true,immediate:true,terminalMention:{replyTo:'root',profile:'owner',text:'任务已取消。'}});
+  const entry=(await store.read()).cardMessages['job:login:first'];
+  assert.equal(entry.terminalMention.text,'任务已取消。');assert.equal(entry.mentionDelivered,true);
+  assert.doesNotMatch(JSON.stringify(entry.card),/取消任务|刷新状态|"action":"cancel"/);
+  assert.deepEqual(calls.map(x=>x.type),['send','text','patch','text']);
+});
+
 test('in-flight progress coalesces, then terminal wins without concurrent PATCH calls', async (t) => {
   const gate = deferred(), entered = deferred(); let concurrent = 0, max = 0;
   const patches = [];

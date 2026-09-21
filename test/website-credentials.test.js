@@ -4,8 +4,10 @@ import { WebsiteCredentialService, parseWebsiteCredentialMessage } from '../src/
 
 const environment = { kind:'website', projectId:'demo', tier:'prd', baseUrl:'https://business.example/app/', credentialRef:'web-entry-test',
   ownerOpenIdsByProfile:{owner:['ou_admin']}, membersRead:false, queries:{investigate:{mode:'investigate'}} };
-const job = { id:'job-one', status:'awaiting_clarification', originProfile:'owner', result:{browserLoginRequired:true},
+const job = { id:'job-one', status:'awaiting_clarification', originProfile:'owner', agentProfile:'developer', chatId:'group', questionId:'q-one', result:{browserLoginRequired:true},
   environmentAccess:{kind:'website',environmentId:'site'} };
+const threadedState = (jobs=[job]) => ({jobs,questions:{'q-one':{id:'q-one',messageId:'root-one',threadRootId:'root-one'}},
+  cardMessages:{'question:q-one':{messageId:'card-one',destination:{profile:'owner',replyTo:'root-one'}}}});
 
 test('private website credentials are parsed, saved to Keychain adapter and submitted without echoing secrets', async()=>{
   const saved=[],submitted=[],replies=[];
@@ -19,11 +21,22 @@ test('private website credentials are parsed, saved to Keychain adapter and subm
   assert.doesNotMatch(JSON.stringify(replies),/alice|S3cret/);
 });
 
-test('credential-looking group messages are swallowed and directed to private chat',async()=>{
-  let reads=0;const replies=[];const service=new WebsiteCredentialService({store:{read:async()=>{reads++;return {jobs:[]};}},
+test('group credentials require a reply to the waiting login card',async()=>{
+  const replies=[];const service=new WebsiteCredentialService({store:{read:async()=>({jobs:[]})},
     feishu:{reply:async(id,text)=>replies.push(text)},websiteBrowser:{}},{load:async()=>({environments:{}})});
   const result=await service.handle({message_id:'m2',chat_type:'group',agent_profile:'owner',sender_id:'ou_admin',content:'网站登录 账号：alice 密码：group-secret'});
-  assert.equal(result.credentialMessage,true);assert.equal(reads,0);assert.match(replies[0],/撤回.*私聊/);assert.doesNotMatch(replies[0],/alice|group-secret/);
+  assert.equal(result.credentialMessage,true);assert.match(replies[0],/直接回复对应/);assert.doesNotMatch(replies[0],/alice|group-secret/);
+});
+
+test('a card or topic reply accepts natural account slash password syntax and binds the exact website',async()=>{
+  const saved=[],replies=[];const context={store:{read:async()=>threadedState()},feishu:{reply:async(id,text)=>replies.push(text)},
+    websiteBrowser:{submitCredentials:async()=>({authenticated:true})}};
+  const service=new WebsiteCredentialService(context,{load:async()=>({environments:{site:environment}}),save:async(ref,value)=>saved.push({ref,value})});
+  await service.handle({message_id:'m-card',chat_type:'group',chat_id:'group',reply_to:'card-one',agent_profile:'owner',sender_id:'ou_admin',content:'admin / 123456'});
+  assert.deepEqual(saved,[{ref:'web-entry-test',value:{username:'admin',password:'123456'}}]);assert.match(replies[0],/登录成功/);
+  assert.doesNotMatch(JSON.stringify(replies),/123456/);
+  saved.length=0;await service.handle({message_id:'m-topic',chat_type:'group',chat_id:'group',root_id:'root-one',agent_profile:'owner',sender_id:'ou_admin',content:'other-user，other-pass'});
+  assert.equal(saved[0].value.username,'other-user');assert.equal(saved[0].value.password,'other-pass');
 });
 
 test('private credential intake requires the configured website owner and supports one pending site without URL',async()=>{
@@ -51,6 +64,9 @@ test('saved website credentials can be retried once by the login poller service'
 
 test('credential command parser requires both account and password',()=>{
   assert.deepEqual(parseWebsiteCredentialMessage('普通问题'),null);
+  assert.deepEqual(parseWebsiteCredentialMessage('admin / 123456'),null);
+  assert.deepEqual(parseWebsiteCredentialMessage('admin / 123456',{allowLoose:true}),{intent:true,username:'admin',password:'123456'});
+  assert.equal(parseWebsiteCredentialMessage('登录 好了',{allowLoose:true}).invalid,true);
   assert.equal(parseWebsiteCredentialMessage('网站登录 账号：alice').invalid,true);
   assert.deepEqual(parseWebsiteCredentialMessage('网页登录 账号=alice 密码=pwd'),{intent:true,username:'alice',password:'pwd'});
   assert.deepEqual(parseWebsiteCredentialMessage('账号 alice 密码 pwd'),{intent:true,username:'alice',password:'pwd'});

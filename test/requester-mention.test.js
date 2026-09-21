@@ -63,3 +63,12 @@ test('browser automation wait asks for macOS permission instead of another websi
   assert.match(mention.text,/放行系统对Chrome的自动化访问/);
   assert.doesNotMatch(mention.text,/网页登录/);
 });
+
+test('website login wait names the exact site and allows a natural reply on the task card', () => {
+  const mention = jobTerminalMention({ originChatType:'group', status:'awaiting_clarification',
+    result:{browserLoginRequired:true,loginUrl:'https://jobs.example/xxl-job-admin/'}, environmentAccess:{approvalOwnerIds:['ou_admin']},
+    originMessageId:'m', originProfile:'owner' });
+  assert.match(mention.text,/https:\/\/jobs\.example\/xxl-job-admin\//);
+  assert.match(mention.text,/直接回复本任务卡“账号 \/ 密码”/);
+  assert.doesNotMatch(mention.text,/私聊/);
+});
