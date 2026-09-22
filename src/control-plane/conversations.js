@@ -395,8 +395,12 @@ export class ConversationService {
         try { sourceEnvironment = selectSourceEnvironment(projects.projects[projectId], decision.sourceEnvironment); }
         catch (error) { return { notice: error.message }; }
       }
-      const route = environmentAccess
-        ? { stage: 'developer', workflow: turn.setupSourceJobId ? 'continuous_analysis' : 'single_developer' }
+      // Every newly created analysis uses the same persistent developer job,
+      // including questions whose first useful step is an environment query.
+      // Legacy single_developer/analysis_review jobs remain readable in the
+      // store, but must not be created by new intake.
+      const route = decision.intent === 'analysis'
+        ? { stage: 'developer', workflow: 'continuous_analysis' }
         : routeDecision(turn.role, decision.intent);
       const routing = agentRouting(this.context, route.stage);
       if (route.workflow === 'continuous_analysis' && !routing.agentProfile) throw new Error('代码分析需要配置开发机器人 profile；本次未创建任务。');

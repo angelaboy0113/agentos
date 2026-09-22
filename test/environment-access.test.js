@@ -75,6 +75,7 @@ test('member PRD read request is immediately leasable and can only be claimed on
   const { app, send, calls } = await fixture(t); await send();
   const state = await app.store.read(); const job = state.jobs[0];
   assert.equal(job.status, 'queued'); assert.equal(job.environmentAccess.approvedBy, 'policy:read-only');
+  assert.equal(job.workflow, 'continuous_analysis'); assert.equal(job.continuousInvestigation, true);
   assert.doesNotMatch(JSON.stringify(calls), /批准本次只读查询|请审核原卡中的环境/);
   const leased = await app.store.leaseNext('r'); const identity = { leaseId: leased.lease.id, runnerId: 'r' };
   const plan = await app.store.claimEnvironment(job.id, identity); assert.ok(plan.startedAt);

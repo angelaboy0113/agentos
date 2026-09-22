@@ -34,6 +34,29 @@ test('continuous analysis keeps source and environment turns inside one leased j
   assert.deepEqual(new Set(calls.map((item) => item.id)), new Set(['JOB-one']));
 });
 
+test('continuous analysis can start with an environment query and return to the same source thread', async () => {
+  const root = { id: 'JOB-database-first', questionId: 'QST-database-first', projectId: 'demo', stage: 'developer', taskIntent: 'analysis',
+    continuousInvestigation: true, lease: { id: 'LEASE-database-first', runnerId: 'runner-one' }, context: [],
+    environmentAccess: { environmentId: 'uat', queryId: 'investigate', parameters: ['核对经销商'], kind: 'mysql' } };
+  const calls = [];
+  const runner = new AgentRunner({ runnerId: 'runner-one' }, async (job) => {
+    calls.push({ id: job.id, kind: job.environmentAccess ? 'environment' : 'source', context: job.context.length });
+    return job.environmentAccess
+      ? { outcome: 'partial', finalMessage: '数据库确认销售组织为空', environmentEvidence: { resultHash: 'a'.repeat(64) } }
+      : { outcome: 'ready', finalMessage: '结合数据库、源码和同批次对照，确认缺少销售组织导致上账失败' };
+  });
+  runner.post = async (url, body) => {
+    assert.ok(url.endsWith('/continuous-environment-result'));
+    return { job: { ...root, environmentAccess: undefined,
+      context: [{ stage: 'developer', kind: 'environment_result', result: body.result }] } };
+  };
+  const result = await runner.executeContinuous(root, async () => {}, new AbortController().signal);
+  assert.equal(result.outcome, 'ready');
+  assert.deepEqual(calls.map((item) => item.kind), ['environment', 'source']);
+  assert.deepEqual(new Set(calls.map((item) => item.id)), new Set(['JOB-database-first']));
+  assert.equal(calls[1].context, 1);
+});
+
 test('runner pool provides bounded unique parallel execution slots', async () => {
   const config = await runnerConfig({ projects: {}, runnerId: 'mac-mini', concurrency: 3 });
   let active = 0, peak = 0;

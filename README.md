@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.4.1** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.4.2** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -65,6 +65,8 @@ npm ci
 可手动运行 `node scripts/smoke-source-decision.mjs`（合成上下文的真实 AI 决策）及 `node scripts/smoke-folder-read.mjs`（真实 Codex 读取合成非 Git 父目录和子仓忽略文件）。两者不发送飞书、不创建线上 Job，使用现有 Codex 登录，会消耗订阅额度。
 
 `@项目负责人 帮我查一下登录接口逻辑，不改代码`：AI 判断为 analysis 后，创建一个持续开发调查任务，不经过 PM/QA/人工放行。源码、数据库和网页只读步骤都在同一个 Job 和同一个 Codex 开发 thread 内接续，拿到证据后由该开发会话直接回答原问题，不再生成“开发 → 开发”或额外负责人汇总任务。等待网页登录或必要配置时释放执行槽；条件恢复后续跑原 Job。专业测试/审计分析仍由各自执行，真实缺口会保留在原任务中等待恢复。
+
+新问题即使第一步就是数据库、Nacos 或网页查询，也使用同一个 `continuous_analysis` Job：环境证据写回原 Job 后，由原 Codex thread 继续核对源码、对照样本并形成结论，不创建旧式 `single_developer → analysis_review → owner_report` 接力链。原因判断按证据强度给出“确认 / 高度支持 / 尚不能确认”；下游原始报错是强证据，但多个独立证据已经收敛时不再把它作为唯一完成条件。
 
 分析先按 `projects.local.json` 的 `analysisRepositories` 同步各仓 origin 对应分支；缺少清单或同步失败即阻塞。成功后读取 `repoPath` 内的已同步源码，Codex 使用 read-only/never；不执行 `verifyCommands`，附件只写 Runner 数据区。它不代表根仓 worktree 已具备多仓写入能力。实施任务仍使用原有隔离工作区和人工门。
 
