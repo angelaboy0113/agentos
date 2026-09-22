@@ -38,6 +38,21 @@ test('dynamic query builder only permits actual scoped fields and bound filters'
   const s = selectStatement(args, tables, query); assert.doesNotMatch(s.sql, /OR 1=1/); assert.equal(s.params[0], "x' OR 1=1");
   for (const bad of [{ ...args, columns: ['password'] }, { ...args, table: 'users' }, { ...args, columns: ['SLEEP(5)'] }, { ...args, filters: [] }, { ...args, filters: [{ column: 'id', op: '= 1;DELETE', value: 1 }] }]) assert.throws(() => selectStatement(bad, tables, query));
 });
+test('dynamic query builder supports bounded parameterized contains and in filters', () => {
+  const tables = new Map([['logs', ['oper_param','status','id']]]);
+  const scopedQuery = {...query,tables:['*']};
+  const contains = selectStatement({ table:'logs', columns:['status'], filters:[{ column:'oper_param', op:'contains', value:'2102210708288290818' }] }, tables, scopedQuery);
+  assert.match(contains.sql, /LOCATE\(\?, `oper_param`\) > 0/);
+  assert.deepEqual(contains.params, ['2102210708288290818']);
+  const many = selectStatement({ table:'logs', columns:['status'], filters:[{ column:'id', op:'in', value:['one','two'] }] }, tables, scopedQuery);
+  assert.match(many.sql, /`id` IN \(\?, \?\)/);
+  assert.deepEqual(many.params, ['one','two']);
+  for (const filters of [
+    [{ column:'oper_param', op:'contains', value:'' }],
+    [{ column:'id', op:'in', value:[] }],
+    [{ column:'id', op:'in', value:Array.from({length:101},(_,i)=>i) }],
+  ]) assert.throws(() => selectStatement({ table:'logs', columns:['status'], filters }, tables, scopedQuery), QueryInputError);
+});
 test('investigation auto-authorizes member PRD read while preserving explicit scope', () => {
   const cfg = { version: 1, environments: { env: { ...environment, tier: 'prd', membersRead: false } } };
   const p = planQuery(cfg, { environmentId: 'env', queryId: 'investigate', parameters: ['检查连接'] }, 'demo', { profile: 'owner', senderId: 'ou_member' });
@@ -91,6 +106,22 @@ test('MySQL dynamic tools verify grants, use only base table metadata, bind valu
   const metadata=calls.find(x=>x.sql?.includes('information_schema'));assert.match(metadata.sql,/BASE TABLE/);assert.match(metadata.sql,/GENERATED/);
   const select=calls.find(x=>x.sql?.startsWith('SELECT `status`'));assert.deepEqual(select.params,["' OR 1=1"]);assert.doesNotMatch(select.sql,/OR 1=1/);
   await tools.close();assert.equal(calls.at(-1),'destroy');
+});
+test('schema can discover exact fields in a wide table without paging through unrelated columns', async () => {
+  const calls=[];
+  const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async(statement,params)=>{
+    calls.push({sql:statement.sql,params});
+    return [[{table_name:'sys_operation_log_202609',column_name:'oper_time'},{table_name:'sys_operation_log_202609',column_name:'oper_param'}]];
+  },rollback:async()=>{},destroy:()=>{}})};
+  const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'fake',database:'demo'}, {...query,tables:['*']}, credentials,{mysql:driver});
+  try {
+    const result=await tools.run('schema',{table:'sys_operation_log_202609',columns:['oper_time','oper_param']});
+    assert.deepEqual(result.tables.sys_operation_log_202609,['oper_time','oper_param']);
+    assert.equal(result.truncated,false);assert.equal(result.nextCursor,null);
+    assert.match(calls.at(-1).sql,/c\.COLUMN_NAME IN \(\?, \?\)/);
+    assert.deepEqual(calls.at(-1).params,['demo','sys_operation_log_202609','oper_time','oper_param']);
+    await assert.rejects(tools.run('schema',{columns:['oper_time']}),QueryInputError);
+  } finally { await tools.close(); }
 });
 test('MySQL tools never query business data using a write-capable account', async()=>{
   let business=0;const c={query:async()=>[[{grant:'GRANT ALL PRIVILEGES ON demo.* TO reader'}]],execute:async()=>{business++;return[[]];},destroy:()=>{}};

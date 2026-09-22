@@ -82,6 +82,15 @@ test('member PRD read request is immediately leasable and can only be claimed on
   await assert.rejects(app.store.claimEnvironment(job.id, identity));
   assert.equal((await app.store.read()).jobs[0].events.filter(e => e.type === 'environment_query_started').length, 1);
 });
+test('environment-first analysis preserves the matching source environment for the later source turn', async (t) => {
+  const { app, send } = await fixture(t);
+  app.projects.projects.demo.analysisSourceMode='isolated';
+  app.projects.projects.demo.analysisEnvironments={prd:{description:'Production',repositories:[]},uat:{description:'UAT',repositories:[]}};
+  await send();
+  const job=(await app.store.read()).jobs[0];
+  assert.equal(job.environmentAccess.tier,'prd');
+  assert.equal(job.sourceEnvironment,'prd');
+});
 test('cancel, changed config, expired grant and wrong lease never reach connector claim', async (t) => {
   const { app, send, cfg } = await fixture(t); await send('ou_owner'); const j = (await app.store.read()).jobs[0];
   const leased = await app.store.leaseNext('r'); const identity = { leaseId: leased.lease.id, runnerId: 'r' };

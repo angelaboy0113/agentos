@@ -23,7 +23,18 @@ export function selectStatement(args, tables, q) {
   const params = [], where = filters.map(f => {
     if (!f || !ident(f.column) || secretName.test(f.column)) throw new Error('查询筛选列超出范围');
     if (!known.includes(f.column)) throw new QueryInputError('SCHEMA_FIELDS', '筛选字段未在已读取结构中；先读取目标表schema并使用实际字段。');
-    if (!['=','>','>=','<','<='].includes(f.op) || !['string','number'].includes(typeof f.value) || (typeof f.value === 'number' && !Number.isFinite(f.value)) || String(f.value).length > 200) throw new QueryInputError('QUERY_INPUT', '筛选仅支持=、>、>=、<、<=；value为不超过200字符的字符串或有限数字。');
+    if (f.op === 'contains') {
+      if (typeof f.value !== 'string' || !f.value || f.value.length > 200) throw new QueryInputError('QUERY_INPUT', 'contains需要1至200字符的非空字符串。');
+      params.push(f.value); return `LOCATE(?, \`${f.column}\`) > 0`;
+    }
+    if (f.op === 'in') {
+      if (!Array.isArray(f.value) || !f.value.length || f.value.length > 100
+        || f.value.some(v => !['string','number'].includes(typeof v) || (typeof v === 'number' && !Number.isFinite(v)) || String(v).length > 200)) {
+        throw new QueryInputError('QUERY_INPUT', 'in需要1至100个不超过200字符的字符串或有限数字。');
+      }
+      params.push(...f.value); return `\`${f.column}\` IN (${f.value.map(() => '?').join(', ')})`;
+    }
+    if (!['=','>','>=','<','<='].includes(f.op) || !['string','number'].includes(typeof f.value) || (typeof f.value === 'number' && !Number.isFinite(f.value)) || String(f.value).length > 200) throw new QueryInputError('QUERY_INPUT', '筛选仅支持=、>、>=、<、<=、contains、in；标量value为不超过200字符的字符串或有限数字。');
     params.push(f.value); return `\`${f.column}\` ${f.op} ?`;
   }).join(' AND ');
   return { sql: `SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`${table}\` WHERE ${where} LIMIT ${q.maxRows + 1}`, params, columns };
@@ -71,9 +82,9 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   ] : [
     { tool: 'connection', args: {}, description: '测试数据库连接、只读账号授权与只读事务' },
     { tool: 'tables', args: {cursor:'可选：nextCursor，默认0'}, description:'分页列出允许的基础表名称，先定位目标表再用schema读取列' },
-    { tool: 'schema', args: { table: '可选：限定基础表名', cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段，不读取业务数据' },
+    { tool: 'schema', args: { table: '可选：限定基础表名', columns: ['可选：要定向发现的准确字段名，最多20个；使用时必须提供table'], cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段；已知字段名时用table+columns定向发现，避免宽表分页遗漏；不读取业务数据' },
     { tool: 'count', args: { table: 'schema返回的表', distinctColumns: '可选：去重字段数组；空数组统计行数，非空按这些字段组合去重（不计含NULL的组合）', filters: '与select相同的明确筛选条件' }, description: '统计批准基础表筛选范围内的完整行数或指定字段组合去重数，不用样本行数代替总数，不支持任意SQL或联表' },
-    { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=', value: '筛选值' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件且op仅支持=、>、>=、<、<=；仅基础表，不允许SQL、函数、联表或写入` }
+    { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=|>|>=|<|<=|contains|in', value: '标量；in使用数组' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件；contains执行参数化子串匹配，in最多100个绑定值；仅基础表，不允许任意SQL、联表或写入` }
   ];
   let browser;
   if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
@@ -119,15 +130,19 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         }
         if (tool === 'schema') {
           if(args.table !== undefined && (!ident(args.table) || !(q.tables.includes('*') || q.tables.includes(args.table)))) throw new Error('查询表超出范围');
+          const requestedColumns = args.columns;
+          if (requestedColumns !== undefined && (!args.table || !Array.isArray(requestedColumns) || !requestedColumns.length || requestedColumns.length > 20
+            || requestedColumns.some(column => !ident(column) || secretName.test(column)))) throw new QueryInputError('QUERY_INPUT', '定向字段发现需要table和1至20个普通字段名。');
           const offset = args.cursor === undefined ? 0 : Number(args.cursor);
           if(!Number.isInteger(offset) || offset<0 || offset>100000) throw new Error('结构分页参数无效');
-          const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${offset}`, timeout: q.timeoutMs }, args.table ? [e.database,args.table] : [e.database]);
+          const columnClause = requestedColumns ? ` AND c.COLUMN_NAME IN (${requestedColumns.map(() => '?').join(', ')})` : '';
+          const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
           const visible = new Map();
           for (const r of rows.slice(0,100)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) {
             visible.set(r.table_name,[...(visible.get(r.table_name)??[]),r.column_name]);
             tables.set(r.table_name,[...new Set([...(tables.get(r.table_name)??[]),r.column_name])]);
           }
-          const result = {tables:Object.fromEntries(visible),truncated:rows.length>100,nextCursor:rows.length>100?offset+100:null};
+          const result = {tables:Object.fromEntries(visible),truncated:requestedColumns ? false : rows.length>100,nextCursor:!requestedColumns && rows.length>100?offset+100:null};
           if(result.truncated) result.note='仅当前页表结构；可用schema的nextCursor继续，或指定table读取目标表。';
           return result;
         }

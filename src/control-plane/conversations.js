@@ -391,8 +391,12 @@ export class ConversationService {
         environmentAccess = planQuery(await loadEnvironments(), decision.environmentQuery, projectId, turn);
       }
       let sourceEnvironment;
-      if (!environmentAccess && decision.intent === 'analysis') {
-        try { sourceEnvironment = selectSourceEnvironment(projects.projects[projectId], decision.sourceEnvironment); }
+      if (decision.intent === 'analysis') {
+        // Environment-first investigations still return to the same source worker.
+        // Preserve an explicit source choice, otherwise use the verified runtime
+        // tier when it names a configured source environment (uat/prd).
+        const selectedEnvironment = decision.sourceEnvironment || environmentAccess?.tier;
+        try { sourceEnvironment = selectSourceEnvironment(projects.projects[projectId], selectedEnvironment); }
         catch (error) { return { notice: error.message }; }
       }
       // Every newly created analysis uses the same persistent developer job,
