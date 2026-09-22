@@ -225,6 +225,8 @@ Invoke-RestMethod http://127.0.0.1:8787/health
 
 启动完成后，在同一台电脑打开 `http://127.0.0.1:8787/admin`。页面用于管理和查看已经运行的 AgentOS，不用于启动服务。可以在其中查看服务与 Runner 状态、任务及普通回复记录、模型、耗时、工具调用、失败原因，并修改后续任务使用的模型和推理强度。正在执行的任务保持原设置。参见 [本机管理控制台](admin-console.md)。
 
+`start:local` 默认启动 3 个 Runner 执行槽，因此三张不同问题卡可以真正同时排查。Mac mini 先使用默认值；根据内存、CPU 和 Codex 账号承载情况，可在 `.env` 设置 `AGENTOS_RUNNER_CONCURRENCY=1..8` 后重启。`/health` 的 `runnerConcurrency` 和管理页面的 Runner 池状态必须与配置一致。它只改变并发槽数，不改变模型、账号、项目权限或网页登录态。
+
 ## 11. 拉机器人进群并发送第一条消息
 
 把五个机器人都加入第 8 步配置的群。先验证负责人：
@@ -283,6 +285,8 @@ curl http://127.0.0.1:8787/health
 - `doctor.ps1` 没有缺失项。
 - `npm run check` 全绿。
 - `/health` 返回 `ok: true`，Runner 为 codex。
+- `/health` 返回 `analysisWorkflow: continuous-developer-tools-v2`，`runnerConcurrency` 与配置一致。
+- 同时提交两到三张只读问题卡时，管理页面能看到多个忙碌 Runner；每张卡只有一个 Job，源码与环境工具证据都进入同一时间线。
 - 五个 `im.message.receive_v1` 和五个 `card.action.trigger` 消费者 ready。
 - 普通问候只回复、不创建 Job。
 - 只读分析能读目标目录但不修改文件。
@@ -339,7 +343,7 @@ git pull --ff-only
 
 ## 环境源码快照
 
-可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。每次调查与负责人汇总复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
+可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。同一卡内的源码与工具步骤复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
 
 ## 按问题发现业务网站
 

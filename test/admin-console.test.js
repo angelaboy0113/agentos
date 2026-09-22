@@ -13,6 +13,18 @@ test('admin overview keeps a runner online while it holds a live job lease', () 
     runners: { 'runner-1': { runnerId: 'runner-1', lastSeenAt: new Date(now - 60_000).toISOString() } },
   }, {}, now);
   assert.equal(overview.runner.online, true);
+  assert.deepEqual(overview.runnerPool, { total: 1, online: 1, busy: 1 });
+});
+
+test('admin runner pool ignores historical heartbeat records when reporting current capacity', () => {
+  const now = Date.now();
+  const overview = adminOverview({ jobs: [], runners: {
+    old: { runnerId: 'old', lastSeenAt: new Date(now - 86_400_000).toISOString() },
+    'runner-1': { runnerId: 'runner-1', lastSeenAt: new Date(now - 1_000).toISOString() },
+    'runner-2': { runnerId: 'runner-2', lastSeenAt: new Date(now - 1_000).toISOString() },
+  } }, { runnerConcurrency: 3 }, now);
+  assert.deepEqual(overview.runnerPool, { total: 3, online: 2, busy: 0 });
+  assert.deepEqual(overview.runners.map((runner) => runner.runnerId).sort(), ['runner-1', 'runner-2']);
 });
 
 test('local admin console serves task records and safely updates runtime settings', async (t) => {

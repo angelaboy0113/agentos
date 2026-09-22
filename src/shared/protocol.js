@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 export const WORKFLOWS = {
   analysis_review: ['developer', 'owner_report'],
+  continuous_analysis: ['developer'],
   full_delivery: ['owner_intake', 'pm', 'developer', 'qa', 'owner_audit', 'owner_report'],
   pm_delivery: ['pm', 'developer', 'qa', 'owner_audit', 'owner_report'],
   developer_delivery: ['developer', 'qa', 'owner_audit', 'owner_report'],

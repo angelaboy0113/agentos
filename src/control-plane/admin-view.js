@@ -12,6 +12,12 @@ export function adminOverview(state, runtime, now = Date.now()) {
     ['running', 'cancelling'].includes(job.status)
     && job.lease?.runnerId === runner.runnerId
     && Date.parse(job.lease.expiresAt) > now);
+  const runnerViews = runners.map((item) => ({ ...item, online: (state.jobs ?? []).some((job) =>
+    ['running', 'cancelling'].includes(job.status) && job.lease?.runnerId === item.runnerId
+      && Date.parse(job.lease.expiresAt) > now) || now - Date.parse(item.lastSeenAt) < 30_000 }));
+  const currentRunners = runnerViews.filter((item) => item.online);
+  const configuredRunnerCount = Number.isInteger(Number(runtime.runnerConcurrency)) && Number(runtime.runnerConcurrency) > 0
+    ? Number(runtime.runnerConcurrency) : currentRunners.length;
   return {
     runtime,
     counts: {
@@ -26,6 +32,9 @@ export function adminOverview(state, runtime, now = Date.now()) {
       successRate: finished.length ? Math.round(successful.length / finished.length * 1000) / 10 : null,
     },
     runner: runner ? { ...runner, online: runnerHasActiveLease || now - Date.parse(runner.lastSeenAt) < 30_000 } : null,
+    runners: currentRunners,
+    runnerPool: { total: configuredRunnerCount, online: currentRunners.length,
+      busy: (state.jobs ?? []).filter((job) => job.status === 'running' && job.lease && Date.parse(job.lease.expiresAt) > now).length },
     recent: records.slice(0, 8),
     audit: (state.adminAudit ?? []).slice(-8).reverse(),
   };

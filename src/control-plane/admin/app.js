@@ -43,7 +43,7 @@ async function loadOverview() {
     setText('metric-completed', overview.counts.completed24h);
     setText('metric-success', overview.performance.successRate === null ? '—' : `${overview.performance.successRate}%`);
     setText('metric-median', duration(overview.performance.medianMs));
-    setText('runner-state', overview.runner?.online ? '在线' : overview.runner ? '离线' : '尚未注册');
+    setText('runner-state', overview.runnerPool?.total ? `${overview.runnerPool.online}/${overview.runnerPool.total} 在线 · ${overview.runnerPool.busy} 忙碌` : '尚未注册');
     setText('health-model', modelName(runtime.model)); setText('health-failed', overview.counts.failed24h);
     document.querySelector('#recent-list').innerHTML = overview.recent.length ? overview.recent.map(recordRow).join('') : '<div class="loading-row">暂无处理记录</div>';
     bindRecordButtons(document.querySelector('#recent-list'));

@@ -239,7 +239,7 @@ test('source sync escalation retries the same requester/admin mention without re
   assert.deepEqual(after[0].result, before[0].result);
 });
 
-test('analysis receipt stays silent until developer and owner report finish the chain', async (t) => {
+test('analysis receipt stays silent until the continuous developer investigation finishes', async (t) => {
   const { directory, client, calls } = await setup(t);
   const app = await createControlPlane({ dataDir: directory, storeFile: path.join(directory, 'chain.json'),
     projects: { projects: { demo: { displayName: 'demo' } }, chatProjectMap: { group: 'demo' } },
@@ -256,12 +256,10 @@ test('analysis receipt stays silent until developer and owner report finish the 
   const developer = await app.store.leaseNext('runner');
   const complete = (job) => ({ type: 'completed', runnerId: 'runner', leaseId: job.lease.id,
     result: { outcome: 'ready', finalMessage: '调查证据' } });
-  const first = await app.store.appendEvent(developer.id, complete(developer), { agentRole: 'owner_report', agentProfile: 'owner' });
-  await notifyJobEvent(context, first);
-  assert.ok(first.nextJob);
-  assert.equal(calls.filter(c => c.type === 'text').length, 0);
-  const owner = await app.store.leaseNext('runner');
-  const final = await app.store.appendEvent(owner.id, complete(owner));
+  assert.equal(developer.workflow, 'continuous_analysis');
+  assert.equal(developer.continuousInvestigation, true);
+  const final = await app.store.appendEvent(developer.id, complete(developer));
+  assert.equal(final.nextJob, null);
   await notifyJobEvent(context, final); await notifyJobEvent(context, final);
   const notices = calls.filter(c => c.type === 'text');
   assert.equal(notices.length, 1);

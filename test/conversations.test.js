@@ -161,7 +161,7 @@ test('natural approval invokes AI but cannot bypass admin, chat or status checks
 });
 
 test('analysis delegates read-only investigation; planning stays scoped; QA implementation goes to owner', () => {
-  assert.deepEqual(routeDecision('owner_intake', 'analysis'), { stage: 'developer', workflow: 'analysis_review' });
+  assert.deepEqual(routeDecision('owner_intake', 'analysis'), { stage: 'developer', workflow: 'continuous_analysis' });
   assert.deepEqual(routeDecision('pm', 'planning'), { stage: 'pm', workflow: 'single_pm' });
   assert.deepEqual(routeDecision('qa', 'implementation'), { stage: 'owner_intake', workflow: 'full_delivery' });
 });
@@ -173,14 +173,15 @@ test('AI analysis creates a developer job with owner origin and refuses missing 
   const job = (await app.store.read()).jobs[0];
   assert.equal(job.agentProfile, 'dev');
   assert.equal(job.taskIntent, 'analysis');
+  assert.equal(job.continuousInvestigation, true);
   assert.equal(job.requestedAgentProfile, 'owner');
   assert.equal(job.delegation.toStage, 'developer');
   assert.equal(inputs[0].project.sourceDirectory, 'D:/demo');
-  assert.match(replies[0].text, /开发只读调查 → 项目负责人汇总/);
+  assert.match(replies[0].text, /同一开发会话持续完成源码与环境只读调查/);
   delete app.agents.agents.developer;
   await send(message('missing-dev', '再分析一次'));
   assert.equal((await app.store.read()).jobs.length, 1);
-  assert.match(replies.at(-1).text, /需要配置开发和项目负责人/);
+  assert.match(replies.at(-1).text, /需要配置开发机器人/);
 });
 
 test('ordinary members may chat and investigate read-only source but cannot create executable work', async (t) => {

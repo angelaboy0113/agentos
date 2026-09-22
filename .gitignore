@@ -14,6 +14,7 @@ data/
 node_modules/
 coverage/
 .codex/
+.planning/
 .vscode/
 .idea/
 .DS_Store

@@ -2,7 +2,7 @@ import { loadConversationSettings } from './conversation-settings.js';
 import { randomBytes } from 'node:crypto';
 import { createControlPlane } from './server.js';
 import { startLarkEventSources } from './lark-event-source.js';
-import { AgentRunner } from '../runner/index.js';
+import { createRunnerPool } from '../runner/index.js';
 import { runnerConfig } from '../runner/config.js';
 
 async function main() {
@@ -23,16 +23,17 @@ async function main() {
     watchedChatIds: Object.keys(projects.chatProjectMap ?? {}).filter(id=>!projects.retiredChatIds?.includes(id)),
     cliEntry: config.feishu.cliEntry,
   }, agents.agents);
-  const localRunner = new AgentRunner(await runnerConfig({
+  const localRunnerConfig = await runnerConfig({
     serverUrl: `http://${config.host}:${config.port}`,
     runnerToken,
     projects: projects.projects,
     executor: process.env.AGENTOS_RUNNER_EXECUTOR || 'codex',
-  }));
-  const runnerRunning = localRunner.start();
+  });
+  const localRunners = createRunnerPool(localRunnerConfig);
+  const runnerRunning = Promise.all(localRunners.map((runner) => runner.start()));
   const stop = () => {
     for (const { source } of eventSources) source.stop();
-    localRunner.stop();
+    for (const runner of localRunners) runner.stop();
     server.close();
   };
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, stop);

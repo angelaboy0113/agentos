@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.3.3** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.4.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -64,11 +64,11 @@ npm ci
 
 可手动运行 `node scripts/smoke-source-decision.mjs`（合成上下文的真实 AI 决策）及 `node scripts/smoke-folder-read.mjs`（真实 Codex 读取合成非 Git 父目录和子仓忽略文件）。两者不发送飞书、不创建线上 Job，使用现有 Codex 登录，会消耗订阅额度。
 
-`@项目负责人 帮我查一下登录接口逻辑，不改代码`：AI 判断为 analysis 后，由开发机器人持续调查，ready 后自动生成同 Mission 的负责人汇总任务，不经过 PM/QA/人工放行。调查中需要切换源码、数据库或网页时，仍复用同一份源码快照和同一个 Codex 开发会话；内部工具步骤不会在卡片上重复显示成多个“开发”。需要已配置开发与负责人 profile；专业测试/审计分析仍由各自执行。无法执行的真实缺口会保留在原任务中等待恢复。
+`@项目负责人 帮我查一下登录接口逻辑，不改代码`：AI 判断为 analysis 后，创建一个持续开发调查任务，不经过 PM/QA/人工放行。源码、数据库和网页只读步骤都在同一个 Job 和同一个 Codex 开发 thread 内接续，拿到证据后由该开发会话直接回答原问题，不再生成“开发 → 开发”或额外负责人汇总任务。等待网页登录或必要配置时释放执行槽；条件恢复后续跑原 Job。专业测试/审计分析仍由各自执行，真实缺口会保留在原任务中等待恢复。
 
 分析先按 `projects.local.json` 的 `analysisRepositories` 同步各仓 origin 对应分支；缺少清单或同步失败即阻塞。成功后读取 `repoPath` 内的已同步源码，Codex 使用 read-only/never；不执行 `verifyCommands`，附件只写 Runner 数据区。它不代表根仓 worktree 已具备多仓写入能力。实施任务仍使用原有隔离工作区和人工门。
 
-角色真源为 `config/roles/analysis.md` 与 `analysis_report.md`，规范见 [analysis-workflow.spec.md](docs/analysis-workflow.spec.md)。修改后在无在途任务时重启 start:local；`/health` 的 `analysisWorkflow` 应为 `read-only-developer-owner-v1`。旧 `single_owner_intake` 任务不自动迁移或重跑，请新发分析请求。结果卡首屏直接展示脱敏结论及交接信息，长证据保留在详情和续文。
+角色真源为 `config/roles/analysis.md`；`analysis_report.md` 仅供旧任务和交付链兼容。规范见 [analysis-workflow.spec.md](docs/analysis-workflow.spec.md)。修改后在无在途任务时重启 `start:local`；`/health` 的 `analysisWorkflow` 应为 `continuous-developer-tools-v2`，并显示实际 `runnerConcurrency`。默认创建 3 个真正独立的 Runner 执行槽，可通过 `AGENTOS_RUNNER_CONCURRENCY=1..8` 调整。旧任务不迁移或重跑，新分析请求使用新链路。
 
 ## 架构
 
@@ -297,7 +297,7 @@ Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地
 
 ## 环境源码快照
 
-可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。每次调查与负责人汇总复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](docs/source-sync.spec.md)。
+可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。同一卡内的源码与工具步骤复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](docs/source-sync.spec.md)。
 
 ## 按问题发现业务网站
 

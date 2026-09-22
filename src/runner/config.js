@@ -8,6 +8,8 @@ export async function runnerConfig(overrides = {}) {
     const parsed = JSON.parse(await readFile(path.resolve(projectsFile), 'utf8'));
     projects = parsed.projects ?? {};
   }
+  const concurrency = Number(overrides.concurrency ?? process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('AGENTOS_RUNNER_CONCURRENCY must be an integer from 1 to 8');
   return {
     serverUrl: String(overrides.serverUrl ?? process.env.AGENTOS_SERVER_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, ''),
     runnerId: overrides.runnerId ?? process.env.AGENTOS_RUNNER_ID ?? `runner-${process.platform}-${process.pid}`,
@@ -16,6 +18,7 @@ export async function runnerConfig(overrides = {}) {
     worktreeRoot: path.resolve(overrides.worktreeRoot ?? process.env.AGENTOS_RUNNER_WORKTREE_ROOT ?? './data/worktrees'),
     executor: overrides.executor ?? process.env.AGENTOS_RUNNER_EXECUTOR ?? 'mock',
     codexBin: overrides.codexBin ?? process.env.CODEX_BIN ?? 'codex',
+    concurrency,
     projects,
   };
 }
