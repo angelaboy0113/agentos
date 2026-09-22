@@ -8,6 +8,14 @@ import { CodexConversationEngine } from '../control-plane/codex-conversation.js'
 import path from 'node:path';
 import { publicText } from '../control-plane/result-presentation.js';
 export async function executeEnvironmentJob(job, config, emit) {
+  const began = Date.now();
+  let heartbeat;
+  const startHeartbeat = () => {
+    heartbeat = setInterval(() => Promise.resolve(emit({ type: 'progress', phase: 'codex_working', elapsedSeconds: Math.round((Date.now() - began) / 1000) })).catch(() => {}), 10_000);
+    heartbeat.unref();
+  };
+  startHeartbeat();
+  try {
   const response = await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/environment-claim`, {
     method: 'POST', signal: AbortSignal.timeout(10000), headers: { authorization: `Bearer ${config.runnerToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ leaseId: job.lease.id, runnerId: job.lease.runnerId }) });
@@ -51,6 +59,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   const scopeDetails = publicText(`查询范围与授权\n环境：${plan.environmentId} (${plan.tier}) · 模板：${plan.queryId}\n参数：${JSON.stringify(plan.parameters)}\n最多 ${plan.maxRows} 条 · 超时 ${plan.timeoutMs} ms\n授权截止：${plan.expiresAt}\n仅本次只读查询，不授权修改。`);
   return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, explanation ? `业务解释\n${explanation}` : '', result.summary ? `排查记录\n${result.summary}` : '', result.runtimeDiscoveries?.length ? `调度入口证据（待网页核验）\n${JSON.stringify(result.runtimeDiscoveries)}` : '', presented.details, (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
     websiteMismatch: result.websiteMismatch === true, runtimeDiscoveries: result.runtimeDiscoveries ?? [], connectionEndpoints: connectionEndpoints(result.rows), environmentEvidence: result.evidence, memorySafeSummary: safeSummary, verification: [] };
+  } finally { clearInterval(heartbeat); }
 }
 
 function websiteTools(job,config){

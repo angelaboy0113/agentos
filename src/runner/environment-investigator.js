@@ -8,6 +8,35 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 const schema = { type: 'object', additionalProperties: false, required: ['tool','arguments','summary','complete'], properties: { tool: { type: 'string' }, arguments: { type: 'string' }, summary: { type: 'string' }, complete: { type: 'boolean' } } };
+const TOOL_RESULT_LIMIT = 24000;
+
+// Browser pages can expose many safe read controls alongside a long rendered body.
+// Keep the useful prefix and live references, tell the planner that the view was
+// compacted, and continue the same investigation instead of failing the whole job.
+export function fitToolResult(value, maxBytes = TOOL_RESULT_LIMIT) {
+  if (Buffer.byteLength(JSON.stringify(value)) <= maxBytes) return value;
+  if (!value || typeof value !== 'object' || (!Array.isArray(value.controls) && typeof value.pageText !== 'string')) {
+    throw new Error('工具结果超出大小限制，请缩小范围');
+  }
+  const result = structuredClone(value);
+  result.pageText = String(result.pageText ?? '').slice(0, 6000);
+  result.controls = Array.isArray(result.controls) ? result.controls.map(control => ({
+    ...control,
+    label: String(control.label ?? '').slice(0, 100),
+    ...(Array.isArray(control.options) ? { options: control.options.slice(0, 40).map(option => ({
+      value: String(option.value ?? '').slice(0, 200), label: String(option.label ?? '').slice(0, 100),
+    })) } : {}),
+  })) : [];
+  result.resultLimited = true;
+  result.truncated = true;
+  result.note = `${String(result.note ?? '').slice(0, 500)} 页面结果过大，AgentOS 已自动压缩可见文本和控件清单；可继续搜索、查看详情或翻页。`.trim();
+  while (Buffer.byteLength(JSON.stringify(result)) > maxBytes && result.pageText.length > 1000) {
+    result.pageText = result.pageText.slice(0, Math.max(1000, Math.floor(result.pageText.length * 0.75)));
+  }
+  while (Buffer.byteLength(JSON.stringify(result)) > maxBytes && result.controls.length > 1) result.controls.pop();
+  if (Buffer.byteLength(JSON.stringify(result)) > maxBytes) throw new Error('工具结果超出大小限制，请缩小范围');
+  return result;
+}
 export async function createToolPlanner() {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'agentos-environment-tools-'));
   const runtime = await loadCodexRuntimeSettings();
@@ -77,7 +106,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       }
       if (['select', 'count'].includes(choice.tool)) { unresolvedInput = false; unresolvedTimeout = false; timeoutStreak = 0; }
       if(result.loginRequired) return {loginRequired:true,summary:result.message??result.stage,checkpoint:{steps,results},rows:[],partial:true};
-      const encoded = JSON.stringify(result); if (Buffer.byteLength(encoded) > 24000) throw new Error('工具结果超出大小限制，请缩小范围');
+      result = fitToolResult(result);
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
       if(result.websiteMismatch){summary='网站入口不匹配，尚未核实目标业务数据。请结合本环境源码、部署配置和原问题重新发现正确入口，不复用此错误入口，不要求用户扩大权限。';complete=false;break;}
       const hash = fingerprint({ tool: choice.tool, result });

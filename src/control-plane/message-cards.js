@@ -63,7 +63,7 @@ export function elapsed(start, end = Date.now()) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000) || 0);
   return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
-export function jobCard(job, now = Date.now()) {
+export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {}) {
   const expired=job.status==='awaiting_environment_approval' && !(Date.parse(job.environmentAccess?.expiresAt)>now);
   const labels = { running: ['执行中', 'blue'], queued: ['等待执行', 'blue'], completed: ['当前阶段已完成', 'green'],
     awaiting_environment_approval: ['待环境负责人批准查询', 'orange'],
@@ -75,8 +75,9 @@ export function jobCard(job, now = Date.now()) {
     ? ['部分分析完成 · 有待核实', 'orange'] : labels[job.status] ?? ['等待更新', 'grey'];
   const active = ['running', 'queued', 'cancelling'].includes(job.status);
   const events = job.events ?? [];
-  const start = events.filter((e) => e.type === 'started').at(-1)?.at ?? job.createdAt;
-  const relevant = events.filter((e) => Date.parse(e.at) >= Date.parse(start));
+  const attemptStart = events.filter((e) => e.type === 'started').at(-1)?.at ?? job.createdAt;
+  const start = startAt ?? job.createdAt ?? attemptStart;
+  const relevant = events.filter((e) => Date.parse(e.at) >= Date.parse(attemptStart));
   const activity = relevant.filter((e) => e.phase === 'tool_activity').at(-1)?.activity;
   const phase = relevant.filter((e) => e.type === 'progress' && e.phase).at(-1)?.phase;
   const operation = job.status === 'cancelling' ? (job.cancellationError ?? '已请求停止，等待执行器确认进程退出；已有文件修改将保留。')
@@ -89,7 +90,7 @@ export function jobCard(job, now = Date.now()) {
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'
     : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label)).map(part => md(part))], color),
     { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns: [
-      { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${elapsed(start, active ? now : Date.parse(job.updatedAt))}**`), md('本阶段耗时', true)] },
+      { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${elapsed(start, active ? now : Date.parse(job.updatedAt))}**`), md('总耗时', true)] },
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${Number(activity?.total) || 0} 次**`), md('实际工具调用', true)] },
     ] }];
   if (active && activity?.recent?.length) elements.push(block([md(`**最近完成 · 展示 ${activity.recent.length} / ${Number(activity.completed) || 0} 项**`),

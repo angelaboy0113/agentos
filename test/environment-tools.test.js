@@ -4,7 +4,7 @@ import { databaseEndpoints } from '../src/runner/config-endpoints.js';
 import { createEnvironmentTools, selectStatement, QueryInputError } from '../src/runner/environment-tools.js';
 import { validateToolQuery } from '../src/shared/environment-tool-policy.js';
 import { planQuery } from '../src/shared/environment-access.js';
-import { investigateEnvironment } from '../src/runner/environment-investigator.js';
+import { fitToolResult, investigateEnvironment } from '../src/runner/environment-investigator.js';
 const credentials = { username: 'fake-user', password: 'fake-secret' };
 const query = { mode: 'investigate', reviewed: true, description: '只读排查', namespaces: ['uat'], tables: ['orders'], maxCalls: 6, maxRows: 5, timeoutMs: 1000, parameters: [{ name: 'purpose', type: 'string' }] };
 const environment = { kind: 'nacos', projectId: 'demo', tier: 'uat', credentialRef: 'fake', baseUrl: 'http://localhost:8848/nacos', ownerOpenIdsByProfile: { owner: ['ou_admin'] }, membersRead: true, queries: { investigate: query } };
@@ -64,6 +64,19 @@ test('tool loop reports unresolved extraction as partial even when model claims 
     tools: async () => ({ spec: [{ tool: 'connection' },{ tool: 'read_config' }], run: async t => t === 'connection' ? {} : { rows: [], partial: true }, close: async () => {} }),
     planner: async () => ({ next: async () => ++n === 1 ? { tool: 'read_config', arguments: '{}' } : { tool: 'finish', summary: 'done', complete: true }, close: async () => {} }) });
   assert.equal(r.partial, true); assert.equal(r.evidence.toolCount, 2);
+});
+
+test('oversized website snapshots are compacted and remain usable instead of failing the job', () => {
+  const controls = Array.from({ length: 150 }, (_, i) => ({
+    ref: `ref-${i}-${'x'.repeat(80)}`, type: 'read-action', label: `查看详情 ${i} ${'字段'.repeat(30)}`,
+    options: Array.from({ length: 20 }, (__, n) => ({ value: `${n}`, label: `选项 ${n}` })),
+  }));
+  const fitted = fitToolResult({ stage: '已读取业务网页', pageText: '页面内容'.repeat(5000), controls, rows: [], note: '只读页面' });
+  assert.ok(Buffer.byteLength(JSON.stringify(fitted)) <= 24000);
+  assert.equal(fitted.resultLimited, true);
+  assert.equal(fitted.truncated, true);
+  assert.ok(fitted.controls.length > 0);
+  assert.match(fitted.note, /自动压缩/);
 });
 test('MySQL dynamic tools verify grants, use only base table metadata, bind values and rollback', async () => {
   const calls = []; let connectionOptions; const c = { query: async sql => { calls.push(sql); return [[{ grant: 'GRANT SELECT ON demo.* TO reader' }]]; }, execute: async (statement, params) => {

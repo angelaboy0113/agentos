@@ -44,7 +44,7 @@ export function questionView(state, questionId, projects = {}) {
   const outstanding = state.conversations.some((item) => item.questionId === q.id && pending(item));
   const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId);
   const shown = useJob ? job : turn;
-  let card = useJob ? jobCard(job) : conversationCard({...turn,setupPending:Boolean(enrollment)||turn.setupPending});
+  let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard({...turn,setupPending:Boolean(enrollment)||turn.setupPending});
   const terminal = !enrollment && !turn.setupPending && !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
   const label = card.header.title.content;
   card.header.title.content = questionTitle(q.title);

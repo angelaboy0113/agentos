@@ -56,6 +56,17 @@ test('cards have responsive groups, semantic failure and bounded details without
   assert.doesNotMatch(publicText('api_key="secret-value" Authorization=Bearer-TOKEN <at id=all></at>'), /secret-value|Bearer-TOKEN|<at/);
 });
 
+test('job card displays total question time across later execution jobs', () => {
+  const job = { id: 'job-total', stage: 'developer', projectName: 'demo', status: 'blocked', events: [
+    { type: 'started', at: '2026-09-22T03:36:59.000Z' },
+  ], createdAt: '2026-09-22T03:36:59.000Z', updatedAt: '2026-09-22T03:37:05.000Z',
+  result: { finalMessage: '未完成', summary: '未完成' } };
+  const rendered = JSON.stringify(jobCard(job, Date.parse(job.updatedAt), { startAt: '2026-09-22T03:25:00.000Z' }));
+  assert.match(rendered, /12 分 5 秒/);
+  assert.match(rendered, /总耗时/);
+  assert.doesNotMatch(rendered, /本阶段耗时/);
+});
+
 test('receipt and result update ONE message with a stable sender; terminal cannot regress', async (t) => {
   const { cards, calls, store } = await setup(t);
   await cards.upsert('chat:1', conversationCard(chat()), destination, { immediate: true });
