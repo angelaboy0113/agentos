@@ -66,12 +66,13 @@ test('tool loop reports unresolved extraction as partial even when model claims 
   assert.equal(r.partial, true); assert.equal(r.evidence.toolCount, 2);
 });
 test('MySQL dynamic tools verify grants, use only base table metadata, bind values and rollback', async () => {
-  const calls = []; const c = { query: async sql => { calls.push(sql); return [[{ grant: 'GRANT SELECT ON demo.* TO reader' }]]; }, execute: async (statement, params) => {
+  const calls = []; let connectionOptions; const c = { query: async sql => { calls.push(sql); return [[{ grant: 'GRANT SELECT ON demo.* TO reader' }]]; }, execute: async (statement, params) => {
     calls.push({ sql: statement.sql, params });
     return statement.sql.includes('information_schema') ? [[{ table_name:'orders',column_name:'id' },{table_name:'orders',column_name:'status'},{table_name:'orders',column_name:'password'}]] : [[{ status:'ok',password:'never-return' }]];
   }, rollback:async()=>calls.push('rollback'), destroy:()=>calls.push('destroy') };
-  const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'localhost',port:3306,database:'demo'},query,credentials,{mysql:{createConnection:async()=>c}});
+  const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'localhost',port:3306,database:'demo'},query,credentials,{mysql:{createConnection:async options=>{connectionOptions=options;return c;}}});
   await tools.run('connection');const schema=await tools.run('schema');assert.deepEqual(schema.tables.orders,['id','status']);
+  assert.equal(connectionOptions.supportBigNumbers,true);assert.equal(connectionOptions.bigNumberStrings,true);
   const r=await tools.run('select',{table:'orders',columns:['status'],filters:[{column:'id',op:'=',value:"' OR 1=1"}]});
   assert.deepEqual(r.rows,[{status:'ok'}]);assert.ok(calls.includes('START TRANSACTION READ ONLY'));
   const metadata=calls.find(x=>x.sql?.includes('information_schema'));assert.match(metadata.sql,/BASE TABLE/);assert.match(metadata.sql,/GENERATED/);

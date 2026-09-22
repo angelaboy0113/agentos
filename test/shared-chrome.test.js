@@ -21,10 +21,10 @@ test('daily Chrome exposes a safe automation health probe',async()=>{
 });
 test('daily Chrome DOM reads rendered text and rejects stale refs, writes and foreign navigation',async t=>{
  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();
- await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:`<ul role="menu"><li><div class="ant-menu-submenu-title">预算管理</div></li></ul><h1>Actual page</h1><noscript>Enable JavaScript</noscript><div hidden>Hidden secret</div><input type=password value=secret style="display:none"><input placeholder="查询编号"><button onclick="document.querySelector('h1').textContent='Query done'">查询</button><button>保存</button><a href="https://other.example/">Other</a><a href="/app/detail">详情</a>`}));
+ await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:`<ul role="menu"><li><div class="ant-menu-submenu-title">预算管理</div></li></ul><h1>Actual page</h1><noscript>Enable JavaScript</noscript><div hidden>Hidden secret</div><input type=password value=secret style="display:none"><input placeholder="查询编号"><button onclick="document.querySelector('h1').textContent='Query done'">查询</button><button>保存</button><a href="https://other.example/">Other</a><a href="/app/detail">详情</a><table><tr class="ant-table-row" data-row-key="2097222728173392000" onclick="document.querySelector('h1').textContent='Row detail'"><td>HD-20260810-0157-01</td><td>3150</td></tr></table>`}));
  await page.goto(e.baseUrl);const q={baseUrl:e.baseUrl,token:'one',tool:'browser_snapshot'};
  const read=()=>page.evaluate(chromePage,q);let r=await read();assert.match(r.pageText,/Actual page/);assert.doesNotMatch(r.pageText,/Enable JavaScript|Hidden secret|secret/);
- assert.equal(r.controls.some(c=>['保存','Other'].includes(c.label)),false);assert.ok(r.controls.some(c=>c.label==='预算管理'));
+ assert.equal(r.controls.some(c=>['保存','Other'].includes(c.label)),false);assert.ok(r.controls.some(c=>c.label==='预算管理'));assert.ok(r.controls.some(c=>c.label.includes('HD-20260810-0157-01')));
  const old=r.controls.find(c=>c.label==='查询').ref;await read();
  assert.ok((await page.evaluate(chromePage,{...q,tool:'browser_click',args:{ref:old}})).error);
  // Snapshot refs are replaced, not shared across questions.
@@ -32,6 +32,9 @@ test('daily Chrome DOM reads rendered text and rejects stale refs, writes and fo
  r=await read();const ref=r.controls.find(c=>c.label==='查询').ref;
  assert.equal((await page.evaluate(chromePage,{...q,tool:'browser_click',args:{ref}})).acted,true);
  assert.match((await read()).pageText,/Query done/);
+ r=await read();const rowRef=r.controls.find(c=>c.label.includes('HD-20260810-0157-01')).ref;
+ assert.equal((await page.evaluate(chromePage,{...q,tool:'browser_click',args:{ref:rowRef}})).acted,true);
+ assert.match((await read()).pageText,/Row detail/);
  await page.goto('https://other.example/');assert.ok((await read()).error);
 });
 test('daily Chrome login status is detected without reading password; native bridge errors are explicit',async t=>{
