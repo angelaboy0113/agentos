@@ -53,7 +53,10 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   async function mysql() {
     if (!conn) {
       const driver = adapters.mysql ?? await import('mysql2/promise');
-      conn = await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false, ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
+      conn = await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
+        // Business IDs frequently exceed Number.MAX_SAFE_INTEGER. Keep BIGINT/DECIMAL values lossless so a value returned by one read can be used by the next read unchanged.
+        supportBigNumbers: true, bigNumberStrings: true,
+        ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
       if (!active) { conn.destroy(); conn = null; throw new Error('连接已超时'); }
       try { const [g] = await conn.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, g); await conn.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`); await conn.query('START TRANSACTION READ ONLY'); }
       catch (error) { conn.destroy(); conn = null; throw error; }

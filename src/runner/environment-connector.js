@@ -35,7 +35,9 @@ export async function mysqlRead(e, q, parameters, cred, adapters = {}) {
   const timer = setTimeout(() => { timedOut = true; connection?.destroy(); }, q.timeoutMs);
   try {
     connection = await mysql.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password,
-      connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false, ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
+      connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
+      supportBigNumbers: true, bigNumberStrings: true,
+      ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
     if (timedOut) throw new Error('timeout');
     const [grants] = await connection.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, grants);
     await connection.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`);
