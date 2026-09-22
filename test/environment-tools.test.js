@@ -211,6 +211,7 @@ test('expiry during long investigation retains evidence and prohibits subsequent
  const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;
  const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;plan.expiresAt='2000-01-01T00:00:00Z';return{stage:'connected'};},close:async()=>{}}),planner:async()=>({next:async input=>{assert.deepEqual(input.tools,[]);return{tool:'finish',summary:'已有连接证据',complete:true};},close:async()=>{}})});
  assert.equal(calls,1);assert.equal(r.partial,true);assert.match(r.summary,/SCOPE_LIMIT/);assert.match(r.summary,/已有连接证据/);
+ assert.ok(Number.isFinite(Date.parse(r.evidence.lastAuthorizedAt)));
 });
 test('MySQL tool layer no longer enforces legacy call count',async()=>{
  const c={query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],rollback:async()=>{},destroy:()=>{}};

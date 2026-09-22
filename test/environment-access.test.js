@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { planQuery, verifyPlan, loadEnvironments, catalog } from '../src/shared/environment-access.js';
+import { planQuery, verifyPlan, verifyApprovedPlan, verifyCompletedPlan, loadEnvironments, catalog } from '../src/shared/environment-access.js';
 import { mysqlRead, nacosRead, databaseEndpoints, assertReadOnlyGrants, readEnvironment } from '../src/runner/environment-connector.js';
 import { createControlPlane } from '../src/control-plane/server.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
@@ -61,6 +61,18 @@ test('approval scope binds parameters, configuration and deadline', () => {
   assert.throws(() => verifyPlan(cfg, plan, 1000000));
   cfg.environments.prd.host = 'another-host'; assert.throws(() => verifyPlan(cfg, plan, 2000));
   assert.throws(() => planQuery(config(), { ...request, parameters: [{ sql: 'SELECT anything' }] }, 'demo', actor));
+});
+test('expired tool grant accepts only a promptly returned result gathered while authorization was live', () => {
+  const cfg = config(), plan = planQuery(cfg, request, 'demo', actor, 1000);
+  plan.startedAt = new Date(1500).toISOString();
+  const evidence = { lastAuthorizedAt: new Date(5000).toISOString() };
+  assert.throws(() => verifyApprovedPlan(cfg, plan, Date.parse(plan.expiresAt) + 1));
+  assert.equal(verifyCompletedPlan(cfg, plan, evidence, Date.parse(plan.expiresAt) + 90_000).kind, 'mysql');
+  assert.throws(() => verifyCompletedPlan(cfg, plan, {}, Date.parse(plan.expiresAt) + 1));
+  assert.throws(() => verifyCompletedPlan(cfg, plan, { lastAuthorizedAt: new Date(Date.parse(plan.expiresAt) + 1).toISOString() }, Date.parse(plan.expiresAt) + 1));
+  assert.throws(() => verifyCompletedPlan(cfg, plan, evidence, Date.parse(plan.expiresAt) + 10 * 60000 + 1));
+  cfg.environments.prd.host = 'changed';
+  assert.throws(() => verifyCompletedPlan(cfg, plan, evidence, Date.parse(plan.expiresAt) + 1));
 });
 test('configuration accepts PRD read policy but rejects secrets, SQL writes and unreviewed templates', async (t) => {
   const { dir } = await fixture(t); const file = path.join(dir, 'invalid.json');

@@ -57,6 +57,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
   const cred = e.kind==='website' ? {} : await (adapters.credential ?? credential)(e.credentialRef);
   let tools = await (adapters.tools ?? createEnvironmentTools)(e, q, cred);
   let planner; const steps = [...(adapters.checkpoint?.steps??[])], results = [...(adapters.checkpoint?.results??[])]; let summary = '', complete = false, unresolvedInput = false, stalled = 0, stopReason = '';
+  let lastAuthorizedAt = adapters.checkpoint?.lastAuthorizedAt ?? null;
   const seen = new Set();
   const timedOutQueries = new Set(); let timeoutStreak = 0, unresolvedTimeout = false;
   try {
@@ -74,6 +75,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       if (!tools.spec.some(x => x.tool === choice.tool)) throw new Error('未开放该环境工具');
       try { verifyApprovedPlan(await load(), plan); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
+      lastAuthorizedAt = new Date().toISOString();
       await emit({ type: 'progress', phase: 'tool_activity', activity: { current: `只读工具：${choice.tool}`, total: i + 1, completed: i, recent: steps.slice(-3).map(text => ({ text })) } });
       diagnosticStage = choice.tool;
       let result;
@@ -105,7 +107,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
         continue;
       }
       if (['select', 'count'].includes(choice.tool)) { unresolvedInput = false; unresolvedTimeout = false; timeoutStreak = 0; }
-      if(result.loginRequired) return {loginRequired:true,summary:result.message??result.stage,checkpoint:{steps,results},rows:[],partial:true};
+      if(result.loginRequired) return {loginRequired:true,summary:result.message??result.stage,checkpoint:{steps,results,lastAuthorizedAt},rows:[],partial:true};
       result = fitToolResult(result);
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
       if(result.websiteMismatch){summary='网站入口不匹配，尚未核实目标业务数据。请结合本环境源码、部署配置和原问题重新发现正确入口，不复用此错误入口，不要求用户扩大权限。';complete=false;break;}
@@ -141,6 +143,6 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     const uniqueResults = [...new Map(results.filter(x => x.result).map(x => [fingerprint(x), x])).values()];
     return { websiteMismatch: results.some(x => x.result?.websiteMismatch === true), runtimeDiscoveries: uniqueResults.filter(x => x.result?.runtimeDiscovery).map(x => x.result.runtimeDiscovery), rows: uniqueResults.filter(x => x.result?.rows).flatMap(x => x.result.rows.map(row => x.result.table ? { ...row, '来源表': x.result.table } : row)), steps, summary, partial: !complete,
       note: e.kind === 'website' ? '本次读取业务网页，未执行修改。' : e.kind === 'nacos' ? 'Nacos 读取与数据库连接是两步；本次未连接数据库。' : '仅本次范围内的数据库只读工具。',
-      evidence: { environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash, readAt: new Date().toISOString(), toolCount: results.length, rowCount: uniqueResults.filter(x => x.result?.rows).reduce((n,x) => n+x.result?.rows.length, 0), resultHash: fingerprint(serialized) } };
+      evidence: { environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash, readAt: new Date().toISOString(), lastAuthorizedAt, toolCount: results.length, rowCount: uniqueResults.filter(x => x.result?.rows).reduce((n,x) => n+x.result?.rows.length, 0), resultHash: fingerprint(serialized) } };
   } finally { await tools.close(); await planner?.close(); }
 }

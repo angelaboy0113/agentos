@@ -1,5 +1,5 @@
 import { reviewDecision } from './investigation-review.js';
-import { loadEnvironments, verifyApprovedPlan, planQuery, fingerprint } from './environment-access.js';
+import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint } from './environment-access.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createId, nextStage } from './protocol.js';
@@ -268,8 +268,8 @@ export class JsonStore {
       const job = requireJob(state, id);
       requireActiveLease(job, identity);
       const plan = job.environmentAccess;
-      verifyApprovedPlan(config, plan ?? {});
       const evidence = result?.environmentEvidence;
+      verifyCompletedPlan(config, plan ?? {}, evidence);
       if (!plan.startedAt || !evidence || evidence.environmentId !== plan.environmentId || evidence.queryId !== plan.queryId
         || evidence.scopeHash !== plan.scopeHash || !Number.isFinite(Date.parse(evidence.readAt))
         || Date.parse(evidence.readAt) < Date.parse(plan.startedAt) || !Number.isInteger(evidence.rowCount) || evidence.rowCount < 0

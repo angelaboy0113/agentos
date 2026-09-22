@@ -67,18 +67,43 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
     approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: 'policy:read-only', approvedAt: new Date(now).toISOString() };
 }
 export function verifyPlan(config, plan, now = Date.now()) {
+  if (!Number.isFinite(Date.parse(plan.expiresAt)) || Date.parse(plan.expiresAt) <= now) throw new Error('查询授权已过期或配置已变更，请重新申请');
+  const e = verifyPlanIntegrity(config, plan);
+  return e;
+}
+
+function verifyPlanIntegrity(config, plan) {
   const e = config.environments[plan.environmentId];
-  if (!e || fingerprint(e) !== plan.configHash || !Number.isFinite(Date.parse(plan.expiresAt)) || Date.parse(plan.expiresAt) <= now) throw new Error('查询授权已过期或配置已变更，请重新申请');
+  if (!e || fingerprint(e) !== plan.configHash || !Number.isFinite(Date.parse(plan.expiresAt))) throw new Error('查询授权已过期或配置已变更，请重新申请');
   const scope = Object.fromEntries(['expiresAt','approvalProfile','environmentId','queryId','projectId','parameters','configHash','maxRows','timeoutMs'].map((k) => [k, plan[k]]));
   if (fingerprint(scope) !== plan.scopeHash || e.projectId !== plan.projectId) throw new Error('查询范围与批准内容不一致');
   return e;
 }
 
-export function verifyApprovedPlan(config, plan, now = Date.now()) {
-  const e = verifyPlan(config, plan, now);
+function verifyApproval(e, plan) {
   const owner = (e.ownerOpenIdsByProfile[plan.approvalProfile] ?? []).includes(plan.approvedBy);
   const policy = plan.approvedBy === 'policy:read-only' && !plan.approvalRequired;
   const legacyPolicy = plan.approvedBy === 'policy:uat-read' && e.tier === 'uat' && e.membersRead && !plan.approvalRequired;
   if (!owner && !policy && !legacyPolicy) throw new Error('查询尚未批准或批准人不属于当前环境负责人');
+  return e;
+}
+
+export function verifyApprovedPlan(config, plan, now = Date.now()) {
+  return verifyApproval(verifyPlan(config, plan, now), plan);
+}
+
+// Expiry closes the environment tools immediately. A result that was gathered while
+// the grant was live may still need a short, bounded interval for model synthesis and
+// transport back to the control plane. This accepts that result without extending the
+// tool grant or permitting another read.
+export function verifyCompletedPlan(config, plan, evidence, now = Date.now(), graceMs = 10 * 60000) {
+  const e = verifyApproval(verifyPlanIntegrity(config, plan), plan);
+  const expiresAt = Date.parse(plan.expiresAt);
+  if (now <= expiresAt) return e;
+  const startedAt = Date.parse(plan.startedAt);
+  const lastAuthorizedAt = Date.parse(evidence?.lastAuthorizedAt);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(lastAuthorizedAt)
+    || lastAuthorizedAt < startedAt || lastAuthorizedAt > expiresAt
+    || now > expiresAt + graceMs) throw new Error('[RESULT_GRACE_EXPIRED] 查询授权已关闭，且结果不符合授权期内取证后的收尾条件');
   return e;
 }

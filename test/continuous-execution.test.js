@@ -108,3 +108,30 @@ test('continuous environment evidence stays on the same job and final completion
   assert.equal(done.nextJob, null);
   assert.equal((await store.read()).jobs.length, 1);
 });
+
+test('continuous environment accepts evidence returned shortly after tool expiry when the final read was authorized', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agentos-continuous-expiry-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const old = process.env.AGENTOS_ENVIRONMENTS_FILE;
+  process.env.AGENTOS_ENVIRONMENTS_FILE = path.join(directory, 'environments.json');
+  t.after(() => { if (old) process.env.AGENTOS_ENVIRONMENTS_FILE = old; else delete process.env.AGENTOS_ENVIRONMENTS_FILE; });
+  const environments = { version: 1, environments: { uat: { projectId: 'demo', tier: 'uat', kind: 'mysql', host: 'db.test', port: 3306,
+    database: 'demo', credentialRef: 'uat', membersRead: true, ownerOpenIdsByProfile: { owner: ['ou_admin'] },
+    queries: { investigate: { reviewed: true, mode: 'investigate', description: '只读核对订单', tables: ['orders'], maxRows: 20,
+      timeoutMs: 5000, parameters: [{ name: 'purpose', type: 'string', maxLength: 200 }] } } } } };
+  await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE, JSON.stringify(environments));
+  const store = new JsonStore(path.join(directory, 'state.json'));
+  const { job } = await store.createJob({ projectId: 'demo', questionId: 'QST-expiry', chatId: 'group', senderId: 'member', originProfile: 'owner',
+    taskIntent: 'analysis', workflow: 'continuous_analysis', stage: 'developer', instruction: '核对订单', continuousInvestigation: true });
+  const leased = await store.leaseNext('runner');
+  const identity = { runnerId: 'runner', leaseId: leased.lease.id };
+  const plannedAt = Date.now() - 15 * 60000 - 90_000;
+  const plan = planQuery(environments, { environmentId: 'uat', queryId: 'investigate', parameters: ['核对订单'] }, 'demo', { profile: 'owner', senderId: 'member' }, plannedAt);
+  plan.startedAt = new Date(plannedAt + 1000).toISOString();
+  await store.beginContinuousEnvironment(job.id, identity, plan, { outcome: 'needs_clarification', finalMessage: '需要数据库证据', environmentQuery: {} });
+  const result = { outcome: 'ready', finalMessage: '已读取订单', environmentEvidence: { environmentId: 'uat', queryId: 'investigate', scopeHash: plan.scopeHash,
+    readAt: new Date().toISOString(), lastAuthorizedAt: new Date(Date.parse(plan.expiresAt) - 1000).toISOString(), rowCount: 1, resultHash: 'b'.repeat(64) } };
+  const resumed = await store.completeContinuousEnvironment(job.id, identity, result);
+  assert.equal(resumed.status, 'running');
+  assert.equal(resumed.environmentAccess, undefined);
+});
