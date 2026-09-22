@@ -122,7 +122,8 @@ async function route(context) {
     requireAdminSession(context, request, false);
     const state = await store.read();
     const runtime = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
-    return json(response, 200, { ok: true, overview: adminOverview(state, runtime) }, { 'cache-control': 'no-store' });
+    return json(response, 200, { ok: true, overview: adminOverview(state,
+      { ...runtime, runnerConcurrency: Number(process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3) }) }, { 'cache-control': 'no-store' });
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/records') {
     requireAdminSession(context, request, false);
@@ -171,7 +172,7 @@ async function route(context) {
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
-      analysisWorkflow: 'read-only-developer-owner-v1', sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1', analysisSnapshotPolicy: 'isolated-environment-source-v1',
+      analysisWorkflow: 'continuous-developer-tools-v2', runnerConcurrency: Number(process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3), sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1', analysisSnapshotPolicy: 'isolated-environment-source-v1',
       resultPresentation: 'summary-paged-v1', identityPolicy: 'profile-linked-human-v1',
       executionPolicy: 'admin-write-members-analysis-v1', harnessPolicy: 'standard-handoff-v1', now: new Date().toISOString() });
   }
@@ -242,6 +243,46 @@ async function route(context) {
     const body = await readJson(request);
     const job = await store.leaseNext(body.runnerId, body.capabilities ?? []);
     return json(response, 200, { ok: true, job });
+  }
+
+  const continuousPlanMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-environment$/);
+  if (request.method === 'POST' && continuousPlanMatch) {
+    requireBearer(request, config.runnerToken, 'runner');
+    const id = decodeURIComponent(continuousPlanMatch[1]);
+    const body = await readJson(request);
+    const job = await store.getJob(id);
+    if (!job) return json(response, 404, { error: 'Unknown job' });
+    if (job.status !== 'running' || !job.continuousInvestigation || !job.lease?.id
+      || body.leaseId !== job.lease.id || body.runnerId !== job.lease.runnerId) {
+      return json(response, 409, { ok: false, error: 'Stale, foreign or non-continuous Runner lease' });
+    }
+    const identity = { leaseId: body.leaseId, runnerId: body.runnerId };
+    const sourceResult = body.result ?? {};
+    try {
+      let query = sourceResult.environmentQuery;
+      if (sourceResult.websiteQuery) query = await prepareWebsiteQuery(context, job, sourceResult.websiteQuery);
+      if (!query || sourceResult.outcome !== 'needs_clarification') throw new Error('当前结果没有可执行的环境查询');
+      const plan = planQuery(await loadEnvironments(), query, job.projectId,
+        { senderId: job.senderId, profile: job.originProfile });
+      const updated = await store.beginContinuousEnvironment(id, identity, plan, sourceResult);
+      return json(response, 200, { ok: true, planned: true, plan, job: updated });
+    } catch (error) {
+      const diagnostic = queryRejection(error, job);
+      const rejected = await store.rejectContinuousEnvironment(id, identity, sourceResult, diagnostic);
+      return json(response, 200, { ok: true, planned: false, diagnostic, ...rejected });
+    }
+  }
+
+  const continuousResultMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-environment-result$/);
+  if (request.method === 'POST' && continuousResultMatch) {
+    requireBearer(request, config.runnerToken, 'runner');
+    const id = decodeURIComponent(continuousResultMatch[1]);
+    const body = await readJson(request);
+    const before = await store.getJob(id);
+    const updated = await store.completeContinuousEnvironment(id,
+      { leaseId: body.leaseId, runnerId: body.runnerId }, body.result);
+    if (before?.environmentAccess?.kind === 'website') await context.websiteBrowser.release(id);
+    return json(response, 200, { ok: true, job: updated });
   }
 
   const websiteMatch=url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/website-tool$/);

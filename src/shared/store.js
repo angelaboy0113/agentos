@@ -104,6 +104,7 @@ export class JsonStore {
         ...(input.questionId ? { questionId: input.questionId } : {}),
         ...(input.connectionEnrollmentPending ? {connectionEnrollmentPending:true} : {}),
         ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
+        ...(input.continuousInvestigation ? { continuousInvestigation: true } : {}),
         missionId: input.missionId ?? createId('MISSION'),
         projectId: input.projectId,
         projectName: input.projectName ?? input.projectId,
@@ -239,6 +240,69 @@ export class JsonStore {
       if (!continuing) plan.startedAt = new Date().toISOString();
       job.events.push({ id: createId('EVT'), type: continuing ? 'environment_query_resumed' : 'environment_query_started', at: new Date().toISOString(), scopeHash: plan.scopeHash, leaseId: job.lease.id });
       return structuredClone(job.environmentAccess);
+    });
+  }
+
+  async beginContinuousEnvironment(id, identity, plan, sourceResult) {
+    return this.transact((state) => {
+      const job = requireJob(state, id);
+      requireActiveLease(job, identity);
+      if (!job.continuousInvestigation || job.taskIntent !== 'analysis' || job.stage !== 'developer') throw new Error('当前任务不是连续只读调查');
+      if (job.environmentAccess) throw new Error('当前调查已有正在执行的环境步骤');
+      const queryKey = fingerprint({ environmentId: plan.environmentId, queryId: plan.queryId, parameters: plan.parameters });
+      job.continuousQueryKeys ??= [];
+      if (job.continuousQueryKeys.includes(queryKey)) throw Object.assign(new Error('重复环境查询，需要调整范围或补充新证据'), { code: 'DUPLICATE_QUERY' });
+      job.continuousQueryKeys.push(queryKey);
+      job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(sourceResult) }]);
+      job.environmentAccess = structuredClone(plan);
+      job.updatedAt = new Date().toISOString();
+      job.events.push({ id: createId('EVT'), type: 'continuous_environment_started', at: job.updatedAt,
+        environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash });
+      return structuredClone(job);
+    });
+  }
+
+  async completeContinuousEnvironment(id, identity, result) {
+    const config = await loadEnvironments();
+    return this.transact((state) => {
+      const job = requireJob(state, id);
+      requireActiveLease(job, identity);
+      const plan = job.environmentAccess;
+      verifyApprovedPlan(config, plan ?? {});
+      const evidence = result?.environmentEvidence;
+      if (!plan.startedAt || !evidence || evidence.environmentId !== plan.environmentId || evidence.queryId !== plan.queryId
+        || evidence.scopeHash !== plan.scopeHash || !Number.isFinite(Date.parse(evidence.readAt))
+        || Date.parse(evidence.readAt) < Date.parse(plan.startedAt) || !Number.isInteger(evidence.rowCount) || evidence.rowCount < 0
+        || !/^[a-f0-9]{64}$/.test(evidence.resultHash ?? '') || !result.finalMessage) throw new Error('Invalid continuous environment evidence');
+      job.context = compactContext([...job.context, { stage: 'developer', kind: 'environment_result', result: structuredClone(result) }]);
+      delete job.environmentAccess;
+      delete job.browserCheckpoint;
+      delete job.browserResumeClaim;
+      job.updatedAt = new Date().toISOString();
+      job.events.push({ id: createId('EVT'), type: 'continuous_environment_completed', at: job.updatedAt,
+        environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash });
+      return structuredClone(job);
+    });
+  }
+
+  async rejectContinuousEnvironment(id, identity, sourceResult, diagnostic) {
+    return this.transact((state) => {
+      const job = requireJob(state, id);
+      requireActiveLease(job, identity);
+      if (!job.continuousInvestigation) throw new Error('当前任务不是连续只读调查');
+      const rejectionKey = fingerprint({ code: diagnostic.code ?? 'INVALID_QUERY', environmentQuery: sourceResult?.environmentQuery ?? null,
+        websiteQuery: sourceResult?.websiteQuery ?? null });
+      job.continuousRejectionKeys ??= [];
+      const stalled = job.continuousRejectionKeys.includes(rejectionKey);
+      if (!stalled) job.continuousRejectionKeys.push(rejectionKey);
+      const message = `本次追加查询尚未执行：${diagnostic.reason} ${diagnostic.correction ?? ''}`.trim();
+      const result = { ...structuredClone(sourceResult), outcome: stalled ? 'blocked' : 'needs_clarification', environmentQuery: null, websiteQuery: null,
+        queryRejection: { ...structuredClone(diagnostic), retry: !stalled }, summary: message,
+        finalMessage: stalled ? `${message}\n\n同一无效查询在自查后仍未修正，已停止空转并保留现有证据。` : `${message}\n\n正在同一会话内修正查询范围并继续。` };
+      job.context = compactContext([...job.context, { stage: job.stage, kind: 'query_rejection', result }]);
+      job.updatedAt = new Date().toISOString();
+      job.events.push({ id: createId('EVT'), type: 'continuous_query_rejected', at: job.updatedAt, code: diagnostic.code ?? 'INVALID_QUERY' });
+      return { job: structuredClone(job), stalled, terminalResult: stalled ? result : null };
     });
   }
 
@@ -567,4 +631,9 @@ function requireJob(state, id) {
   const job = state.jobs.find((candidate) => candidate.id === id);
   if (!job) throw new Error(`Unknown job: ${id}`);
   return job;
+}
+
+function requireActiveLease(job, identity) {
+  if (job.status !== 'running' || job.lease?.id !== identity.leaseId || job.lease?.runnerId !== identity.runnerId
+    || !(Date.parse(job.lease?.expiresAt) > Date.now())) throw new Error('任务执行租约已失效');
 }

@@ -14,7 +14,7 @@ flowchart LR
   C --> S[(data/agentos.json)]
   C --> A[只读 Codex app-server]
   C --> Q[Job 队列]
-  R[Local Runner] --> Q
+  R[Bounded Runner Pool] --> Q
   R --> W[data/worktrees]
   W --> X[Codex exec]
   X --> B[业务仓库变更与验证]
@@ -62,10 +62,11 @@ agentos/
 - `JsonStore` 把状态写入临时文件后原子重命名为 `data/agentos.json`，并在单进程内串行事务。
 - 同一个控制面在 `/admin` 提供本机管理页面，并在 `/api/v1/admin/*` 提供脱敏记录与模型设置接口。页面先建立本机同源会话；写配置还要通过 Origin 和专用请求头检查。非回环监听时管理页面关闭。
 - 飞书消息用 source message ID 去重；卡片动作还有事件、消息、角色、群、状态和 action version 校验。
-- Runner 通过租约避免同一 Job 被重复领取；取消必须等待实际任务进程树退出。
+- 单一控制面管理有界 Runner 池，默认 3 个执行槽；每个槽用独立 runnerId 和租约领取不同 Job，同一 Job 仍只能被一个槽执行。取消必须等待实际任务进程树退出。
 - 卡片投递失败只重试投递，不重新运行 Codex；未送达动作先保存在 `pending-card-actions/`。
 - 单机 JSON 是当前产品边界。不要让两套 Control Plane 同时写同一个数据文件；多机高可用需要另行设计存储和分布式锁。
-- 分析链以“已核实目标是否增加”判断继续。同一环境目标连续两轮没有新增核实项时，转入一次负责人最终汇总，避免源码分析与环境查询彼此重复启动。一个问题中的开发调查复用首次准备的不可变源码快照及原 Codex thread；数据库和网页查询是该调查的内部工具段，不再重复 clone/fetch 或创建新的开发会话。卡片按连续角色去重显示流程，因此内部接续仍只显示一个“开发”。上下文有界保存，历史结果仍作为本机审计记录保留。
+- 新分析链是一个持久 Job：开发 Codex thread 提出受控环境请求，Runner 在当前租约内执行数据库或网页只读工具，把证据写回同一 Job，再恢复原 thread 继续判断。内部步骤不重新排队、不生成后继开发 Job，也没有额外负责人汇总模型轮次。相同且已拒绝的查询连续出现时才以证据化受阻结束，不设置整项任务的固定总时长或工具次数上限。
+- Runner 池默认 3 个槽，多个问题卡可真实并行；同一卡始终单线推进。共享 Chrome 复用同一用户登录态，但每个问题绑定自己的标签页，底层 Apple Events 原子操作串行化，避免不同任务互相导航。等待登录会释放 Runner 槽，登录恢复后由任一空闲槽继续原 Job 和原 Codex thread。
 
 ## 工作区边界
 
@@ -109,7 +110,7 @@ agentos/
 
 ## 环境源码快照
 
-可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。每次调查与负责人汇总复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
+可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。同一卡内的源码与工具步骤复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
 
 ## 按问题发现业务网站
 

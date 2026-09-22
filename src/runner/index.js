@@ -83,7 +83,7 @@ export class AgentRunner {
         if (!lostLease) await emit({ type: 'cancelled', processesExited: true });
         return;
       }
-      const result = await this.execute(job, this.config, emit, controller.signal);
+      const result = await this.executeContinuous(job, emit, controller.signal);
       const completed = await emit({ type: 'completed', result });
       // Cancellation may win the transaction race just after the worker exited naturally.
       if (completed.job.status === 'cancelling') await emit({ type: 'cancelled', processesExited: true });
@@ -98,6 +98,34 @@ export class AgentRunner {
     } finally {
       clearInterval(controlTimer);
       clearInterval(heartbeatTimer);
+    }
+  }
+
+  async executeContinuous(job, emit, signal) {
+    if (!job.continuousInvestigation || job.taskIntent !== 'analysis' || job.stage !== 'developer') {
+      return this.execute(job, this.config, emit, signal);
+    }
+    const identity = { runnerId: this.config.runnerId, leaseId: job.lease.id };
+    let current = job;
+    if (current.environmentAccess) {
+      const environmentResult = await this.execute(current, this.config, emit, signal);
+      if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) return environmentResult;
+      current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
+        { ...identity, result: environmentResult })).job;
+    }
+    for (;;) {
+      signal.throwIfAborted();
+      const result = await this.execute(current, this.config, emit, signal);
+      if (result?.outcome !== 'needs_clarification' || (!result.environmentQuery && !result.websiteQuery)) return result;
+      const prepared = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment`,
+        { ...identity, result });
+      current = prepared.job;
+      if (prepared.terminalResult) return prepared.terminalResult;
+      if (!prepared.planned) continue;
+      const environmentResult = await this.execute(current, this.config, emit, signal);
+      if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) return environmentResult;
+      current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
+        { ...identity, result: environmentResult })).job;
     }
   }
 
@@ -118,11 +146,16 @@ export class AgentRunner {
   }
 }
 
+export function createRunnerPool(config, execute = executeTaskProcess) {
+  return Array.from({ length: config.concurrency }, (_, index) => new AgentRunner({ ...config,
+    runnerId: config.concurrency === 1 ? config.runnerId : `${config.runnerId}-${index + 1}` }, execute));
+}
+
 async function main() {
   const config = await runnerConfig();
-  const runner = new AgentRunner(config);
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => runner.stop());
-  await runner.start();
+  const runners = createRunnerPool(config);
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => runners.forEach((runner) => runner.stop()));
+  await Promise.all(runners.map((runner) => runner.start()));
 }
 
 const current = process.argv[1] ? fileURLToPath(import.meta.url) : '';

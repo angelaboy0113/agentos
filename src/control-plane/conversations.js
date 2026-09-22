@@ -395,11 +395,11 @@ export class ConversationService {
         try { sourceEnvironment = selectSourceEnvironment(projects.projects[projectId], decision.sourceEnvironment); }
         catch (error) { return { notice: error.message }; }
       }
-      const route = environmentAccess ? { stage: 'developer', workflow: 'single_developer' } : routeDecision(turn.role, decision.intent);
+      const route = environmentAccess
+        ? { stage: 'developer', workflow: turn.setupSourceJobId ? 'continuous_analysis' : 'single_developer' }
+        : routeDecision(turn.role, decision.intent);
       const routing = agentRouting(this.context, route.stage);
-      if (route.workflow === 'analysis_review' && (!routing.agentProfile || !agentRouting(this.context, 'owner_report').agentProfile)) {
-        throw new Error('代码分析协作需要配置开发和项目负责人两个机器人 profile；本次未创建任务。');
-      }
+      if (route.workflow === 'continuous_analysis' && !routing.agentProfile) throw new Error('代码分析需要配置开发机器人 profile；本次未创建任务。');
       await store.transact(s => { const t = (s.conversations ?? []).find(x=>x.id===turn.id); if(t) t.decision=structuredClone(decision); });
       const created = await store.createJob({
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
@@ -410,12 +410,12 @@ export class ConversationService {
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
-        ...routing, ...route, taskIntent: decision.intent, instruction: decision.instruction, originalQuestion: turn.content, attachments: [...(turn.resumeAttachments??[]),...attachments],
+        ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction, originalQuestion: turn.content, attachments: [...(turn.resumeAttachments??[]),...attachments],
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
-          reason: route.workflow === 'analysis_review' ? '交给开发只读调查，完成后由项目负责人汇总' : '按角色边界转交负责人协调' } : null,
+          reason: route.workflow === 'continuous_analysis' ? '交给开发在同一会话内完成只读调查和最终回答' : '按角色边界转交负责人协调' } : null,
       });
       if(turn.setupPending && !decision.environmentSetup)await this.update(turn.id,{setupPending:false});
-      return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${route.workflow === 'analysis_review' ? '协作：开发只读调查 → 项目负责人汇总（不修改代码）\n' : ''}状态：${created.job.status === 'awaiting_environment_approval' ? '等待环境负责人批准本次查询' : '等待执行'}` };
+      return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${route.workflow === 'continuous_analysis' ? '执行：同一开发会话持续完成源码与环境只读调查\n' : ''}状态：${created.job.status === 'awaiting_environment_approval' ? '等待环境负责人批准本次查询' : '等待执行'}` };
     }
     const job = await store.getJob(decision.jobId);
     if (!job || job.chatId !== turn.chatId || job.projectId !== projectId) throw new Error('本群没有这个任务，不能跨群操作。');
@@ -454,7 +454,7 @@ export class ConversationService {
 
 export function routeDecision(role, intent) {
   if (intent === 'analysis' && ['owner_intake', 'owner_report', 'pm', 'developer'].includes(role)) {
-    return { stage: 'developer', workflow: 'analysis_review' };
+    return { stage: 'developer', workflow: 'continuous_analysis' };
   }
   if (intent === 'implementation') {
     const stage = ['qa', 'owner_audit', 'owner_report'].includes(role) ? 'owner_intake' : role;
