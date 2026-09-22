@@ -26,5 +26,6 @@ export function presentEnvironmentResult(plan, result, explanation = '') {
       '查询记录、技术字段和执行过程见详情。'].filter(Boolean).join('\n\n');
   const details = rows.map((row,i) => `记录 ${i+1}（查询证据，不代表原因）\n\n${Object.entries(row).map(([k,v]) => `- ${cell(k)}：${cell(v)}`).join('\n\n')}`).join('\n\n');
   const metadata = `${plan.tier.toUpperCase()} · ${plan.description}：返回 ${unique.length} 条去重结果${result.truncated ? '（结果受限，非全部数据）' : ''}。读取时间：${result.evidence.readAt}。${note}`;
-  return { summary, details, metadata };
+  const records = rows.slice(0, 20).map(row => Object.fromEntries(Object.entries(row).map(([key,value]) => [cell(key), cell(value)])));
+  return { summary, details, metadata, records };
 }

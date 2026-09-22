@@ -18,6 +18,15 @@ test('completion requires all declared goals with evidence; old resolved gaps ca
  r.investigation=null;assert.equal(assessInvestigation(job,r).outcome,'partial');
  assert.equal(assessInvestigation({...job,taskIntent:'implementation'},r).outcome,'ready');
 });
+test('optional adjacent findings cannot keep an answered user question red',()=>{
+ const job={taskIntent:'analysis',stage:'developer',context:[]};
+ const r=result();r.outcome='ready';r.investigation={...r.investigation,status:'complete',goals:[
+  {id:'asked-field-limit',required:true,status:'verified',evidence:'Frontend and backend both enforce 150 characters'},
+  {id:'adjacent-srm-column',required:false,status:'open',evidence:'Screenshot contains a separate SRM mapping error'},
+ ],blocker:null};
+ assert.equal(investigationComplete(job,r),true);
+ assert.equal(assessInvestigation(job,r).outcome,'ready');
+});
 test('self-review continues with new evidence but stops repeated evidence or explicit external blocker',()=>{
  const r=result(),job={context:[{stage:'owner_report',result:r},{stage:'owner_report',result:r}]};
  assert.equal(reviewDecision(job,r).continue,false);

@@ -215,12 +215,16 @@
                 "additionalProperties": false,
                 "required": [
                   "id",
+                  "required",
                   "status",
                   "evidence"
                 ],
                 "properties": {
                   "id": {
                     "type": "string"
+                  },
+                  "required": {
+                    "type": "boolean"
                   },
                   "status": {
                     "type": "string",

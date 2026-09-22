@@ -10,6 +10,7 @@ test('query answer survives card summary clipping, deduplicates endpoints and hi
  for(const value of ['db.example','3306','demo','未连接数据库'])assert.ok(visible.includes(value));
  assert.equal((visible.match(/主机\/IP/g)||[]).length,1);assert.doesNotMatch(JSON.stringify(p),/hidden-secret|password/);
  assert.doesNotMatch(p.metadata,/db.example|demo/);
+ assert.deepEqual(p.records,[{host:'db.example',port:'3306',database:'demo'}]);
 });
 test('empty and partial queries do not claim complete; overflow points to full evidence',()=>{
  assert.match(presentEnvironmentResult(plan,{...result,rows:[]}).summary,/未返回记录/);

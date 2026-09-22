@@ -20,6 +20,16 @@ test('same environment target converges after two restarts without new verified 
  assert.equal(environmentContinuation(state,job,{...request,queryId:'browser'},result()).continue,true);
 });
 
+test('continuous job changes evidence path after one empty partial website round',()=>{
+ const request={environmentId:'prd-site',queryId:'investigate',kind:'website',parameters:['check record']};
+ const evidence={...request,rowCount:0};
+ const job={questionId:'q',taskIntent:'analysis',context:[{kind:'environment_result',result:{outcome:'partial',environmentEvidence:evidence}}]};
+ const state={jobs:[job]};
+ const decision=environmentContinuation(state,job,request,result());
+ assert.equal(decision.continue,false);assert.match(decision.reason,/数据库、源码/);
+ assert.equal(environmentContinuation(state,job,{...request,environmentId:'prd-db',queryId:'records',kind:'mysql'},result()).continue,true);
+});
+
 test('question context stays bounded instead of copying every prior context',async t=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'agentos-context-bound-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const file=path.join(dir,'state.json'),store=new JsonStore(file);

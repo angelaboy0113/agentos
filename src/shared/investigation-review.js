@@ -4,9 +4,14 @@ export function investigationComplete(job, result) {
  const r=result.investigation;
  if(r?.status!=='complete'||r.blocker||!r.goals?.length)return false;
  const ids=new Set();
- for(const g of r.goals){if(!nonempty(g.id)||ids.has(g.id)||g.status!=='verified'||!nonempty(g.evidence))return false;ids.add(g.id);}
- // A later report cannot obtain completion by omitting a previously declared goal.
- return (job.context??[]).every(x=>(x.result?.investigation?.goals??[]).every(g=>ids.has(g.id)));
+ for(const g of r.goals){
+  if(!nonempty(g.id)||ids.has(g.id)||!nonempty(g.evidence))return false;
+  if(g.required!==false&&g.status!=='verified')return false;
+  ids.add(g.id);
+ }
+ // A later report cannot obtain completion by omitting a previously declared required goal.
+ return (job.context??[]).every(x=>(x.result?.investigation?.goals??[])
+  .filter(g=>g.required!==false).every(g=>ids.has(g.id)));
 }
 export function assessInvestigation(job,result){
  if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
@@ -44,11 +49,15 @@ const verifiedGoals = result => new Set((result?.investigation?.goals ?? [])
 // same target without closing another goal is a stalled orchestration loop.
 export function environmentContinuation(state,job,request,currentResult){
  const jobs=(state.jobs??[]).filter(item=>item.questionId===job.questionId&&item.taskIntent==='analysis');
+ const contexts=jobs.flatMap(item=>item.context??[]).map(entry=>entry.result).filter(Boolean);
  const current=verifiedGoals(currentResult);
  let priorBest=new Set();
- for(const item of jobs){const found=verifiedGoals(item.result);if(found.size>priorBest.size)priorBest=found;}
+ for(const result of [...jobs.map(item=>item.result),...contexts]){const found=verifiedGoals(result);if(found.size>priorBest.size)priorBest=found;}
  if([...current].some(id=>!priorBest.has(id)))return {continue:true};
- const sameTarget=jobs.filter(item=>item.environmentAccess&&targetKey(item.environmentAccess)===targetKey(request));
+ const priorResults=contexts.filter(result=>targetKey(result.environmentEvidence)===targetKey(request));
+ const emptyPartial=priorResults.some(result=>result.outcome==='partial'&&result.environmentEvidence?.rowCount===0);
+ if(request?.kind==='website'&&emptyPartial)return {continue:false,reason:'该业务网站目标上一轮未取得记录且调查未完成。请改用已登记数据库、源码或另一条有依据的证据路径，不要换一种描述重复打开同一网站。'};
+ const sameTarget=[...jobs.filter(item=>item.environmentAccess&&targetKey(item.environmentAccess)===targetKey(request)),...priorResults];
  if(sameTarget.length<2)return {continue:true};
  return {continue:false,reason:'同一环境调查目标已经完成两轮独立执行，但原问题的已核实目标没有增加。继续重启任务只会重复已有路径。'};
 }

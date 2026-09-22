@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { JsonStore } from '../src/shared/store.js';
-import { validateHandoff, enforceHandoff, preserveAnalysisGaps } from '../src/runner/harness.js';
+import { validateHandoff, enforceHandoff, preserveAnalysisGaps, preserveEnvironmentEvidence } from '../src/runner/harness.js';
 import { jobCard } from '../src/control-plane/message-cards.js';
 import { jobTerminalMention } from '../src/control-plane/requester-mention.js';
 const handoff = () => ({ artifacts: [{ kind: 'code', path: 'code.js' }], checks: [
@@ -86,4 +86,16 @@ test('owner cannot silently upgrade partial findings or discard inherited gaps',
   assert.equal(raw.outcome, 'ready');
   assert.equal(preserveAnalysisGaps(job, { outcome: 'blocked' }).outcome, 'blocked');
   assert.equal(preserveAnalysisGaps({ ...job, taskIntent: 'implementation' }, raw), raw);
+});
+test('final synthesis retains the supporting records returned by a read-only query',()=>{
+ const job={taskIntent:'analysis',stage:'developer',context:[{result:{evidenceRecords:[
+  {code:'DZ-20260910-0001',status:'approved'},
+  {code:'DZ-20260911-0001',status:'approved'},
+  {code:'DZ-20260915-0001',status:'approved'},
+ ]}}]};
+ const output=preserveEnvironmentEvidence(job,{outcome:'ready',summary:'blob URL caused the broken image',finalMessage:'Confirmed root cause'});
+ for(const id of ['DZ-20260910-0001','DZ-20260911-0001','DZ-20260915-0001']){
+  assert.match(output.summary,new RegExp(id));assert.match(output.finalMessage,new RegExp(id));
+ }
+ assert.match(output.finalMessage,/关键查询记录/);
 });

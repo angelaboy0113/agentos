@@ -28,7 +28,7 @@ export async function loadHarness(job, directory = CONFIG) {
 export function handoffContext(job) {
   const independent = ['qa', 'owner_audit'].includes(job.stage);
   return (job.context ?? []).slice(-8).map(({ stage, result = {} }) => ({ stage,
-    outcome: result.outcome, environmentEvidence: result.environmentEvidence, workspace: result.workspace,
+    outcome: result.outcome, environmentEvidence: result.environmentEvidence, evidenceRecords: result.evidenceRecords, workspace: result.workspace,
     harness: result.harness, investigation: result.investigation, investigationPause: result.investigationPause,
     runtimeDiscoveries: result.runtimeDiscoveries, websiteMismatch: result.websiteMismatch,
     handoff: result.handoff,
@@ -111,4 +111,19 @@ export function preserveAnalysisGaps(job, result) {
     finalMessage: `${result.finalMessage}\n\n仍未核实（沿用本轮调查）：\n${risks.map((risk) => `- ${risk}`).join('\n')}`,
     handoff: { ...result.handoff, risks,
       artifacts: result.handoff.artifacts?.length ? result.handoff.artifacts : prior.handoff?.artifacts ?? [] } };
+}
+
+const evidenceLine = (record) => Object.entries(record).slice(0, 8).map(([key,value]) => `${key}=${value}`).join('；');
+
+// Rows have already been credential-filtered by environment-result-presentation.
+export function preserveEnvironmentEvidence(job, result) {
+  if (job.taskIntent !== 'analysis' || !['ready', 'partial'].includes(result.outcome)) return result;
+  const evidence = [...(job.context ?? [])].reverse().find(entry => entry.result?.evidenceRecords?.length)?.result?.evidenceRecords;
+  if (!evidence?.length || String(result.finalMessage ?? '').includes('关键查询记录（来自受控只读查询）')) return result;
+  const records = evidence.slice(0, 5);
+  const details = records.map((record,index) => `${index + 1}. ${evidenceLine(record)}`).join('\n');
+  const compact = records.slice(0, 3).map(evidenceLine).join('；');
+  return { ...result,
+    summary: `${result.summary ?? ''}\n\n关键查询记录：${compact}`.trim().slice(0, 1200),
+    finalMessage: `${result.finalMessage ?? result.summary ?? ''}\n\n关键查询记录（来自受控只读查询）\n${details}` };
 }

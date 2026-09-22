@@ -16,6 +16,8 @@ test('parameter diagnostics explain the actual constraint without retaining valu
  }
  const unknown=queryRejection(new Error('password=do-not-expose'),{});assert.equal(unknown.retry,false);assert.doesNotMatch(JSON.stringify(unknown),/password|do-not-expose/);
  const denied=queryRejection(new Error('环境或查询模板未配置；请管理员在本机配置'),{});assert.equal(denied.retry,false);
+ const repeated=queryRejection({queryDiagnostic:{code:'REPEATED_TARGET',reason:'website returned no evidence'}},{context:[]});
+ assert.equal(repeated.code,'REPEATED_TARGET');assert.equal(repeated.retry,true);assert.match(repeated.correction,/数据库、源码/);
 });
 async function fixture(t){
  const dir=await mkdtemp(path.join(os.tmpdir(),'query-repair-'));const previous=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(dir,'env.json');await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(env()));
