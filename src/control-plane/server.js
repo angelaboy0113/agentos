@@ -542,7 +542,7 @@ export async function notifyJobEvent(context, { job, event }) {
   if (!job.chatId && !job.replyToMessageId) return;
   if (context.cards?.enabled) {
     if (!['queued', 'started', 'completed', 'failed', 'cancelled', 'cancel_requested', 'progress'].includes(event.type)) return;
-    if (event.type === 'progress' && !['codex_waiting', 'codex_working', 'connection_retry', 'verification', 'tool_activity'].includes(event.phase)) return;
+    if (event.type === 'progress' && !['codex_waiting', 'codex_working', 'connection_retry', 'model_capacity_retry', 'verification', 'tool_activity'].includes(event.phase)) return;
     // Always re-read authoritative state; HTTP event notifications may arrive out of order.
     const current = await context.store.getJob(job.id);
     if (current.questionId) { await publishQuestion(context, current.questionId); return; }
@@ -563,7 +563,7 @@ export async function notifyJobEvent(context, { job, event }) {
   }
   if (event.type === 'progress') {
     const labels = { codex_waiting: 'Codex 已启动，正在等待模型响应', codex_working: 'Codex 仍在处理当前任务，尚未完成',
-      connection_retry: 'Codex 连接异常，正在重试；尚未完成', verification: 'Codex 已返回，正在执行配置的验证命令' };
+      connection_retry: 'Codex 连接异常，正在重试；尚未完成', model_capacity_retry: '当前模型服务繁忙，正在同一调查会话中自动重试', verification: 'Codex 已返回，正在执行配置的验证命令' };
     if (!Object.hasOwn(labels, event.phase)) return; // Never publish raw commands, logs or credentials.
     const accepted = await context.store.transact((state) => {
       const current = state.jobs.find((item) => item.id === job.id);

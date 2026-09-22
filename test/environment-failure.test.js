@@ -39,3 +39,7 @@ test('native MySQL TLS unsupported code becomes an actionable secret-free diagno
  const diagnostic=failureDiagnostic(error);assert.match(diagnostic,/TLS_UNSUPPORTED/);assert.match(diagnostic,/尚未开始查询/);assert.doesNotMatch(diagnostic,/synthetic-secret/);
  assert.equal(failureDiagnostic(safeExecutionError(error)),diagnostic);
 });
+test('model capacity failure is classified as temporary service capacity, not an unknown execution error',()=>{
+ const diagnostic=failureDiagnostic('Selected model is at capacity. Please try a different model.');
+ assert.match(diagnostic,/MODEL_CAPACITY/);assert.match(diagnostic,/模型暂时没有可用容量/);assert.doesNotMatch(diagnostic,/EXECUTION_ERROR/);
+});

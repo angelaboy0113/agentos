@@ -82,6 +82,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   const phase = relevant.filter((e) => e.type === 'progress' && e.phase).at(-1)?.phase;
   const operation = job.status === 'cancelling' ? (job.cancellationError ?? '已请求停止，等待执行器确认进程退出；已有文件修改将保留。')
     : phase === 'verification' ? '正在运行项目验证命令' : phase === 'connection_retry' ? '连接异常，Codex 正在重试'
+      : phase === 'model_capacity_retry' ? '当前模型服务繁忙，正在同一调查会话中自动重试'
     : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
   const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : job.status === 'cancelled' ? '任务已取消，已停止继续执行。' : !active && job.result?.finalMessage ? resultSummary(job.result.summary || job.result.finalMessage) : '';

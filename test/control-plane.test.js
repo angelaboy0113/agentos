@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createControlPlane } from '../src/control-plane/server.js';
 import { parseFeishuMessage } from '../src/control-plane/feishu.js';
 import { routeInstruction, routeInstructionForStage } from '../src/shared/protocol.js';
-import { buildCodexArgs } from '../src/runner/codex-executor.js';
+import { buildCodexArgs, isModelCapacityError, runCodexWithCapacityRetry } from '../src/runner/codex-executor.js';
 
 test('Codex runner uses automatic review without a conflicting sandbox flag', () => {
   const args = buildCodexArgs('D:\\workspace', []);
@@ -18,6 +18,41 @@ test('Codex runner uses automatic review without a conflicting sandbox flag', ()
 test('Codex runner applies the AgentOS model and reasoning selection to new jobs', () => {
   const args = buildCodexArgs('/workspace', [], { runtime: { model: 'gpt-6-astra', reasoningEffort: 'xhigh' } });
   assert.deepEqual(args.slice(0, 7), ['exec', '-C', '/workspace', '--model', 'gpt-6-astra', '-c', 'model_reasoning_effort="xhigh"']);
+});
+
+test('read-only analysis resumes once after temporary model capacity failure', async () => {
+  const calls = [], events = [], waits = [];
+  const result = await runCodexWithCapacityRetry({
+    job: { taskIntent: 'analysis', stage: 'developer', context: [] }, workspace: '/workspace', prompt: 'original',
+    emit: async (event) => events.push(event),
+  }, {
+    run: async (options) => {
+      calls.push(options);
+      if (calls.length === 1) throw Object.assign(new Error('Selected model is at capacity. Please try a different model.'), { threadId: 'thread-capacity' });
+      return { outcome: 'ready', finalMessage: 'done' };
+    },
+    wait: async (ms) => waits.push(ms), delayMs: 25,
+  });
+  assert.equal(result.finalMessage, 'done');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].resumeThreadIdOverride, 'thread-capacity');
+  assert.match(calls[1].prompt, /同一会话/);
+  assert.deepEqual(events, [{ type: 'progress', phase: 'model_capacity_retry', attempt: 1 }]);
+  assert.deepEqual(waits, [25]);
+  assert.equal(isModelCapacityError(new Error('Selected model is at capacity. Please try a different model.')), true);
+});
+
+test('capacity retry is read-only only and a second capacity failure remains explicit', async () => {
+  let calls = 0;
+  await assert.rejects(runCodexWithCapacityRetry({
+    job: { taskIntent: 'implementation' }, workspace: '/workspace', prompt: 'write', emit: async () => {},
+  }, { run: async () => { calls++; throw new Error('Selected model is at capacity.'); }, wait: async () => {} }), /at capacity/);
+  assert.equal(calls, 1);
+  calls = 0;
+  await assert.rejects(runCodexWithCapacityRetry({
+    job: { taskIntent: 'analysis', stage: 'developer', context: [] }, workspace: '/workspace', prompt: 'read', emit: async () => {},
+  }, { run: async () => { calls++; throw new Error('Selected model is at capacity.'); }, wait: async () => {} }), /at capacity/);
+  assert.equal(calls, 2);
 });
 
 test('only explicit role commands are recognized for execution', () => {

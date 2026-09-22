@@ -43,7 +43,7 @@ export async function executeJob(job, config, emit) {
   const prompt = await buildPrompt(job, project, harness, sourceSync, ledger);
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
-  const rawResult = assessInvestigation(job, preserveAnalysisGaps(job, await runCodex({ job, config, workspace, attachmentPaths, prompt, emit })));
+  const rawResult = assessInvestigation(job, preserveAnalysisGaps(job, await runCodexWithCapacityRetry({ job, config, workspace, attachmentPaths, prompt, emit })));
   if (sourceSync) {
     try { await verifyAnalysisSources(project, sourceSync); }
     catch (error) { return { ...sourceBlocked(error), sourceSync }; }
@@ -82,13 +82,13 @@ function executeMock(job, emit) {
   });
 }
 
-async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit }) {
+async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit, resumeThreadIdOverride = null }) {
   const env = await codexEnvironment();
   const runtime = await loadCodexRuntimeSettings();
   const codexBin = await resolveCodexBinary(config.codexBin);
   return new Promise((resolve, reject) => {
     const readOnly = job.taskIntent === 'analysis' || ['owner_intake', 'owner_audit', 'owner_report'].includes(job.stage);
-    const resumeThreadId = analysisThreadId(job, workspace);
+    const resumeThreadId = resumeThreadIdOverride ?? analysisThreadId(job, workspace);
     const args = buildCodexArgs(workspace, attachmentPaths, { readOnly, runtime, resumeThreadId });
 
     const child = spawn(codexBin, args, { cwd: workspace, env, windowsHide: true, shell: false });
@@ -147,7 +147,11 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit 
         } catch { /* Incomplete diagnostics are not a successful result. */ }
       }
       await outgoing; // Complete event delivery before the runner publishes terminal status.
-      if (code !== 0 || failure) return reject(new Error(failure || `Codex exited ${code}: ${stderr.slice(-4000)}`));
+      if (code !== 0 || failure) {
+        const error = new Error(failure || `Codex exited ${code}: ${stderr.slice(-4000)}`);
+        if (threadId) error.threadId = threadId;
+        return reject(error);
+      }
       try {
         const result = JSON.parse(finalMessage);
         if (!['ready', 'needs_clarification', 'blocked', ...(job.taskIntent === 'analysis' ? ['partial'] : [])].includes(result.outcome) || !result.finalMessage?.trim()) throw new Error('Missing valid outcome');
@@ -155,6 +159,27 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit 
       } catch (error) { reject(new Error(`Codex result invalid: ${error.message}`)); }
     });
   });
+}
+
+export function isModelCapacityError(error) {
+  return /selected model is at capacity|model.{0,40}(?:at capacity|overloaded|temporarily unavailable)/i.test(String(error?.message ?? error ?? ''));
+}
+
+export async function runCodexWithCapacityRetry(options, adapters = {}) {
+  const run = adapters.run ?? runCodex;
+  const wait = adapters.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  try {
+    return await run(options);
+  } catch (error) {
+    if (options.job.taskIntent !== 'analysis' || !isModelCapacityError(error)) throw error;
+    await options.emit({ type: 'progress', phase: 'model_capacity_retry', attempt: 1 });
+    await wait(adapters.delayMs ?? 5000);
+    const resumeThreadIdOverride = error.threadId ?? analysisThreadId(options.job, options.workspace);
+    const prompt = resumeThreadIdOverride
+      ? '上一轮只读调查因所选模型临时容量不足而中断。请基于同一会话已经取得的源码与工具证据继续，完成原问题并按输出 schema 返回结果；不要重复无必要的检索，也不要执行任何写操作。'
+      : options.prompt;
+    return run({ ...options, prompt, resumeThreadIdOverride });
+  }
 }
 
 export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false, runtime = {}, resumeThreadId = null } = {}) {
