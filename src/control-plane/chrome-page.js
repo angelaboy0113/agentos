@@ -11,13 +11,20 @@ export function chromePage(request) {
   return {error:'浏览器已离开本次批准的应用范围，请重新确认页面'};
  const write=/新增|创建|保存|修改|编辑|删除|启动|停止|执行|触发|重跑|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout)\b/i;
  const read=/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|search|query|view|detail|log|next|previous|refresh/i;
- const label=el=>(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+ const isRow=el=>el.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');
+ const label=el=>{
+  const text=(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+  return isRow(el)&&text?`行详情：${text}`:text;
+ };
  function type(el){
   if(!visible(el)||el.disabled||el.closest('[contenteditable="true"]'))return null;
   const text=label(el),tag=el.tagName.toLowerCase();if(!text||write.test(text))return null;
   if(el.closest('[role=menu]')&&(el.matches('[role=menuitem]')||el.classList.contains('ant-menu-submenu-title')))return 'read-action';
   if(tag==='input')return /^(text|search|date|datetime-local|number)$/.test(el.type)&&/搜索|查询|日期|时间|名称|编号|search|filter|date|name|id/i.test(text)?'search':null;
   if(tag==='select')return 'select';
+  // Ant Design and similar data tables commonly attach the detail navigation to the row itself instead of rendering a labelled link.
+  // A row key identifies an existing record; clicking it only drills into that record and remains subject to the same-origin/read-only label checks above.
+  if(isRow(el))return 'read-action';
   if(tag==='a'){
    const raw=el.getAttribute('href');if(!raw||raw.startsWith('javascript:'))return null;
    const u=new URL(raw,location.href);
@@ -42,7 +49,7 @@ export function chromePage(request) {
  }
  if(credentialFormVisible)return {loginRequired:true,credentialFormVisible:true,verificationRequired:false,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在此Chrome页面完成，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
  const refs={},controls=[],generation=(state?.generation??0)+1;let n=0;
- for(const el of [...document.querySelectorAll('a,button,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title')].slice(0,500)){
+ for(const el of [...document.querySelectorAll('a,[role=link],button,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]')].slice(0,500)){
   const t=type(el);if(!t)continue;const ref=token+'-'+generation+'-'+n++;
   const text=label(el);refs[ref]={el,type:t,label:text,href:el.getAttribute('href')};
   controls.push({ref,type:t,label:text,...(t==='select'?{options:[...el.options].slice(0,100).map(o=>({value:o.value,label:o.textContent}))}:{})});

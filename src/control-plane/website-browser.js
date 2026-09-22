@@ -68,14 +68,15 @@ export class WebsiteBrowser {
  async snapshot(s){
   s.refs.clear();s.generation++;
   const text=await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
-  const loc=s.page.locator('a,button,select,[role="button"],input:not([type="password"]):not([type="hidden"])');const controls=[];
+  const loc=s.page.locator('a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');const controls=[];
   for(let i=0,n=Math.min(await loc.count(),150);i<n;i++){
    const el=loc.nth(i);if(!await el.isVisible()||!await el.isEnabled())continue;
-   const tag=await el.evaluate(x=>x.tagName.toLowerCase());const label=cleanWebsiteText((await el.innerText().catch(()=>''))||await el.getAttribute('placeholder')||await el.getAttribute('aria-label')||await el.getAttribute('name')||await el.getAttribute('id')||'').trim().slice(0,100);
+   const tag=await el.evaluate(x=>x.tagName.toLowerCase());const row=await el.evaluate(x=>x.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]'));
+   const rawLabel=cleanWebsiteText((await el.innerText().catch(()=>''))||await el.getAttribute('placeholder')||await el.getAttribute('aria-label')||await el.getAttribute('title')||await el.getAttribute('name')||await el.getAttribute('id')||'').trim().slice(0,100);const label=row&&rawLabel?`行详情：${rawLabel}`:rawLabel;
    if(!label||writeAction.test(label))continue;
    if(tag==='input'&&!/搜索|查询|日期|时间|名称|编号|search|filter|date|name|id/i.test(label))continue;
    // Expose navigation, view, search and pagination controls; unknown effects are not guessed.
-   if(tag!=='input'&&tag!=='select'&&tag!=='a'&&!/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|确定|search|query|view|detail|log|next|previous|refresh/i.test(label))continue;
+   if(tag!=='input'&&tag!=='select'&&tag!=='a'&&!row&&!/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|确定|search|query|view|detail|log|next|previous|refresh/i.test(label))continue;
    const ref=`${s.refPrefix}-${s.generation}-${i}`,type=tag==='input'?'search':tag==='select'?'select':'read-action';s.refs.set(ref,{el,type});controls.push({ref,type,label,...(tag==='select'?{options:await el.locator('option').evaluateAll(xs=>xs.slice(0,100).map(x=>({value:x.value,label:x.textContent})))}:{})});
   }
   return {stage:'已读取业务网页',url:new URL(s.page.url()).origin+new URL(s.page.url()).pathname,pageText:cleanWebsiteText(text),controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；不代表任务已执行或数据已修改。'};
