@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.5.1** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.5.2** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 

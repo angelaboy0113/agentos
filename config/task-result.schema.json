@@ -145,6 +145,17 @@
               "items": {
                 "type": "string"
               }
+            },
+            "goalIds": {
+              "type": "array",
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              }
             }
           }
         }

@@ -107,6 +107,20 @@ test('MySQL dynamic tools verify grants, use only base table metadata, bind valu
   const select=calls.find(x=>x.sql?.startsWith('SELECT `status`'));assert.deepEqual(select.params,["' OR 1=1"]);assert.doesNotMatch(select.sql,/OR 1=1/);
   await tools.close();assert.equal(calls.at(-1),'destroy');
 });
+test('MySQL JSON fields remain readable while nested secrets are removed',async()=>{
+ const payload={items:[{expenseName:'临促费',unitPrice:130,formula:'130/4'}],password:'must-not-leak',nested:{token:'also-hidden',amount:32.5}};
+ const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async statement=>statement.sql.includes('information_schema')
+  ?[[{table_name:'orders',column_name:'id'},{table_name:'orders',column_name:'fee_json'}]]
+  :[[{fee_json:payload}]],rollback:async()=>{},destroy:()=>{}})};
+ const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'fake',database:'demo'},query,credentials,{mysql:driver});
+ try{
+  await tools.run('schema',{table:'orders'});
+  const result=await tools.run('select',{table:'orders',columns:['fee_json'],filters:[{column:'id',op:'=',value:'one'}]});
+  const value=result.rows[0].fee_json;
+  assert.match(value,/临促费/);assert.match(value,/unitPrice/);assert.match(value,/130/);assert.match(value,/32\.5/);
+  assert.doesNotMatch(value,/\[object Object\]|must-not-leak|also-hidden|password|token/);assert.ok(value.length<=500);
+ }finally{await tools.close();}
+});
 test('schema can discover exact fields in a wide table without paging through unrelated columns', async () => {
   const calls=[];
   const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async(statement,params)=>{

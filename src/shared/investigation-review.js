@@ -44,20 +44,42 @@ export function reviewDecision(job,result){
 const targetKey = value => `${value?.environmentId ?? ''}:${value?.queryId ?? ''}`;
 const verifiedGoals = result => new Set((result?.investigation?.goals ?? [])
  .filter(goal => goal.status === 'verified' && nonempty(goal.id) && nonempty(goal.evidence)).map(goal => goal.id));
+const continuationMetadata = (request,currentResult) => {
+ const ids=request?.goalIds;
+ if(ids===undefined)return {ok:true,metadata:null};
+ if(!Array.isArray(ids)||!ids.length||ids.length>8||new Set(ids).size!==ids.length||ids.some(id=>!nonempty(id)))
+  return {ok:false,reason:'定向补查必须列出1至8个未完成目标 goalIds。'};
+ const goals=new Map((currentResult?.investigation?.goals??[]).map(goal=>[goal.id,goal]));
+ const invalid=ids.filter(id=>{const goal=goals.get(id);return !goal||goal.required===false||goal.status!=='open';});
+ if(invalid.length)return {ok:false,reason:`定向补查只能关联本轮仍未核实的核心目标：${invalid.join('、')}。`};
+ const sorted=[...ids].sort();
+ const evidence=sorted.map(id=>{const goal=goals.get(id);return [id,goal.status,goal.evidence??''];});
+ const evidenceHash=createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+ const continuationKey=createHash('sha256').update(JSON.stringify([targetKey(request),sorted,evidenceHash])).digest('hex');
+ return {ok:true,metadata:{continuationGoalIds:sorted,continuationEvidenceHash:evidenceHash,continuationKey}};
+};
 
 // One environment worker may perform many tool calls. Starting more workers for the
 // same target without closing another goal is a stalled orchestration loop.
 export function environmentContinuation(state,job,request,currentResult){
  const jobs=(state.jobs??[]).filter(item=>item.questionId===job.questionId&&item.taskIntent==='analysis');
  const contexts=jobs.flatMap(item=>item.context??[]).map(entry=>entry.result).filter(Boolean);
+ const targeted=continuationMetadata(request,currentResult);
+ if(!targeted.ok)return {continue:false,reason:targeted.reason};
  const current=verifiedGoals(currentResult);
  let priorBest=new Set();
  for(const result of [...jobs.map(item=>item.result),...contexts]){const found=verifiedGoals(result);if(found.size>priorBest.size)priorBest=found;}
- if([...current].some(id=>!priorBest.has(id)))return {continue:true};
+ if([...current].some(id=>!priorBest.has(id)))return {continue:true,metadata:targeted.metadata};
  const priorResults=contexts.filter(result=>targetKey(result.environmentEvidence)===targetKey(request));
  const emptyPartial=priorResults.some(result=>result.outcome==='partial'&&result.environmentEvidence?.rowCount===0);
  if(request?.kind==='website'&&emptyPartial)return {continue:false,reason:'该业务网站目标上一轮未取得记录且调查未完成。请改用已登记数据库、源码或另一条有依据的证据路径，不要换一种描述重复打开同一网站。'};
  const sameTarget=[...jobs.filter(item=>item.environmentAccess&&targetKey(item.environmentAccess)===targetKey(request)),...priorResults];
- if(sameTarget.length<2)return {continue:true};
+ if(sameTarget.length<2)return {continue:true,metadata:targeted.metadata};
+ if(targeted.metadata){
+  const used=jobs.some(item=>(item.continuousContinuationKeys??[]).includes(targeted.metadata.continuationKey)
+    ||item.environmentAccess?.continuationKey===targeted.metadata.continuationKey);
+  if(!used)return {continue:true,metadata:targeted.metadata};
+  return {continue:false,reason:'该剩余目标已经按当前证据完成过一次定向补查；证据没有变化，不能通过改写查询重复执行。'};
+ }
  return {continue:false,reason:'同一环境调查目标已经完成两轮独立执行，但原问题的已核实目标没有增加。继续重启任务只会重复已有路径。'};
 }

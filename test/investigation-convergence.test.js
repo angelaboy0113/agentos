@@ -14,10 +14,33 @@ const result=(verified=[])=>({investigation:{status:'continue',goals:[
 
 test('same environment target converges after two restarts without new verified goals',()=>{
  const job={questionId:'q',taskIntent:'analysis'};
- const state={jobs:[0,1].map(i=>({id:`env-${i}`,questionId:'q',taskIntent:'analysis',environmentAccess:request,result:{finalMessage:`evidence-${i}`}}))};
+ const state={jobs:[0,1].map(i=>({id:`env-${i}`,questionId:'q',taskIntent:'analysis',environmentAccess:request,result:{...result(['source']),finalMessage:`evidence-${i}`}}))};
  assert.equal(environmentContinuation(state,job,request,result()).continue,false);
  assert.equal(environmentContinuation(state,job,request,result(['runtime'])).continue,true);
  assert.equal(environmentContinuation(state,job,{...request,queryId:'browser'},result()).continue,true);
+});
+
+test('a new evidence-backed point query may target one remaining required goal exactly once',()=>{
+ const job={questionId:'q',taskIntent:'analysis'};
+ const state={jobs:[0,1].map(i=>({id:`env-${i}`,questionId:'q',taskIntent:'analysis',environmentAccess:request,result:{...result(['source']),finalMessage:`evidence-${i}`}}))};
+ const targeted={...request,parameters:['check exact fee record'],goalIds:['runtime']};
+ const first=environmentContinuation(state,job,targeted,result(['source']));
+ assert.equal(first.continue,true);assert.deepEqual(first.metadata.continuationGoalIds,['runtime']);
+ const repeated={jobs:[...state.jobs,{id:'active',questionId:'q',taskIntent:'analysis',continuousContinuationKeys:[first.metadata.continuationKey]}]};
+ const again=environmentContinuation(repeated,job,{...targeted,parameters:['reword exact fee query']},result(['source']));
+ assert.equal(again.continue,false);assert.match(again.reason,/证据没有变化/);
+ const changed=result(['source']);changed.investigation.goals[1].evidence='发现费用记录主键 fee-130，待定向读取';
+ assert.equal(environmentContinuation(repeated,job,targeted,changed).continue,true);
+});
+
+test('targeted continuation rejects verified, optional and unknown goals',()=>{
+ const job={questionId:'q',taskIntent:'analysis'};
+ const state={jobs:[0,1].map(i=>({id:`env-${i}`,questionId:'q',taskIntent:'analysis',environmentAccess:request}))};
+ const current=result(['source']);current.investigation.goals.push({id:'optional',required:false,status:'open',evidence:'nice to have'});
+ for(const goalIds of [['source'],['optional'],['missing'],[]]){
+  const decision=environmentContinuation(state,job,{...request,goalIds},current);
+  assert.equal(decision.continue,false);
+ }
 });
 
 test('continuous job changes evidence path after one empty partial website round',()=>{

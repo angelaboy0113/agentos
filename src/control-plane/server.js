@@ -264,8 +264,9 @@ async function route(context) {
       if (!query || sourceResult.outcome !== 'needs_clarification') throw new Error('当前结果没有可执行的环境查询');
       const plan = planQuery(await loadEnvironments(), query, job.projectId,
         { senderId: job.senderId, profile: job.originProfile });
-      const convergence = environmentContinuation(await store.read(), job, plan, sourceResult);
+      const convergence = environmentContinuation(await store.read(), job, query, sourceResult);
       if (!convergence.continue) throw Object.assign(new Error(convergence.reason), { queryDiagnostic: { code: 'REPEATED_TARGET', reason: convergence.reason } });
+      if(convergence.metadata)Object.assign(plan,convergence.metadata);
       const updated = await store.beginContinuousEnvironment(id, identity, plan, sourceResult);
       return json(response, 200, { ok: true, planned: true, plan, job: updated });
     } catch (error) {
@@ -334,6 +335,7 @@ async function route(context) {
         }
         const plan = planQuery(await loadEnvironments(), body.result.environmentQuery, job.projectId,
           { senderId: job.senderId, profile: job.originProfile });
+        if(continuation.metadata)Object.assign(plan,continuation.metadata);
         routing = { ...agentRouting(context, 'developer'), environmentPlan: plan };
         if (!routing.agentProfile) throw new Error('开发角色未配置');
       } catch (error) {

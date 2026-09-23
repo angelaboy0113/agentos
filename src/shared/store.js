@@ -253,6 +253,7 @@ export class JsonStore {
       job.continuousQueryKeys ??= [];
       if (job.continuousQueryKeys.includes(queryKey)) throw Object.assign(new Error('重复环境查询，需要调整范围或补充新证据'), { code: 'DUPLICATE_QUERY' });
       job.continuousQueryKeys.push(queryKey);
+      if(plan.continuationKey){job.continuousContinuationKeys??=[];job.continuousContinuationKeys.push(plan.continuationKey);}
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(sourceResult) }]);
       job.environmentAccess = structuredClone(plan);
       job.updatedAt = new Date().toISOString();

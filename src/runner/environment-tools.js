@@ -5,7 +5,24 @@ import { boundedFetch, checkAccountGrants } from './environment-connector.js';
 import { databaseEndpoints, schedulerConfiguration } from './config-endpoints.js';
 const secretName = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
-const bounded = (x, secrets = []) => { let s = String(x ?? '').slice(0, 500); for (const v of secrets.filter(Boolean)) s = s.split(v).join('[已隐藏]'); return s; };
+function safeStructured(value,depth=0,seen=new WeakSet()){
+ if(value===null||value===undefined||['string','number','boolean'].includes(typeof value))return value??'';
+ if(typeof value==='bigint')return String(value);
+ if(value instanceof Date)return value.toISOString();
+ if(Buffer.isBuffer(value))return `[二进制 ${value.length} 字节]`;
+ if(typeof value!=='object')return String(value);
+ if(seen.has(value))return '[循环引用]';
+ if(depth>=5)return '[嵌套内容已截断]';
+ seen.add(value);
+ if(Array.isArray(value))return value.slice(0,30).map(item=>safeStructured(item,depth+1,seen));
+ return Object.fromEntries(Object.entries(value).slice(0,40)
+  .filter(([key])=>!secretName.test(key)).map(([key,item])=>[key,safeStructured(item,depth+1,seen)]));
+}
+const bounded = (x, secrets = []) => {
+ let s=typeof x==='object'&&x!==null?JSON.stringify(safeStructured(x)):String(x??'');
+ for(const v of secrets.filter(Boolean))s=s.split(v).join('[已隐藏]');
+ return s.slice(0,500);
+};
 export class QueryInputError extends Error {
   constructor(code, message) { super(`[${code}] ${message}`); this.code = code; }
 }
