@@ -43,3 +43,7 @@ test('model capacity failure is classified as temporary service capacity, not an
  const diagnostic=failureDiagnostic('Selected model is at capacity. Please try a different model.');
  assert.match(diagnostic,/MODEL_CAPACITY/);assert.match(diagnostic,/模型暂时没有可用容量/);assert.doesNotMatch(diagnostic,/EXECUTION_ERROR/);
 });
+test('invalid Codex response schemas are classified before model execution',()=>{
+ const diagnostic=failureDiagnostic(new Error("invalid_request_error invalid_json_schema Invalid schema for response_format 'codex_output_schema': text.format.schema"));
+ assert.match(diagnostic,/SCHEMA_COMPAT/);assert.match(diagnostic,/模型尚未开始分析/);assert.match(diagnostic,/无需补充问题、登录或重新授权/);assert.doesNotMatch(diagnostic,/EXECUTION_ERROR/);
+});

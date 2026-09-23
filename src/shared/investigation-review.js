@@ -71,7 +71,7 @@ const verifiedGoals = result => new Set((result?.investigation?.goals ?? [])
  .filter(goal => goal.status === 'verified' && nonempty(goal.id) && nonempty(goal.evidence)).map(goal => goal.id));
 const continuationMetadata = (request,currentResult) => {
  const ids=request?.goalIds;
- if(ids===undefined)return {ok:true,metadata:null};
+ if(ids==null)return {ok:true,metadata:null};
  if(!Array.isArray(ids)||!ids.length||ids.length>8||new Set(ids).size!==ids.length||ids.some(id=>!nonempty(id)))
   return {ok:false,reason:'定向补查必须列出1至8个未完成目标 goalIds。'};
  const goals=new Map((currentResult?.investigation?.goals??[]).map(goal=>[goal.id,goal]));

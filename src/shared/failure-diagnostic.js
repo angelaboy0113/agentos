@@ -24,6 +24,7 @@ const rules = [
   ['TLS_VALIDATION', /certificate|SSL|TLS|HANDSHAKE/i, '数据库加密连接', '数据库TLS连接或证书校验未通过。', '请管理员核对服务器TLS支持和信任证书；程序不会自动关闭验证。'],
   ['CREDENTIAL_SOURCE', /凭据引用|外部或加密凭据|目标数据库凭据|凭据字段|配置凭据|Nacos配置已改变/, '配置凭据解析', '配置已改变，或无法唯一解析目标数据库凭据。', '重新发现并确认配置；外部密钥或多个账号需要管理员指定正确来源。'],
   ['RESULT_CONTRACT', /Invalid partial (analysis|environment) evidence/, '结果提交校验', '程序拒绝了部分结果的证据格式，并非已确认的远端连接失败。', '联系维护者核对版本与结果协议；修复后重新发起查询。'],
+  ['SCHEMA_COMPAT', /invalid_json_schema|Invalid schema for response_format|text\.format\.schema/i, '结构化结果协议', 'AgentOS提交给Codex的结果结构不兼容，模型尚未开始分析，也未访问业务环境。', '请维护者更新结果结构并重启AgentOS；用户无需补充问题、登录或重新授权。'],
   ['RESULT_GRACE_EXPIRED', /RESULT_GRACE_EXPIRED/, '结果提交校验', '环境读取已停止，但结果在允许的收尾时间内未能提交。', '重新发起任务；系统不会在授权到期后继续访问环境。'],
   ['MODEL_CAPACITY', /Selected model is at capacity|model.{0,40}(at capacity|overloaded|temporarily unavailable)/i, 'Codex模型服务', '当前选择的Codex模型暂时没有可用容量，并非业务代码、数据或权限错误。', 'AgentOS已在同一只读调查会话中自动重试一次；仍失败时请稍后重发，或在本机管理后台选择当前可用的模型。'],
   ['AUTH_REQUIRED', /认证未成功|Invalid login|Login required|credential|本机凭据|ChatGPT 登录|Unapproved login/i, '登录与凭据', '登录未完成或本机凭据不可用。', '在 AgentOS 所在电脑重新登录对应服务或解锁钥匙串。'],

@@ -16,6 +16,7 @@ test('same environment target converges after two restarts without new verified 
  const job={questionId:'q',taskIntent:'analysis'};
  const state={jobs:[0,1].map(i=>({id:`env-${i}`,questionId:'q',taskIntent:'analysis',environmentAccess:request,result:{...result(['source']),finalMessage:`evidence-${i}`}}))};
  assert.equal(environmentContinuation(state,job,request,result()).continue,false);
+ assert.equal(environmentContinuation({jobs:[]},job,{...request,goalIds:null},result()).continue,true);
  assert.equal(environmentContinuation(state,job,request,result(['runtime'])).continue,true);
  assert.equal(environmentContinuation(state,job,{...request,queryId:'browser'},result()).continue,true);
 });

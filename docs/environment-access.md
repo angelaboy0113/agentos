@@ -133,7 +133,7 @@ Nacos/MySQL 接入弹窗当前需要已登录的 macOS 桌面、Terminal、Node 
 
 环境排查返回 partial 时，控制面按本次环境授权校验 environmentEvidence：已批准且已领取、对应查询开始事件、environmentId/queryId/scopeHash 一致、读取时间有效、非负记录数与结果摘要哈希。它不要求代码分析的文件产物和 Git 同步证据；普通代码分析仍保留原校验。部分结果用橙色展示已取得的信息与尚未确认的缺口，不等于数据库连接成功。
 
-失败卡片显示固定错误码、失败环节、脱敏原因和操作建议。RESULT_CONTRACT 表示 AgentOS 结果协议拒绝；AUTH_REQUIRED、READ_PERMISSION、TIMEOUT、NETWORK、SCOPE_LIMIT、PAGE_REFERENCE、HTTP_RESPONSE 分别帮助定位登录、权限、等待、网络、范围、页面引用与接口响应。无法分类时显示 EXECUTION_ERROR 并请维护者按任务编号检查本机日志，不猜测原因。错误分类只是诊断线索，不替代真实连接验证。
+失败卡片显示固定错误码、失败环节、脱敏原因和操作建议。RESULT_CONTRACT 表示 AgentOS 结果协议拒绝；SCHEMA_COMPAT 表示 AgentOS 提交给 Codex 的结构化结果 schema 不兼容，此时模型尚未开始分析，也未访问业务环境；AUTH_REQUIRED、READ_PERMISSION、TIMEOUT、NETWORK、SCOPE_LIMIT、PAGE_REFERENCE、HTTP_RESPONSE 分别帮助定位登录、权限、等待、网络、范围、页面引用与接口响应。无法分类时显示 EXECUTION_ERROR 并请维护者按任务编号检查本机日志，不猜测原因。错误分类只是诊断线索，不替代真实连接验证。
 
 实现入口：src/shared/failure-diagnostic.js、src/shared/store.js、src/runner/environment-job.js 和 src/control-plane/message-cards.js。外部异常只用于匹配已审核类别，不直接复制到卡片；密码、令牌和原始响应不展示。无需新增配置，更新运行实例后对新任务生效；旧卡片不自动重发。
 

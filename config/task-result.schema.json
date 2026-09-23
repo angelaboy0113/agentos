@@ -131,7 +131,8 @@
           "required": [
             "environmentId",
             "queryId",
-            "parameters"
+            "parameters",
+            "goalIds"
           ],
           "properties": {
             "environmentId": {
@@ -147,15 +148,21 @@
               }
             },
             "goalIds": {
-              "type": "array",
-              "maxItems": 8,
-              "uniqueItems": true,
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 80,
-                "pattern": "^[A-Za-z0-9_-]+$"
-              }
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "maxItems": 8,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                }
+              ]
             }
           }
         }
