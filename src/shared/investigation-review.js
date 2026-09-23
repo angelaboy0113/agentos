@@ -4,15 +4,18 @@ export const QUESTION_GOAL_ID = 'original-question';
 // The question is the acceptance target. Investigation leads may aid that target,
 // but discovering a new field must not silently expand the user's request.
 export function normalizeQuestionScope(job, result) {
- if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||result.sourceSyncBlocked||!['ready','partial','blocked'].includes(result.outcome))return result;
+ if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||result.sourceSyncBlocked||!['ready','partial','blocked','needs_clarification'].includes(result.outcome))return result;
  const investigation=result.investigation;
  if(!investigation?.goals?.some(goal=>goal.id===QUESTION_GOAL_ID))return result;
  const goals=investigation.goals.map(goal=>goal.id===QUESTION_GOAL_ID?goal:{...goal,required:false});
  const root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
  const answered=root.required===true&&root.status==='verified'&&nonempty(root.evidence);
+ const promoted=answered&&result.outcome!=='ready';
  const handoff=result.handoff?{...result.handoff,checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID?check:{...check,required:false}),
   ...(answered?{returnTo:'none',risks:[...new Set([...(result.handoff.risks??[]),...(investigation.blocker?[`补充调查受限：${investigation.blocker.needed}`]:[])])]}:{})}:result.handoff;
  return {...result,outcome:answered?'ready':result.outcome,
+  ...(promoted?{summary:`原问题已核实：${root.evidence}。补充调查的限制见详情。`.slice(0,1200),
+   finalMessage:`原问题已核实：${root.evidence}\n\n补充调查说明（不影响上述结论）：\n${result.finalMessage??''}`} : {}),
   investigation:{...investigation,goals,status:answered?'complete':investigation.status==='complete'?'continue':investigation.status,
    blocker:answered?null:investigation.blocker},handoff,
   ...(answered?{environmentQuery:null,websiteQuery:null,environmentSetup:null}: {})};

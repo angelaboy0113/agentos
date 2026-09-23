@@ -78,6 +78,7 @@ test('an already answered question does not become red because an ancillary logi
  const checked=assessInvestigation(job,r);
  assert.equal(checked.outcome,'ready');assert.equal(checked.investigation.blocker,null);
  assert.equal(checked.handoff.returnTo,'none');assert.match(checked.handoff.risks.join(' '),/Page login/);
+ assert.match(checked.summary,/原问题已核实/);assert.match(checked.finalMessage,/补充调查说明/);
 });
 test('self-review continues with new evidence but stops repeated evidence or explicit external blocker',()=>{
  const r=result(),job={context:[{stage:'owner_report',result:r},{stage:'owner_report',result:r}]};
