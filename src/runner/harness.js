@@ -1,4 +1,4 @@
-import { investigationComplete } from '../shared/investigation-review.js';
+import { investigationComplete, QUESTION_GOAL_ID } from '../shared/investigation-review.js';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -76,6 +76,10 @@ export async function validateHandoff(job, result, workspace) {
     if (result.outcome === 'ready' && check.required && check.status !== 'passed') issues.push(`必需验收项未通过：${check.id}`);
     if (result.outcome === 'partial' && check.required && check.status === 'failed') issues.push(`必需验收项失败：${check.id}`);
   }
+  if (job.taskIntent === 'analysis' && result.outcome === 'ready'
+    && result.investigation?.goals?.some(goal => goal.id === QUESTION_GOAL_ID)
+    && !h.checks.some(check => check?.id === QUESTION_GOAL_ID && check.required && check.status === 'passed' && nonempty(check.evidence)))
+    issues.push('原问题验收项缺少通过依据');
   if (['ready', 'partial'].includes(result.outcome)) {
     if (h.returnTo !== 'none') issues.push('存在退回责任时不能标记ready');
     if (!h.checks.length) issues.push('ready必须给出本阶段检查依据');
@@ -87,7 +91,9 @@ export async function validateHandoff(job, result, workspace) {
   }
   if (result.outcome === 'partial') {
     if (job.taskIntent !== 'analysis') issues.push('partial只允许只读分析');
-    if (!verifiedArtifacts.length || !h.checks.some((c) => c?.required && c.status === 'passed') || !h.risks.length) issues.push('部分分析必须有可核验工件、已通过的必需检查及明确证据缺口');
+    const questionScoped = result.investigation?.goals?.some(goal => goal.id === QUESTION_GOAL_ID);
+    if (!verifiedArtifacts.length || !h.checks.some((c) => c?.status === 'passed' && (questionScoped || c.required)) || !h.risks.length)
+      issues.push('部分分析必须有可核验工件、已通过的检查及明确证据缺口');
   }
   return { issues: [...new Set(issues)], verifiedArtifacts };
 }

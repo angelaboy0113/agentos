@@ -1,19 +1,41 @@
 import { createHash } from 'node:crypto';
 const nonempty = s => typeof s === 'string' && s.trim().length > 0;
+export const QUESTION_GOAL_ID = 'original-question';
+// The question is the acceptance target. Investigation leads may aid that target,
+// but discovering a new field must not silently expand the user's request.
+export function normalizeQuestionScope(job, result) {
+ if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||result.sourceSyncBlocked||!['ready','partial','blocked'].includes(result.outcome))return result;
+ const investigation=result.investigation;
+ if(!investigation?.goals?.some(goal=>goal.id===QUESTION_GOAL_ID))return result;
+ const goals=investigation.goals.map(goal=>goal.id===QUESTION_GOAL_ID?goal:{...goal,required:false});
+ const root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
+ const answered=root.required===true&&root.status==='verified'&&nonempty(root.evidence);
+ const handoff=result.handoff?{...result.handoff,checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID?check:{...check,required:false}),
+  ...(answered?{returnTo:'none',risks:[...new Set([...(result.handoff.risks??[]),...(investigation.blocker?[`补充调查受限：${investigation.blocker.needed}`]:[])])]}:{})}:result.handoff;
+ return {...result,outcome:answered?'ready':result.outcome,
+  investigation:{...investigation,goals,status:answered?'complete':investigation.status==='complete'?'continue':investigation.status,
+   blocker:answered?null:investigation.blocker},handoff,
+  ...(answered?{environmentQuery:null,websiteQuery:null,environmentSetup:null}: {})};
+}
 export function investigationComplete(job, result) {
  const r=result.investigation;
  if(r?.status!=='complete'||r.blocker||!r.goals?.length)return false;
+ if(job.questionScopePolicy==='original-question-v1'&&!r.goals.some(goal=>goal.id===QUESTION_GOAL_ID))return false;
  const ids=new Set();
+ const questionScoped=r.goals.some(g=>g.id===QUESTION_GOAL_ID);
  for(const g of r.goals){
-  if(!nonempty(g.id)||ids.has(g.id)||!nonempty(g.evidence))return false;
-  if(g.required!==false&&g.status!=='verified')return false;
+  if(!nonempty(g.id)||ids.has(g.id))return false;
+  if((questionScoped?g.id===QUESTION_GOAL_ID:g.required!==false)&&!nonempty(g.evidence))return false;
+  if(questionScoped?(g.id===QUESTION_GOAL_ID&&(g.required!==true||g.status!=='verified')):(g.required!==false&&g.status!=='verified'))return false;
   ids.add(g.id);
  }
+ if(questionScoped)return true;
  // A later report cannot obtain completion by omitting a previously declared required goal.
  return (job.context??[]).every(x=>(x.result?.investigation?.goals??[])
   .filter(g=>g.required!==false).every(g=>ids.has(g.id)));
 }
 export function assessInvestigation(job,result){
+ result=normalizeQuestionScope(job,result);
  if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
    && (result.environmentSetup || result.investigation?.status==='wait'&&['login','user_input'].includes(result.investigation?.blocker?.kind)))
   return {...result,outcome:'needs_clarification'};

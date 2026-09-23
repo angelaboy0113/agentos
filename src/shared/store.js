@@ -123,6 +123,7 @@ export class JsonStore {
         instruction: input.instruction,
         originalQuestion: input.originalQuestion ?? input.instruction,
         taskIntent: input.taskIntent ?? 'implementation',
+        ...(input.taskIntent === 'analysis' ? { questionScopePolicy: 'original-question-v1' } : {}),
         ...(input.sourceEnvironment ? { sourceEnvironment: input.sourceEnvironment } : {}),
         originProfile: input.originProfile ?? input.requestedAgentProfile ?? input.agentProfile ?? null,
         originChatType: input.originChatType ?? null,

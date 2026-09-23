@@ -43,6 +43,15 @@ test('partial analysis may preserve a required check as not run when other requi
   assert.match(enforced.finalMessage, /释放流水/);
   assert.equal(jobCard({ status: 'completed', taskIntent: 'analysis', result: enforced, events: [], createdAt: new Date().toISOString(), id: 'JOB-partial' }).header.template, 'orange');
 });
+test('question-scoped ready answer requires a passed original-question handoff check',async t=>{
+ const root=await fixture(t),job={taskIntent:'analysis',stage:'developer'};
+ const result={outcome:'ready',finalMessage:'Confirmed from source and records',investigation:{status:'complete',blocker:null,goals:[
+  {id:'original-question',required:true,status:'verified',evidence:'Source and records agree'},
+ ]},handoff:handoff()};
+ assert.match((await validateHandoff(job,result,root)).issues.join(' '),/原问题验收项/);
+ result.handoff.checks[0].id='original-question';
+ assert.deepEqual((await validateHandoff(job,result,root)).issues,[]);
+});
 test('partial developer findings continue to owner exactly once, retain gaps and mention only final report', async (t) => {
   const root = await fixture(t), store = new JsonStore(path.join(root, 'state.json'));
   const result = { outcome: 'partial', summary: 'Known finding; remaining gap', finalMessage: 'Evidence and gaps', handoff: handoff(),

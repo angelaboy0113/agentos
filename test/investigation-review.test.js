@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {JsonStore} from '../src/shared/store.js';
-import {assessInvestigation,investigationComplete,reviewDecision} from '../src/shared/investigation-review.js';
+import {assessInvestigation,investigationComplete,reviewDecision,QUESTION_GOAL_ID} from '../src/shared/investigation-review.js';
 import {preserveAnalysisGaps} from '../src/runner/harness.js';
 const review=()=>({status:'continue',goals:[{id:'actual-data',status:'open',evidence:'Source checked; database not checked'}],attempts:['Checked source and environment catalog'],nextStep:'Find matching Nacos configuration',blocker:null});
 const result=()=>({outcome:'partial',summary:'Still checking',finalMessage:'Evidence',investigation:review(),handoff:{artifacts:[{kind:'code',path:'a.js'}],checks:[],risks:['Database not checked']},verifiedArtifacts:[{path:'a.js'}],handoffGate:{passed:true},sourceSync:{repositories:[{commit:'abc'}]}});
@@ -26,6 +26,58 @@ test('optional adjacent findings cannot keep an answered user question red',()=>
  ],blocker:null};
  assert.equal(investigationComplete(job,r),true);
  assert.equal(assessInvestigation(job,r).outcome,'ready');
+});
+test('new supporting fields cannot become acceptance gates after original question is answered',()=>{
+ const job={taskIntent:'analysis',stage:'owner_report',context:[{result:{outcome:'partial',investigation:{goals:[
+  {id:QUESTION_GOAL_ID,required:true,status:'open',evidence:'Calculation still being checked'},
+  {id:'direct-price-field',required:true,status:'open',evidence:'Intermediate price field not located'},
+ ]}}}]};
+ const r={outcome:'partial',summary:'Formula and actual deductions match',finalMessage:'The deduction is 130.',investigation:{status:'continue',blocker:null,goals:[
+  {id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'Source formula and persisted deductions reproduce 260-32.5-130=97.5'},
+  {id:'direct-price-field',required:true,status:'open',evidence:''},
+ ],attempts:['Checked source and actual records'],nextStep:'Find intermediate field'},handoff:{artifacts:[],checks:[
+  {id:QUESTION_GOAL_ID,required:true,status:'passed',evidence:'Source and amount agree'},
+  {id:'direct-price-field',required:true,status:'not_run',evidence:'Not requested'},
+ ],risks:['Intermediate field not located'],returnTo:'none'},environmentQuery:{environmentId:'uat',queryId:'extra',parameters:[]}};
+ const checked=assessInvestigation(job,r);
+ assert.equal(checked.outcome,'ready');assert.equal(checked.investigation.status,'complete');
+ assert.equal(checked.investigation.goals[1].required,false);
+ assert.equal(checked.handoff.checks[1].required,false);
+ assert.equal(checked.environmentQuery,null);
+ assert.equal(investigationComplete(job,checked),true);
+ assert.equal(preserveAnalysisGaps(job,checked).outcome,'ready');
+ assert.doesNotMatch(preserveAnalysisGaps(job,checked).finalMessage,/仍未核实（沿用本轮调查）/);
+});
+test('a multi-part original question stays open until every requested answer has evidence',()=>{
+ const job={taskIntent:'analysis',stage:'developer',context:[]};
+ const r=result();r.outcome='ready';r.investigation={status:'complete',blocker:null,goals:[
+  {id:QUESTION_GOAL_ID,required:true,status:'open',evidence:'First requested answer confirmed; second remains unknown'},
+  {id:'supporting-detail',required:true,status:'verified',evidence:'Related field found'},
+ ],attempts:[],nextStep:'Check second requested answer'};
+ const checked=assessInvestigation(job,r);
+ assert.equal(checked.outcome,'partial');assert.equal(checked.investigation.status,'continue');
+ assert.equal(checked.investigation.goals[1].required,false);
+ assert.equal(investigationComplete(job,checked),false);
+});
+test('new analysis jobs cannot pass the gate by omitting the original-question target',()=>{
+ const job={taskIntent:'analysis',stage:'owner_report',questionScopePolicy:'original-question-v1',context:[]};
+ const r=result();r.outcome='ready';r.investigation={status:'complete',blocker:null,goals:[
+  {id:'supporting-field',required:true,status:'verified',evidence:'The supporting field exists'},
+ ],attempts:[],nextStep:''};
+ assert.equal(investigationComplete(job,r),false);
+ assert.equal(assessInvestigation(job,r).outcome,'partial');
+});
+test('an already answered question does not become red because an ancillary login is unavailable',()=>{
+ const job={taskIntent:'analysis',stage:'owner_report',context:[]};
+ const r=result();r.outcome='blocked';r.investigation={status:'wait',goals:[
+  {id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'Actual records and source agree on the cause'},
+  {id:'optional-page-log',required:true,status:'open',evidence:'Page login unavailable'},
+ ],attempts:['Checked records'],nextStep:'Wait for page login',blocker:{kind:'login',needed:'Page login',evidence:'Login form'}};
+ r.handoff.checks=[{id:QUESTION_GOAL_ID,required:true,status:'passed',evidence:'Source and records agree'}];
+ r.handoff.returnTo='developer';
+ const checked=assessInvestigation(job,r);
+ assert.equal(checked.outcome,'ready');assert.equal(checked.investigation.blocker,null);
+ assert.equal(checked.handoff.returnTo,'none');assert.match(checked.handoff.risks.join(' '),/Page login/);
 });
 test('self-review continues with new evidence but stops repeated evidence or explicit external blocker',()=>{
  const r=result(),job={context:[{stage:'owner_report',result:r},{stage:'owner_report',result:r}]};
