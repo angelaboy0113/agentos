@@ -77,7 +77,17 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       try { cfg = await load(); e = verifyApprovedPlan(cfg, plan); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
       const choice = i === 0 ? { tool: 'connection', arguments: '{}' } : await planner.next({ purpose: plan.parameters[0], tools: tools.spec, results: results.slice(-12), progress: { toolCount: results.length, consecutiveNoProgress: stalled, maxCalls:limits.maxCalls, remainingMs:Math.max(0,limits.maxMs-(Date.now()-began)) }, instruction: '优先用一次聚合或重复组合查询关闭核心缺口；不要为了浏览表结构消耗剩余预算。先前结果仍在本会话历史中。' });
-      if (choice.tool === 'finish') { summary = String(choice.summary ?? '').slice(0, 6000); complete = choice.complete === true; break; }
+      if (choice.tool === 'finish') {
+        const mysqlEvidence = results.some(item => item.result && ['tables','schema','select','count','group_count'].includes(item.tool));
+        const mysqlQueryTools = e.kind === 'mysql' && tools.spec.some(item => ['tables','schema','select','count','group_count'].includes(item.tool));
+        if (mysqlQueryTools && !mysqlEvidence) {
+          results.push({ tool: 'finish', error: { code: 'PREMATURE_FINISH', message: '数据库查询工具已提供；仅完成连接检查不能判断记录或声称查询工具不可用。请使用tables、schema、select、count或group_count取得与原问题相关的证据。' }, executed: false });
+          steps.push('finish：仅完成连接检查，继续执行已提供的只读查询工具');
+          if (++stalled >= 3) { stopReason = '规划器连续3次仅完成连接检查，未执行已提供的只读查询工具；本轮保留连接证据并暂停。'; break; }
+          continue;
+        }
+        summary = String(choice.summary ?? '').slice(0, 6000); complete = choice.complete === true; break;
+      }
       let args; try { if (typeof choice.arguments !== 'string' || choice.arguments.length > 8000) throw new Error(); args = JSON.parse(choice.arguments); } catch { throw new Error('工具参数格式不正确，已停止'); }
       if (!tools.spec.some(x => x.tool === choice.tool)) throw new Error('未开放该环境工具');
       try { verifyApprovedPlan(await load(), plan); }

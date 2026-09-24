@@ -56,9 +56,10 @@ test('unavailable request logs preserve useful question findings as an orange pa
   handoff:{artifacts:[{kind:'code',path:'code.js'}],checks:[
    {id:'original-question',required:true,status:'failed',evidence:'具体慢点未定位'},
    {id:'state',required:false,status:'passed',evidence:'V3已核实'},
-  ],risks:['不要重复提交'],returnTo:'none'}});
+  ],risks:['不要重复提交'],returnTo:'owner'}});
  const enforced=enforceHandoff(assessed,await validateHandoff(job,assessed,root));
  assert.equal(enforced.outcome,'partial');assert.equal(enforced.handoffGate.passed,true);
+ assert.equal(enforced.handoff.returnTo,'none');
  assert.equal(jobCard({status:'completed',taskIntent:'analysis',result:enforced,events:[],createdAt:new Date().toISOString(),id:'JOB-causal-partial'}).header.template,'orange');
  assert.match(enforced.finalMessage,/V3已创建/);
 });
@@ -126,4 +127,21 @@ test('final synthesis retains the supporting records returned by a read-only que
   assert.match(output.summary,new RegExp(id));assert.match(output.finalMessage,new RegExp(id));
  }
  assert.match(output.finalMessage,/关键查询记录/);
+});
+test('blocked unavailable findings are normalized before prior query records are restored',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'为什么没有推送到LTX',context:[{result:{evidenceRecords:[
+  {conclusion_code:'HD-20260923-0005-01',status:'1'},
+  {store_code:'LTX20260000438',exec_times:'0'},
+ ]}}]};
+ const blocked={outcome:'blocked',summary:'缺少发送日志',finalMessage:'目标单与五条门店明细已核实，发送环节待日志。',investigation:{status:'wait',goals:[
+  {id:'original-question',required:true,status:'open',evidence:'目标单与五条门店明细已核实；发送环节待日志。'},
+ ],attempts:['查询数据库'],nextStep:'接入日志',causalAssessment:{status:'unknown',link:'unproven',mechanism:'发送环节未知',evidence:[
+  {kind:'database',reference:'conclusion_info',finding:'目标单与门店明细存在'},
+ ],alternatives:'未调度或LTX未接收'},blocker:{kind:'unavailable',needed:'发送日志',evidence:'当前无日志入口'}},handoff:{artifacts:[{kind:'code',path:'code.js'}],checks:[
+  {id:'original-question',required:true,status:'not_run',evidence:'发送环节待日志'},
+  {id:'target-record',required:false,status:'passed',evidence:'目标记录已核实'},
+ ],risks:['无法归因'],returnTo:'owner'}};
+ const output=preserveEnvironmentEvidence(job,assessInvestigation(job,blocked));
+ assert.equal(output.outcome,'partial');assert.equal(output.handoff.returnTo,'none');
+ assert.match(output.finalMessage,/HD-20260923-0005-01/);assert.match(output.finalMessage,/LTX20260000438/);
 });

@@ -80,6 +80,23 @@ test('tool loop reports unresolved extraction as partial even when model claims 
     planner: async () => ({ next: async () => ++n === 1 ? { tool: 'read_config', arguments: '{}' } : { tool: 'finish', summary: 'done', complete: true }, close: async () => {} }) });
   assert.equal(r.partial, true); assert.equal(r.evidence.toolCount, 2);
 });
+test('MySQL investigation cannot finish after connection while query tools are available',async()=>{
+ const mysqlQuery={...query,tables:['*']};
+ const env={...environment,kind:'mysql',host:'fake',port:3306,database:'demo',queries:{investigate:mysqlQuery}};
+ const cfg={version:1,environments:{env}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['按单号核对推送记录']},'demo',{profile:'owner',senderId:'ou_member'});
+ const calls=[];let n=0;
+ const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+  tools:async()=>({spec:[{tool:'connection'},{tool:'schema'},{tool:'select'}],run:async tool=>{calls.push(tool);return tool==='select'?{table:'push_log',rows:[{id:'one'}]}:{};},close:async()=>{}}),
+  planner:async()=>({next:async input=>{
+   n++;
+   if(n===1)return{tool:'finish',summary:'查询工具不可用',complete:false};
+   if(n===2){assert.equal(input.results.at(-1).error.code,'PREMATURE_FINISH');return{tool:'schema',arguments:'{}'};}
+   if(n===3)return{tool:'select',arguments:'{}'};
+   return{tool:'finish',summary:'已核对推送记录',complete:true};
+  },close:async()=>{}})});
+ assert.deepEqual(calls,['connection','schema','select']);
+ assert.equal(result.partial,false);assert.match(result.summary,/已核对推送记录/);assert.doesNotMatch(result.summary,/查询工具不可用/);
+});
 
 test('oversized website snapshots are compacted and remain usable instead of failing the job', () => {
   const controls = Array.from({ length: 150 }, (_, i) => ({

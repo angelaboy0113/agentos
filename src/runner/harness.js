@@ -81,7 +81,7 @@ export async function validateHandoff(job, result, workspace) {
     && !h.checks.some(check => check?.id === QUESTION_GOAL_ID && check.required && check.status === 'passed' && nonempty(check.evidence)))
     issues.push('原问题验收项缺少通过依据');
   if (['ready', 'partial'].includes(result.outcome)) {
-    if (h.returnTo !== 'none') issues.push('存在退回责任时不能标记ready');
+    if (h.returnTo !== 'none') issues.push('存在退回责任时不能标记ready或partial');
     if (!h.checks.length) issues.push('ready必须给出本阶段检查依据');
     if (job.taskIntent !== 'analysis') {
       if (job.stage === 'pm' && !['prd', 'spec'].every((kind) => verifiedArtifacts.some((a) => a.kind === kind))) issues.push('PM交接缺少实际PRD或Spec');

@@ -113,8 +113,9 @@ test('useful findings waiting on unavailable request logs stay partial instead o
   handoff:{artifacts:[{kind:'code',path:'code.js'}],checks:[
    {id:QUESTION_GOAL_ID,required:true,status:'failed',evidence:'具体超时环节未定位'},
    {id:'post-timeout-state',required:false,status:'passed',evidence:'V3和审批状态已核实'},
-  ],risks:['不要重复提交'],returnTo:'none'}});
+  ],risks:['不要重复提交'],returnTo:'owner'}});
  assert.equal(actual.outcome,'partial');
+ assert.equal(actual.handoff.returnTo,'none');
  assert.equal(actual.handoff.checks[0].status,'not_run');
  assert.match(actual.finalMessage,/V3已创建/);
 });

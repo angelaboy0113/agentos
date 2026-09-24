@@ -76,7 +76,7 @@ export function assessInvestigation(job,result){
    .some(item=>diagnosticKinds.has(item?.kind)&&nonempty(item.reference)&&nonempty(item.finding));
   const usefulEvidence=nonempty(root?.evidence)&&nonempty(result.finalMessage)
    &&result.handoff?.artifacts?.length&&result.handoff?.risks?.length&&(supportingGoal||supportingCause);
-  if(usefulEvidence)result={...result,outcome:'partial',handoff:{...result.handoff,
+  if(usefulEvidence)result={...result,outcome:'partial',handoff:{...result.handoff,returnTo:'none',
    checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed'?{...check,status:'not_run'}:check)}};
  }
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!['ready','partial'].includes(result.outcome))return result;
