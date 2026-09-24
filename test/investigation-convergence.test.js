@@ -33,6 +33,12 @@ test('a new evidence-backed point query may target one remaining required goal e
  const changed=result(['source']);changed.investigation.goals[1].evidence='发现费用记录主键 fee-130，待定向读取';
  assert.equal(environmentContinuation(repeated,job,targeted,changed).continue,true);
 });
+test('same environment target has a hard round bound even when each round changes evidence',()=>{
+ const job={id:'active',questionId:'q',taskIntent:'analysis',events:Array.from({length:3},(_,i)=>({type:'continuous_environment_completed',environmentId:'prd-db',queryId:'investigate',scopeHash:`scope-${i}`}))};
+ const current=result(['source']);current.investigation.goals[1].evidence='new runtime clue after the third round';
+ const decision=environmentContinuation({jobs:[job]},job,{...request,goalIds:['runtime']},current);
+ assert.equal(decision.continue,false);assert.match(decision.reason,/已完成3轮/);assert.match(decision.reason,/显著增加耗时/);
+});
 
 test('targeted continuation rejects verified, optional and unknown goals',()=>{
  const job={questionId:'q',taskIntent:'analysis'};

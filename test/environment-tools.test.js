@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { databaseEndpoints } from '../src/runner/config-endpoints.js';
-import { createEnvironmentTools, groupCountStatement, selectStatement, QueryInputError } from '../src/runner/environment-tools.js';
+import { aggregateStatement, collectValuesStatement, createEnvironmentTools, groupCountStatement, linkedAggregateStatement, selectStatement, QueryInputError } from '../src/runner/environment-tools.js';
 import { validateToolQuery } from '../src/shared/environment-tool-policy.js';
 import { planQuery } from '../src/shared/environment-access.js';
 import { fitToolResult, investigateEnvironment } from '../src/runner/environment-investigator.js';
@@ -52,6 +52,38 @@ test('dynamic query builder supports bounded parameterized contains and in filte
     [{ column:'id', op:'in', value:[] }],
     [{ column:'id', op:'in', value:Array.from({length:101},(_,i)=>i) }],
   ]) assert.throws(() => selectStatement({ table:'logs', columns:['status'], filters }, tables, scopedQuery), QueryInputError);
+});
+test('bounded aggregates close totals without accepting model SQL',()=>{
+  const tables=new Map([['budget_available_ts',['allocation_dimension_id','allocation_time','available_ts','deleted']]]);
+  const types=new Map([['budget_available_ts',new Map([['allocation_dimension_id','bigint'],['allocation_time','varchar'],['available_ts','decimal'],['deleted','tinyint']])]]);
+  const scoped={...query,tables:['*']};
+  const statement=aggregateStatement({table:'budget_available_ts',aggregates:[{op:'sum',column:'available_ts',as:'total_budget'},{op:'count',as:'row_count'}],filters:[{column:'allocation_time',op:'=',value:'202610'},{column:'deleted',op:'=',value:0}]},tables,types,scoped);
+  assert.match(statement.sql,/SUM\(`available_ts`\) AS `total_budget`/);assert.match(statement.sql,/COUNT\(\*\) AS `row_count`/);
+  assert.deepEqual(statement.params,['202610',0]);assert.doesNotMatch(statement.sql,/202610/);
+  assert.throws(()=>aggregateStatement({table:'budget_available_ts',aggregates:[{op:'sum',column:'allocation_time',as:'bad'}],filters:[{column:'deleted',op:'=',value:0}]},tables,types,scoped),e=>e.code==='NUMERIC_FIELD');
+  assert.throws(()=>aggregateStatement({table:'budget_available_ts',aggregates:[{op:'sum); DROP TABLE x',column:'available_ts'}],filters:[{column:'deleted',op:'=',value:0}]},tables,types,scoped),QueryInputError);
+});
+test('collected hierarchy set feeds a parameterized two-table aggregate',()=>{
+  const tables=new Map([
+    ['dc_hierarchy_tile',['l1_code','l2_code','l3_code','deleted']],
+    ['budget_dimensions_allocation',['id','hierarchy_code','bo_code','deleted']],
+    ['budget_available_ts',['allocation_dimension_id','allocation_time','available_ts','deleted']],
+  ]),types=new Map([
+    ['budget_dimensions_allocation',new Map([['id','bigint'],['hierarchy_code','varchar'],['bo_code','varchar'],['deleted','tinyint']])],
+    ['budget_available_ts',new Map([['allocation_dimension_id','bigint'],['allocation_time','varchar'],['available_ts','decimal'],['deleted','tinyint']])],
+  ]),scoped={...query,tables:['*']};
+  const collect=collectValuesStatement({table:'dc_hierarchy_tile',columns:['l1_code','l2_code','l3_code'],filters:[{column:'l1_code',op:'=',value:'041'},{column:'deleted',op:'=',value:0}]},tables,scoped);
+  assert.match(collect.sql,/SELECT DISTINCT `l1_code`, `l2_code`, `l3_code`/);assert.match(collect.sql,/LIMIT 1001$/);assert.deepEqual(collect.params,['041',0]);
+  const sets=new Map([['set-1',{values:['041','04101','0410101'],truncated:false}]]);
+  const linked=linkedAggregateStatement({leftTable:'budget_dimensions_allocation',rightTable:'budget_available_ts',join:{leftColumn:'id',rightColumn:'allocation_dimension_id'},aggregates:[{op:'sum',table:'budget_available_ts',column:'available_ts',as:'sales_budget'},{op:'count',table:'budget_available_ts',as:'matched_rows'}],filters:[
+    {table:'budget_dimensions_allocation',column:'hierarchy_code',op:'in_set',value:'set-1'},
+    {table:'budget_dimensions_allocation',column:'bo_code',op:'=',value:'4'},
+    {table:'budget_available_ts',column:'allocation_time',op:'=',value:'202610'},
+  ]},tables,types,scoped,sets);
+  assert.match(linked.sql,/JOIN `budget_available_ts` `r` ON `l`.`id` = `r`.`allocation_dimension_id`/);
+  assert.match(linked.sql,/`l`.`hierarchy_code` IN \(\?, \?, \?\)/);assert.match(linked.sql,/SUM\(`r`.`available_ts`\)/);
+  assert.deepEqual(linked.params,['041','04101','0410101','4','202610']);
+  assert.throws(()=>linkedAggregateStatement({leftTable:'budget_dimensions_allocation',rightTable:'budget_available_ts',join:{leftColumn:'id',rightColumn:'allocation_dimension_id'},aggregates:[{op:'sum',table:'budget_available_ts',column:'available_ts'}],filters:[{table:'budget_dimensions_allocation',column:'hierarchy_code',op:'in_set',value:'missing'}]},tables,types,scoped,sets),e=>e.code==='VALUE_SET');
 });
 test('investigation auto-authorizes member PRD read while preserving explicit scope', () => {
   const cfg = { version: 1, environments: { env: { ...environment, tier: 'prd', membersRead: false } } };
@@ -317,4 +349,30 @@ test('count tool returns database aggregate rather than returned-row length',asy
  const queries=[];const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async stmt=>{queries.push(stmt.sql);return stmt.sql.includes('information_schema')?[[{table_name:'orders',column_name:'id'},{table_name:'orders',column_name:'status'}]]:[[{total:'28119'}]];},rollback:async()=>{},destroy:()=>{}})};
  const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'fake',port:3306,database:'demo'},query,credentials,{mysql:driver});
  try{await tools.run('schema',{table:'orders'});const r=await tools.run('count',{table:'orders',filters:[{column:'status',op:'=',value:'ready'}]});assert.equal(r.rows[0].total,'28119');assert.equal(r.rows[0].countMode,'rows');assert.doesNotMatch(queries.at(-1),/LIMIT/);}finally{await tools.close();}
+});
+test('runtime tools keep a collected set local and execute the linked aggregate in one read-only session',async()=>{
+ const executed=[];const schemas={
+  dc_hierarchy_tile:[['l1_code','varchar'],['l2_code','varchar'],['deleted','tinyint']],
+  budget_dimensions_allocation:[['id','bigint'],['hierarchy_code','varchar'],['bo_code','varchar']],
+  budget_available_ts:[['allocation_dimension_id','bigint'],['allocation_time','varchar'],['available_ts','decimal']],
+ };
+ const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async(statement,params)=>{
+  executed.push({sql:statement.sql,params});
+  if(statement.sql.includes('information_schema.COLUMNS')){const table=params[1];return [schemas[table].map(([column_name,data_type])=>({table_name:table,column_name,data_type}))];}
+  if(statement.sql.startsWith('SELECT DISTINCT'))return [[{l1_code:'041',l2_code:'04101'}]];
+  return [[{sales_budget:'0.0000',matched_rows:'2'}]];
+ },rollback:async()=>{},destroy:()=>{}})};
+ const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'fake',port:3306,database:'demo'},{...query,tables:['*']},credentials,{mysql:driver});
+ try{
+  for(const table of Object.keys(schemas))await tools.run('schema',{table});
+  const set=await tools.run('collect_values',{table:'dc_hierarchy_tile',columns:['l1_code','l2_code'],filters:[{column:'l1_code',op:'=',value:'041'}]});
+  assert.equal(set.setRef,'set-1');assert.equal(set.valueCount,2);
+  const result=await tools.run('linked_aggregate',{leftTable:'budget_dimensions_allocation',rightTable:'budget_available_ts',join:{leftColumn:'id',rightColumn:'allocation_dimension_id'},aggregates:[{op:'sum',table:'budget_available_ts',column:'available_ts',as:'sales_budget'},{op:'count',table:'budget_available_ts',as:'matched_rows'}],filters:[
+   {table:'budget_dimensions_allocation',column:'hierarchy_code',op:'in_set',value:set.setRef},
+   {table:'budget_dimensions_allocation',column:'bo_code',op:'=',value:'4'},
+   {table:'budget_available_ts',column:'allocation_time',op:'=',value:'202610'},
+  ]});
+  assert.deepEqual(result.rows,[{sales_budget:'0.0000',matched_rows:'2'}]);
+  const queryCall=executed.at(-1);assert.deepEqual(queryCall.params,['041','04101','4','202610']);assert.doesNotMatch(queryCall.sql,/202610|04101/);
+ }finally{await tools.close();}
 });

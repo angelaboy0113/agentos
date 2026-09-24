@@ -22,6 +22,19 @@ function actionButton(job, action, label, type = 'default') {
 export const CARD_TEXT_LIMIT = 3500;
 const clip = (text, n) => Array.from(String(text ?? '')).slice(0, n).join('');
 const md = (content, small = false) => ({ tag: 'markdown', content, text_size: small ? 'notation' : 'normal', margin: '0px' });
+export function cumulativeToolCalls(events=[]){
+  let total=0,segmentMax=0;
+  for(const event of events){
+    if(event.type==='started'||event.type==='continuous_environment_started'||event.type==='continuous_environment_completed'
+      ||event.type==='codex_event'&&event.event?.type==='turn.started')segmentMax=0;
+    if(event.phase!=='tool_activity')continue;
+    const next=Number(event.activity?.total);
+    if(!Number.isFinite(next)||next<0)continue;
+    if(next<segmentMax)segmentMax=0;
+    total+=Math.max(0,next-segmentMax);segmentMax=Math.max(segmentMax,next);
+  }
+  return total;
+}
 const block = (elements, color = 'grey') => ({ tag: 'column_set', flex_mode: 'none', columns: [
   { tag: 'column', width: 'weighted', weight: 1, padding: '12px', vertical_spacing: '8px',
     background_style: `${color}-50`, elements },
@@ -92,7 +105,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
     : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label)).map(part => md(part))], color),
     { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns: [
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${elapsed(start, active ? now : Date.parse(job.updatedAt))}**`), md('总耗时', true)] },
-      { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${Number(activity?.total) || 0} 次**`), md('实际工具调用', true)] },
+      { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${cumulativeToolCalls(relevant)} 次**`), md('累计实际工具调用', true)] },
     ] }];
   if (active && activity?.recent?.length) elements.push(block([md(`**最近完成 · 展示 ${activity.recent.length} / ${Number(activity.completed) || 0} 项**`),
     ...activity.recent.slice(-3).map((item) => md(`${item.failed ? '未通过' : '完成'} · ${publicText(clip(item.label, 120))}`, true))]));

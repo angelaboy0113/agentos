@@ -5,6 +5,7 @@ import { boundedFetch, checkAccountGrants } from './environment-connector.js';
 import { databaseEndpoints, schedulerConfiguration } from './config-endpoints.js';
 const secretName = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
+const numericTypes = new Set(['tinyint','smallint','mediumint','int','integer','bigint','decimal','numeric','float','double','real']);
 function safeStructured(value,depth=0,seen=new WeakSet()){
  if(value===null||value===undefined||['string','number','boolean'].includes(typeof value))return value??'';
  if(typeof value==='bigint')return String(value);
@@ -26,34 +27,55 @@ const bounded = (x, secrets = []) => {
 export class QueryInputError extends Error {
   constructor(code, message) { super(`[${code}] ${message}`); this.code = code; }
 }
-export function selectStatement(args, tables, q) {
-  const { table, columns, filters } = args;
+function tableColumns(tables, table, q) {
   const known = tables.get(table);
   if (!ident(table) || !(q.tables.includes('*') || q.tables.includes(table))) throw new Error('查询表超出范围');
   if (!known) throw new QueryInputError('SCHEMA_REQUIRED', '目标表尚未读取结构；先调用schema并指定table，再选择实际返回的字段。');
-  if (!Array.isArray(columns) || !columns.length) throw new QueryInputError('QUERY_INPUT', 'columns必须是非空字段数组。');
-  if (columns.length > 12) throw new QueryInputError('COLUMN_LIMIT', '一次最多选择12个字段；只选择与问题相关的字段，必要时分次读取。');
-  if (columns.some(c => typeof c === 'string' && secretName.test(c))) throw new Error('查询列超出范围');
-  if (columns.some(c => !ident(c))) throw new QueryInputError('QUERY_INPUT', 'columns仅接受schema返回的普通字段名，不能使用*、函数或表达式。');
-  if (columns.some(c => !known.includes(c))) throw new QueryInputError('SCHEMA_FIELDS', '字段未在已读取结构中；重新读取目标表schema或继续分页，仅使用返回的字段。');
-  if (!Array.isArray(filters) || !filters.length || filters.length > 6) throw new QueryInputError('QUERY_INPUT', 'filters必须包含1至6个明确筛选条件，不允许全表读取。');
-  const params = [], where = filters.map(f => {
+  return known;
+}
+function checkedColumn(tables, table, column, q) {
+  const known = tableColumns(tables, table, q);
+  if (!ident(column) || secretName.test(column)) throw new Error('查询列超出范围');
+  if (!known.includes(column)) throw new QueryInputError('SCHEMA_FIELDS', '字段未在已读取结构中；重新读取目标表schema或继续分页，仅使用返回的字段。');
+  return column;
+}
+function filterClause(filters, tables, table, q, valueSets = new Map(), alias = '', maxFilters = 8) {
+  const known = tableColumns(tables, table, q);
+  if (!Array.isArray(filters) || !filters.length || filters.length > maxFilters) throw new QueryInputError('QUERY_INPUT', `filters必须包含1至${maxFilters}个明确筛选条件，不允许全表读取。`);
+  const params = [], prefix = alias ? `\`${alias}\`.` : '';
+  const where = filters.map(f => {
     if (!f || !ident(f.column) || secretName.test(f.column)) throw new Error('查询筛选列超出范围');
     if (!known.includes(f.column)) throw new QueryInputError('SCHEMA_FIELDS', '筛选字段未在已读取结构中；先读取目标表schema并使用实际字段。');
     if (f.op === 'contains') {
       if (typeof f.value !== 'string' || !f.value || f.value.length > 200) throw new QueryInputError('QUERY_INPUT', 'contains需要1至200字符的非空字符串。');
-      params.push(f.value); return `LOCATE(?, \`${f.column}\`) > 0`;
+      params.push(f.value); return `LOCATE(?, ${prefix}\`${f.column}\`) > 0`;
+    }
+    if (f.op === 'in_set') {
+      const set = valueSets.get(f.value);
+      if (!set || set.truncated || !set.values.length) throw new QueryInputError('VALUE_SET', 'in_set必须引用本轮collect_values返回的完整非空setRef。');
+      params.push(...set.values); return `${prefix}\`${f.column}\` IN (${set.values.map(() => '?').join(', ')})`;
     }
     if (f.op === 'in') {
       if (!Array.isArray(f.value) || !f.value.length || f.value.length > 100
         || f.value.some(v => !['string','number'].includes(typeof v) || (typeof v === 'number' && !Number.isFinite(v)) || String(v).length > 200)) {
         throw new QueryInputError('QUERY_INPUT', 'in需要1至100个不超过200字符的字符串或有限数字。');
       }
-      params.push(...f.value); return `\`${f.column}\` IN (${f.value.map(() => '?').join(', ')})`;
+      params.push(...f.value); return `${prefix}\`${f.column}\` IN (${f.value.map(() => '?').join(', ')})`;
     }
     if (!['=','>','>=','<','<='].includes(f.op) || !['string','number'].includes(typeof f.value) || (typeof f.value === 'number' && !Number.isFinite(f.value)) || String(f.value).length > 200) throw new QueryInputError('QUERY_INPUT', '筛选仅支持=、>、>=、<、<=、contains、in；标量value为不超过200字符的字符串或有限数字。');
-    params.push(f.value); return `\`${f.column}\` ${f.op} ?`;
+    params.push(f.value); return `${prefix}\`${f.column}\` ${f.op} ?`;
   }).join(' AND ');
+  return { where, params };
+}
+export function selectStatement(args, tables, q) {
+  const { table, columns, filters } = args;
+  const known = tableColumns(tables, table, q);
+  if (!Array.isArray(columns) || !columns.length) throw new QueryInputError('QUERY_INPUT', 'columns必须是非空字段数组。');
+  if (columns.length > 12) throw new QueryInputError('COLUMN_LIMIT', '一次最多选择12个字段；只选择与问题相关的字段，必要时分次读取。');
+  if (columns.some(c => typeof c === 'string' && secretName.test(c))) throw new Error('查询列超出范围');
+  if (columns.some(c => !ident(c))) throw new QueryInputError('QUERY_INPUT', 'columns仅接受schema返回的普通字段名，不能使用*、函数或表达式。');
+  if (columns.some(c => !known.includes(c))) throw new QueryInputError('SCHEMA_FIELDS', '字段未在已读取结构中；重新读取目标表schema或继续分页，仅使用返回的字段。');
+  const {where,params}=filterClause(filters,tables,table,q,new Map(),'',6);
   return { sql: `SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`${table}\` WHERE ${where} LIMIT ${q.maxRows + 1}`, params, columns };
 }
 // Count only validated base-table fields and filters; no model-provided SQL.
@@ -77,9 +99,61 @@ export function groupCountStatement(args,tables,q){
     params:[...base.params,minCount],groupColumns};
 }
 
+const aggregateExpression = (item, tables, types, q, aliases = new Map()) => {
+  if (!item || !['sum','avg','min','max','count','count_distinct'].includes(item.op)) throw new QueryInputError('QUERY_INPUT','aggregate op仅支持sum、avg、min、max、count、count_distinct。');
+  const table = item.table;
+  const alias = aliases.get(table) ?? '';
+  if (item.op === 'count' && item.column == null) return 'COUNT(*)';
+  const column = checkedColumn(tables,table,item.column,q);
+  if (['sum','avg'].includes(item.op) && !numericTypes.has(types.get(table)?.get(column))) throw new QueryInputError('NUMERIC_FIELD','sum/avg只能使用schema确认的数值字段。');
+  const target=`${alias ? `\`${alias}\`.` : ''}\`${column}\``;
+  return item.op==='count_distinct'?`COUNT(DISTINCT ${target})`:`${item.op.toUpperCase()}(${target})`;
+};
+function checkedAggregates(aggregates,tables,types,q,aliases){
+  if(!Array.isArray(aggregates)||!aggregates.length||aggregates.length>6)throw new QueryInputError('QUERY_INPUT','aggregates必须包含1至6项。');
+  return aggregates.map((item,index)=>{
+    const name=item.as??`metric_${index+1}`;
+    if(!ident(name)||secretName.test(name))throw new QueryInputError('QUERY_INPUT','aggregate as必须是普通非敏感字段名。');
+    return {name,expression:aggregateExpression(item,tables,types,q,aliases)};
+  });
+}
+export function aggregateStatement(args,tables,types,q,valueSets=new Map()){
+  tableColumns(tables,args.table,q);
+  const metrics=checkedAggregates((args.aggregates??[]).map(x=>({...x,table:args.table})),tables,types,q,new Map());
+  const filter=filterClause(args.filters,tables,args.table,q,valueSets);
+  return {sql:`SELECT ${metrics.map(x=>`${x.expression} AS \`${x.name}\``).join(', ')} FROM \`${args.table}\` WHERE ${filter.where}`,params:filter.params,columns:metrics.map(x=>x.name)};
+}
+export function collectValuesStatement(args,tables,q){
+  const columns=args.columns??[];
+  if(!Array.isArray(columns)||!columns.length||columns.length>8)throw new QueryInputError('QUERY_INPUT','columns必须是1至8个字段。');
+  for(const column of columns)checkedColumn(tables,args.table,column,q);
+  const filter=filterClause(args.filters,tables,args.table,q);
+  return {sql:`SELECT DISTINCT ${columns.map(c=>`\`${c}\``).join(', ')} FROM \`${args.table}\` WHERE ${filter.where} LIMIT 1001`,params:filter.params,columns};
+}
+export function linkedAggregateStatement(args,tables,types,q,valueSets=new Map()){
+  const left=args.leftTable,right=args.rightTable;
+  if(left===right)throw new QueryInputError('QUERY_INPUT','关联汇总必须使用两个不同基础表。');
+  tableColumns(tables,left,q);tableColumns(tables,right,q);
+  const leftJoin=checkedColumn(tables,left,args.join?.leftColumn,q),rightJoin=checkedColumn(tables,right,args.join?.rightColumn,q);
+  const aliases=new Map([[left,'l'],[right,'r']]);
+  if((args.aggregates??[]).some(item=>!item||![left,right].includes(item.table)))throw new QueryInputError('QUERY_INPUT','每项aggregate必须指定leftTable或rightTable。');
+  const metrics=checkedAggregates(args.aggregates,tables,types,q,aliases);
+  const filters=args.filters??[];
+  if(!Array.isArray(filters)||!filters.length||filters.length>10)throw new QueryInputError('QUERY_INPUT','filters必须包含1至10个明确筛选条件。');
+  const clauses=[],params=[];
+  for(const table of [left,right]){
+    const current=filters.filter(f=>f?.table===table).map(({table:_,...f})=>f);
+    if(!current.length)continue;
+    const part=filterClause(current,tables,table,q,valueSets,aliases.get(table),10);clauses.push(part.where);params.push(...part.params);
+  }
+  if(filters.some(f=>!f||![left,right].includes(f.table)))throw new QueryInputError('QUERY_INPUT','每个关联筛选必须指定leftTable或rightTable。');
+  if(!clauses.length)throw new QueryInputError('QUERY_INPUT','关联汇总不允许无条件读取。');
+  return {sql:`SELECT ${metrics.map(x=>`${x.expression} AS \`${x.name}\``).join(', ')} FROM \`${left}\` \`l\` JOIN \`${right}\` \`r\` ON \`l\`.\`${leftJoin}\` = \`r\`.\`${rightJoin}\` WHERE ${clauses.join(' AND ')}`,params,columns:metrics.map(x=>x.name)};
+}
+
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
-  const configs = new Map(), tables = new Map();
+  const configs = new Map(), tables = new Map(), columnTypes = new Map(), valueSets = new Map();
   const request = adapters.fetch ?? boundedFetch;
   async function nacos(api, params = {}, login = false) {
     if (!active) throw new Error('工具执行已结束');
@@ -113,6 +187,9 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'schema', args: { table: '可选：限定基础表名', columns: ['可选：要定向发现的准确字段名，最多20个；使用时必须提供table'], cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段；已知字段名时用table+columns定向发现，避免宽表分页遗漏；不读取业务数据' },
     { tool: 'count', args: { table: 'schema返回的表', distinctColumns: '可选：去重字段数组；空数组统计行数，非空按这些字段组合去重（不计含NULL的组合）', filters: '与select相同的明确筛选条件' }, description: '统计批准基础表筛选范围内的完整行数或指定字段组合去重数，不用样本行数代替总数，不支持任意SQL或联表' },
     { tool: 'group_count', args: { table: 'schema返回的表', groupColumns: ['用于判断重复的1至8个字段'], minCount: '最小重复数，默认2', filters: '与select相同的明确筛选条件' }, description: `按业务字段组合分组统计重复记录，返回重复最多的${q.maxRows}组；仅单表参数化查询。总行数大于业务去重数、疑似重复批次或重复提交时优先使用` },
+    { tool: 'aggregate', args: {table:'schema返回的表',aggregates:[{op:'sum|avg|min|max|count|count_distinct',column:'count可省略，其余使用schema字段',as:'结果名'}],filters:'与select相同；可用本轮setRef作为in_set'},description:'在一个基础表内执行最多6项受控汇总；sum/avg仅允许schema确认的数值字段，不接受SQL表达式' },
+    { tool: 'collect_values', args: {table:'schema返回的表',columns:['合并收集值的1至8个字段'],filters:'与select相同'},description:'从一个表的多列收集最多1000个去重值，返回本轮setRef和少量样本；后续aggregate或linked_aggregate可用in_set引用完整集合，适合组织层级等中间集合' },
+    { tool: 'linked_aggregate', args: {leftTable:'左表',rightTable:'右表',join:{leftColumn:'左表关联字段',rightColumn:'右表关联字段'},aggregates:[{op:'sum|avg|min|max|count|count_distinct',table:'左表或右表',column:'字段',as:'结果名'}],filters:[{table:'左表或右表',column:'字段',op:'=|>|>=|<|<=|contains|in|in_set',value:'值或setRef'}]},description:'仅允许两个已读取基础表按一个等值字段关联并做受控汇总；所有表、列、数值类型和筛选均由程序校验，不接受任意SQL' },
     { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=|>|>=|<|<=|contains|in', value: '标量；in使用数组' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件；contains执行参数化子串匹配，in最多100个绑定值；仅基础表，不允许任意SQL、联表或写入` }
   ];
   let browser;
@@ -165,11 +242,12 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const offset = args.cursor === undefined ? 0 : Number(args.cursor);
           if(!Number.isInteger(offset) || offset<0 || offset>100000) throw new Error('结构分页参数无效');
           const columnClause = requestedColumns ? ` AND c.COLUMN_NAME IN (${requestedColumns.map(() => '?').join(', ')})` : '';
-          const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
+          const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name,c.DATA_TYPE AS data_type FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
           const visible = new Map();
           for (const r of rows.slice(0,100)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) {
             visible.set(r.table_name,[...(visible.get(r.table_name)??[]),r.column_name]);
             tables.set(r.table_name,[...new Set([...(tables.get(r.table_name)??[]),r.column_name])]);
+            if(typeof r.data_type==='string'){const known=columnTypes.get(r.table_name)??new Map();known.set(r.column_name,r.data_type.toLowerCase());columnTypes.set(r.table_name,known);}
           }
           const result = {tables:Object.fromEntries(visible),truncated:requestedColumns ? false : rows.length>100,nextCursor:!requestedColumns && rows.length>100?offset+100:null};
           if(result.truncated) result.note='仅当前页表结构；可用schema的nextCursor继续，或指定table读取目标表。';
@@ -185,6 +263,17 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const [rows]=await c.execute({sql:statement.sql,timeout:q.timeoutMs},statement.params);
           return {table:args.table,rows:rows.slice(0,q.maxRows).map(row=>Object.fromEntries([...statement.groupColumns,'duplicate_count'].map(key=>[key,bounded(row[key],secrets)]))),
             truncated:rows.length>q.maxRows,groupColumns:statement.groupColumns,stage:`已按 ${statement.groupColumns.join('、')} 核对重复组合`};
+        }
+        if(tool==='collect_values'){
+          const statement=collectValuesStatement(args,tables,q);const [rows]=await c.execute({sql:statement.sql,timeout:q.timeoutMs},statement.params);
+          const values=[...new Set(rows.slice(0,1000).flatMap(row=>statement.columns.map(column=>row[column])).filter(value=>value!==null&&value!==undefined&&['string','number','bigint'].includes(typeof value)).map(String))];
+          const setRef=`set-${valueSets.size+1}`;valueSets.set(setRef,{values,truncated:rows.length>1000});
+          return {table:args.table,setRef,valueCount:values.length,sample:values.slice(0,Math.min(q.maxRows,20)),truncated:rows.length>1000,stage:`已收集 ${values.length} 个去重值供本轮关联汇总`};
+        }
+        if(tool==='aggregate'||tool==='linked_aggregate'){
+          const statement=tool==='aggregate'?aggregateStatement(args,tables,columnTypes,q,valueSets):linkedAggregateStatement(args,tables,columnTypes,q,valueSets);
+          const [rows]=await c.execute({sql:statement.sql,timeout:q.timeoutMs},statement.params);
+          return {rows:rows.slice(0,1).map(row=>Object.fromEntries(statement.columns.map(key=>[key,bounded(row[key],secrets)]))),truncated:false,stage:tool==='aggregate'?'已完成单表汇总':'已完成受控关联汇总'};
         }
         const statement = selectStatement(args, tables, q);
         const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);

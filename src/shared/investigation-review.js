@@ -104,6 +104,13 @@ export function reviewDecision(job,result){
 }
 
 const targetKey = value => `${value?.environmentId ?? ''}:${value?.queryId ?? ''}`;
+const maxTargetRounds=()=>{const n=Number(process.env.AGENTOS_ENV_TARGET_MAX_ROUNDS);return Number.isInteger(n)&&n>=1&&n<=6?n:3;};
+function completedTargetRounds(jobs,request){
+ const key=targetKey(request);
+ return jobs.reduce((total,item)=>total
+  +(item.events??[]).filter(event=>event.type==='continuous_environment_completed'&&targetKey(event)===key).length
+  +(item.environmentAccess&&targetKey(item.environmentAccess)===key&&!item.continuousInvestigation&&item.status!=='queued'?1:0),0);
+}
 const verifiedGoals = result => new Set((result?.investigation?.goals ?? [])
  .filter(goal => goal.status === 'verified' && nonempty(goal.id) && nonempty(goal.evidence)).map(goal => goal.id));
 const continuationMetadata = (request,currentResult) => {
@@ -128,6 +135,8 @@ export function environmentContinuation(state,job,request,currentResult){
  const contexts=jobs.flatMap(item=>item.context??[]).map(entry=>entry.result).filter(Boolean);
  const targeted=continuationMetadata(request,currentResult);
  if(!targeted.ok)return {continue:false,reason:targeted.reason};
+ const targetRounds=completedTargetRounds(jobs,request);
+ if(targetRounds>=maxTargetRounds())return {continue:false,reason:`同一环境调查目标已完成${targetRounds}轮；继续串行追加小范围查询会显著增加耗时。请使用本轮受控汇总工具关闭缺口，或根据已有证据给出已确认与未确认项。`};
  const current=verifiedGoals(currentResult);
  let priorBest=new Set();
  for(const result of [...jobs.map(item=>item.result),...contexts]){const found=verifiedGoals(result);if(found.size>priorBest.size)priorBest=found;}

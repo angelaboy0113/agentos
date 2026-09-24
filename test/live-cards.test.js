@@ -6,7 +6,7 @@ import path from 'node:path';
 import { JsonStore } from '../src/shared/store.js';
 import { ExecutionActivity, commandLabel } from '../src/shared/execution-activity.js';
 import { LiveCards } from '../src/control-plane/live-cards.js';
-import { conversationCard, jobCard, publicText, resultParts } from '../src/control-plane/message-cards.js';
+import { conversationCard, cumulativeToolCalls, jobCard, publicText, resultParts } from '../src/control-plane/message-cards.js';
 import { createControlPlane, handleLarkCliEvent, notifyJobEvent } from '../src/control-plane/server.js';
 
 const destination = { replyTo: 'om_question', profile: 'owner' };
@@ -65,6 +65,18 @@ test('job card displays total question time across later execution jobs', () => 
   assert.match(rendered, /12 分 5 秒/);
   assert.match(rendered, /总耗时/);
   assert.doesNotMatch(rendered, /本阶段耗时/);
+});
+test('job card reports cumulative tool calls across source and environment turns',()=>{
+ const events=[
+  {type:'started'},
+  {type:'codex_event',event:{type:'turn.started'}},{phase:'tool_activity',activity:{total:1}},{phase:'tool_activity',activity:{total:3}},
+  {type:'continuous_environment_started'},{phase:'tool_activity',activity:{total:1}},{phase:'tool_activity',activity:{total:4}},
+  {type:'continuous_environment_completed'},{type:'codex_event',event:{type:'turn.started'}},{phase:'tool_activity',activity:{total:2}},
+ ].map((event,index)=>({...event,at:new Date(Date.parse('2026-09-22T03:36:59.000Z')+index).toISOString()}));
+ assert.equal(cumulativeToolCalls(events),9);
+ const job={id:'job-tools',stage:'developer',status:'running',events,createdAt:'2026-09-22T03:36:59.000Z',updatedAt:'2026-09-22T03:37:05.000Z'};
+ const rendered=JSON.stringify(jobCard(job,Date.parse(job.updatedAt)));
+ assert.match(rendered,/9 次/);assert.match(rendered,/累计实际工具调用/);
 });
 
 test('receipt and result update ONE message with a stable sender; terminal cannot regress', async (t) => {

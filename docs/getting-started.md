@@ -234,9 +234,10 @@ AGENTOS_ANALYSIS_TURN_TIMEOUT_MS=900000
 AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS=480000
 AGENTOS_ENV_INVESTIGATION_MAX_CALLS=24
 AGENTOS_ENV_INVESTIGATION_MAX_MS=150000
+AGENTOS_ENV_TARGET_MAX_ROUNDS=3
 ```
 
-前两项分别限制首轮和续轮 Codex 分析；后两项限制一次环境调查的调用数和耗时。超时或预算用尽会保留已有证据并显示部分结果，不代表连接失败或已经查清根因。不要单纯调大这些值来掩盖重复查询；重复批次应使用受控聚合查询。
+前两项分别限制首轮和续轮 Codex 分析；中间两项限制一次环境调查的调用数和耗时；最后一项限制同一环境与查询模板连续启动的总轮数，允许范围为 1—6，默认 3。超时或预算用尽会保留已有证据并显示部分结果，不代表连接失败或已经查清根因。不要单纯调大这些值来掩盖重复查询；重复批次应使用 `group_count`，源码已有汇总口径时应在一轮内使用 `aggregate` 或 `collect_values` + `linked_aggregate`。
 
 ## 11. 拉机器人进群并发送第一条消息
 
