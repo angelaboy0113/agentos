@@ -68,6 +68,17 @@ export function assessInvestigation(job,result){
  if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
    && (result.environmentSetup || result.investigation?.status==='wait'&&['login','user_input'].includes(result.investigation?.blocker?.kind)))
   return {...result,outcome:'needs_clarification'};
+ if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
+   &&result.outcome==='blocked'&&result.investigation?.status==='wait'&&result.investigation?.blocker?.kind==='unavailable'){
+  const goals=result.investigation.goals??[],root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
+  const supportingGoal=goals.some(goal=>goal.id!==QUESTION_GOAL_ID&&goal.status==='verified'&&nonempty(goal.evidence));
+  const supportingCause=(result.investigation.causalAssessment?.evidence??[])
+   .some(item=>diagnosticKinds.has(item?.kind)&&nonempty(item.reference)&&nonempty(item.finding));
+  const usefulEvidence=nonempty(root?.evidence)&&nonempty(result.finalMessage)
+   &&result.handoff?.artifacts?.length&&result.handoff?.risks?.length&&(supportingGoal||supportingCause);
+  if(usefulEvidence)result={...result,outcome:'partial',handoff:{...result.handoff,
+   checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed'?{...check,status:'not_run'}:check)}};
+ }
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!['ready','partial'].includes(result.outcome))return result;
  if(investigationComplete(job,result))return result;
  const note='原问题仍有待核实目标，继续自查；尚不能认定排查完成。';

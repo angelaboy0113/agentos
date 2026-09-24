@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { JsonStore } from '../src/shared/store.js';
 import { validateHandoff, enforceHandoff, preserveAnalysisGaps, preserveEnvironmentEvidence } from '../src/runner/harness.js';
+import { assessInvestigation } from '../src/shared/investigation-review.js';
 import { jobCard } from '../src/control-plane/message-cards.js';
 import { jobTerminalMention } from '../src/control-plane/requester-mention.js';
 const handoff = () => ({ artifacts: [{ kind: 'code', path: 'code.js' }], checks: [
@@ -42,6 +43,24 @@ test('partial analysis may preserve a required check as not run when other requi
   assert.equal(enforced.handoff.checks[1].status, 'not_run');
   assert.match(enforced.finalMessage, /释放流水/);
   assert.equal(jobCard({ status: 'completed', taskIntent: 'analysis', result: enforced, events: [], createdAt: new Date().toISOString(), id: 'JOB-partial' }).header.template, 'orange');
+});
+test('unavailable request logs preserve useful question findings as an orange partial result',async t=>{
+ const root=await fixture(t),job={taskIntent:'analysis',stage:'developer',originalQuestion:'为什么提交504',questionScopePolicy:'original-question-v1'};
+ const assessed=assessInvestigation(job,{outcome:'blocked',summary:'已确认提交后状态',finalMessage:'V3已创建并进入审批，具体慢点待日志。',
+  investigation:{status:'wait',goals:[
+   {id:'original-question',required:true,status:'open',evidence:'504后V3创建并进入审批，具体慢点未定位'},
+   {id:'state',required:false,status:'verified',evidence:'数据库确认V3'},
+  ],attempts:['查询数据库'],nextStep:'获取请求日志',causalAssessment:{status:'unknown',link:'unproven',mechanism:'响应超时',evidence:[
+   {kind:'database',reference:'V3',finding:'已创建'},
+  ],alternatives:'待日志排除'},blocker:{kind:'unavailable',needed:'请求日志',evidence:'未登记日志入口'}},
+  handoff:{artifacts:[{kind:'code',path:'code.js'}],checks:[
+   {id:'original-question',required:true,status:'failed',evidence:'具体慢点未定位'},
+   {id:'state',required:false,status:'passed',evidence:'V3已核实'},
+  ],risks:['不要重复提交'],returnTo:'none'}});
+ const enforced=enforceHandoff(assessed,await validateHandoff(job,assessed,root));
+ assert.equal(enforced.outcome,'partial');assert.equal(enforced.handoffGate.passed,true);
+ assert.equal(jobCard({status:'completed',taskIntent:'analysis',result:enforced,events:[],createdAt:new Date().toISOString(),id:'JOB-causal-partial'}).header.template,'orange');
+ assert.match(enforced.finalMessage,/V3已创建/);
 });
 test('question-scoped ready answer requires a passed original-question handoff check',async t=>{
  const root=await fixture(t),job={taskIntent:'analysis',stage:'developer'};

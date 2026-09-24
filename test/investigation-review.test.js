@@ -100,6 +100,24 @@ test('a business error plus correlated records can complete a causal question',(
  ],alternatives:'附件上传接口已返回成功'},goals:[{id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'业务错误、重复明细和源码校验路径一致'}],attempts:[],nextStep:''};
  assert.equal(causalEvidenceComplete(job,r),true);assert.equal(assessInvestigation(job,r).outcome,'ready');
 });
+test('useful findings waiting on unavailable request logs stay partial instead of becoming a generic blocked card',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'提交为什么返回504',questionScopePolicy:'original-question-v1'};
+ const actual=assessInvestigation(job,{outcome:'blocked',summary:'已确认新版本和审批状态',finalMessage:'V3已创建并进入审批；具体超时环节仍需请求日志。',
+  investigation:{status:'wait',goals:[
+   {id:QUESTION_GOAL_ID,required:true,status:'open',evidence:'已确认504后V3创建和审批启动，具体耗时环节未定位。'},
+   {id:'post-timeout-state',required:false,status:'verified',evidence:'数据库确认V3和审批实例。'},
+  ],attempts:['查询源码和数据库'],nextStep:'取得请求日志',causalAssessment:{status:'unknown',link:'unproven',mechanism:'响应未及时返回',evidence:[
+   {kind:'database',reference:'conclusion_info V3',finding:'新版本已创建'},
+   {kind:'source',reference:'confirm调用链',finding:'请求同步启动审批'},
+  ],alternatives:'具体慢点未排除'},blocker:{kind:'unavailable',needed:'只读请求日志',evidence:'当前没有日志入口'}},
+  handoff:{artifacts:[{kind:'code',path:'code.js'}],checks:[
+   {id:QUESTION_GOAL_ID,required:true,status:'failed',evidence:'具体超时环节未定位'},
+   {id:'post-timeout-state',required:false,status:'passed',evidence:'V3和审批状态已核实'},
+  ],risks:['不要重复提交'],returnTo:'none'}});
+ assert.equal(actual.outcome,'partial');
+ assert.equal(actual.handoff.checks[0].status,'not_run');
+ assert.match(actual.finalMessage,/V3已创建/);
+});
 test('self-review continues with new evidence but stops repeated evidence or explicit external blocker',()=>{
  const r=result(),job={context:[{stage:'owner_report',result:r},{stage:'owner_report',result:r}]};
  assert.equal(reviewDecision(job,r).continue,false);
