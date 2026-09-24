@@ -213,7 +213,8 @@
             "goals",
             "attempts",
             "nextStep",
-            "blocker"
+            "blocker",
+            "causalAssessment"
           ],
           "properties": {
             "status": {
@@ -266,6 +267,86 @@
             },
             "nextStep": {
               "type": "string"
+            },
+            "causalAssessment": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "link",
+                    "mechanism",
+                    "evidence",
+                    "alternatives"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "unknown",
+                        "highly_supported",
+                        "confirmed"
+                      ]
+                    },
+                    "link": {
+                      "type": "string",
+                      "enum": [
+                        "unproven",
+                        "direct",
+                        "reproduced",
+                        "multi_evidence"
+                      ]
+                    },
+                    "mechanism": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "array",
+                      "maxItems": 12,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "reference",
+                          "finding"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "business_error",
+                              "application_log",
+                              "runtime_trace",
+                              "database",
+                              "source",
+                              "comparison",
+                              "calculation",
+                              "web_runtime",
+                              "gateway_response",
+                              "screenshot",
+                              "other"
+                            ]
+                          },
+                          "reference": {
+                            "type": "string"
+                          },
+                          "finding": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "alternatives": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
             },
             "blocker": {
               "anyOf": [

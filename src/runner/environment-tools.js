@@ -66,6 +66,17 @@ export function countStatement(args, tables, q) {
   return { sql: `SELECT COUNT(${distinct.length ? 'DISTINCT ' + distinct.map(c => '`' + c + '`').join(', ') : '*'}) AS total${from}`, params: base.params };
 }
 
+export function groupCountStatement(args,tables,q){
+  const groupColumns=args.groupColumns??[],minCount=args.minCount??2;
+  if(!Array.isArray(groupColumns)||!groupColumns.length||groupColumns.length>8)throw new QueryInputError('QUERY_INPUT','groupColumns必须是1至8个字段。');
+  if(!Number.isInteger(minCount)||minCount<2||minCount>100000)throw new QueryInputError('QUERY_INPUT','minCount必须是2至100000的整数。');
+  const base=selectStatement({table:args.table,columns:groupColumns,filters:args.filters},tables,q);
+  const from=base.sql.slice(base.sql.indexOf(' FROM ')).replace(/ LIMIT \d+$/,'');
+  const quoted=groupColumns.map(column=>`\`${column}\``).join(', ');
+  return {sql:`SELECT ${quoted}, COUNT(*) AS duplicate_count${from} GROUP BY ${quoted} HAVING COUNT(*) >= ? ORDER BY duplicate_count DESC LIMIT ${q.maxRows+1}`,
+    params:[...base.params,minCount],groupColumns};
+}
+
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map();
@@ -101,6 +112,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'tables', args: {cursor:'可选：nextCursor，默认0'}, description:'分页列出允许的基础表名称，先定位目标表再用schema读取列' },
     { tool: 'schema', args: { table: '可选：限定基础表名', columns: ['可选：要定向发现的准确字段名，最多20个；使用时必须提供table'], cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段；已知字段名时用table+columns定向发现，避免宽表分页遗漏；不读取业务数据' },
     { tool: 'count', args: { table: 'schema返回的表', distinctColumns: '可选：去重字段数组；空数组统计行数，非空按这些字段组合去重（不计含NULL的组合）', filters: '与select相同的明确筛选条件' }, description: '统计批准基础表筛选范围内的完整行数或指定字段组合去重数，不用样本行数代替总数，不支持任意SQL或联表' },
+    { tool: 'group_count', args: { table: 'schema返回的表', groupColumns: ['用于判断重复的1至8个字段'], minCount: '最小重复数，默认2', filters: '与select相同的明确筛选条件' }, description: `按业务字段组合分组统计重复记录，返回重复最多的${q.maxRows}组；仅单表参数化查询。总行数大于业务去重数、疑似重复批次或重复提交时优先使用` },
     { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=|>|>=|<|<=|contains|in', value: '标量；in使用数组' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件；contains执行参数化子串匹配，in最多100个绑定值；仅基础表，不允许任意SQL、联表或写入` }
   ];
   let browser;
@@ -167,6 +179,12 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const statement = countStatement(args, tables, q);
           const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
           return { table: args.table, rows: [{ total: String(rows[0].total), countMode: args.distinctColumns?.length ? 'distinct' : 'rows', distinctColumns: (args.distinctColumns ?? []).join(',') }], truncated: false };
+        }
+        if(tool==='group_count'){
+          const statement=groupCountStatement(args,tables,q);
+          const [rows]=await c.execute({sql:statement.sql,timeout:q.timeoutMs},statement.params);
+          return {table:args.table,rows:rows.slice(0,q.maxRows).map(row=>Object.fromEntries([...statement.groupColumns,'duplicate_count'].map(key=>[key,bounded(row[key],secrets)]))),
+            truncated:rows.length>q.maxRows,groupColumns:statement.groupColumns,stage:`已按 ${statement.groupColumns.join('、')} 核对重复组合`};
         }
         const statement = selectStatement(args, tables, q);
         const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);

@@ -68,6 +68,8 @@ npm ci
 
 新问题即使第一步就是数据库、Nacos 或网页查询，也使用同一个 `continuous_analysis` Job：环境证据写回原 Job 后，由原 Codex thread 继续核对源码、对照样本并形成结论，不创建旧式 `single_developer → analysis_review → owner_report` 接力链。原因判断按证据强度给出“确认 / 高度支持 / 尚不能确认”；下游原始报错是强证据，但多个独立证据已经收敛时不再把它作为唯一完成条件。
 
+原因类问题有程序完成门：504、红叉、截图或单条异常记录只能证明现象，必须取得直接业务错误，或至少两类独立证据共同解释作用机制，才允许把原问题标为完成。续轮只把新增环境证据追加给同一 Codex thread，不重发附件和完整历史。环境调查默认每轮 24 次工具调用或 150 秒；数据库重复记录优先使用受控 `group_count` 聚合。开发分析首轮默认 15 分钟、续轮 8 分钟，超时保留已有证据并返回可接续的部分结果，不伪造根因。
+
 分析先按 `projects.local.json` 的 `analysisRepositories` 同步各仓 origin 对应分支；缺少清单或同步失败即阻塞。成功后读取 `repoPath` 内的已同步源码，Codex 使用 read-only/never；不执行 `verifyCommands`，附件只写 Runner 数据区。它不代表根仓 worktree 已具备多仓写入能力。实施任务仍使用原有隔离工作区和人工门。
 
 角色真源为 `config/roles/analysis.md`；`analysis_report.md` 仅供旧任务和交付链兼容。规范见 [analysis-workflow.spec.md](docs/analysis-workflow.spec.md)。修改后在无在途任务时重启 `start:local`；`/health` 的 `analysisWorkflow` 应为 `continuous-developer-tools-v2`，并显示实际 `runnerConcurrency`。默认创建 3 个真正独立的 Runner 执行槽，可通过 `AGENTOS_RUNNER_CONCURRENCY=1..8` 调整。旧任务不迁移或重跑，新分析请求使用新链路。

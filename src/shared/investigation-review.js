@@ -1,6 +1,28 @@
 import { createHash } from 'node:crypto';
 const nonempty = s => typeof s === 'string' && s.trim().length > 0;
 export const QUESTION_GOAL_ID = 'original-question';
+const causalQuestion = /(?:为什么|为何|为啥|原因|根因|怎么回事|咋回事|分析.{0,12}(?:报错|失败|异常)|(?:报错|失败|异常).{0,12}(?:怎么|咋))|(?:\bwhy\b|root\s*cause|what\s+caused|reason\s+for)/i;
+const causalUncertainty = /(?:根因|原因|具体(?:超时|失败|异常)?(?:步骤|环节|位置)?).{0,16}(?:未查明|未找到|未确认|不能确认|无法确认|无法确定|不能确定|未知)|(?:尚未|尚不能|无法|不能).{0,12}(?:确认|确定|定位).{0,12}(?:根因|原因|步骤|环节|位置)/;
+const diagnosticKinds = new Set(['application_log','runtime_trace','database','source','comparison','calculation','web_runtime']);
+
+export function requiresCausalEvidence(job) {
+ return causalQuestion.test(String(job.originalQuestion ?? job.instruction ?? ''));
+}
+
+export function causalEvidenceComplete(job,result) {
+ if(!requiresCausalEvidence(job))return true;
+ const assessment=result.investigation?.causalAssessment;
+ if(!assessment||!['confirmed','highly_supported'].includes(assessment.status)
+   ||!['direct','reproduced','multi_evidence'].includes(assessment.link)||!nonempty(assessment.mechanism))return false;
+ const evidence=(assessment.evidence??[]).filter(item=>nonempty(item?.reference)&&nonempty(item?.finding));
+ const direct=evidence.some(item=>item.kind==='business_error');
+ const independent=new Set(evidence.filter(item=>diagnosticKinds.has(item.kind)).map(item=>item.kind));
+ if(!direct&&independent.size<2)return false;
+ const conclusion=[assessment.mechanism,result.investigation?.goals?.find(goal=>goal.id===QUESTION_GOAL_ID)?.evidence,result.summary].filter(Boolean).join(' ');
+ return !causalUncertainty.test(conclusion);
+}
+
+const questionAnswered=(job,result,root)=>root?.required===true&&root.status==='verified'&&nonempty(root.evidence)&&causalEvidenceComplete(job,result);
 // The question is the acceptance target. Investigation leads may aid that target,
 // but discovering a new field must not silently expand the user's request.
 export function normalizeQuestionScope(job, result) {
@@ -8,12 +30,16 @@ export function normalizeQuestionScope(job, result) {
  const investigation=result.investigation;
  if(!investigation?.goals?.some(goal=>goal.id===QUESTION_GOAL_ID))return result;
  const goals=investigation.goals.map(goal=>goal.id===QUESTION_GOAL_ID?goal:{...goal,required:false});
- const root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
- const answered=root.required===true&&root.status==='verified'&&nonempty(root.evidence);
+ let root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
+ const causalIncomplete=requiresCausalEvidence(job)&&root?.status==='verified'&&!causalEvidenceComplete(job,result);
+ if(causalIncomplete){root={...root,status:'open'};goals.splice(goals.findIndex(goal=>goal.id===QUESTION_GOAL_ID),1,root);}
+ const answered=questionAnswered(job,{...result,investigation:{...investigation,goals}},root);
  const promoted=answered&&result.outcome!=='ready';
  const handoff=result.handoff?{...result.handoff,checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID?check:{...check,required:false}),
   ...(answered?{returnTo:'none',risks:[...new Set([...(result.handoff.risks??[]),...(investigation.blocker?[`补充调查受限：${investigation.blocker.needed}`]:[])])]}:{})}:result.handoff;
- return {...result,outcome:answered?'ready':result.outcome,
+ const causalNote='用户询问的是原因，但现有材料只证明了现象或候选路径，因果证据尚未闭环。';
+ return {...result,outcome:answered?'ready':causalIncomplete&&result.outcome==='ready'?'partial':result.outcome,
+  ...(causalIncomplete?{summary:`${causalNote} ${result.summary??''}`.slice(0,1200)}:{}),
   ...(promoted?{summary:`原问题已核实：${root.evidence}。补充调查的限制见详情。`.slice(0,1200),
    finalMessage:`原问题已核实：${root.evidence}\n\n补充调查说明（不影响上述结论）：\n${result.finalMessage??''}`} : {}),
   investigation:{...investigation,goals,status:answered?'complete':investigation.status==='complete'?'continue':investigation.status,
@@ -32,7 +58,7 @@ export function investigationComplete(job, result) {
   if(questionScoped?(g.id===QUESTION_GOAL_ID&&(g.required!==true||g.status!=='verified')):(g.required!==false&&g.status!=='verified'))return false;
   ids.add(g.id);
  }
- if(questionScoped)return true;
+ if(questionScoped)return causalEvidenceComplete(job,result);
  // A later report cannot obtain completion by omitting a previously declared required goal.
  return (job.context??[]).every(x=>(x.result?.investigation?.goals??[])
   .filter(g=>g.required!==false).every(g=>ids.has(g.id)));

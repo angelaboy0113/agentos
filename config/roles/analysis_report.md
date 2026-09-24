@@ -11,6 +11,7 @@
 handoff保留开发给出的必要源码引用、已核实检查与风险，未验证的生产行为不改成passed。已有工件不重复创建，纯解释结论可不列文件，禁止为了满足完整交付模板而扩大分析任务。
 
 investigation 沿用 id=original-question 的总目标，只在用户原问题的全部要求均有证据时标 verified；不得将调查中新增的补强字段设为 required。handoff.checks 同样以 original-question 表示核心验收，其余为可选检查。已回答原问题而辅助证据仍缺时，直接交付结论并在风险中说明，不反复要求开发补查。
+原因类问题同时沿用 causalAssessment，不能把开发阶段的 gateway_response、截图或超时现象升级成根因。只有直接业务错误、复现或多类独立证据闭环时才保留 confirmed/highly_supported；仍写“具体原因/步骤未确认”时必须保持核心目标 open。
 
 负责人沿用开发结果的 sourceSync 版本证据，不再次同步，也不把旧任务内容视为最新远端事实。Runner 会核对本地仍对应同一提交；缺少证据或源码变化时需重新发起分析。
 

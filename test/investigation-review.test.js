@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {JsonStore} from '../src/shared/store.js';
-import {assessInvestigation,investigationComplete,reviewDecision,QUESTION_GOAL_ID} from '../src/shared/investigation-review.js';
+import {assessInvestigation,causalEvidenceComplete,investigationComplete,requiresCausalEvidence,reviewDecision,QUESTION_GOAL_ID} from '../src/shared/investigation-review.js';
 import {preserveAnalysisGaps} from '../src/runner/harness.js';
 const review=()=>({status:'continue',goals:[{id:'actual-data',status:'open',evidence:'Source checked; database not checked'}],attempts:['Checked source and environment catalog'],nextStep:'Find matching Nacos configuration',blocker:null});
 const result=()=>({outcome:'partial',summary:'Still checking',finalMessage:'Evidence',investigation:review(),handoff:{artifacts:[{kind:'code',path:'a.js'}],checks:[],risks:['Database not checked']},verifiedArtifacts:[{path:'a.js'}],handoffGate:{passed:true},sourceSync:{repositories:[{commit:'abc'}]}});
@@ -79,6 +79,26 @@ test('an already answered question does not become red because an ancillary logi
  assert.equal(checked.outcome,'ready');assert.equal(checked.investigation.blocker,null);
  assert.equal(checked.handoff.returnTo,'none');assert.match(checked.handoff.risks.join(' '),/Page login/);
  assert.match(checked.summary,/原问题已核实/);assert.match(checked.finalMessage,/补充调查说明/);
+});
+test('a gateway symptom cannot complete a causal question without root-cause evidence',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'为什么提交时报红 X 和 504？',context:[]};
+ const r=result();r.outcome='ready';r.investigation={status:'complete',blocker:null,causalAssessment:{status:'confirmed',link:'direct',mechanism:'confirm 请求收到 504 Gateway Timeout',evidence:[
+  {kind:'gateway_response',reference:'network confirm',finding:'HTTP 504'},
+  {kind:'screenshot',reference:'user screenshot',finding:'red X'},
+ ],alternatives:''},goals:[{id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'红 X 对应 504；具体超时环节仍未确认'}],attempts:[],nextStep:'查应用日志'};
+ assert.equal(requiresCausalEvidence(job),true);
+ assert.equal(causalEvidenceComplete(job,r),false);
+ const checked=assessInvestigation(job,r);
+ assert.equal(checked.outcome,'partial');assert.equal(checked.investigation.status,'continue');
+ assert.equal(checked.investigation.goals[0].status,'open');assert.match(checked.summary,/因果证据尚未闭环/);
+});
+test('a business error plus correlated records can complete a causal question',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'分析提交失败的原因',context:[]};
+ const r=result();r.outcome='ready';r.investigation={status:'complete',blocker:null,causalAssessment:{status:'confirmed',link:'direct',mechanism:'重复的第二批252条明细参与校验，触发活动规则日期重叠',evidence:[
+  {kind:'business_error',reference:'application log request-1',finding:'活动规则中起止时间有重叠'},
+  {kind:'database',reference:'activity_item group count',finding:'252组业务字段各重复2次，共504条'},
+ ],alternatives:'附件上传接口已返回成功'},goals:[{id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'业务错误、重复明细和源码校验路径一致'}],attempts:[],nextStep:''};
+ assert.equal(causalEvidenceComplete(job,r),true);assert.equal(assessInvestigation(job,r).outcome,'ready');
 });
 test('self-review continues with new evidence but stops repeated evidence or explicit external blocker',()=>{
  const r=result(),job={context:[{stage:'owner_report',result:r},{stage:'owner_report',result:r}]};

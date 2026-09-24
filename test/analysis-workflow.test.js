@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import { prepareWorkspace } from '../src/runner/workspace.js';
-import { analysisThreadId, buildCodexArgs, buildPrompt, verificationCommands } from '../src/runner/codex-executor.js';
+import { analysisThreadId, analysisTimeoutResult, buildCodexArgs, buildPrompt, verificationCommands } from '../src/runner/codex-executor.js';
 import { JsonStore } from '../src/shared/store.js';
 import { createControlPlane } from '../src/control-plane/server.js';
 import { jobCard } from '../src/control-plane/message-cards.js';
@@ -65,6 +65,24 @@ test('same developer investigation resumes its Codex thread instead of starting 
   assert.equal(args.at(-2), 'thread-current');
   assert.equal(args.at(-1), '-');
   assert.equal(args.includes('-C'), false);
+  assert.equal(args.includes('/tmp/repeated.png'),false);
+});
+
+test('resumed analysis sends only new evidence and does not repeat the full harness or attachment',async()=>{
+ const job={...input,originalQuestion:'很长的原始问题和请求体',context:[
+  {stage:'developer',kind:'analysis_turn',result:{threadId:'thread-current',workspace:'/snapshot/current',finalMessage:'旧分析全文'}},
+  {stage:'developer',kind:'environment_result',result:{outcome:'partial',summary:'新数据库证据',evidenceRecords:[{total:'504',distinct:'252'}],environmentEvidence:{resultHash:'a'.repeat(64)}}},
+ ]};
+ const prompt=await buildPrompt(job,{}, {instruction:'完整角色规则不应重复',metadata:{version:'test'}},{workspace:'/snapshot/current'},[], '/snapshot/current');
+ assert.match(prompt,/新数据库证据/);assert.match(prompt,/504/);assert.doesNotMatch(prompt,/完整角色规则不应重复|很长的原始问题和请求体|旧分析全文/);
+ const args=buildCodexArgs('/snapshot/current',[{type:'image',path:'/tmp/repeated.png'}],{readOnly:true,resumeThreadId:'thread-current'});
+ assert.equal(args.includes('/tmp/repeated.png'),false);
+});
+
+test('analysis timeout preserves prior evidence as partial and reopens the original question',()=>{
+ const prior={outcome:'needs_clarification',summary:'已确认部分事实',finalMessage:'源码和数据库证据',investigation:{status:'continue',goals:[{id:'original-question',required:true,status:'verified',evidence:'候选原因'}],attempts:[],nextStep:'查日志',blocker:null,causalAssessment:{status:'unknown',link:'unproven',mechanism:'',evidence:[],alternatives:''}},handoff:{artifacts:[{kind:'code',path:'a.js'}],checks:[{id:'original-question',required:true,status:'not_run',evidence:'待查'}],risks:[],returnTo:'none'}};
+ const out=analysisTimeoutResult({context:[{kind:'analysis_turn',result:prior}]},new Error('resume timeout'));
+ assert.equal(out.outcome,'partial');assert.equal(out.investigation.goals[0].status,'open');assert.match(out.summary,/性能保护/);assert.match(out.handoff.risks.join(' '),/resume timeout/);
 });
 
 test('analysis accepts a non-Git project folder and sees ignored and untracked files in child repositories', async (t) => {

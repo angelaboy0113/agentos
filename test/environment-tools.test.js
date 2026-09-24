@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { databaseEndpoints } from '../src/runner/config-endpoints.js';
-import { createEnvironmentTools, selectStatement, QueryInputError } from '../src/runner/environment-tools.js';
+import { createEnvironmentTools, groupCountStatement, selectStatement, QueryInputError } from '../src/runner/environment-tools.js';
 import { validateToolQuery } from '../src/shared/environment-tool-policy.js';
 import { planQuery } from '../src/shared/environment-access.js';
 import { fitToolResult, investigateEnvironment } from '../src/runner/environment-investigator.js';
@@ -221,6 +221,13 @@ test('evidence-driven investigation passes twelve calls and legacy maxCalls with
  planner:async()=>({next:async input=>{assert.equal(input.remainingCalls,undefined);return executed<16?{tool:'select',arguments:'{}'}:{tool:'finish',summary:'完成',complete:true};},close:async()=>{}})});
  assert.equal(executed,16);assert.equal(r.partial,false);assert.equal(r.rows.length,15);
 });
+test('investigation performance budget stops additional planning and preserves evidence',async()=>{
+ const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,limits:{maxCalls:4,maxMs:60000},
+  tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;return{stage:`step-${calls}`,rows:[{id:calls}]};},close:async()=>{}}),
+  planner:async()=>({next:async input=>input.remainingCalls===0?{tool:'finish',summary:'保留已有证据',complete:false}:{tool:'connection',arguments:'{}'},close:async()=>{}})});
+ assert.equal(calls,4);assert.equal(r.partial,true);assert.match(r.summary,/性能预算/);assert.equal(r.rows.length,4);
+});
 test('expiry during long investigation retains evidence and prohibits subsequent queries',async()=>{
  const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;
  const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;plan.expiresAt='2000-01-01T00:00:00Z';return{stage:'connected'};},close:async()=>{}}),planner:async()=>({next:async input=>{assert.deepEqual(input.tools,[]);return{tool:'finish',summary:'已有连接证据',complete:true};},close:async()=>{}})});
@@ -277,6 +284,16 @@ test('aggregate counts validate same table fields and filters without sample lim
  assert.throws(()=>countStatement({...args,table:'other'},tables,query));
  assert.throws(()=>countStatement({...args,distinctColumns:['id); DROP TABLE orders']},tables,query));
  assert.throws(()=>countStatement({...args,filters:[]},tables,query));
+});
+
+test('duplicate grouping is parameterized and limited to validated single-table fields',()=>{
+ const tables=new Map([['activity_item',['activity_id','dealer_id','amount','start_date','end_date']]]);
+ const statement=groupCountStatement({table:'activity_item',groupColumns:['dealer_id','amount','start_date','end_date'],minCount:2,
+  filters:[{column:'activity_id',op:'=',value:'2066723860004384770'}]},tables,{...query,maxRows:20,tables:['*']});
+ assert.match(statement.sql,/GROUP BY `dealer_id`, `amount`, `start_date`, `end_date`/);
+ assert.match(statement.sql,/HAVING COUNT\(\*\) >= \?/);assert.match(statement.sql,/LIMIT 21$/);
+ assert.deepEqual(statement.params,['2066723860004384770',2]);
+ assert.throws(()=>groupCountStatement({table:'activity_item',groupColumns:['dealer_id;drop'],filters:[{column:'activity_id',op:'=',value:'x'}]},tables,query));
 });
 
 test('count tool returns database aggregate rather than returned-row length',async()=>{

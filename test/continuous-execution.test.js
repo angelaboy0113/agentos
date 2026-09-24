@@ -59,6 +59,7 @@ test('continuous analysis can start with an environment query and return to the 
 
 test('runner pool provides bounded unique parallel execution slots', async () => {
   const config = await runnerConfig({ projects: {}, runnerId: 'mac-mini', concurrency: 3 });
+  assert.equal(config.analysisTurnTimeoutMs,900000);assert.equal(config.analysisResumeTimeoutMs,480000);
   let active = 0, peak = 0;
   const pool = createRunnerPool(config, async () => {
     active++; peak = Math.max(peak, active);
@@ -73,6 +74,7 @@ test('runner pool provides bounded unique parallel execution slots', async () =>
   }, async () => {}, new AbortController().signal)));
   assert.equal(peak, 3);
   await assert.rejects(runnerConfig({ projects: {}, concurrency: 9 }), /1 to 8/);
+  await assert.rejects(runnerConfig({projects:{},analysisResumeTimeoutMs:1000}),/60000\.\.1800000/);
 });
 
 test('continuous environment evidence stays on the same job and final completion creates no successor', async (t) => {

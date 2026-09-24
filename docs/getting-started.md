@@ -227,6 +227,17 @@ Invoke-RestMethod http://127.0.0.1:8787/health
 
 `start:local` 默认启动 3 个 Runner 执行槽，因此三张不同问题卡可以真正同时排查。Mac mini 先使用默认值；根据内存、CPU 和 Codex 账号承载情况，可在 `.env` 设置 `AGENTOS_RUNNER_CONCURRENCY=1..8` 后重启。`/health` 的 `runnerConcurrency` 和管理页面的 Runner 池状态必须与配置一致。它只改变并发槽数，不改变模型、账号、项目权限或网页登录态。
 
+持续分析的默认性能边界也可在 `.env` 调整，修改后必须重启：
+
+```dotenv
+AGENTOS_ANALYSIS_TURN_TIMEOUT_MS=900000
+AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS=480000
+AGENTOS_ENV_INVESTIGATION_MAX_CALLS=24
+AGENTOS_ENV_INVESTIGATION_MAX_MS=150000
+```
+
+前两项分别限制首轮和续轮 Codex 分析；后两项限制一次环境调查的调用数和耗时。超时或预算用尽会保留已有证据并显示部分结果，不代表连接失败或已经查清根因。不要单纯调大这些值来掩盖重复查询；重复批次应使用受控聚合查询。
+
 ## 11. 拉机器人进群并发送第一条消息
 
 把五个机器人都加入第 8 步配置的群。先验证负责人：

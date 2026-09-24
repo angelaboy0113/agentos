@@ -10,6 +10,10 @@ export async function runnerConfig(overrides = {}) {
   }
   const concurrency = Number(overrides.concurrency ?? process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('AGENTOS_RUNNER_CONCURRENCY must be an integer from 1 to 8');
+  const analysisTurnTimeoutMs = Number(overrides.analysisTurnTimeoutMs ?? process.env.AGENTOS_ANALYSIS_TURN_TIMEOUT_MS ?? 900000);
+  const analysisResumeTimeoutMs = Number(overrides.analysisResumeTimeoutMs ?? process.env.AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS ?? 480000);
+  if (!Number.isInteger(analysisTurnTimeoutMs) || analysisTurnTimeoutMs < 60000 || analysisTurnTimeoutMs > 3600000) throw new Error('AGENTOS_ANALYSIS_TURN_TIMEOUT_MS must be 60000..3600000');
+  if (!Number.isInteger(analysisResumeTimeoutMs) || analysisResumeTimeoutMs < 60000 || analysisResumeTimeoutMs > 1800000) throw new Error('AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS must be 60000..1800000');
   return {
     serverUrl: String(overrides.serverUrl ?? process.env.AGENTOS_SERVER_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, ''),
     runnerId: overrides.runnerId ?? process.env.AGENTOS_RUNNER_ID ?? `runner-${process.platform}-${process.pid}`,
@@ -19,6 +23,8 @@ export async function runnerConfig(overrides = {}) {
     executor: overrides.executor ?? process.env.AGENTOS_RUNNER_EXECUTOR ?? 'mock',
     codexBin: overrides.codexBin ?? process.env.CODEX_BIN ?? 'codex',
     concurrency,
+    analysisTurnTimeoutMs,
+    analysisResumeTimeoutMs,
     projects,
   };
 }
