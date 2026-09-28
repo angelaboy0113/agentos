@@ -219,7 +219,7 @@ $env:AGENTOS_RUNNER_EXECUTOR='codex'
 $env:CODEX_BIN='codex'
 ```
 
-Windows 桌面版 Codex 使用版本哈希目录时，AgentOS 会在未指定有效绝对路径的情况下，从当前用户的 Codex 安装目录自动选择最新可用的 `codex.exe`，避免桌面应用更新后旧路径失效。显式 `CODEX_BIN` 仍具有最高优先级。
+Windows 桌面版 Codex 使用版本哈希目录时，AgentOS 会在未指定有效绝对路径的情况下，从当前用户的 Codex 安装目录自动选择最新可用的 `codex.exe`。macOS 会识别 ChatGPT 应用当前的嵌套 `CodexCLI.app` 可执行文件。两者都避免桌面应用更新后旧路径失效；显式 `CODEX_BIN` 仍具有最高优先级。
 
 Runner 不会自动合并、推送或部署。Codex 只在任务 worktree 内修改和验证，结果由飞书人工确认后再进入测试阶段。
 
@@ -259,7 +259,7 @@ Runner 不会自动合并、推送或部署。Codex 只在任务 worktree 内修
 
 `proxyUrl` 显式留空表示直连，并清除 AgentOS 子进程继承到的 HTTP(S)/ALL_PROXY 环境变量；填写代理 URL 才强制使用该代理。本机已于 2026-09-11 通过真实 ChatGPT 登录完成两轮直连烟测，0 次重试，因此当前本地配置不再依赖 VPN。若换到无法直连的网络，再填写该网络实际可用的代理并重启 AgentOS。
 
-Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地有效绝对路径、Windows 桌面版安装目录自动发现、PATH 中的 `codex`。`codexBin` 可写 `codex` 以启用自动发现，不改变模型配置或登录方式。Codex CLI 0.153.4 起，AgentOS 不再注入只有 `enabled=false`、但缺少传输定义的临时 MCP 配置；聊天进程仍通过禁用插件、应用、shell、浏览器等能力及拒绝工具请求保持只读决策边界。
+Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地有效绝对路径、Windows/macOS 桌面应用自动发现、PATH 中的 `codex`。`codexBin` 可写 `codex` 以启用自动发现，不改变模型配置或登录方式。Codex CLI 0.153.4 起，AgentOS 不再注入只有 `enabled=false`、但缺少传输定义的临时 MCP 配置；聊天进程仍通过禁用插件、应用、shell、浏览器等能力及拒绝工具请求保持只读决策边界。若可执行文件无法启动，诊断日志会保留明确的启动错误，不再只显示笼统的 app-server 断开。
 
 诊断脚本 `scripts/benchmark-codex-app-server.mjs` 仅发送合成问候；`scripts/smoke-ai-conversation.mjs` 用完整角色规则和虚构项目测试对话、连续追问与自然语言授权，不发飞书消息、不执行研发任务。
 # 飞书动态消息

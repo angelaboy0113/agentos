@@ -199,7 +199,7 @@ lark-cli --profile agentos-owner event consume im.message.receive_v1 --as bot
 
 - `proxyUrl` 留空：Codex 子进程直连，并清除继承的代理变量。
 - 确有代理时填写本机实际可用的 URL；不要复制别人的端口。
-- Windows 使用 `codex` 时会自动寻找 Codex 桌面版更新后的最新 `codex.exe`。
+- Windows 使用 `codex` 时会自动寻找 Codex 桌面版更新后的最新 `codex.exe`；macOS 会自动识别 ChatGPT 应用当前嵌套的 `CodexCLI.app` 可执行文件。桌面应用升级并移动内置 CLI 后，无需重新安装 AgentOS 自启项。
 
 ## 10. 回归并启动
 

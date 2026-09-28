@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,7 +67,29 @@ export async function resolveCodexBinary(explicit, options = {}) {
     try { if ((await stat(local.codexBin)).isFile()) return local.codexBin; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
-  return await discoverWindowsCodexBinary(options.discoveryRoot) || 'codex';
+  return await discoverWindowsCodexBinary(options.discoveryRoot)
+    || await discoverMacCodexBinary(options.macDiscoveryRoot)
+    || 'codex';
+}
+
+export async function discoverMacCodexBinary(root = null) {
+  if (!root && process.platform !== 'darwin') return null;
+  const resources = root || '/Applications/ChatGPT.app/Contents/Resources';
+  const candidates = [
+    path.join(resources, 'codex-cli', 'CodexCLI.app', 'Contents', 'MacOS', 'codex'),
+    path.join(resources, 'codex'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if ((await stat(candidate)).isFile()) {
+        await access(candidate, constants.X_OK);
+        return candidate;
+      }
+    } catch (error) {
+      if (!['ENOENT', 'EACCES'].includes(error.code)) throw error;
+    }
+  }
+  return null;
 }
 
 export async function discoverWindowsCodexBinary(root = null) {

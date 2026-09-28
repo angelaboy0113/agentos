@@ -35,16 +35,19 @@ export class CodexAppServer extends EventEmitter {
       }
     });
     child.stderr.on('data', () => {});
-    const fail = () => {
+    const fail = (cause = null) => {
       if (this.child !== child) return;
       this.child = null;
       this.starting = null;
-      for (const request of this.pending.values()) request.reject(new Error('Codex app-server disconnected'));
+      const failure = cause instanceof Error
+        ? new Error(`Codex app-server could not start: ${cause.message}`)
+        : new Error('Codex app-server disconnected');
+      for (const request of this.pending.values()) request.reject(failure);
       this.pending.clear();
       this.emit('disconnected');
     };
     child.once('error', fail);
-    child.once('close', fail);
+    child.once('close', () => fail());
     const result = await this.request('initialize', {
       clientInfo: { name: 'agentos_runner', title: 'AgentOS', version: '0.2.0' },
       capabilities: { experimentalApi: true },

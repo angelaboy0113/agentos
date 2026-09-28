@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdtemp, mkdir, readFile, writeFile, rm, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, utimes, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { CodexAppServer } from '../src/shared/codex-app-server.js';
-import { codexEnvironment, discoverWindowsCodexBinary, loadCodexRuntimeSettings, resolveCodexBinary, saveCodexRuntimeSettings } from '../src/shared/codex-runtime.js';
+import { codexEnvironment, discoverMacCodexBinary, discoverWindowsCodexBinary, loadCodexRuntimeSettings, resolveCodexBinary, saveCodexRuntimeSettings } from '../src/shared/codex-runtime.js';
 
 function fakeServer() {
   const requests = [], children = [];
@@ -129,6 +129,27 @@ test('desktop Codex discovery selects the newest valid executable directory', as
   await utimes(oldBin, new Date(1_000), new Date(1_000));
   await utimes(newBin, new Date(2_000), new Date(2_000));
   assert.equal(await discoverWindowsCodexBinary(root), newBin);
+});
+
+test('macOS ChatGPT Codex discovery follows the current nested app bundle', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'agentos-mac-codex-bin-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const binary = path.join(root, 'codex-cli', 'CodexCLI.app', 'Contents', 'MacOS', 'codex');
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(binary, '#!/bin/sh\n');
+  await chmod(binary, 0o755);
+  assert.equal(await discoverMacCodexBinary(root), binary);
+  assert.equal(await resolveCodexBinary(undefined, { macDiscoveryRoot: root }), binary);
+});
+
+test('macOS ChatGPT Codex discovery ignores a non-executable bundle file', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'agentos-mac-codex-mode-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const binary = path.join(root, 'codex-cli', 'CodexCLI.app', 'Contents', 'MacOS', 'codex');
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(binary, 'not executable');
+  await chmod(binary, 0o644);
+  assert.equal(await discoverMacCodexBinary(root), null);
 });
 
 test('the codex sentinel in CODEX_BIN still enables desktop discovery', async (t) => {
