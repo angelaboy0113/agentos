@@ -116,19 +116,19 @@ test('owner cannot silently upgrade partial findings or discard inherited gaps',
   assert.equal(preserveAnalysisGaps(job, { outcome: 'blocked' }).outcome, 'blocked');
   assert.equal(preserveAnalysisGaps({ ...job, taskIntent: 'implementation' }, raw), raw);
 });
-test('final synthesis retains the supporting records returned by a read-only query',()=>{
+test('final synthesis keeps supporting records as structured audit evidence without dumping rows into the answer',()=>{
  const job={taskIntent:'analysis',stage:'developer',context:[{result:{evidenceRecords:[
   {code:'DZ-20260910-0001',status:'approved'},
   {code:'DZ-20260911-0001',status:'approved'},
   {code:'DZ-20260915-0001',status:'approved'},
  ]}}]};
  const output=preserveEnvironmentEvidence(job,{outcome:'ready',summary:'blob URL caused the broken image',finalMessage:'Confirmed root cause'});
- for(const id of ['DZ-20260910-0001','DZ-20260911-0001','DZ-20260915-0001']){
-  assert.match(output.summary,new RegExp(id));assert.match(output.finalMessage,new RegExp(id));
- }
- assert.match(output.finalMessage,/关键查询记录/);
+ assert.deepEqual(output.evidenceAppendix.map(record=>record.code),['DZ-20260910-0001','DZ-20260911-0001','DZ-20260915-0001']);
+ assert.equal(output.summary,'blob URL caused the broken image');
+ assert.equal(output.finalMessage,'Confirmed root cause');
+ assert.doesNotMatch(output.finalMessage,/关键查询记录/);
 });
-test('blocked unavailable findings are normalized before prior query records are restored',()=>{
+test('blocked unavailable findings are normalized while prior query records remain structured audit evidence',()=>{
  const job={taskIntent:'analysis',stage:'developer',originalQuestion:'为什么没有推送到LTX',context:[{result:{evidenceRecords:[
   {conclusion_code:'HD-20260923-0005-01',status:'1'},
   {store_code:'LTX20260000438',exec_times:'0'},
@@ -143,5 +143,6 @@ test('blocked unavailable findings are normalized before prior query records are
  ],risks:['无法归因'],returnTo:'owner'}};
  const output=preserveEnvironmentEvidence(job,assessInvestigation(job,blocked));
  assert.equal(output.outcome,'partial');assert.equal(output.handoff.returnTo,'none');
- assert.match(output.finalMessage,/HD-20260923-0005-01/);assert.match(output.finalMessage,/LTX20260000438/);
+ assert.deepEqual(output.evidenceAppendix.map(record=>Object.values(record)[0]),['HD-20260923-0005-01','LTX20260000438']);
+ assert.doesNotMatch(output.finalMessage,/关键查询记录/);
 });

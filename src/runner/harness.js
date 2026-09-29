@@ -119,17 +119,13 @@ export function preserveAnalysisGaps(job, result) {
       artifacts: result.handoff.artifacts?.length ? result.handoff.artifacts : prior.handoff?.artifacts ?? [] } };
 }
 
-const evidenceLine = (record) => Object.entries(record).slice(0, 8).map(([key,value]) => `${key}=${value}`).join('；');
-
 // Rows have already been credential-filtered by environment-result-presentation.
+// Keep them as structured audit evidence. The answering agent must turn the
+// relevant fields into business prose instead of dumping database rows after
+// the user-facing conclusion.
 export function preserveEnvironmentEvidence(job, result) {
   if (job.taskIntent !== 'analysis' || !['ready', 'partial'].includes(result.outcome)) return result;
   const evidence = [...(job.context ?? [])].reverse().find(entry => entry.result?.evidenceRecords?.length)?.result?.evidenceRecords;
-  if (!evidence?.length || String(result.finalMessage ?? '').includes('关键查询记录（来自受控只读查询）')) return result;
-  const records = evidence.slice(0, 5);
-  const details = records.map((record,index) => `${index + 1}. ${evidenceLine(record)}`).join('\n');
-  const compact = records.slice(0, 3).map(evidenceLine).join('；');
-  return { ...result,
-    summary: `${result.summary ?? ''}\n\n关键查询记录：${compact}`.trim().slice(0, 1200),
-    finalMessage: `${result.finalMessage ?? result.summary ?? ''}\n\n关键查询记录（来自受控只读查询）\n${details}` };
+  if (!evidence?.length) return result;
+  return { ...result, evidenceAppendix: evidence.slice(0, 20) };
 }

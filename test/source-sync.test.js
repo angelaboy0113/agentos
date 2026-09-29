@@ -98,6 +98,8 @@ test('executeJob blocks before starting Codex when sync config is absent; read-o
   const evidence = { policy: 'origin-ff-before-analysis-v1', repositories: [{ path: '.', branch: 'main', commit: 'abc' }] };
   const prompt = await buildPrompt({ taskIntent: 'analysis' }, {}, { instruction: '', metadata: {} }, evidence);
   assert.match(prompt, /"commit":"abc"/);
+  assert.match(prompt, /不同图片中各自明确标注的状态、错误提示或数值都属于需要逐项解释的可见目标/);
+  assert.match(prompt, /原始字段行由系统留在审计证据中/);
 });
 
 test('unfinished Git operation, symlink escape and changed committed evidence are rejected', async (t) => {
