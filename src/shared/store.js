@@ -92,7 +92,7 @@ export class JsonStore {
       if (input.taskIntent === 'analysis' && question && question.projectId === input.projectId && question.chatId === input.chatId) {
         const root = (state.conversations ?? []).find(t => t.id === question.rootTurnId);
         const prior = state.jobs.filter(j => j.questionId === question.id && j.projectId === input.projectId && j.chatId === input.chatId && j.taskIntent === 'analysis');
-        const original = prior[0]?.originalQuestion ?? root?.content;
+        const original = prior[0]?.originalQuestion ?? input.originalQuestion ?? root?.content;
         const context = questionEvidence(prior, input.context ?? []);
         const attachments = [...new Map([...prior.flatMap(j=>j.attachments??[]), ...(input.attachments??[])].map(a=>[a.id,a])).values()];
         input = {...input, ...(original ? {originalQuestion:original} : {}), context, attachments,
@@ -313,10 +313,10 @@ export class JsonStore {
       job.continuousRejectionKeys ??= [];
       const stalled = job.continuousRejectionKeys.includes(rejectionKey);
       if (!stalled) job.continuousRejectionKeys.push(rejectionKey);
-      const message = `本次追加查询尚未执行：${diagnostic.reason} ${diagnostic.correction ?? ''}`.trim();
+      const message = `${diagnostic.code === 'REPEATED_TARGET' ? '本次追加查询由 AgentOS 自动暂停' : '本次追加查询尚未执行'}：${diagnostic.reason} ${diagnostic.correction ?? ''}`.trim();
       const result = { ...structuredClone(sourceResult), outcome: stalled ? 'blocked' : 'needs_clarification', environmentQuery: null, websiteQuery: null,
         queryRejection: { ...structuredClone(diagnostic), retry: !stalled }, summary: message,
-        finalMessage: stalled ? `${message}\n\n同一无效查询在自查后仍未修正，已停止空转并保留现有证据。` : `${message}\n\n正在同一会话内修正查询范围并继续。` };
+        finalMessage: stalled ? `${message}\n\n同一无效查询在自查后仍未修正，已停止空转并保留现有证据。` : `${message}\n\n正在同一会话内修正查询范围并继续，不需要用户重新授权。` };
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'query_rejection', result }]);
       job.updatedAt = new Date().toISOString();
       job.events.push({ id: createId('EVT'), type: 'continuous_query_rejected', at: job.updatedAt, code: diagnostic.code ?? 'INVALID_QUERY' });

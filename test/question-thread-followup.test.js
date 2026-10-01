@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { attachQuestion } from '../src/control-plane/questions.js';
 import { questionRequest } from '../src/control-plane/conversations.js';
+import { JsonStore } from '../src/shared/store.js';
 
 const projects={ownerOpenIdsByProfile:{owner:['ou_admin']}};
 const baseTurn=(id,messageId,content)=>({id,messageId,content,chatId:'group',profile:'owner',projectId:'p',senderId:'ou_member',createdAt:new Date().toISOString()});
@@ -30,4 +34,20 @@ test('an explicit reply to a descendant card keeps that exact association',()=>{
  },conversations:[rootTurn,deepTurn],jobs:[{id:'job-deep',questionId:'q-deep',status:'completed'}],cardMessages:{'question:q-deep':{messageId:'card-deep'}}};
  attachQuestion(state,follow,{reply_to:'card-deep',root_id:'msg-root'},projects);
  assert.equal(state.questions[follow.questionId].parentQuestionId,'q-deep');
+});
+
+test('creating the first job for a descendant question keeps the full parent request',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'agentos-question-chain-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const store=new JsonStore(path.join(dir,'state.json'));
+ await store.transact(state=>{
+  state.conversations=[baseTurn('turn-root','msg-root','为什么出现异常监控'),baseTurn('turn-child','msg-child','prd环境')];
+  state.questions={
+   root:{id:'root',rootTurnId:'turn-root',chatId:'group',projectId:'p'},
+   child:{id:'child',rootTurnId:'turn-child',parentQuestionId:'root',chatId:'group',projectId:'p'},
+  };
+ });
+ const snapshot=await store.read();
+ const originalQuestion=questionRequest(snapshot,'child');
+ const {job}=await store.createJob({questionId:'child',projectId:'p',chatId:'group',taskIntent:'analysis',stage:'developer',workflow:'continuous_analysis',instruction:'查PRD',originalQuestion});
+ assert.equal(job.originalQuestion,'为什么出现异常监控\n\n后续补充：prd环境');
 });

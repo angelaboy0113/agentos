@@ -358,7 +358,7 @@ async function route(context) {
         const repairable=diagnostic.retry && job.taskIntent==='analysis' && job.questionId && !job.environmentAccess
           && ['developer','owner_report'].includes(job.stage) && agentRouting(context,'developer').agentProfile;
         diagnostic.retry=Boolean(repairable);
-        const message=`本次追加查询尚未执行：${diagnostic.reason} ${diagnostic.pause??(repairable?'正在自动修正申请并继续原问题。':diagnostic.correction)} 已有排查证据保留。`;
+        const message=`${diagnostic.code==='REPEATED_TARGET'?'本次追加查询由 AgentOS 自动暂停':'本次追加查询尚未执行'}：${diagnostic.reason} ${diagnostic.pause??(repairable?'正在自动修正申请并继续原问题，不需要用户重新授权。':diagnostic.correction)} 已有排查证据保留。`;
         body.result = {...body.result,outcome:repairable?'needs_clarification':'blocked',environmentQuery:null,websiteQuery:null,
           queryRejection:diagnostic,summary:message,finalMessage:`${message}\n\n${diagnostic.correction}`};
         routing=repairable?{...agentRouting(context,'developer'),repairQuery:true}:{};

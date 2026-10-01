@@ -12,7 +12,8 @@ export function queryRejection(error, job) {
  }else if(d?.code==='CONVERGENCE_STALLED'){
   code=d.code;reason=d.reason;correction='停止创建新的环境子任务，保留已有证据并交由项目负责人形成最终结论、明确剩余缺口。';recoverable=false;
  }else if(d?.code==='REPEATED_TARGET'){
-  code=d.code;reason=d.reason;correction='保留已有网站证据，改用已登记数据库、源码或其他能够补齐核心目标的只读路径。';recoverable=true;
+  code=d.code;reason=`AgentOS 自动收敛规则暂停了本次追加查询（不是用户拒绝，也不是权限拒绝）：${d.reason}`;
+  correction='保留已有证据，针对仍未核实的核心目标缩小查询范围，或改用已登记的数据库、网页、日志、配置或源码证据路径。';recoverable=true;
  }else{
   const known={
    '重复环境查询，需要调整范围或补充新证据':['DUPLICATE_QUERY','相同查询已在本问题申请过。','先检查已有申请、审批和结果；复用证据或针对剩余缺口提出不同查询，不能重复申请。',true],
