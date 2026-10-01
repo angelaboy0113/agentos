@@ -2,15 +2,31 @@ import { createHash } from 'node:crypto';
 const nonempty = s => typeof s === 'string' && s.trim().length > 0;
 export const QUESTION_GOAL_ID = 'original-question';
 const causalQuestion = /(?:为什么|为何|为啥|原因|根因|怎么回事|咋回事|分析.{0,12}(?:报错|失败|异常)|(?:报错|失败|异常).{0,12}(?:怎么|咋))|(?:\bwhy\b|root\s*cause|what\s+caused|reason\s+for)/i;
+const deepInvestigation = /(?:深度|深入|彻底|完整|全面).{0,8}(?:排查|调查|分析)|(?:排查|调查|分析).{0,8}(?:到底|根因)|查到底|刨根问底|deep\s+(?:investigation|dive)|root\s*cause/i;
+const causalGoal = /(?:cause|reason|root|failure|unfinished|原因|根因|成因|为何|为什么|未完成|失败|异常)/i;
 const causalUncertainty = /(?:根因|原因|具体(?:超时|失败|异常)?(?:步骤|环节|位置)?).{0,16}(?:未查明|未找到|未确认|不能确认|无法确认|无法确定|不能确定|未知)|(?:尚未|尚不能|无法|不能).{0,12}(?:确认|确定|定位).{0,12}(?:根因|原因|步骤|环节|位置)/;
 const diagnosticKinds = new Set(['application_log','runtime_trace','database','source','comparison','calculation','web_runtime']);
 
 export function requiresCausalEvidence(job) {
- return causalQuestion.test(String(job.originalQuestion ?? job.instruction ?? ''));
+ return causalQuestion.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+}
+export function requiresDeepInvestigation(job) {
+ return deepInvestigation.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+}
+
+function unresolvedDeepCause(job,result){
+ if(!requiresDeepInvestigation(job)||!requiresCausalEvidence(job))return false;
+ const goals=result.investigation?.goals??[];
+ if(goals.some(goal=>goal.id!==QUESTION_GOAL_ID&&goal.status==='open'
+   &&causalGoal.test(`${goal.id ?? ''} ${goal.evidence ?? ''}`)))return true;
+ const unresolved=[result.investigation?.nextStep,result.investigation?.causalAssessment?.alternatives,
+  ...(result.handoff?.risks??[])].filter(Boolean).join(' ');
+ return /(?:原因|根因|为何|为什么|未完成|失败|异常).{0,20}(?:尚未|仍未|未)(?:核实|确认|查明|定位|调查)|(?:尚未|仍未|未)(?:核实|确认|查明|定位|调查).{0,20}(?:原因|根因|为何|为什么|未完成|失败|异常)/.test(unresolved);
 }
 
 export function causalEvidenceComplete(job,result) {
  if(!requiresCausalEvidence(job))return true;
+ if(unresolvedDeepCause(job,result))return false;
  const assessment=result.investigation?.causalAssessment;
  if(!assessment||!['confirmed','highly_supported'].includes(assessment.status)
    ||!['direct','reproduced','multi_evidence'].includes(assessment.link)||!nonempty(assessment.mechanism))return false;
@@ -100,6 +116,16 @@ export function reviewDecision(job,result){
  const hash=signature(result);
  if(prior.filter(x=>signature(x)===hash).length>=2)
   return {continue:false,reason:'自动自查后仍未取得新证据，已暂停重复排查；请查看详情中的已尝试路径与剩余目标。'};
+ return {continue:true};
+}
+
+export function continuousReviewDecision(job,result){
+ const r=result?.investigation,b=r?.blocker;
+ if(result?.outcome!=='partial'||r?.status!=='continue'||b)return {continue:false};
+ const prior=(job.context??[]).filter(entry=>entry.kind==='analysis_turn'&&entry.result?.outcome==='partial').map(entry=>entry.result);
+ if(prior.length>=2)return {continue:false,reason:'同一会话已完成两轮自动补查，仍有缺口，停止重复空转。'};
+ const hash=signature(result);
+ if(prior.some(item=>signature(item)===hash))return {continue:false,reason:'自动补查没有新增证据，停止重复空转。'};
  return {continue:true};
 }
 

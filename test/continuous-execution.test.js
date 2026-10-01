@@ -57,6 +57,24 @@ test('continuous analysis can start with an environment query and return to the 
   assert.equal(calls[1].context, 1);
 });
 
+test('continuous analysis automatically resumes a partial investigation without asking the user to say continue', async () => {
+  const root = { id: 'JOB-deep', questionId: 'QST-deep', projectId: 'demo', stage: 'developer', taskIntent: 'analysis',
+    continuousInvestigation: true, lease: { id: 'LEASE-deep', runnerId: 'runner-one' }, context: [] };
+  const calls = [];
+  const runner = new AgentRunner({ runnerId: 'runner-one' }, async (job) => {
+    calls.push(job.context.length);
+    if (!job.context.length) return { outcome: 'partial', finalMessage: '只确认了告警触发条件',
+      investigation: { status: 'continue', blocker: null, goals: [{ id: 'original-question', status: 'open', evidence: '触发条件已确认' }] } };
+    return { outcome: 'ready', finalMessage: '已继续查清异常状态形成原因', investigation: { status: 'complete', blocker: null } };
+  });
+  runner.post = async (url, body) => {
+    assert.ok(url.endsWith('/continuous-analysis-continue'));
+    return { continued: true, job: { ...root, context: [{ stage: 'developer', kind: 'analysis_turn', result: body.result }] } };
+  };
+  const result = await runner.executeContinuous(root, async () => {}, new AbortController().signal);
+  assert.equal(result.outcome, 'ready');assert.deepEqual(calls, [0, 1]);
+});
+
 test('runner pool provides bounded unique parallel execution slots', async () => {
   const config = await runnerConfig({ projects: {}, runnerId: 'mac-mini', concurrency: 3 });
   assert.equal(config.analysisTurnTimeoutMs,900000);assert.equal(config.analysisResumeTimeoutMs,480000);
@@ -109,6 +127,23 @@ test('continuous environment evidence stays on the same job and final completion
   assert.equal(done.job.status, 'completed');
   assert.equal(done.nextJob, null);
   assert.equal((await store.read()).jobs.length, 1);
+});
+
+test('store checkpoints one partial analysis turn on the same lease and rejects unchanged repetition', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agentos-continuous-review-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new JsonStore(path.join(directory, 'state.json'));
+  const { job } = await store.createJob({ projectId: 'demo', questionId: 'QST-review', chatId: 'group', senderId: 'member', originProfile: 'owner',
+    taskIntent: 'analysis', workflow: 'continuous_analysis', stage: 'developer', instruction: '深度排查', continuousInvestigation: true });
+  const leased = await store.leaseNext('runner');
+  const identity = { runnerId: 'runner', leaseId: leased.lease.id };
+  const partial = { outcome: 'partial', finalMessage: '告警触发已确认，上游原因待查',
+    investigation: { status: 'continue', blocker: null, goals: [{ id: 'original-question', status: 'open', evidence: '告警触发已确认' }] } };
+  const first = await store.continueContinuousAnalysis(job.id, identity, partial);
+  assert.equal(first.continued, true);assert.equal(first.job.context.length, 1);assert.equal(first.job.status, 'running');
+  const repeated = await store.continueContinuousAnalysis(job.id, identity, partial);
+  assert.equal(repeated.continued, false);assert.equal(repeated.terminalResult.finalMessage, partial.finalMessage);
+  assert.equal((await store.getJob(job.id)).context.length, 1);
 });
 
 test('continuous environment accepts evidence returned shortly after tool expiry when the final read was authorized', async (t) => {

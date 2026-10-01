@@ -288,6 +288,16 @@ async function route(context) {
     return json(response, 200, { ok: true, job: updated });
   }
 
+  const continuousAnalysisMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-analysis-continue$/);
+  if (request.method === 'POST' && continuousAnalysisMatch) {
+    requireBearer(request, config.runnerToken, 'runner');
+    const id = decodeURIComponent(continuousAnalysisMatch[1]);
+    const body = await readJson(request);
+    const result = await store.continueContinuousAnalysis(id,
+      { leaseId: body.leaseId, runnerId: body.runnerId }, body.result);
+    return json(response, 200, { ok: true, ...result });
+  }
+
   const websiteMatch=url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/website-tool$/);
   if(request.method==='POST'&&websiteMatch){
     requireBearer(request,config.runnerToken,'runner');const body=await readJson(request);const job=await store.getJob(decodeURIComponent(websiteMatch[1]));

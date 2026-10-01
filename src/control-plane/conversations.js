@@ -309,7 +309,7 @@ export class ConversationService {
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
       environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
-      questionOriginalRequest: turn.questionId ? state.conversations.find(t=>t.id===state.questions?.[turn.questionId]?.rootTurnId)?.content ?? null : null,
+      questionOriginalRequest: turn.questionId ? questionRequest(state, turn.questionId) : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: catalog(await loadEnvironments(), projectId),
       role: turn.role, administrator: isAdministrator(projects, turn),
@@ -418,7 +418,9 @@ export class ConversationService {
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
-        ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction, originalQuestion: turn.content, attachments: [...(turn.resumeAttachments??[]),...attachments],
+        ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction,
+        originalQuestion: turn.questionId ? questionRequest(await store.read(), turn.questionId) : turn.content,
+        attachments: [...(turn.resumeAttachments??[]),...attachments],
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
           reason: route.workflow === 'continuous_analysis' ? '交给开发在同一会话内完成只读调查和最终回答' : '按角色边界转交负责人协调' } : null,
       });
@@ -470,6 +472,20 @@ export function routeDecision(role, intent) {
   }
   // Read/plan/test requests are single-stage, never silently escalated to coding.
   return { stage: role, workflow: `single_${role}` };
+}
+
+export function questionRequest(state, questionId) {
+  const turns = [];
+  const seen = new Set();
+  let question = state.questions?.[questionId];
+  while (question && !seen.has(question.id)) {
+    seen.add(question.id);
+    const turn = state.conversations?.find(item => item.id === question.rootTurnId);
+    if (turn?.content?.trim()) turns.push(turn.content.trim());
+    question = state.questions?.[question.parentQuestionId];
+  }
+  return turns.reverse().filter((text, index, all) => index === 0 || text !== all[index - 1])
+    .map((text, index) => index === 0 ? text : `后续补充：${text}`).join('\n\n') || null;
 }
 
 function agentRouting(context, role) {

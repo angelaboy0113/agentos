@@ -1,4 +1,4 @@
-import { reviewDecision } from './investigation-review.js';
+import { continuousReviewDecision, reviewDecision } from './investigation-review.js';
 import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint } from './environment-access.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -284,6 +284,22 @@ export class JsonStore {
       job.events.push({ id: createId('EVT'), type: 'continuous_environment_completed', at: job.updatedAt,
         environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash });
       return structuredClone(job);
+    });
+  }
+
+  async continueContinuousAnalysis(id, identity, result) {
+    return this.transact((state) => {
+      const job = requireJob(state, id);
+      requireActiveLease(job, identity);
+      if (!job.continuousInvestigation || job.taskIntent !== 'analysis' || job.stage !== 'developer' || job.environmentAccess) {
+        throw new Error('当前任务不能续接源码自查');
+      }
+      const decision = continuousReviewDecision(job, result);
+      if (!decision.continue) return { job: structuredClone(job), continued: false, terminalResult: structuredClone(result), reason: decision.reason ?? null };
+      job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(result) }]);
+      job.updatedAt = new Date().toISOString();
+      job.events.push({ id: createId('EVT'), type: 'continuous_analysis_continued', at: job.updatedAt });
+      return { job: structuredClone(job), continued: true, terminalResult: null };
     });
   }
 

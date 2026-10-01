@@ -15,9 +15,14 @@ export function attachQuestion(state, turn, event, projects) {
     && item.projectId === turn.projectId && (isTaskCreator(projects, item, turn) || isAdministrator(projects, turn)));
   const direct = (item, id) => Boolean(id && (item.messageId === id || state.cardMessages?.[`question:${item.id}`]?.messageId === id
     || state.conversations.some(other => other.questionId === item.id && other.messageId === id)));
-  // An explicit card reply wins over the broad topic root, especially for approval.
-  const related = candidates.find(item => direct(item, event.reply_to))
-    ?? candidates.find(item => event.root_id && (item.threadRootId === event.root_id || direct(item, event.root_id)));
+  const explicit = candidates.find(item => direct(item, event.reply_to));
+  const threadLatest = candidates.find(item => event.root_id && (item.threadRootId === event.root_id || direct(item, event.root_id)));
+  // Feishu replies inside one topic commonly keep reply_to pinned to the first
+  // message. Treat that value as a thread anchor and attach the reply to the
+  // newest descendant. A reply to a later card/message remains explicit.
+  const broadTopicRoot = Boolean(explicit && event.root_id && event.reply_to === event.root_id
+    && (explicit.messageId === event.root_id || explicit.threadRootId === event.root_id));
+  const related = broadTopicRoot ? (threadLatest ?? explicit) : (explicit ?? threadLatest);
   const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status));
   const relatedTurn = related && state.conversations.find(t => t.id === related.latestTurnId);
   const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && (pending(relatedTurn)||relatedTurn.setupPending))) ? related : null;

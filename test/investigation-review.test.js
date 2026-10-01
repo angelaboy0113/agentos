@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {JsonStore} from '../src/shared/store.js';
-import {assessInvestigation,causalEvidenceComplete,investigationComplete,requiresCausalEvidence,reviewDecision,QUESTION_GOAL_ID} from '../src/shared/investigation-review.js';
+import {assessInvestigation,causalEvidenceComplete,continuousReviewDecision,investigationComplete,requiresCausalEvidence,requiresDeepInvestigation,reviewDecision,QUESTION_GOAL_ID} from '../src/shared/investigation-review.js';
 import {preserveAnalysisGaps} from '../src/runner/harness.js';
 const review=()=>({status:'continue',goals:[{id:'actual-data',status:'open',evidence:'Source checked; database not checked'}],attempts:['Checked source and environment catalog'],nextStep:'Find matching Nacos configuration',blocker:null});
 const result=()=>({outcome:'partial',summary:'Still checking',finalMessage:'Evidence',investigation:review(),handoff:{artifacts:[{kind:'code',path:'a.js'}],checks:[],risks:['Database not checked']},verifiedArtifacts:[{path:'a.js'}],handoffGate:{passed:true},sourceSync:{repositories:[{commit:'abc'}]}});
@@ -99,6 +99,40 @@ test('a business error plus correlated records can complete a causal question',(
   {kind:'database',reference:'activity_item group count',finding:'252组业务字段各重复2次，共504条'},
  ],alternatives:'附件上传接口已返回成功'},goals:[{id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'业务错误、重复明细和源码校验路径一致'}],attempts:[],nextStep:''};
  assert.equal(causalEvidenceComplete(job,r),true);assert.equal(assessInvestigation(job,r).outcome,'ready');
+});
+test('a short follow-up still uses the causal instruction and deep investigation keeps an upstream cause open',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'prd环境，深度排查一下',instruction:'深度排查方案为何出现在异常监控中',context:[]};
+ const r=result();r.outcome='ready';r.investigation={status:'complete',blocker:null,causalAssessment:{status:'highly_supported',link:'multi_evidence',mechanism:'关闭方案存在未完成上账执行单，因此命中监控',evidence:[
+  {kind:'database',reference:'monitor 35',finding:'监控筛选未完成执行单'},
+  {kind:'source',reference:'monitor controller',finding:'页面执行监控SQL'},
+ ],alternatives:'执行单为何未完成上账仍未知'},goals:[
+  {id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'已确认监控命中条件'},
+  {id:'unfinished-account-reason',required:false,status:'open',evidence:'尚未读取执行单处理轨迹'},
+ ],attempts:['核对源码和数据库'],nextStep:'继续核对执行单为何未完成上账'};
+ assert.equal(requiresCausalEvidence(job),true);assert.equal(requiresDeepInvestigation(job),true);
+ assert.equal(causalEvidenceComplete(job,r),false);
+ const checked=assessInvestigation(job,r);
+ assert.equal(checked.outcome,'partial');assert.equal(checked.investigation.status,'continue');
+ assert.equal(checked.investigation.goals[0].status,'open');
+});
+test('ordinary causal questions can finish at the requested direct cause without expanding an ancillary lead',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'为什么这个方案出现在告警中',instruction:'核对告警原因',context:[]};
+ const r=result();r.outcome='ready';r.investigation={status:'complete',blocker:null,causalAssessment:{status:'highly_supported',link:'multi_evidence',mechanism:'关闭方案存在未完成上账执行单，因此命中监控',evidence:[
+  {kind:'database',reference:'monitor 35',finding:'监控筛选未完成执行单'},
+  {kind:'source',reference:'monitor controller',finding:'页面执行监控SQL'},
+ ],alternatives:'执行单上游处理原因不影响告警命中'},goals:[
+  {id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'告警命中条件与实际数据一致'},
+  {id:'unfinished-account-reason',required:false,status:'open',evidence:'未继续核对上游处理轨迹'},
+ ],attempts:['核对源码和数据库'],nextStep:'可选核对上游轨迹'};
+ assert.equal(requiresDeepInvestigation(job),false);assert.equal(causalEvidenceComplete(job,r),true);
+ assert.equal(assessInvestigation(job,r).outcome,'ready');
+});
+test('continuous review retries useful open work once and stops unchanged evidence',()=>{
+ const r=result();
+ assert.equal(continuousReviewDecision({context:[]},r).continue,true);
+ assert.equal(continuousReviewDecision({context:[{kind:'analysis_turn',result:r}]},r).continue,false);
+ const changed=result();changed.investigation.goals[0].evidence='Found processing history; runtime log remains';
+ assert.equal(continuousReviewDecision({context:[{kind:'analysis_turn',result:r}]},changed).continue,true);
 });
 test('useful findings waiting on unavailable request logs stay partial instead of becoming a generic blocked card',()=>{
  const job={taskIntent:'analysis',stage:'developer',originalQuestion:'提交为什么返回504',questionScopePolicy:'original-question-v1'};

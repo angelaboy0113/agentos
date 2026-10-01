@@ -116,6 +116,13 @@ export class AgentRunner {
     for (;;) {
       signal.throwIfAborted();
       const result = await this.execute(current, this.config, emit, signal);
+      if (result?.outcome === 'partial' && result.investigation?.status === 'continue' && !result.investigation?.blocker) {
+        const continued = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-analysis-continue`,
+          { ...identity, result });
+        if (!continued.continued) return continued.terminalResult ?? result;
+        current = continued.job;
+        continue;
+      }
       if (result?.outcome !== 'needs_clarification' || (!result.environmentQuery && !result.websiteQuery)) return result;
       const prepared = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment`,
         { ...identity, result });
