@@ -4,6 +4,7 @@ import { cardMarkdownTables } from './card-markdown-tables.js';
 
 const clip = (text, size) => Array.from(text).slice(0, size).join('');
 export const PRIMARY_RESPONSE_LIMIT = 1200;
+export const PRIMARY_ANALYSIS_LIMIT = 2400;
 export function publicText(text) {
   // Decode legacy escaping before redaction, then escape markup exactly once.
   return String(text ?? '').replace(/&amp;/g, '&')
@@ -34,6 +35,14 @@ export function conciseSummary(text) {
   const prefix = clip(cleaned, PRIMARY_RESPONSE_LIMIT - 40);
   const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('\n'));
   return `${boundary > 400 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n详情含完整证据与未验证事项。`;
+}
+
+export function analysisPrimaryResult(text) {
+  const cleaned = readableMarkdown(text).replace(/```[\s\S]*?```/g, '[代码及原始技术片段见完整详情]').trim();
+  if (Array.from(cleaned).length <= PRIMARY_ANALYSIS_LIMIT) return cleaned;
+  const prefix = clip(cleaned, PRIMARY_ANALYSIS_LIMIT - 40);
+  const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('\n'));
+  return `${boundary > 900 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n\n完整技术详情与证据见下方。`;
 }
 
 // Split compact numbered prose for narrow message cards without changing its claims.
@@ -85,7 +94,7 @@ export function resultPanel(pages, index = 0, expanded = false) {
     })) });
   }
   return { tag: 'collapsible_panel', element_id: 'result_details', expanded, padding: '12px',
-    header: { title: { tag: 'plain_text', content: `查看详细结果与证据 · ${index + 1}/${pages.length}` } }, elements };
+    header: { title: { tag: 'plain_text', content: `查看完整技术详情与证据 · ${index + 1}/${pages.length}` } }, elements };
 }
 
 export function withResultPage(card, pages, index = 0, expanded = false) {

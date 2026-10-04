@@ -1,7 +1,7 @@
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { stageLabel } from '../shared/protocol.js';
 import { createHash } from 'node:crypto';
-import { publicText, conciseSummary, summaryParagraphs, resultPages, resultPanel, PRIMARY_RESPONSE_LIMIT } from './result-presentation.js';
+import { publicText, conciseSummary, analysisPrimaryResult, summaryParagraphs, resultPages, resultPanel, PRIMARY_RESPONSE_LIMIT } from './result-presentation.js';
 export { publicText } from './result-presentation.js';
 
 export function jobActionVersion(job) {
@@ -98,8 +98,10 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
       : phase === 'model_capacity_retry' ? '当前模型服务繁忙，正在同一调查会话中自动重试'
     : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
-  const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : job.status === 'cancelled' ? '任务已取消，已停止继续执行。' : !active && job.result?.finalMessage ? resultSummary(job.result.summary || job.result.finalMessage) : '';
-  const elements = [block([md(`**${active ? '当前操作' : '结论'}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
+  const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : job.status === 'cancelled' ? '任务已取消，已停止继续执行。' : !active && job.result?.finalMessage
+    ? job.taskIntent === 'analysis' ? analysisPrimaryResult(job.result.finalMessage) : resultSummary(job.result.summary || job.result.finalMessage) : '';
+  const resultHeading = !active && job.taskIntent === 'analysis' && job.result?.finalMessage ? '结论与详细说明' : '结论';
+  const elements = [block([md(`**${active ? '当前操作' : resultHeading}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'
     : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label)).map(part => md(part))], color),

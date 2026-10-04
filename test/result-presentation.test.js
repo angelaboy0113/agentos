@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { jobCard, conversationCard } from '../src/control-plane/message-cards.js';
-import { resultPages, readableMarkdown, publicText, detailVersion, withResultPage } from '../src/control-plane/result-presentation.js';
+import { resultPages, readableMarkdown, publicText, detailVersion, withResultPage, PRIMARY_ANALYSIS_LIMIT } from '../src/control-plane/result-presentation.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { JsonStore } from '../src/shared/store.js';
 import { LiveCards } from '../src/control-plane/live-cards.js';
@@ -23,7 +23,33 @@ test('all roles lead with a readable answer and keep full technical evidence fol
     assert.ok(Buffer.byteLength(JSON.stringify(card)) < 28000);
     assert.doesNotMatch(JSON.stringify(card), /结论续文|D:\\|^###/);
     assert.match(await buildPrompt(job, {}), /通常 300–900 字，最多 1200 字/);
+    assert.match(await buildPrompt(job, {}), /先给直接结论，再按问题需要写“关键依据”“影响与建议\/处理方式”/);
   }
+});
+
+test('analysis cards show the detailed conclusion on the first screen and keep the full evidence folded', () => {
+  const finalMessage = '**结论：比例校验被跳过。**\n\n**关键依据：**下级金额为零，因此没有进入比例比较。\n\n**影响与建议：**若上限应始终生效，需要补充零下级金额场景的校验。';
+  const card = jobCard({ id: 'analysis-result', stage: 'developer', projectName: '预算', taskIntent: 'analysis', status: 'completed',
+    result: { summary: '比例校验被跳过。', finalMessage }, events: [] });
+  const first = card.body.elements[0].columns[0].elements.map((item) => item.content).join('\n');
+  assert.match(first, /结论与详细说明/);
+  assert.match(first, /关键依据/);
+  assert.match(first, /影响与建议/);
+  assert.doesNotMatch(first, /比例校验被跳过。\n比例校验被跳过。/);
+  const detail = card.body.elements.find((item) => item.tag === 'collapsible_panel');
+  assert.equal(detail.expanded, false);
+  assert.match(detail.header.title.content, /完整技术详情与证据/);
+});
+
+test('analysis first screen is bounded while the folded result remains complete', () => {
+  const finalMessage = `**结论：已定位。**\n\n${'关键证据与影响说明。'.repeat(800)}`;
+  const card = jobCard({ id: 'long-analysis', stage: 'developer', projectName: '预算', taskIntent: 'analysis', status: 'completed',
+    result: { summary: '已定位。', finalMessage }, events: [] });
+  const first = card.body.elements[0].columns[0].elements.map((item) => item.content).join('\n');
+  assert.ok(Array.from(first).length <= PRIMARY_ANALYSIS_LIMIT + 80);
+  assert.match(first, /完整技术详情与证据见下方/);
+  assert.match(card.body.elements.find((item) => item.tag === 'collapsible_panel').elements[0].content, /关键证据与影响说明/);
+  assert.ok(Buffer.byteLength(JSON.stringify(card)) < 30000);
 });
 
 test('legacy HTML is escaped once, file links become readable labels and fences balance per page', () => {
