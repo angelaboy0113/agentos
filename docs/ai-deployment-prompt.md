@@ -23,6 +23,10 @@ AI 可以完成大部分技术步骤，但不能代替真人完成账号登录�
    docs/ai-deployment-prompt.md、docs/architecture.md、docs/storage-and-data.md、SECURITY.md、
    package.json、config/*.example.json、scripts/ 和相关测试。
 
+首次部署以当前 main 的代码、配置示例和上述现行文档为准，不读取
+docs/maintenance-history.md 来推导当前配置。该文件只供维护者在升级、迁移或排查历史回归时
+查阅；历史提交、旧测试数量、旧部署路径和旧机器状态都不是新部署要求。
+
 如果飞书文档因登录或权限无法读取，不要猜测内容。先使用 GitHub 仓库中的上述文档继续
 完成能够确认的步骤，再明确告诉我缺少哪个飞书章节或权限。仓库代码、配置 schema、脚本
 和测试是精确实现来源；飞书手册是部署与操作说明。发生冲突时先核对当前 main 的实现并

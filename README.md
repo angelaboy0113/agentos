@@ -10,6 +10,8 @@
 4. [安全边界](SECURITY.md)
 5. [可直接复制的 AgentOS 完整 AI 搭建提示词](docs/ai-deployment-prompt.md)
 
+首次部署只需阅读上面的现行文档。升级、迁移或追溯历史回归时，再查阅[维护与版本记录](docs/maintenance-history.md)；历史提交、旧测试数量和旧机器状态不是新部署要求。
+
 最短入口：
 
 ```powershell
