@@ -8,7 +8,7 @@
 2. [架构与仓库设计](docs/architecture.md)
 3. [文件、对话、任务、日志和认证位置](docs/storage-and-data.md)
 4. [安全边界](SECURITY.md)
-5. [交给 Codex/AI 搭建自己的 AgentOS](docs/getting-started.md#15-交给-codexai-搭建自己的-agentos)
+5. [可直接复制的 AgentOS 完整 AI 搭建提示词](docs/ai-deployment-prompt.md)
 
 最短入口：
 
