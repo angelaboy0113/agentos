@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.8.1** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.8.2** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -8,6 +8,7 @@
 2. [架构与仓库设计](docs/architecture.md)
 3. [文件、对话、任务、日志和认证位置](docs/storage-and-data.md)
 4. [安全边界](SECURITY.md)
+5. [交给 Codex/AI 搭建自己的 AgentOS](docs/getting-started.md#15-交给-codexai-搭建自己的-agentos)
 
 最短入口：
 
