@@ -100,7 +100,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
   const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : job.status === 'cancelled' ? '任务已取消，已停止继续执行。' : !active && job.result?.finalMessage
     ? job.taskIntent === 'analysis' ? analysisPrimaryResult(job.result.finalMessage) : resultSummary(job.result.summary || job.result.finalMessage) : '';
-  const resultHeading = !active && job.taskIntent === 'analysis' && job.result?.finalMessage ? '结论与详细说明' : '结论';
+  const resultHeading = !active && job.taskIntent === 'analysis' && job.result?.finalMessage ? '结论与业务说明' : '结论';
   const elements = [block([md(`**${active ? '当前操作' : resultHeading}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'

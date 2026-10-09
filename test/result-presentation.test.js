@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { jobCard, conversationCard } from '../src/control-plane/message-cards.js';
-import { resultPages, readableMarkdown, publicText, detailVersion, withResultPage, PRIMARY_ANALYSIS_LIMIT } from '../src/control-plane/result-presentation.js';
+import { resultPages, readableMarkdown, publicText, detailVersion, withResultPage, analysisPrimaryResult, PRIMARY_ANALYSIS_LIMIT } from '../src/control-plane/result-presentation.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { JsonStore } from '../src/shared/store.js';
 import { LiveCards } from '../src/control-plane/live-cards.js';
@@ -23,7 +23,8 @@ test('all roles lead with a readable answer and keep full technical evidence fol
     assert.ok(Buffer.byteLength(JSON.stringify(card)) < 28000);
     assert.doesNotMatch(JSON.stringify(card), /结论续文|D:\\|^###/);
     assert.match(await buildPrompt(job, {}), /通常 300–900 字，最多 1200 字/);
-    assert.match(await buildPrompt(job, {}), /先给直接结论，再按问题需要写“关键依据”“影响与建议\/处理方式”/);
+    assert.match(await buildPrompt(job, {}), /默认结构为“结论 → 系统怎样处理 → 这次数据说明什么 → 影响与建议 → 技术依据”/);
+    assert.match(await buildPrompt(job, {}), /禁止用表名、字段名、类名、方法名、主键范围或 commit 开头/);
   }
 });
 
@@ -32,13 +33,23 @@ test('analysis cards show the detailed conclusion on the first screen and keep t
   const card = jobCard({ id: 'analysis-result', stage: 'developer', projectName: '预算', taskIntent: 'analysis', status: 'completed',
     result: { summary: '比例校验被跳过。', finalMessage }, events: [] });
   const first = card.body.elements[0].columns[0].elements.map((item) => item.content).join('\n');
-  assert.match(first, /结论与详细说明/);
+  assert.match(first, /结论与业务说明/);
   assert.match(first, /关键依据/);
   assert.match(first, /影响与建议/);
   assert.doesNotMatch(first, /比例校验被跳过。\n比例校验被跳过。/);
   const detail = card.body.elements.find((item) => item.tag === 'collapsible_panel');
   assert.equal(detail.expanded, false);
   assert.match(detail.header.title.content, /完整技术详情与证据/);
+});
+
+test('analysis first screen keeps the business explanation and folds the technical appendix', () => {
+  const finalMessage = '**结论**\n这个费比按真实客户的业绩计算。\n\n**系统怎样处理**\n1. 先找到活动截止月以前最近一个有实际财务数据的月份。\n2. 再汇总年初到该月月末的含税销售额，排除不参加计算的产品。\n\n**这次数据说明什么**\n194 是数据库明细行，不是 194 张订单；同一订单的多个商品会占多行。\n\n**技术依据**\n表 `exec_result_sell_in`，字段 `gsv_with_tax`，源码 `src/example.java:12-30`。';
+  const primary = analysisPrimaryResult(finalMessage);
+  assert.match(primary, /这个费比按真实客户的业绩计算/);
+  assert.match(primary, /194 是数据库明细行，不是 194 张订单/);
+  assert.doesNotMatch(primary, /exec_result_sell_in|src\/example\.java/);
+  assert.match(primary, /源码位置、表字段、版本与查询证据见下方完整详情/);
+  assert.match(resultPages(finalMessage).join('\n'), /exec_result_sell_in/);
 });
 
 test('analysis first screen is bounded while the folded result remains complete', () => {

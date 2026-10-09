@@ -5,6 +5,7 @@ import { cardMarkdownTables } from './card-markdown-tables.js';
 const clip = (text, size) => Array.from(text).slice(0, size).join('');
 export const PRIMARY_RESPONSE_LIMIT = 1200;
 export const PRIMARY_ANALYSIS_LIMIT = 2400;
+const TECHNICAL_APPENDIX_HEADING = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?(?:技术依据|源码与数据依据|代码与数据依据|技术细节)\s*[：:]?\s*(?:\*\*)?\s*[：:]?\s*(?=\n|$)/i;
 export function publicText(text) {
   // Decode legacy escaping before redaction, then escape markup exactly once.
   return String(text ?? '').replace(/&amp;/g, '&')
@@ -39,8 +40,11 @@ export function conciseSummary(text) {
 
 export function analysisPrimaryResult(text) {
   const cleaned = readableMarkdown(text).replace(/```[\s\S]*?```/g, '[代码及原始技术片段见完整详情]').trim();
-  if (Array.from(cleaned).length <= PRIMARY_ANALYSIS_LIMIT) return cleaned;
-  const prefix = clip(cleaned, PRIMARY_ANALYSIS_LIMIT - 40);
+  const technicalAppendix = cleaned.match(TECHNICAL_APPENDIX_HEADING);
+  const businessAnswer = technicalAppendix?.index > 0 ? cleaned.slice(0, technicalAppendix.index).trim() : cleaned;
+  const appendixNote = technicalAppendix?.index > 0 ? '\n\n源码位置、表字段、版本与查询证据见下方完整详情。' : '';
+  if (Array.from(businessAnswer + appendixNote).length <= PRIMARY_ANALYSIS_LIMIT) return businessAnswer + appendixNote;
+  const prefix = clip(businessAnswer, PRIMARY_ANALYSIS_LIMIT - 40);
   const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('\n'));
   return `${boundary > 900 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n\n完整技术详情与证据见下方。`;
 }
