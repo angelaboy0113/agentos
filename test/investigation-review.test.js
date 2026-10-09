@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {JsonStore} from '../src/shared/store.js';
-import {assessInvestigation,causalEvidenceComplete,continuousReviewDecision,investigationComplete,requiresCausalEvidence,requiresDeepInvestigation,reviewDecision,QUESTION_GOAL_ID} from '../src/shared/investigation-review.js';
+import {assessInvestigation,causalEvidenceComplete,continuousReviewDecision,investigationComplete,isOperationGuidanceQuestion,requiresCausalEvidence,requiresDeepInvestigation,requiresLiveVerification,reviewDecision,QUESTION_GOAL_ID} from '../src/shared/investigation-review.js';
 import {preserveAnalysisGaps} from '../src/runner/harness.js';
 const review=()=>({status:'continue',goals:[{id:'actual-data',status:'open',evidence:'Source checked; database not checked'}],attempts:['Checked source and environment catalog'],nextStep:'Find matching Nacos configuration',blocker:null});
 const result=()=>({outcome:'partial',summary:'Still checking',finalMessage:'Evidence',investigation:review(),handoff:{artifacts:[{kind:'code',path:'a.js'}],checks:[],risks:['Database not checked']},verifiedArtifacts:[{path:'a.js'}],handoffGate:{passed:true},sourceSync:{repositories:[{commit:'abc'}]}});
@@ -152,6 +152,39 @@ test('useful findings waiting on unavailable request logs stay partial instead o
  assert.equal(actual.handoff.returnTo,'none');
  assert.equal(actual.handoff.checks[0].status,'not_run');
  assert.match(actual.finalMessage,/V3已创建/);
+});
+test('source-backed operation guidance stays yellow when only optional live-page access is denied',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'如果我想在uat环境创建一个搭赠方案我要怎么操作?',questionScopePolicy:'original-question-v1'};
+ const actual=assessInvestigation(job,{outcome:'blocked',summary:'源码已确认创建入口和表单步骤',
+  finalMessage:'进入方案管理，选择方案创建和随单搭赠，填写基本信息、费用信息、促销产品和搭赠规则后保存或提交。',
+  sourceSync:{repositories:[{path:'sip-tpm-project-ui-v2',branch:'uat-merge',commit:'ec7665a'}]},
+  investigation:{status:'wait',goals:[
+   {id:QUESTION_GOAL_ID,required:true,status:'open',evidence:'UAT同步源码已确认入口、字段、保存与提交流程；当前页面权限和提交后状态未实测。'},
+   {id:'source-guidance',required:false,status:'verified',evidence:'路由、表单组件和规格说明一致。'},
+  ],attempts:['读取同步源码','尝试打开Chrome'],nextStep:'如需确认当前账号权限，再进行只读页面核对',
+  blocker:{kind:'approval',needed:'只读打开当前UAT页面',evidence:'Computer Use未获准使用Chrome'}},
+  handoff:{artifacts:[{kind:'code',path:'src/router/index.js'},{kind:'code',path:'src/views/plan/create.vue'}],checks:[
+   {id:QUESTION_GOAL_ID,required:true,status:'failed',evidence:'当前页面未实测'},
+   {id:'source-guidance',required:false,status:'passed',evidence:'源码确认完整操作路径'},
+  ],risks:['部署页面可能与同步源码有差异'],returnTo:'owner'}});
+ assert.equal(isOperationGuidanceQuestion(job),true);
+ assert.equal(requiresLiveVerification(job),false);
+ assert.equal(actual.outcome,'partial');
+ assert.equal(actual.handoff.returnTo,'none');
+ assert.equal(actual.handoff.checks[0].status,'not_run');
+ assert.match(actual.handoff.risks.join(' '),/尚未实测/);
+});
+test('an explicitly requested current-page verification remains blocked when browser access is denied',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'请打开UAT页面实际操作一下，确认我当前账号能不能创建搭赠方案',questionScopePolicy:'original-question-v1'};
+ const result={outcome:'blocked',summary:'源码能说明入口，但当前账号未验证',finalMessage:'源码入口已找到。',
+  sourceSync:{repositories:[{path:'ui',commit:'abc'}]},investigation:{status:'wait',goals:[
+   {id:QUESTION_GOAL_ID,required:true,status:'open',evidence:'当前账号权限未验证'},
+   {id:'source-guidance',required:false,status:'verified',evidence:'入口已找到'},
+  ],attempts:['尝试打开Chrome'],nextStep:'打开当前页面',blocker:{kind:'approval',needed:'浏览器访问',evidence:'访问未获准'}},
+  handoff:{artifacts:[{kind:'code',path:'router.js'}],checks:[{id:'source-guidance',required:false,status:'passed',evidence:'源码确认'}],risks:['当前权限未知'],returnTo:'owner'}};
+ assert.equal(isOperationGuidanceQuestion(job),true);
+ assert.equal(requiresLiveVerification(job),true);
+ assert.equal(assessInvestigation(job,result).outcome,'blocked');
 });
 test('self-review continues with new evidence but stops repeated evidence or explicit external blocker',()=>{
  const r=result(),job={context:[{stage:'owner_report',result:r},{stage:'owner_report',result:r}]};

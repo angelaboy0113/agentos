@@ -6,12 +6,20 @@ const deepInvestigation = /(?:深度|深入|彻底|完整|全面).{0,8}(?:排查
 const causalGoal = /(?:cause|reason|root|failure|unfinished|原因|根因|成因|为何|为什么|未完成|失败|异常)/i;
 const causalUncertainty = /(?:根因|原因|具体(?:超时|失败|异常)?(?:步骤|环节|位置)?).{0,16}(?:未查明|未找到|未确认|不能确认|无法确认|无法确定|不能确定|未知)|(?:尚未|尚不能|无法|不能).{0,12}(?:确认|确定|定位).{0,12}(?:根因|原因|步骤|环节|位置)/;
 const diagnosticKinds = new Set(['application_log','runtime_trace','database','source','comparison','calculation','web_runtime']);
+const operationGuidance = /(?:怎么|如何|怎样|在哪|哪里).{0,18}(?:操作|创建|新增|配置|发起|申请|填写|保存|提交|办理)|(?:操作|创建|新增|配置|发起|申请|填写|保存|提交|办理).{0,18}(?:怎么|如何|怎样|步骤|流程|入口)|(?:能不能|是否能|可不可以).{0,12}(?:操作|创建|新增|配置|发起|申请|保存|提交|办理)|(?:how\s+to|where\s+(?:can|do)\s+i).{0,30}(?:create|configure|submit|apply|operate)/i;
+const explicitLiveVerification = /(?:实际|直接|现场).{0,10}(?:操作|打开|进入|登录|实测|验证)|(?:打开|进入|登录).{0,12}(?:页面|系统).{0,12}(?:看看|看一下|确认|验证|操作)|(?:当前|现在).{0,10}(?:账号|用户|页面|权限).{0,12}(?:能否|是否|可以|展示|显示)|(?:帮我|请).{0,10}(?:实测|实际操作|代为操作|创建一条|提交一次)|(?:live|current\s+account|actually).{0,20}(?:verify|test|open|submit)/i;
 
 export function requiresCausalEvidence(job) {
  return causalQuestion.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
 }
 export function requiresDeepInvestigation(job) {
  return deepInvestigation.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+}
+export function isOperationGuidanceQuestion(job) {
+ return operationGuidance.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+}
+export function requiresLiveVerification(job) {
+ return explicitLiveVerification.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
 }
 
 function unresolvedDeepCause(job,result){
@@ -82,6 +90,20 @@ export function investigationComplete(job, result) {
 export function assessInvestigation(job,result){
  result=normalizeQuestionScope(job,result);
  if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
+   &&result.outcome==='blocked'&&result.investigation?.status==='wait'
+   &&['approval','login','unavailable'].includes(result.investigation?.blocker?.kind)
+   &&isOperationGuidanceQuestion(job)&&!requiresLiveVerification(job)){
+  const goals=result.investigation.goals??[],root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
+  const checks=result.handoff?.checks??[];
+  const sourceBackedGuidance=nonempty(root?.evidence)&&nonempty(result.finalMessage)
+   &&result.handoff?.artifacts?.length&&result.handoff?.risks?.length
+   &&checks.some(check=>check.status==='passed')&&result.sourceSync?.repositories?.length;
+  if(sourceBackedGuidance)result={...result,outcome:'partial',handoff:{...result.handoff,returnTo:'none',
+   checks:checks.map(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed'?{...check,status:'not_run'}:check),
+   risks:[...new Set([...(result.handoff.risks??[]),'当前页面、当前账号权限及提交后的真实状态尚未实测；源码确认的操作路径可以先用于指导。'])]}};
+ }
+ if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
+   &&result.outcome!=='partial'
    && (result.environmentSetup || result.investigation?.status==='wait'&&['login','user_input'].includes(result.investigation?.blocker?.kind)))
   return {...result,outcome:'needs_clarification'};
  if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
