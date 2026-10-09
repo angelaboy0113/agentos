@@ -23,7 +23,8 @@ test('all roles lead with a readable answer and keep full technical evidence fol
     assert.ok(Buffer.byteLength(JSON.stringify(card)) < 28000);
     assert.doesNotMatch(JSON.stringify(card), /结论续文|D:\\|^###/);
     assert.match(await buildPrompt(job, {}), /通常 300–900 字，最多 1200 字/);
-    assert.match(await buildPrompt(job, {}), /默认结构为“结论 → 系统怎样处理 → 这次数据说明什么 → 影响与建议 → 技术依据”/);
+    assert.match(await buildPrompt(job, {}), /字段含义、记录差异、金额、状态、前后版本或方案需要横向比较时/);
+    assert.match(await buildPrompt(job, {}), /不要机械套用“系统怎样处理\/这次数据说明什么\/影响与建议”/);
     assert.match(await buildPrompt(job, {}), /禁止用表名、字段名、类名、方法名、主键范围或 commit 开头/);
   }
 });
@@ -33,13 +34,34 @@ test('analysis cards show the detailed conclusion on the first screen and keep t
   const card = jobCard({ id: 'analysis-result', stage: 'developer', projectName: '预算', taskIntent: 'analysis', status: 'completed',
     result: { summary: '比例校验被跳过。', finalMessage }, events: [] });
   const first = card.body.elements[0].columns[0].elements.map((item) => item.content).join('\n');
-  assert.match(first, /结论与业务说明/);
+  assert.doesNotMatch(first, /^结论与业务说明/m);
   assert.match(first, /关键依据/);
   assert.match(first, /影响与建议/);
   assert.doesNotMatch(first, /比例校验被跳过。\n比例校验被跳过。/);
   const detail = card.body.elements.find((item) => item.tag === 'collapsible_panel');
   assert.equal(detail.expanded, false);
   assert.match(detail.header.title.content, /完整技术详情与证据/);
+});
+
+test('analysis cards preserve comparison tables as native Card 2.0 tables', () => {
+  const finalMessage = '这两个字段代表的客户范围不同，所以金额会不同。\n\n| 字段 | 大白话含义 |\n| --- | --- |\n| `order_owner` | 订单归在哪个主经销商名下 |\n| `sold_to_code` | 这笔销售对应的售达客户是谁 |\n\n| 主经销商 | 售达方 | 含税销售额 |\n| --- | --- | ---: |\n| 100017 | 100017 | 367,679.30 元 |\n| 100017 | 200176 | 45,651.00 元 |\n\n所以当前口径筛选售达方 100017。\n\n**技术依据**\n表 `exec_result_sell_in`。';
+  const card = jobCard({ id: 'analysis-table', stage: 'developer', projectName: '费比', taskIntent: 'analysis', status: 'completed',
+    result: { summary: '字段范围不同。', finalMessage }, events: [] });
+  const tables = card.body.elements.filter((element) => element.tag === 'table');
+  assert.equal(tables.length, 2);
+  assert.deepEqual(tables[0].columns.map((column) => column.display_name), ['字段', '大白话含义']);
+  assert.equal(tables[1].rows[1].column_3, '45,651.00 元');
+  assert.match(JSON.stringify(card.body.elements.slice(0, -2)), /所以当前口径筛选售达方 100017/);
+  assert.doesNotMatch(JSON.stringify(card.body.elements.slice(0, -2)), /exec_result_sell_in/);
+});
+
+test('ordinary Codex-style chat replies also keep native comparison tables', () => {
+  const response = '两个环境的状态如下：\n\n| 环境 | 状态 |\n| --- | --- |\n| UAT | 已验证 |\n| PRD | 待核实 |\n\n因此目前只能确认 UAT。';
+  const card = conversationCard({ id: 'chat-table', role: 'owner_intake', status: 'sent', response });
+  const table = card.body.elements.find((element) => element.tag === 'table');
+  assert.ok(table);
+  assert.equal(table.rows[1].column_2, '待核实');
+  assert.match(JSON.stringify(card), /因此目前只能确认 UAT/);
 });
 
 test('analysis first screen keeps the business explanation and folds the technical appendix', () => {

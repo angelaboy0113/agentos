@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { cardMarkdownEmphasis } from './card-markdown-emphasis.js';
-import { cardMarkdownTables } from './card-markdown-tables.js';
+import { cardMarkdownSegments, cardMarkdownTables, nativeCardTable } from './card-markdown-tables.js';
 
 const clip = (text, size) => Array.from(text).slice(0, size).join('');
 export const PRIMARY_RESPONSE_LIMIT = 1200;
@@ -20,13 +20,21 @@ export function publicText(text) {
     .replace(/&/g, '&amp;').replace(/</g, '&#60;').replace(/>/g, '&#62;');
 }
 
-export function readableMarkdown(text) {
-  return cardMarkdownEmphasis(cardMarkdownTables(publicText(text).replace(/&#60;/g, '＜').replace(/&#62;/g, '＞')
+function cleanedMarkdown(text) {
+  return publicText(text).replace(/&#60;/g, '＜').replace(/&#62;/g, '＞')
     .replace(/\[([^\]\n]+)\]\((?!https?:\/\/)[^\n)]*\)/gi, '$1')
     .replace(/(^|[\s`(])\/?[a-z]:[\\/][^\s`<>）)]*/gi, (_, prefix) => `${prefix}[本机路径]`)
     .replace(/(^|[\s`(])\/(?:Users|home)\/[^\s`<>）)]*/g, (_, prefix) => `${prefix}[本机路径]`)
     .replace(/^\s*\[(?:READY|NEEDS_CLARIFICATION|BLOCKED)\]\s*/i, '')
-    .replace(/^#{1,6}\s+(.+)$/gm, '**$1**'))).trim();
+    .replace(/^#{1,6}\s+(.+)$/gm, '**$1**');
+}
+
+export function readableMarkdown(text) {
+  return cardMarkdownEmphasis(cardMarkdownTables(cleanedMarkdown(text))).trim();
+}
+
+export function readableMarkdownWithTables(text) {
+  return cardMarkdownEmphasis(cleanedMarkdown(text)).trim();
 }
 
 export function conciseSummary(text) {
@@ -38,8 +46,17 @@ export function conciseSummary(text) {
   return `${boundary > 400 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n详情含完整证据与未验证事项。`;
 }
 
+export function conversationPrimaryResult(text) {
+  const cleaned = readableMarkdownWithTables(text).replace(/```[\s\S]*?```/g, '[代码示例见详情]')
+    .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1').trim();
+  if (Array.from(cleaned).length <= PRIMARY_RESPONSE_LIMIT) return cleaned;
+  const prefix = clip(cleaned, PRIMARY_RESPONSE_LIMIT - 40);
+  const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('\n'));
+  return `${boundary > 400 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n详情含完整证据与未验证事项。`;
+}
+
 export function analysisPrimaryResult(text) {
-  const cleaned = readableMarkdown(text).replace(/```[\s\S]*?```/g, '[代码及原始技术片段见完整详情]').trim();
+  const cleaned = readableMarkdownWithTables(text).replace(/```[\s\S]*?```/g, '[代码及原始技术片段见完整详情]').trim();
   const technicalAppendix = cleaned.match(TECHNICAL_APPENDIX_HEADING);
   const businessAnswer = technicalAppendix?.index > 0 ? cleaned.slice(0, technicalAppendix.index).trim() : cleaned;
   const appendixNote = technicalAppendix?.index > 0 ? '\n\n源码位置、表字段、版本与查询证据见下方完整详情。' : '';
@@ -47,6 +64,24 @@ export function analysisPrimaryResult(text) {
   const prefix = clip(businessAnswer, PRIMARY_ANALYSIS_LIMIT - 40);
   const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('\n'));
   return `${boundary > 900 ? prefix.slice(0, boundary + 1) : prefix + '…'}\n\n完整技术详情与证据见下方。`;
+}
+
+export function analysisPrimarySegments(text) {
+  return cardMarkdownSegments(analysisPrimaryResult(text));
+}
+
+function primaryCardElements(text) {
+  return cardMarkdownSegments(text).map((segment) => segment.type === 'table' ? (nativeCardTable(segment) ?? {
+    tag: 'markdown', content: cardMarkdownTables(`| ${segment.headers.join(' | ')} |\n| ${segment.headers.map(() => '---').join(' | ')} |\n${segment.rows.map(row => `| ${row.join(' | ')} |`).join('\n')}`), text_size: 'normal', margin: '0px',
+  }) : { tag: 'markdown', content: segment.text.trim(), text_size: 'normal', margin: '0px' }).filter((element) => element.tag === 'table' || element.content);
+}
+
+export function analysisPrimaryCardElements(text) {
+  return primaryCardElements(analysisPrimaryResult(text));
+}
+
+export function conversationPrimaryCardElements(text) {
+  return primaryCardElements(conversationPrimaryResult(text));
 }
 
 // Split compact numbered prose for narrow message cards without changing its claims.

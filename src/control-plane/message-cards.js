@@ -1,7 +1,7 @@
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { stageLabel } from '../shared/protocol.js';
 import { createHash } from 'node:crypto';
-import { publicText, conciseSummary, analysisPrimaryResult, summaryParagraphs, resultPages, resultPanel, PRIMARY_RESPONSE_LIMIT } from './result-presentation.js';
+import { publicText, conciseSummary, conversationPrimaryCardElements, analysisPrimaryCardElements, summaryParagraphs, resultPages, resultPanel, PRIMARY_RESPONSE_LIMIT } from './result-presentation.js';
 export { publicText } from './result-presentation.js';
 
 export function jobActionVersion(job) {
@@ -64,9 +64,10 @@ export function conversationCard(turn, now = Date.now()) {
   const state = final ? (failed ? '未执行' : turn.setupPending ? '等待补齐接入' : '已回复') : turn.status === 'queued' ? '排队中'
     : turn.connectionWillRetry ? '连接重试中' : '正在处理';
   const color = failed ? 'red' : turn.setupPending ? 'orange' : final ? 'green' : 'blue';
-  const content = final ? conciseSummary(turn.response) : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
+  const content = final ? '' : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
     : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : 'Codex 正在理解你的消息，完成后会更新在这里。';
-  const elements = [block([md(content)], color)];
+  const primary = final ? conversationPrimaryCardElements(turn.response) : [];
+  const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));
   elements.push(md(final ? '可以继续回复这条卡片；详情翻页只更新展示，不执行任务。'
     : `已等待 ${elapsed(turn.createdAt, now)} · 本卡持续更新`, true));
@@ -99,12 +100,16 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
     : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
   const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : job.status === 'cancelled' ? '任务已取消，已停止继续执行。' : !active && job.result?.finalMessage
-    ? job.taskIntent === 'analysis' ? analysisPrimaryResult(job.result.finalMessage) : resultSummary(job.result.summary || job.result.finalMessage) : '';
-  const resultHeading = !active && job.taskIntent === 'analysis' && job.result?.finalMessage ? '结论与业务说明' : '结论';
-  const elements = [block([md(`**${active ? '当前操作' : resultHeading}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
+    ? job.taskIntent === 'analysis' ? '' : resultSummary(job.result.summary || job.result.finalMessage) : '';
+  const analysisElements = !active && job.taskIntent === 'analysis' && job.result?.finalMessage ? analysisPrimaryCardElements(job.result.finalMessage) : [];
+  const answerBlocks = analysisElements.length ? analysisElements.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(`**${active ? '当前操作' : '结论'}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'
-    : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label)).map(part => md(part))], color),
+    : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label)).map(part => md(part))], color)];
+  if (!answerBlocks.some((element) => element.tag === 'column_set')) answerBlocks.push(block([], color));
+  const metadataBlock = [...answerBlocks].reverse().find((element) => element.tag === 'column_set');
+  const metadata = metadataBlock?.columns?.[0]?.elements;
+  const elements = [...answerBlocks,
     { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '12px', columns: [
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${elapsed(start, active ? now : Date.parse(job.updatedAt))}**`), md('总耗时', true)] },
       { tag: 'column', width: 'weighted', weight: 1, elements: [md(`**${cumulativeToolCalls(relevant)} 次**`), md('累计实际工具调用', true)] },
@@ -112,10 +117,10 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   if (active && activity?.recent?.length) elements.push(block([md(`**最近完成 · 展示 ${activity.recent.length} / ${Number(activity.completed) || 0} 项**`),
     ...activity.recent.slice(-3).map((item) => md(`${item.failed ? '未通过' : '完成'} · ${publicText(clip(item.label, 120))}`, true))]));
   if (!active && job.result?.finalMessage) elements.push(resultPanel(resultPages(job.result.finalMessage)));
-  elements[0].columns[0].elements.push(md(publicText(job.id), true));
-  if (job.taskIntent === 'analysis') elements[0].columns[0].elements.push(md(job.environmentAccess ? '环境只读查询 · 不修改数据库或配置' : '只读分析 · 不修改代码', true));
-  if (job.nextJobId) elements[0].columns[0].elements.push(md(`已交给项目负责人汇总 · ${publicText(job.nextJobId)}`, true));
-  if (job.delegation) elements[0].columns[0].elements.push(md(`协作：${stageLabel(job.delegation.fromStage)} → ${stageLabel(job.delegation.toStage)}`, true));
+  metadata?.push(md(publicText(job.id), true));
+  if (job.taskIntent === 'analysis') metadata?.push(md(job.environmentAccess ? '环境只读查询 · 不修改数据库或配置' : '只读分析 · 不修改代码', true));
+  if (job.nextJobId) metadata?.push(md(`已交给项目负责人汇总 · ${publicText(job.nextJobId)}`, true));
+  if (job.delegation) metadata?.push(md(`协作：${stageLabel(job.delegation.fromStage)} → ${stageLabel(job.delegation.toStage)}`, true));
   if (job.status === 'awaiting_clarification' && !job.result?.browserLoginRequired) elements.push({ tag: 'form', name: 'clarification_form', elements: [
     { tag: 'input', name: 'clarification', input_type: 'multiline_text', rows: 3, max_length: 1000, required: true,
       width: 'fill', placeholder: { tag: 'plain_text', content: '填写需要补充的范围、路径或验收要求…' } },
@@ -124,7 +129,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   ] });
   if (job.environmentAccess && (active || job.status === 'awaiting_environment_approval')) {
     const p = job.environmentAccess;
-    elements[0].columns[0].elements.push(md(publicText(`环境：${p.environmentId} (${p.tier}) · 模板：${p.queryId}\n范围：${p.description}\n参数：${JSON.stringify(p.parameters)}\n最多 ${p.maxRows} 条 · 超时 ${p.timeoutMs} ms\n授权截止：${p.expiresAt}\n结果在本问题卡片向群内展示；仅本次查询，不授权修改。`), true));
+    metadata?.push(md(publicText(`环境：${p.environmentId} (${p.tier}) · 模板：${p.queryId}\n范围：${p.description}\n参数：${JSON.stringify(p.parameters)}\n最多 ${p.maxRows} 条 · 超时 ${p.timeoutMs} ms\n授权截止：${p.expiresAt}\n结果在本问题卡片向群内展示；仅本次查询，不授权修改。`), true));
   }
   const buttons = [];
   if (job.status === 'awaiting_environment_approval') buttons.push(actionButton(job, expired ? 'renew_environment' : 'approve_environment', expired ? '重新申请本次查询' : '批准本次只读查询', 'primary_filled'));

@@ -1,5 +1,5 @@
-// Feishu card Markdown is not a full document renderer. Expand confirmed GFM
-// tables before pagination so narrow cards never depend on horizontal columns.
+// Parse only confirmed GFM tables. First-screen cards can render them with the
+// native Card 2.0 table component; folded details still have a vertical fallback.
 function cellsOf(line) {
   const source = line.trim();
   const cells = [];
@@ -25,46 +25,88 @@ function cellsOf(line) {
   return cells;
 }
 
-export function cardMarkdownTables(text) {
-  const lines = text.split('\n'), output = [];
+function parsedTable(lines, start) {
+  const headers = cellsOf(lines[start]);
+  const separator = start + 1 < lines.length ? cellsOf(lines[start + 1]) : null;
+  if (!headers || headers.length < 2 || separator?.length !== headers.length
+    || !separator.every((cell) => /^:?-{3,}:?$/.test(cell))) return null;
+  const rows = [];
+  let end = start + 2, invalid = false;
+  for (; end < lines.length; end++) {
+    const cells = cellsOf(lines[end]);
+    if (!cells || /^ {0,3}(`{3,}|~{3,})/.test(lines[end])) break;
+    if (cells.length > headers.length) { invalid = true; break; }
+    rows.push(cells);
+  }
+  // Uncertain input is evidence too; never guess away an extra column.
+  return rows.length && !invalid ? { headers, rows, end } : null;
+}
+
+export function cardMarkdownSegments(text) {
+  const lines = String(text ?? '').split('\n'), segments = [];
+  let buffer = [];
   let fence = null;
+  const flush = () => {
+    if (buffer.length) segments.push({ type: 'markdown', text: buffer.join('\n') });
+    buffer = [];
+  };
   for (let i = 0; i < lines.length; i++) {
     const marker = lines[i].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (fence) {
-      output.push(lines[i]);
+      buffer.push(lines[i]);
       if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
       continue;
     }
     if (marker) {
       fence = { char: marker[1][0], length: marker[1].length };
-      output.push(lines[i]); continue;
+      buffer.push(lines[i]); continue;
     }
-    const headers = cellsOf(lines[i]);
-    const separator = i + 1 < lines.length ? cellsOf(lines[i + 1]) : null;
-    if (!headers || headers.length < 2 || separator?.length !== headers.length
-      || !separator.every((cell) => /^:?-{3,}:?$/.test(cell))) {
-      output.push(lines[i]); continue;
-    }
-    const rows = [];
-    let end = i + 2, invalid = false;
-    for (; end < lines.length; end++) {
-      const cells = cellsOf(lines[end]);
-      if (!cells || /^ {0,3}(`{3,}|~{3,})/.test(lines[end])) break;
-      if (cells.length > headers.length) { invalid = true; break; }
-      rows.push(cells);
-    }
-    // Uncertain input is evidence too; never guess away an extra column.
-    if (!rows.length || invalid) { output.push(lines[i]); continue; }
-    output.push('');
-    rows.forEach((row, index) => {
-      output.push(`**记录 ${index + 1}**`);
-      headers.forEach((header, column) => {
-        const label = header.replace(/^\*\*(.*?)\*\*$/, '$1') || `字段 ${column + 1}`;
-        output.push(`**${label}**：${row[column] || '—'}`);
-      });
-      output.push('');
-    });
-    i = end - 1;
+    const table = parsedTable(lines, i);
+    if (!table) { buffer.push(lines[i]); continue; }
+    flush();
+    segments.push({ type: 'table', headers: table.headers, rows: table.rows });
+    i = table.end - 1;
   }
+  flush();
+  return segments;
+}
+
+function verticalTable({ headers, rows }) {
+  const output = [''];
+  rows.forEach((row, index) => {
+    output.push(`**记录 ${index + 1}**`);
+    headers.forEach((header, column) => {
+      const label = header.replace(/^\*\*(.*?)\*\*$/, '$1') || `字段 ${column + 1}`;
+      output.push(`**${label}**：${row[column] || '—'}`);
+    });
+    output.push('');
+  });
   return output.join('\n');
+}
+
+export function cardMarkdownTables(text) {
+  return cardMarkdownSegments(text).map((segment) => segment.type === 'table' ? verticalTable(segment) : segment.text).join('\n');
+}
+
+const plainHeader = (text, index) => String(text ?? '').replace(/^\*\*(.*?)\*\*$/, '$1').replace(/`/g, '').trim() || `字段 ${index + 1}`;
+
+export function nativeCardTable(segment) {
+  if (segment?.type !== 'table' || segment.headers.length > 6 || segment.rows.length > 50) return null;
+  const columns = segment.headers.map((header, index) => ({
+    name: `column_${index + 1}`,
+    display_name: plainHeader(header, index),
+    data_type: 'lark_md',
+    width: 'auto',
+    vertical_align: 'top',
+    horizontal_align: 'left',
+  }));
+  return {
+    tag: 'table',
+    page_size: Math.max(1, Math.min(10, segment.rows.length)),
+    row_height: 'auto',
+    freeze_first_column: segment.headers.length > 2,
+    header_style: { text_align: 'left', background_style: 'grey', text_color: 'default', bold: true, lines: 2 },
+    columns,
+    rows: segment.rows.map((row) => Object.fromEntries(columns.map((column, index) => [column.name, row[index] || '—']))),
+  };
 }
