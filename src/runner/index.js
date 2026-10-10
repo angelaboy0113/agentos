@@ -109,7 +109,9 @@ export class AgentRunner {
     let current = job;
     if (current.environmentAccess) {
       const environmentResult = await this.execute(current, this.config, emit, signal);
-      if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) return environmentResult;
+      if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
+        return preserveContinuousEnvironmentEvidence(current, environmentResult);
+      }
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
         { ...identity, result: environmentResult })).job;
     }
@@ -130,7 +132,9 @@ export class AgentRunner {
       if (prepared.terminalResult) return prepared.terminalResult;
       if (!prepared.planned) continue;
       const environmentResult = await this.execute(current, this.config, emit, signal);
-      if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) return environmentResult;
+      if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
+        return preserveContinuousEnvironmentEvidence(current, environmentResult);
+      }
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
         { ...identity, result: environmentResult })).job;
     }
@@ -151,6 +155,45 @@ export class AgentRunner {
     }
     return payload;
   }
+}
+
+// A later supplementary environment read must not erase source-backed findings
+// that already passed the analysis handoff gate. Browser/database interruptions
+// remain visible as an explicit gap; without useful prior evidence the original
+// blocked result is returned unchanged.
+export function preserveContinuousEnvironmentEvidence(job, environmentResult) {
+  if (environmentResult?.outcome !== 'blocked' || environmentResult.browserLoginRequired) return environmentResult;
+  const prior = [...(job.context ?? [])].reverse().find((entry) => {
+    const result = entry.kind === 'analysis_turn' ? entry.result : null;
+    return result?.handoffGate?.passed === true
+      && result.verifiedArtifacts?.length > 0
+      && result.handoff?.checks?.some((check) => check?.status === 'passed')
+      && typeof result.finalMessage === 'string' && result.finalMessage.trim();
+  })?.result;
+  if (!prior) return environmentResult;
+  const diagnostic = String(environmentResult.finalMessage ?? environmentResult.summary ?? '补充环境读取未完成。').slice(0, 2000);
+  const risk = `补充环境核验未完成：${diagnostic.replace(/\s+/g, ' ').slice(0, 500)}`;
+  const investigation = prior.investigation ? {
+    ...prior.investigation,
+    status: 'wait',
+    blocker: { kind: 'unavailable', needed: '恢复受控只读环境连接后补充核验', evidence: diagnostic.slice(0, 1000) },
+    nextStep: '恢复对应只读环境连接后，仅补查尚未核实的页面或运行态证据。',
+  } : prior.investigation;
+  return {
+    ...prior,
+    outcome: 'partial',
+    summary: `已保留前面查明的结论；最后一次补充环境核验未完成。${prior.summary ?? ''}`.slice(0, 1200),
+    finalMessage: `${prior.finalMessage}\n\n尚未完成的补充核验\n${diagnostic}\n\n以上连接异常只影响补充核验，不推翻前面已经取得的源码或数据库证据。`,
+    environmentSetup: null,
+    environmentQuery: null,
+    websiteQuery: null,
+    investigation,
+    handoff: prior.handoff ? {
+      ...prior.handoff,
+      returnTo: 'none',
+      risks: [...new Set([...(prior.handoff.risks ?? []), risk])],
+    } : prior.handoff,
+  };
 }
 
 export function createRunnerPool(config, execute = executeTaskProcess) {

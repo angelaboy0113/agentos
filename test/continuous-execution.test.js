@@ -57,6 +57,44 @@ test('continuous analysis can start with an environment query and return to the 
   assert.equal(calls[1].context, 1);
 });
 
+test('a failed supplementary environment read preserves verified source findings as an orange partial result', async () => {
+  const root = { id: 'JOB-preserve', questionId: 'QST-preserve', projectId: 'demo', stage: 'developer', taskIntent: 'analysis',
+    continuousInvestigation: true, lease: { id: 'LEASE-preserve', runnerId: 'runner-one' }, context: [] };
+  const plan = { environmentId: 'uat-web', queryId: 'investigate', parameters: ['核对页面计算'], kind: 'website' };
+  const source = { outcome: 'needs_clarification', summary: '源码已确认两个费比口径',
+    finalMessage: '通过后费比与基础费用使用比例的公式已经从源码确认。', websiteQuery: { url: 'https://business.example/app', tier: 'uat', purpose: '核对页面计算' },
+    investigation: { status: 'continue', blocker: null, goals: [{ id: 'original-question', required: true, status: 'open', evidence: '源码公式已确认，页面数值待核对' }] },
+    handoff: { artifacts: [{ kind: 'code', path: 'service.js' }], checks: [{ id: 'formula', required: false, status: 'passed', evidence: '源码公式已核对' }], risks: ['页面数值未核对'], returnTo: 'none' },
+    verifiedArtifacts: [{ path: 'service.js' }], handoffGate: { passed: true } };
+  let calls = 0;
+  const runner = new AgentRunner({ runnerId: 'runner-one' }, async (job) => {
+    calls++;
+    return job.environmentAccess
+      ? { outcome: 'blocked', summary: '网页读取失败', finalMessage: '错误码：BROWSER_BRIDGE\n失败环节：日常浏览器接管' }
+      : source;
+  });
+  runner.post = async (url, body) => {
+    assert.ok(url.endsWith('/continuous-environment'));
+    return { planned: true, job: { ...root, environmentAccess: plan,
+      context: [{ stage: 'developer', kind: 'analysis_turn', result: body.result }] } };
+  };
+  const result = await runner.executeContinuous(root, async () => {}, new AbortController().signal);
+  assert.equal(calls, 2);
+  assert.equal(result.outcome, 'partial');
+  assert.match(result.finalMessage, /两个费比口径|公式已经从源码确认/);
+  assert.match(result.finalMessage, /BROWSER_BRIDGE/);
+  assert.equal(result.handoffGate.passed, true);
+  assert.equal(result.investigation.status, 'wait');
+});
+
+test('a failed environment read remains blocked when no verified prior finding exists', async () => {
+  const root = { id: 'JOB-no-evidence', questionId: 'QST-no-evidence', projectId: 'demo', stage: 'developer', taskIntent: 'analysis',
+    continuousInvestigation: true, lease: { id: 'LEASE-no-evidence', runnerId: 'runner-one' }, context: [] };
+  const blocked = { outcome: 'blocked', summary: '连接失败', finalMessage: '错误码：NETWORK' };
+  const runner = new AgentRunner({ runnerId: 'runner-one' }, async () => blocked);
+  assert.equal(await runner.executeContinuous({ ...root, environmentAccess: { kind: 'website' } }, async () => {}, new AbortController().signal), blocked);
+});
+
 test('continuous analysis automatically resumes a partial investigation without asking the user to say continue', async () => {
   const root = { id: 'JOB-deep', questionId: 'QST-deep', projectId: 'demo', stage: 'developer', taskIntent: 'analysis',
     continuousInvestigation: true, lease: { id: 'LEASE-deep', runnerId: 'runner-one' }, context: [] };

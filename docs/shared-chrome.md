@@ -3,7 +3,7 @@
 ## 配置与使用
 Mac 默认 shared-chrome 后端，使用 Apple Events 接管日常 Google Chrome 的对应应用页面。不复制 Cookie、不读取页面里已有的密码值、不打开远程调试端口、不关闭或重启 Chrome。登录过期时可以本机手动登录，也可以由网站负责人直接回复等待登录的任务卡，授权固定程序填写。其他平台默认 isolated；设置 AGENTOS_BROWSER_MODE=isolated 并空闲重启可恢复独立 Playwright 浏览器。
 
-激活日常 Chrome，从 Mac 屏幕顶部选择“查看 → 开发者 → 允许 Apple 事件中的 JavaScript”。全屏时把鼠标移到顶部。系统首次询问运行 AgentOS 的宿主可否控制 Chrome 时，由本机使用者确认。该开关允许获准本地自动化程序执行网页 JavaScript，应只对信任的程序开启。未就绪返回 `BROWSER_BRIDGE`，不应解释成网站账号无权限。
+激活日常 Chrome，从 Mac 屏幕顶部选择“查看 → 开发者 → 允许 Apple 事件中的 JavaScript”。全屏时把鼠标移到顶部。系统首次询问运行 AgentOS 的宿主可否控制 Chrome 时，由本机使用者确认。该开关允许获准本地自动化程序执行网页 JavaScript，应只对信任的程序开启。未就绪或原生自动化暂时“不能获取对象”时返回 `BROWSER_BRIDGE`，不应解释成网站账号无权限。
 
 macOS 会分别判断前台终端/Codex 与后台 LaunchAgent 的 Apple Events 授权。用户已经在日常 Chrome 登录业务网站，只能证明 Cookie 和账号会话有效，不能证明后台 AgentOS 已获准控制 Chrome。macOS 自启脚本把服务限制在当前用户的 Aqua 图形会话并标记为 Interactive；升级后需要重新执行 `./scripts/install-autostart.sh` 使 plist 生效。若系统再次弹出自动化授权，应在本机允许。任务此时显示橙色“等待本机浏览器授权”，不会标红结束；桥接可用后轮询器自动恢复原问题和已有证据，无需重新登录网站或回复“继续”。
 
