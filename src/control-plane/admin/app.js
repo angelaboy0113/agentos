@@ -1,5 +1,5 @@
 const state = { overview: null, settings: null, records: [] };
-const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置' };
+const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识' };
 const statusMap = {
   queued: ['排队中', 'warn'], running: ['执行中', 'live'], cancelling: ['停止中', 'warn'],
   completed: ['已完成', 'good'], sent: ['已回复', 'good'], failed: ['失败', 'bad'],
@@ -21,7 +21,7 @@ let searchTimer;
 document.querySelector('#record-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadRecords, 220); });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeDrawer();
-  if (/^[123]$/.test(event.key) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) showView(['overview', 'records', 'settings'][Number(event.key) - 1]);
+  if (/^[1234]$/.test(event.key) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) showView(['overview', 'records', 'settings', 'knowledge'][Number(event.key) - 1]);
 });
 
 async function api(path, options = {}) {
@@ -97,8 +97,8 @@ async function openRecord(id) {
 }
 
 function closeDrawer() { document.querySelector('#record-drawer').classList.remove('open'); document.querySelector('#record-drawer').setAttribute('aria-hidden', 'true'); document.querySelector('#drawer-backdrop').hidden = true; }
-function showView(name) { document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); }
-function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else loadOverview(); }
+function showView(name) { document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); if (name === 'knowledge') loadKnowledge(); }
+function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
 function bindRecordButtons(root) { root.querySelectorAll('[data-record]').forEach((item) => item.addEventListener('click', () => openRecord(item.dataset.record))); }
 
 function recordRow(item) { const status = statusInfo(item.status); return `<button class="record-row" data-record="${escapeHtml(item.id)}"><span class="record-icon">${item.kind === 'job' ? '任' : '答'}</span><span class="record-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.projectName)} · ${escapeHtml(stageMap[item.stage] ?? item.stage ?? '普通回复')}</small></span><span class="record-meta"><span class="pill ${status[1]}">${status[0]}</span><small>${dateTime(item.createdAt)}</small></span></button>`; }
@@ -122,3 +122,27 @@ function toast(message) { const box = document.querySelector('#toast'); box.text
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]); }
 
 loadOverview();
+
+async function loadKnowledge() {
+  try {
+    const body = await api('/api/v1/admin/knowledge');
+    setText('knowledge-summary', body.enabled ? `已启用 · ${(body.counts ?? []).reduce((n,x)=>n+x.total,0)} 个版本 · 直接命中 ${(body.metrics ?? []).find(x=>x.reason==='direct_hit')?.total ?? 0} 次` : '尚未启用，请维护者配置本机知识范围');
+    document.querySelector('#knowledge-body').innerHTML = (body.entries ?? []).map(x=>`<tr data-knowledge="${escapeHtml(x.id)}"><td>${escapeHtml(x.title)}</td><td>${escapeHtml(x.environment)} / v${x.version}</td><td>${x.validity?.reusable ? '可复用' : escapeHtml(knowledgeReason(x.validity?.reason ?? x.status))}</td><td>${dateTime(x.verified_at)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">暂无知识。新完成的已核实调查会自动提炼通用说明。</td></tr>';
+    document.querySelectorAll('[data-knowledge]').forEach(el=>el.addEventListener('click',()=>openKnowledge(el.dataset.knowledge))); markUpdated();
+  } catch(error) { toast(error.message); }
+}
+function knowledgeReason(reason) { return ({expired:'需要重新核实',source_changed:'相关源码变化',deployment_changed:'部署标记变化',scope_changed:'共享范围变化',scope_removed:'共享已取消',verification_unavailable:'无法核对依据',conflict:'答案冲突',suspended:'已停用',superseded:'历史版本'})[reason] ?? reason; }
+async function openKnowledge(id) {
+  try {
+    const {entry} = await api(`/api/v1/admin/knowledge/${encodeURIComponent(id)}`);
+    setText('detail-title',entry.title);
+    document.querySelector('#detail-body').innerHTML = section('知识说明',entry.answer)+section('适用与来源',`${entry.environment} · v${entry.version} · ${dateTime(entry.verifiedAt)}`)+`<button class="text-button" id="knowledge-suspend">停用这条知识</button>${entry.status==='conflict'||entry.status==='suspended'?'<button class="text-button" id="knowledge-resolve">确认采用此版本</button>':''}`;
+    document.querySelector('#knowledge-suspend').onclick=()=>changeKnowledge(id,'suspend');
+    const resolve=document.querySelector('#knowledge-resolve');if(resolve)resolve.onclick=()=>changeKnowledge(id,'resolve');
+    document.querySelector('#drawer-backdrop').hidden=false;document.querySelector('#record-drawer').classList.add('open');document.querySelector('#record-drawer').setAttribute('aria-hidden','false');
+  }catch(error){toast(error.message);}
+}
+async function changeKnowledge(id,action) {
+  if(action==='resolve'&&!confirm('确认已经核对此版本的内容？采用此版本不会延长原证据有效期。'))return;
+  try {await api(`/api/v1/admin/knowledge/${encodeURIComponent(id)}/${action}`,{method:'POST',headers:{'x-agentos-admin':'1'},body:'{}'});closeDrawer();await loadKnowledge();toast('知识状态已更新');}catch(error){toast(error.message);}
+}

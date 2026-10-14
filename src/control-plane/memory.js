@@ -162,6 +162,7 @@ export function fitContext(input, settings = MEMORY_DEFAULTS) {
     else if (input.jobs.length) input.jobs.shift();
     else if (input.memory?.summary?.items?.length) input.memory.summary.items.shift();
     else if (input.memory?.matches?.length) input.memory.matches.pop();
+    else if (input.teamKnowledge?.candidates?.length) input.teamKnowledge.candidates.pop();
     else if (input.history.length) input.history.shift();
     else throw new Error('Current message and required context exceed configured input budget');
     trimmed = true;

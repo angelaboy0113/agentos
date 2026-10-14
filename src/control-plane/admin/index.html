@@ -16,6 +16,7 @@
       <nav aria-label="主导航">
         <button class="nav-item active" data-view="overview"><span>概览</span><kbd>1</kbd></button>
         <button class="nav-item" data-view="records"><span>任务记录</span><kbd>2</kbd></button>
+        <button class="nav-item" data-view="knowledge"><span>团队知识</span><kbd>4</kbd></button>
         <button class="nav-item" data-view="settings"><span>模型设置</span><kbd>3</kbd></button>
       </nav>
       <div class="sidebar-foot">
@@ -81,6 +82,14 @@
           <div class="table-wrap">
             <table><thead><tr><th>问题 / 任务</th><th>状态</th><th>模型</th><th>耗时</th><th>时间</th></tr></thead><tbody id="records-body"><tr><td colspan="5" class="empty">正在读取记录…</td></tr></tbody></table>
           </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-knowledge">
+        <section class="panel table-panel">
+          <div class="panel-heading"><div><h3>团队知识</h3><p id="knowledge-summary">读取中</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>知识主题</th><th>环境 / 版本</th><th>可否复用</th><th>核实时间</th></tr></thead><tbody id="knowledge-body"></tbody></table></div>
+          <p class="setting-note">只有经过提炼、无角色差异的通用说明进入团队知识；当前单据状态和金额仍需查询。过期或变化会触发重新核实。</p>
         </section>
       </section>
 

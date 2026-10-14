@@ -1,3 +1,4 @@
+import { TeamKnowledgeService } from './team-knowledge.js';
 import { queryRejection } from '../shared/query-repair.js';
 import { enrollmentTarget } from './environment-enrollment.js';
 import { SharedChromeBrowser } from './shared-chrome-browser.js';
@@ -48,6 +49,7 @@ export async function createControlPlane(overrides = {}) {
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
     websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
+  context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
   const cards = new LiveCards(store, feishu);
   context.cards = cards;
@@ -80,9 +82,10 @@ export async function createControlPlane(overrides = {}) {
   server.once('listening', () => {
     cards.start();
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
+    context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
-  server.once('close', () => { conversations.stop(); cards.stop(); void context.websiteBrowser.close(); });
+  server.once('close', () => { conversations.stop(); cards.stop(); void context.websiteBrowser.close(); void context.knowledge.close(); });
   return { server, config, projects, agents, store, conversations, cards };
 }
 
@@ -276,6 +279,27 @@ async function route(context) {
     }
   }
 
+  if (['/api/v1/knowledge','/api/v1/admin/knowledge'].includes(url.pathname) && request.method === 'GET') {
+    if(url.pathname.includes('/admin/')) requireAdminSession(context, request, false);
+    else requireBearer(request, config.adminToken, 'admin');
+    return json(response, 200, await context.knowledge.overview(), { 'cache-control': 'no-store' });
+  }
+  const knowledgeMatch = url.pathname.match(/^\/api\/v1\/(?:admin\/)?knowledge\/(KN-[A-Za-z0-9-]+)(?:\/(suspend|resolve))?$/);
+  if (knowledgeMatch) {
+    if(url.pathname.includes('/admin/')) requireAdminSession(context, request, request.method === 'POST');
+    else requireBearer(request, config.adminToken, 'admin');
+    await context.knowledge.store.open();
+    const entry = context.knowledge.store.get(knowledgeMatch[1]);
+    if (!entry) return json(response, 404, { ok: false });
+    if (request.method === 'GET' && !knowledgeMatch[2]) return json(response, 200, { ok: true, entry }, { 'cache-control': 'no-store' });
+    if (request.method === 'POST' && knowledgeMatch[2]) {
+      if (knowledgeMatch[2] === 'suspend') context.knowledge.store.suspend(entry.id);
+      else context.knowledge.store.resolve(entry.id);
+      await store.recordAdminAudit({actor:'local-knowledge-admin',action:'knowledge_'+knowledgeMatch[2],knowledgeId:entry.id});
+      return json(response, 200, { ok: true });
+    }
+  }
+
   const continuousResultMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-environment-result$/);
   if (request.method === 'POST' && continuousResultMatch) {
     requireBearer(request, config.runnerToken, 'runner');
@@ -381,6 +405,7 @@ async function route(context) {
     }
     const result = await store.appendEvent(job.id, body, routing);
     if(['completed','failed','cancelled'].includes(body.type)&&!body.result?.browserLoginRequired)await context.websiteBrowser.release(job.id);
+    context.knowledge.capture(result.job);
     setImmediate(() => notifyJobEvent(context, result).catch((error) => console.error('[notify]', error)));
     return json(response, 200, { ok: true, job: result.job });
   }

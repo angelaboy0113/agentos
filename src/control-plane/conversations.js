@@ -201,10 +201,11 @@ export class ConversationService {
           queueMs: aiStarted - Date.parse(turn.createdAt) });
         try {
           const input = await this.buildInput(turn);
-          const decision = validateDecision(await this.decide(input, this.abort.signal, { sessionKey: key,
+          let decision = validateDecision(await this.decide(input, this.abort.signal, { sessionKey: key,
             onEvent: (event, info) => {
               if (event === 'error') this.update(turn.id, { connectionRetryAt: new Date().toISOString(), connectionWillRetry: info.willRetry }).catch(() => {});
             } }));
+          if (this.context.knowledge) decision = await this.context.knowledge.reuse(turn, input.project?.id, decision, input);
           await this.update(turn.id, { status: 'decided', decision, timing: decision.timing ?? { aiMs: Date.now() - aiStarted },
             attachmentPool: input.attachments, aiCompletedAt: new Date().toISOString() });
         } catch (error) {
@@ -305,6 +306,7 @@ export class ConversationService {
     }));
     delete memory.suppressedRefs;
     return fitContext({
+      teamKnowledge: this.context.knowledge ? await this.context.knowledge.candidates(turn, projectId) : { enabled: false, candidates: [] },
       memory, nativeSession: scoped, contextIsolation: { policy: 'question-v2', questionIds: [...questionIds], rule: '只回答当前问题；关联问题历史不是其他任务的授权。不得引入无关话题。' }, requestId: turn.id, questionId: turn.questionId ?? null,
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
       environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
@@ -330,8 +332,14 @@ export class ConversationService {
 
   async apply(turn) {
     const { store, projects } = this.context;
-    const decision = turn.decision;
+    let decision = turn.decision;
     const projectId = projects.chatProjectMap[turn.chatId];
+    if (decision.knowledgeReceipt && this.context.knowledge) {
+      const teamKnowledge = await this.context.knowledge.candidates(turn, projectId);
+      decision = await this.context.knowledge.reuse(turn, projectId, decision, {teamKnowledge,jobs:[]});
+      turn.decision = decision;
+      await this.update(turn.id, {decision});
+    }
     const attachmentIds = new Set(decision.attachmentIds);
     const attachments = (turn.attachmentPool ?? []).filter((item) => attachmentIds.has(item.id));
     if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');

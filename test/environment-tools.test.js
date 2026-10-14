@@ -376,3 +376,17 @@ test('runtime tools keep a collected set local and execute the linked aggregate 
   const queryCall=executed.at(-1);assert.deepEqual(queryCall.params,['041','04101','4','202610']);assert.doesNotMatch(queryCall.sql,/202610|04101/);
  }finally{await tools.close();}
 });
+test('query cache reuses identical reads only inside one live readonly transaction and keeps validation',async()=>{
+  let executions=0;
+  const driver={createConnection:async()=>({query:async(sql)=>sql.includes('SHOW GRANTS')?[[{grant:'GRANT SELECT ON `demo`.* TO x'}]]:[[]],
+    execute:async(s,params)=>{executions++;if(s.sql.includes('information_schema.COLUMNS'))return [[{table_name:'orders',column_name:'id',data_type:'bigint'},{table_name:'orders',column_name:'status',data_type:'varchar'}]];return [[{id:'999999999999999999',status:String(params[0])}]];},rollback:async()=>{},destroy:()=>{}})};
+  const e={...environment,kind:'mysql',host:'fake',database:'demo'};
+  const args={table:'orders',columns:['id','status'],filters:[{column:'id',op:'=',value:'one'}]};
+  const a=await createEnvironmentTools(e,query,credentials,{mysql:driver});await a.run('schema',{table:'orders'});
+  const one=await a.run('select',args),two=await a.run('select',args);assert.deepEqual(one,two);assert.equal(executions,2);
+  one.rows[0].status='tampered';assert.equal((await a.run('select',args)).rows[0].status,'one');
+  await assert.rejects(a.run('select',{...args,columns:['password']}));assert.equal(executions,2);
+  await a.run('select',{...args,filters:[{column:'id',op:'=',value:'two'}]});assert.equal(executions,3);
+  await a.close();await assert.rejects(a.run('select',args));
+  const b=await createEnvironmentTools(e,query,credentials,{mysql:driver});await b.run('schema',{table:'orders'});await b.run('select',args);assert.equal(executions,5);await b.close();
+});

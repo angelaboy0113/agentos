@@ -1,0 +1,19 @@
+{
+  "enabled": false,
+  "maxEntries": 2000,
+  "teams": [
+    {
+      "id": "your-team",
+      "projectId": "your-project",
+      "chatIds": ["oc_YOUR_TEAM_GROUP"],
+      "profiles": ["your-owner-profile"],
+      "enabledFrom": "2026-10-14T00:00:00+08:00",
+      "freshnessMs": 86400000,
+      "methodFreshnessMs": 86400000,
+      "revisionFiles": {},
+      "membersByProfile": {
+        "your-owner-profile": ["ou_MEMBER_A", "ou_MEMBER_B"]
+      }
+    }
+  ]
+}

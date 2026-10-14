@@ -12,7 +12,8 @@
     "requiresSourceInspection",
     "environmentQuery",
     "environmentSetup",
-    "sourceEnvironment"
+    "sourceEnvironment",
+    "knowledgeMatch"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -131,6 +132,45 @@
     "sourceEnvironment": {
       "type": "string",
       "description": "源码分析选择 project.sourceEnvironments 中的 id；无环境或非源码任务用空字符串。环境不明且无默认值先询问，禁止猜测分支或路径。"
+    },
+    "knowledgeMatch": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "sameIntent",
+            "currentData",
+            "correction",
+            "roleIndependent",
+            "environment"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sameIntent": {
+              "type": "boolean"
+            },
+            "currentData": {
+              "type": "boolean"
+            },
+            "correction": {
+              "type": "boolean"
+            },
+            "roleIndependent": {
+              "type": "boolean"
+            },
+            "environment": {
+              "type": "string"
+            }
+          }
+        }
+      ]
     }
   }
 }

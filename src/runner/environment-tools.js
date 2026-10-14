@@ -155,6 +155,20 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map(), columnTypes = new Map(), valueSets = new Map();
   const request = adapters.fetch ?? boundedFetch;
+  const readCache = new Map(); let readCacheBytes = 0;
+  // Only one live MySQL readonly transaction. Never import results from another task or snapshot.
+  async function read(connection, statement, parameters) {
+    const key=JSON.stringify([statement.sql,parameters]);
+    if(readCache.has(key))return structuredClone(readCache.get(key));
+    const value=await connection.execute(statement,parameters);
+    const bytes=Buffer.byteLength(JSON.stringify(value[0],(_,v)=>typeof v==='bigint'?String(v):v));
+    if(bytes<=256000&&readCacheBytes+bytes<=2000000&&readCache.size<64){
+      // mysql FieldPacket objects are not part of business evidence; cache just rows.
+      readCache.set(key,[structuredClone(value[0])]);readCacheBytes+=bytes;
+    }
+    return value;
+  }
+
   async function nacos(api, params = {}, login = false) {
     if (!active) throw new Error('工具执行已结束');
     const url = new URL(e.baseUrl.replace(/\/$/, '') + api);
@@ -231,7 +245,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         if (tool === 'tables') {
           const offset=args.cursor===undefined?0:Number(args.cursor);
           if(!Number.isInteger(offset)||offset<0||offset>100000)throw new Error('结构分页参数无效');
-          const [rows]=await c.execute({sql:`SELECT TABLE_NAME AS table_name FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME LIMIT 101 OFFSET ${offset}`,timeout:q.timeoutMs},[e.database]);
+          const [rows]=await read(c,{sql:`SELECT TABLE_NAME AS table_name FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME LIMIT 101 OFFSET ${offset}`,timeout:q.timeoutMs},[e.database]);
           return {tableNames:rows.slice(0,100).map(r=>r.table_name).filter(t=>ident(t)&&(q.tables.includes('*')||q.tables.includes(t))),truncated:rows.length>100,nextCursor:rows.length>100?offset+100:null};
         }
         if (tool === 'schema') {
@@ -242,7 +256,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const offset = args.cursor === undefined ? 0 : Number(args.cursor);
           if(!Number.isInteger(offset) || offset<0 || offset>100000) throw new Error('结构分页参数无效');
           const columnClause = requestedColumns ? ` AND c.COLUMN_NAME IN (${requestedColumns.map(() => '?').join(', ')})` : '';
-          const [rows] = await c.execute({ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name,c.DATA_TYPE AS data_type FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
+          const [rows] = await read(c,{ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name,c.DATA_TYPE AS data_type FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
           const visible = new Map();
           for (const r of rows.slice(0,100)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) {
             visible.set(r.table_name,[...(visible.get(r.table_name)??[]),r.column_name]);
@@ -255,32 +269,32 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         }
         if (tool === 'count') {
           const statement = countStatement(args, tables, q);
-          const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
+          const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
           return { table: args.table, rows: [{ total: String(rows[0].total), countMode: args.distinctColumns?.length ? 'distinct' : 'rows', distinctColumns: (args.distinctColumns ?? []).join(',') }], truncated: false };
         }
         if(tool==='group_count'){
           const statement=groupCountStatement(args,tables,q);
-          const [rows]=await c.execute({sql:statement.sql,timeout:q.timeoutMs},statement.params);
+          const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
           return {table:args.table,rows:rows.slice(0,q.maxRows).map(row=>Object.fromEntries([...statement.groupColumns,'duplicate_count'].map(key=>[key,bounded(row[key],secrets)]))),
             truncated:rows.length>q.maxRows,groupColumns:statement.groupColumns,stage:`已按 ${statement.groupColumns.join('、')} 核对重复组合`};
         }
         if(tool==='collect_values'){
-          const statement=collectValuesStatement(args,tables,q);const [rows]=await c.execute({sql:statement.sql,timeout:q.timeoutMs},statement.params);
+          const statement=collectValuesStatement(args,tables,q);const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
           const values=[...new Set(rows.slice(0,1000).flatMap(row=>statement.columns.map(column=>row[column])).filter(value=>value!==null&&value!==undefined&&['string','number','bigint'].includes(typeof value)).map(String))];
           const setRef=`set-${valueSets.size+1}`;valueSets.set(setRef,{values,truncated:rows.length>1000});
           return {table:args.table,setRef,valueCount:values.length,sample:values.slice(0,Math.min(q.maxRows,20)),truncated:rows.length>1000,stage:`已收集 ${values.length} 个去重值供本轮关联汇总`};
         }
         if(tool==='aggregate'||tool==='linked_aggregate'){
           const statement=tool==='aggregate'?aggregateStatement(args,tables,columnTypes,q,valueSets):linkedAggregateStatement(args,tables,columnTypes,q,valueSets);
-          const [rows]=await c.execute({sql:statement.sql,timeout:q.timeoutMs},statement.params);
+          const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
           return {rows:rows.slice(0,1).map(row=>Object.fromEntries(statement.columns.map(key=>[key,bounded(row[key],secrets)]))),truncated:false,stage:tool==='aggregate'?'已完成单表汇总':'已完成受控关联汇总'};
         }
         const statement = selectStatement(args, tables, q);
-        const [rows] = await c.execute({ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
+        const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
       })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, q.timeoutMs); })]);
     } catch (error) { if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
-  return { spec, run, close: async ({ abort = false } = {}) => { active = false; token = null; await browser?.close(); if (conn) { try { if (!abort) await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
+  return { spec, run, close: async ({ abort = false } = {}) => { active = false; token = null; readCache.clear(); await browser?.close(); if (conn) { try { if (!abort) await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
 }

@@ -20,6 +20,7 @@
 | `.env` | 可选环境变量和令牌 | 严重敏感 | 否 |
 | `docs/`、`scripts/`、`test/` | 设计、部署、维护、辅助脚本和回归测试 | 否 | 是 |
 | `data/codex-conversations.json` | 可选群会话的持久线程引用、待定请求与最近决策；依赖本机 Codex 会话文件，0600，不是登录文件 | 是 | 否 |
+| `data/knowledge/knowledge.sqlite` | 显式团队范围内的通用知识、版本、依赖指纹、索引与命中计数；不包含原始聊天。见[团队知识](team-knowledge.md) | 是 | 否 |
 | `data/memory.json` | 按范围的持久摘录摘要、来源指纹及停用记录；详见[记忆管理](memory-management.md) | 是 | 否 |
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送、幂等记录及最近 200 项本机设置审计 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
@@ -72,7 +73,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 
 ## 可选环境查询边界
 
-详见[受控环境查询](environment-access.md)和[只读排查自动授权](read-only-auto-authorization.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。UAT/PRD 受控只读查询由策略自动授权，修改操作仍需管理员审批。查询结果归属原问题卡片，不注入共享长期记忆；真实环境验收须在本机配置后完成。
+详见[受控环境查询](environment-access.md)和[只读排查自动授权](read-only-auto-authorization.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。UAT/PRD 受控只读查询由策略自动授权，修改操作仍需管理员审批。查询原始结果归属原问题卡片，不注入个人共享记忆；显式启用团队知识后，仅对完成且有证据的分析提炼不含具体案例数据的通用说明，独立保存。真实环境验收须在本机配置后完成。
 
 通用网站等待登录时，只有该网站环境在当前机器人 profile 下配置的负责人可以直接回复对应任务卡提交账号密码。控制面用卡片或同一话题绑定具体网站，在普通对话入库之前消费凭据消息，不把正文写入 `data/agentos.json`；Keychain 保存后仅使用凭据引用。AgentOS 无法删除飞书服务端群消息，群成员可见范围和留存按企业飞书策略执行。固定登录脚本只在已批准网站 origin、应用路径或同源认证路径填写表单，验证码和 MFA 不保存也不绕过。详见[日常 Chrome 登录态复用](shared-chrome.md)。
 
