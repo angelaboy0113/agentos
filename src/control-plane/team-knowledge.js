@@ -1,3 +1,4 @@
+import { KnowledgeSource } from './knowledge-source.js';
 import { isSourceBackedOperationGuidance } from '../shared/investigation-review.js';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -36,7 +37,7 @@ export class TeamKnowledgeService {
     this.context=context;this.file=options.file??path.resolve('./config/knowledge.local.json');
     this.store=options.store??new KnowledgeStore(context.config.dataDir);
     this.model=options.model??new KnowledgeModel({dataDir:context.config.dataDir,file:context.config.codexRuntimeFile});
-    this.now=options.now??Date.now;this.options=options;this.queue=Promise.resolve();this.inflight=new Set();
+    this.now=options.now??Date.now;this.source=options.source??new KnowledgeSource({now:this.now});this.options=options;this.queue=Promise.resolve();this.inflight=new Set();
   }
   async settings(){
     if(this.options.settings)return knowledgeSettings(this.options.settings);
@@ -70,12 +71,16 @@ export class TeamKnowledgeService {
       if(await this.revision(team,entry.environment)!==entry.revision)return {reusable:false,reason:'deployment_changed'};
       const project=this.context.projects.projects[team.projectId];
       if(!project?.repoPath||!entry.dependencies.length)return {reusable:false,reason:'missing_dependencies'};
-      for(const dep of entry.dependencies)if(await this.digest(project.repoPath,path.join(dep.repository,dep.path))!==dep.hash)return {reusable:false,reason:'source_changed'};
+      if(entry.sourceBindings?.length){
+        for(const binding of entry.sourceBindings){const check=await this.source.current(project,entry.environment,binding);if(!check.same)return {reusable:false,reason:check.reason};}
+      }else if(project.analysisSourceMode==='isolated')return {reusable:false,reason:'environment_proof_missing'};
+      else for(const dep of entry.dependencies)if(await this.digest(project.repoPath,path.join(dep.repository,dep.path))!==dep.hash)return {reusable:false,reason:'source_changed'};
       return {reusable:true,reason:entry.evidenceScope==='source_guidance_only'?'source_guidance_only':entry.revision?'deployment_marker_and_dependencies':'bounded_historical_evidence'};
     }catch{return {reusable:false,reason:'verification_unavailable'};}
   }
   async candidates(turn,projectId){
     try{
+      if(this.recovering)await this.recovering;
       const settings=await this.settings(),team=this.team(settings,turn,projectId);
       if(!team)return {enabled:false,candidates:[]};
       if(turn.attachments?.length)return {enabled:true,candidates:[],reason:'attachments_require_investigation'};
@@ -152,6 +157,8 @@ export class TeamKnowledgeService {
       if(!source.repositories.some(r=>r.path===dep.repository))throw new Error('Unknown source repository');
       dependencies.push({...dep,hash:await this.digest(workspace,path.join(dep.repository,dep.path))});
     }
+    const sourceBindings=source.repositories.every(r=>/^[a-f0-9]{40,64}$/.test(r.commit??''))?await this.source.bindings(project,environment,source,dependencies):null;
+    if(project.analysisSourceMode==='isolated'&&!sourceBindings)return;
     // Reload policy after model latency: permission changes never authorize late shared publication.
     const latestSettings=await this.settings(),latestTeam=this.team(latestSettings,actor,job.projectId);
     if(!latestTeam||hash(latestTeam)!==hash(team)||this.closed)return;
@@ -163,15 +170,80 @@ export class TeamKnowledgeService {
     if(team.revisionFiles?.[environment]&&(await stat(team.revisionFiles[environment])).mtimeMs>verifiedAt){this.store.mark(job.id,'revision_changed_after_evidence');return;}
     dependencies.sort((a,b)=>(a.repository+'/'+a.path).localeCompare(b.repository+'/'+b.path));
     const entry={id:'KN-'+randomUUID(),team:team.id,environment,topic,version:(old?.version??0)+1,kind:proposal.kind,
-      title:proposal.title,aliases:proposal.aliases,answer:proposal.answer,evidenceScope:sourceGuidance?'source_guidance_only':'verified_analysis',dependencies,revision,policyHash:hash(team),
+      title:proposal.title,aliases:proposal.aliases,answer:proposal.answer,evidenceScope:proposal.kind==='guide'?'source_guidance_only':'verified_analysis',dependencies,revision,policyHash:hash(team),
       verifiedAt:Date.parse(job.updatedAt),sourceJobId:job.id};
     if(!Number.isFinite(entry.verifiedAt))throw new Error('Missing verified time');
-    const unchanged=old&&old.revision===revision&&hash(old.dependencies)===hash(dependencies);
-    const conflict=old&&(old.status==='suspended'||old.status==='conflict'||(unchanged&&old.answer!==entry.answer));
+    entry.sourceBindings=sourceBindings;
+    // Preserve full verified coverage when the new report repeats only an entry point.
+    let conflict=old?.status==='suspended';
+    if(old&&!conflict){
+      const relation=await this.compare(old,entry);
+      entry.comparison={relation:relation.relation,reason:relation.reason,previousId:old.id};
+      const changedFactsEvidence=old.revision!==entry.revision||old.dependencies.some(previous=>entry.dependencies.some(next=>next.repository===previous.repository&&next.path===previous.path&&next.hash!==previous.hash));
+      conflict=relation.relation==='uncertain'||relation.relation==='contradiction'&&!changedFactsEvidence;
+      if(relation.relation==='contradiction'&&changedFactsEvidence)entry.comparison.reason='相关证据已更新，采用本次重新核实的规则：'+entry.comparison.reason;
+      if(relation.relation==='equivalent'){
+        entry.answer=old.answer;entry.aliases=[...new Set([...old.aliases,...entry.aliases])].slice(0,8);
+        // Refresh only if identical dependencies were reverified; a shorter report cannot refresh old extra facts.
+        if(hash(old.dependencies)!==hash(entry.dependencies)){entry.verifiedAt=old.verifiedAt;entry.dependencies=old.dependencies;entry.sourceBindings=old.sourceBindings??entry.sourceBindings;}
+      }
+    }
+    const checkedSettings=await this.settings(),checkedTeam=this.team(checkedSettings,actor,job.projectId);
+    if(!checkedTeam||hash(checkedTeam)!==hash(team)||this.closed)return;
     this.store.put(entry,conflict?'conflict':'active');this.store.mark(job.id,'captured');this.store.metric(conflict?'conflict':'captured');
   }
-  async recover(){
+  async compare(old,entry){
+    if(old.answer===entry.answer)return {relation:'equivalent',reason:'规范答案一致'};
+    if(!this.model.compare)return {relation:'uncertain',reason:'语义比较暂不可用'};
+    const result=await this.model.compare({environment:entry.environment,previous:{title:old.title,answer:old.answer},next:{title:entry.title,answer:entry.answer}});
+    if(!['equivalent','extension','contradiction','uncertain'].includes(result?.relation)||typeof result.reason!=='string')throw new Error('Invalid fact comparison');
+    return {relation:result.relation,reason:result.reason.slice(0,300)};
+  }
+  async reconcile(){
     const settings=await this.settings();if(!settings.enabled)return;
+    await this.store.open();const state=await this.context.store.read();
+    for(const team of settings.teams){
+      const entries=this.store.scopeEntries(team.id);const groups=new Map();
+      for(let entry of entries){
+        if(entry.policyHash!==hash(team))continue;
+        const job=state.jobs?.find(j=>j.id===entry.sourceJobId),project=this.context.projects.projects[team.projectId];
+        if(!job||job.projectId!==team.projectId||job.result?.handoffGate?.passed!==true||!project)continue;
+        const source=job.result.sourceSync;
+        if(!source?.workspace||source.environment!==entry.environment)continue;
+        if(!entry.sourceBindings?.length){
+          try{
+            const workspace=await realpath(source.workspace);
+            if(!project.analysisSnapshotRoot||!within(await realpath(project.analysisSnapshotRoot),workspace))continue;
+            for(const dep of entry.dependencies)if(await this.digest(workspace,path.join(dep.repository,dep.path))!==dep.hash)throw new Error('Evidence changed');
+            entry={...entry,sourceBindings:await this.source.bindings(project,entry.environment,source,entry.dependencies),
+              evidenceScope:entry.kind==='guide'?'source_guidance_only':entry.evidenceScope};
+            this.store.updateEvidence(entry);this.store.metric('environment_proof_upgraded');
+          }catch{continue;}
+        }
+        const key=JSON.stringify([entry.environment,entry.topic]);groups.set(key,[...(groups.get(key)??[]),entry]);
+      }
+      for(const group of groups.values()){
+        if(!group.some(x=>x.status==='conflict')||group.length<2)continue;
+        const latest=group[0];let compatible=true;
+        for(const older of group.slice(1)){
+          const comparison=await this.compare(older,latest);
+          if(!['equivalent','extension'].includes(comparison.relation)){compatible=false;break;}
+        }
+        // No policy, age or evidence advancement; a newer publish wins over this reconciliation.
+        const current=this.store.latest(team.id,latest.environment,latest.topic),latestSettings=await this.settings();
+        if(compatible&&current?.id===latest.id&&hash(latestSettings.teams.find(t=>t.id===team.id)??{})===hash(team)){
+          this.store.resolve(latest.id);this.store.metric('false_conflict_reconciled');
+        }
+      }
+    }
+  }
+  recover(){
+    if(!this.recovering)this.recovering=this.performRecovery();
+    return this.recovering;
+  }
+  async performRecovery(){
+    const settings=await this.settings();if(!settings.enabled)return;
+    await this.reconcile();
     const state=await this.context.store.read();
     // Only explicitly dated opt-in scopes permit replay; do not backfill old personal conversations.
     const recent=(state.jobs??[]).filter(j=>settings.teams.some(t=>t.projectId===j.projectId&&t.enabledFrom&&Date.parse(j.createdAt)>=Date.parse(t.enabledFrom))).slice(-20);

@@ -62,6 +62,13 @@ export class KnowledgeStore {
     this.hot.set(key,rows.map(r=>r.id));
     return rows.map(r => this.get(r.id));
   }
+  updateEvidence(entry) {
+    this.hot.clear();
+    this.db.prepare('UPDATE entries SET payload=? WHERE id=?').run(JSON.stringify(entry),entry.id);
+  }
+  scopeEntries(team) {
+    return this.db.prepare("SELECT id FROM entries WHERE team=? AND status IN ('active','conflict') ORDER BY verified_at DESC LIMIT 100").all(team).map(x=>this.get(x.id));
+  }
   processed(id) { return this.db.prepare('SELECT status FROM captures WHERE job_id=?').get(id)?.status; }
   mark(id, status) { this.db.prepare('INSERT OR REPLACE INTO captures VALUES(?,?,?)').run(id,status,Date.now()); }
   metric(reason) { this.db.prepare('INSERT INTO metrics VALUES(?,1) ON CONFLICT(reason) DO UPDATE SET total=total+1').run(reason); }

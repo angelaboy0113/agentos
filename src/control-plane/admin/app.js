@@ -131,7 +131,7 @@ async function loadKnowledge() {
     document.querySelectorAll('[data-knowledge]').forEach(el=>el.addEventListener('click',()=>openKnowledge(el.dataset.knowledge))); markUpdated();
   } catch(error) { toast(error.message); }
 }
-function knowledgeReason(reason) { return ({expired:'需要重新核实',source_changed:'相关源码变化',deployment_changed:'部署标记变化',scope_changed:'共享范围变化',scope_removed:'共享已取消',verification_unavailable:'无法核对依据',conflict:'答案冲突',suspended:'已停用',superseded:'历史版本'})[reason] ?? reason; }
+function knowledgeReason(reason) { return ({expired:'需要重新核实',source_changed:'相关源码变化',environment_branch_changed:'环境源码分支更新',source_scope_changed:'环境仓库配置变化',environment_proof_missing:'待补齐环境版本证据',deployment_changed:'部署标记变化',scope_changed:'共享范围变化',scope_removed:'共享已取消',verification_unavailable:'无法核对依据',conflict:'答案冲突',suspended:'已停用',superseded:'历史版本'})[reason] ?? reason; }
 async function openKnowledge(id) {
   try {
     const {entry} = await api(`/api/v1/admin/knowledge/${encodeURIComponent(id)}`);

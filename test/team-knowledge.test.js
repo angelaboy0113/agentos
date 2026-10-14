@@ -47,7 +47,7 @@ test('expiry or dependency change after retrieval forces read-only recheck',asyn
 });
 test('actual configured deployment marker changes even with unchanged source',async t=>{
   const x=await setup(t);const file=path.join(x.dir,'revision.txt');await writeFile(file,'release1');x.team.revisionFiles={prd:file};x.job.updatedAt=new Date(Math.ceil((await stat(file)).mtimeMs)+1).toISOString();
-  await x.service.ingest(x.job);const first=await x.service.candidates(actor,'p');assert.equal(first.candidates[0].reason,'deployment_marker_and_dependencies');
+  await x.service.ingest(x.job);const first=await x.service.candidates(actor,'p');assert.equal(first.candidates[0].reason,'source_guidance_only');
   await writeFile(file,'release2');assert.equal((await x.service.candidates(actor,'p')).candidates[0].reason,'deployment_changed');
 });
 test('live data, role difference and wrong environment cannot directly reuse',async t=>{
@@ -135,4 +135,37 @@ test('validated source-backed partial guide enters knowledge with unverified liv
  const candidate=input.teamKnowledge.candidates[0];assert.equal(candidate.evidenceScope,'source_guidance_only');
  const reused=await x.service.reuse(actor,'p',decision(candidate.id),input);assert.match(reused.reply,/线上页面、当前账号权限和提交后的结果尚未实测/);
  const live=decision(candidate.id);live.knowledgeMatch.currentData=true;assert.equal((await x.service.reuse(actor,'p',live,input)).action,'create_task');
+});
+test('same facts with different prose do not conflict; additional verified steps extend the shared guide',async t=>{
+ const x=await seeded(t);x.options.model.compare=async()=>({relation:'equivalent',reason:'同一入口的改写'});
+ x.options.model.extract=async()=>({...proposal,existingId:x.id,answer:'从方案管理的方案创建中选择随单搭赠即可。'});
+ await x.service.ingest({...x.job,id:'paraphrase',updatedAt:new Date(Date.parse(x.job.updatedAt)+1).toISOString()});
+ let latest=x.service.store.latest('team','prd',x.service.store.get(x.id).topic);assert.equal(latest.status,'active');assert.equal(latest.answer,proposal.answer);
+ x.options.model.compare=async()=>({relation:'extension',reason:'补充填写步骤，没有矛盾'});
+ x.options.model.extract=async()=>({...proposal,existingId:latest.id,answer:proposal.answer+'提交前确认填写内容。'});
+ await x.service.ingest({...x.job,id:'extended',updatedAt:new Date(Date.parse(x.job.updatedAt)+2).toISOString()});
+ latest=x.service.store.latest('team','prd',latest.topic);assert.equal(latest.status,'active');assert.match(latest.answer,/提交前确认/);
+});
+test('real fact contradiction stays conflict; old suspended topic cannot reactivate automatically',async t=>{
+ const x=await seeded(t);x.options.model.compare=async()=>({relation:'contradiction',reason:'入口相互矛盾'});x.options.model.extract=async()=>({...proposal,existingId:x.id,answer:'入口在另一个业务菜单，不在方案管理。'});
+ await x.service.ingest({...x.job,id:'wrong',updatedAt:new Date(Date.parse(x.job.updatedAt)+1).toISOString()});assert.equal(x.service.store.get(x.id).status,'conflict');
+});
+test('a newly verified rule can supersede old contradiction after relevant dependency evidence changes',async t=>{
+ const x=await seeded(t);x.options.model.compare=async()=>({relation:'contradiction',reason:'新代码改了入口'});
+ x.options.model.extract=async()=>({...proposal,existingId:x.id,answer:'新版入口改为活动管理中的方案创建。'});
+ await writeFile(path.join(x.dir,'guide.js'),'export const entry="new-route";');
+ await x.service.ingest({...x.job,id:'new-rule',updatedAt:new Date(Date.parse(x.job.updatedAt)+1).toISOString()});
+ const latest=x.service.store.latest('team','prd',x.service.store.get(x.id).topic);assert.equal(latest.status,'active');assert.equal(x.service.store.get(x.id).status,'superseded');
+});
+test('legacy false conflicts upgrade environment proof without renewing verification time or reviving suspensions',async t=>{
+ const x=await seeded(t);const workspace=path.join(x.dir,'snapshots','run','workspace');await mkdir(workspace,{recursive:true});await writeFile(path.join(workspace,'guide.js'),'export const entry="create";');
+ x.context.projects.projects.p.analysisSnapshotRoot=path.join(x.dir,'snapshots');
+ x.options.model.extract=async()=>({...proposal,existingId:x.id,answer:'另一个同义表述：在方案管理中创建随单搭赠。'});
+ const later={...x.job,id:'second',updatedAt:new Date(Date.parse(x.job.updatedAt)+1).toISOString()};await x.service.ingest(later);
+ const second=x.service.store.latest('team','prd',x.service.store.get(x.id).topic);assert.equal(second.status,'conflict');const before=second.verifiedAt;
+ const jobs=[x.job,later].map(j=>({...j,result:{...j.result,sourceSync:{...j.result.sourceSync,workspace}}}));x.context.store={read:async()=>({jobs})};
+ x.service.source={bindings:async()=>[{repository:'.',branch:'main',commit:'a'.repeat(40),originHash:'test'}],current:async()=>({same:true})};
+ x.options.model.compare=async()=>({relation:'equivalent',reason:'同义'});await x.service.reconcile();
+ assert.equal(x.service.store.get(second.id).status,'active');assert.equal(x.service.store.get(second.id).verifiedAt,before);assert.equal(x.service.store.get(second.id).sourceBindings.length,1);
+ x.service.store.suspend(second.id);await x.service.reconcile();assert.equal(x.service.store.get(second.id).status,'suspended');
 });
