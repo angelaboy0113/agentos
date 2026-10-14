@@ -125,3 +125,14 @@ test('Runner completion publishes asynchronously; local knowledge admin enforces
   assert.equal((await fetch(`${base}/api/v1/admin/knowledge/${id}/suspend`,{method:'POST',headers:{cookie,origin:base,'x-agentos-admin':'1'}})).status,200);
   assert.equal(x.service.store.get(id).status,'suspended');assert.equal((await app.store.read()).adminAudit.at(-1).action,'knowledge_suspend');
 });
+test('validated source-backed partial guide enters knowledge with unverified live scope explicitly preserved',async t=>{
+ const x=await setup(t);const {assessInvestigation}=await import('../src/shared/investigation-review.js');
+ const job={...x.job,stage:'developer',originalQuestion:'prd环境搭赠方案在哪里创建？',result:{...x.job.result,outcome:'ready',verifiedArtifacts:[{kind:'code',path:'guide.js'}],
+   investigation:{status:'wait',goals:[{id:'original-question',required:true,status:'open',evidence:'源码入口已确认，线上页面为空'}],blocker:{kind:'unavailable',needed:'页面恢复',evidence:'页面为空'}},
+   handoff:{artifacts:[{kind:'code',path:'guide.js'}],checks:[{id:'original-question',required:true,status:'failed',evidence:'页面未实测'},{id:'source-route',required:false,status:'passed',evidence:'源码路径确认'}],risks:['线上账号权限未核实'],returnTo:'none'}}};
+ job.result=assessInvestigation(job,job.result);assert.equal(job.result.outcome,'partial');
+ await x.service.ingest(job);const input={teamKnowledge:await x.service.candidates(actor,'p')};assert.equal(input.teamKnowledge.candidates.length,1);
+ const candidate=input.teamKnowledge.candidates[0];assert.equal(candidate.evidenceScope,'source_guidance_only');
+ const reused=await x.service.reuse(actor,'p',decision(candidate.id),input);assert.match(reused.reply,/线上页面、当前账号权限和提交后的结果尚未实测/);
+ const live=decision(candidate.id);live.knowledgeMatch.currentData=true;assert.equal((await x.service.reuse(actor,'p',live,input)).action,'create_task');
+});

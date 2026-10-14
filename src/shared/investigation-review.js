@@ -19,7 +19,8 @@ export function isOperationGuidanceQuestion(job) {
  return operationGuidance.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
 }
 export function requiresLiveVerification(job) {
- return explicitLiveVerification.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+ // Generated investigation instructions must not expand the user's acceptance target.
+ return explicitLiveVerification.test(nonempty(job.originalQuestion)?job.originalQuestion:(job.instruction??''));
 }
 
 function unresolvedDeepCause(job,result){
@@ -87,19 +88,25 @@ export function investigationComplete(job, result) {
  return (job.context??[]).every(x=>(x.result?.investigation?.goals??[])
   .filter(g=>g.required!==false).every(g=>ids.has(g.id)));
 }
+// Source-derived instructions remain useful even when optional live-page verification is unavailable.
+// This is deliberately narrower than generic partial results or actual failed business validation.
+export function isSourceBackedOperationGuidance(job,result){
+ const root=result.investigation?.goals?.find(goal=>goal.id===QUESTION_GOAL_ID);
+ return job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
+   &&isOperationGuidanceQuestion(job)&&!requiresLiveVerification(job)&&!requiresCausalEvidence(job)
+   &&result.investigation?.status==='wait'&&['approval','login','unavailable'].includes(result.investigation?.blocker?.kind)
+   &&root?.status==='open'&&nonempty(root.evidence)&&nonempty(result.finalMessage)
+   &&result.handoff?.artifacts?.some(a=>a.kind==='code')&&result.handoff?.risks?.length>0
+   &&result.handoff?.checks?.some(c=>c.status==='passed'&&c.id!==QUESTION_GOAL_ID)
+   &&result.sourceSync?.repositories?.length>0;
+}
 export function assessInvestigation(job,result){
  result=normalizeQuestionScope(job,result);
- if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
-   &&result.outcome==='blocked'&&result.investigation?.status==='wait'
-   &&['approval','login','unavailable'].includes(result.investigation?.blocker?.kind)
-   &&isOperationGuidanceQuestion(job)&&!requiresLiveVerification(job)){
-  const goals=result.investigation.goals??[],root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
-  const checks=result.handoff?.checks??[];
-  const sourceBackedGuidance=nonempty(root?.evidence)&&nonempty(result.finalMessage)
-   &&result.handoff?.artifacts?.length&&result.handoff?.risks?.length
-   &&checks.some(check=>check.status==='passed')&&result.sourceSync?.repositories?.length;
-  if(sourceBackedGuidance)result={...result,outcome:'partial',handoff:{...result.handoff,returnTo:'none',
-   checks:checks.map(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed'?{...check,status:'not_run'}:check),
+ // Models may label the same evidence ready, partial or blocked. Normalize all three
+ // before the handoff gate, rather than leaving a failed original-question check in partial.
+ if(['ready','partial','blocked'].includes(result.outcome)&&isSourceBackedOperationGuidance(job,result)){
+  result={...result,outcome:'partial',handoff:{...result.handoff,returnTo:'none',
+   checks:result.handoff.checks.map(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed'?{...check,status:'not_run'}:check),
    risks:[...new Set([...(result.handoff.risks??[]),'当前页面、当前账号权限及提交后的真实状态尚未实测；源码确认的操作路径可以先用于指导。'])]}};
  }
  if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked

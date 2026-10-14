@@ -224,3 +224,25 @@ test('HTTP completion routes unresolved owner findings to developer and pauses e
  const out=await app.store.appendEvent(job.id,{type:'completed',result:rr},{reviewInvestigation:true,agentRole:'developer',agentProfile:'dev'});
  assert.equal(out.nextJob,null);assert.match(out.job.result.investigationPause,/Maintainer login/);
 });
+test('source-backed where-to-create guidance normalizes ready and partial before handoff without optional live scope inflation',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'agentos-guidance-gate-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const {writeFile}=await import('node:fs/promises');await writeFile(path.join(dir,'router.js'),'export const route="bogo";');
+ const {validateHandoff,enforceHandoff}=await import('../src/runner/harness.js');
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'prd环境搭赠方案在哪里创建？',
+   instruction:'打开页面实际验证入口及当前账号权限',questionScopePolicy:'original-question-v1'};
+ const input={summary:'源码入口已确认',finalMessage:'方案管理 → 方案创建 → 随单搭赠。线上菜单和当前账号权限未核实。',
+   sourceSync:{repositories:[{path:'.',branch:'prd',commit:'abc'}]},investigation:{status:'wait',goals:[{id:QUESTION_GOAL_ID,required:true,status:'open',evidence:'源码入口已核实；PRD页面为空，账号权限待核实'}],
+   attempts:['查看网页','读取路由'],blocker:{kind:'unavailable',needed:'页面正常显示',evidence:'工具读取空页'},nextStep:'补充页面核验'},
+   handoff:{artifacts:[{kind:'code',path:'router.js'}],checks:[{id:QUESTION_GOAL_ID,required:true,status:'failed',evidence:'线上页面未核实'},{id:'source-route',required:false,status:'passed',evidence:'路由已确认'}],risks:['线上版本未核实'],returnTo:'none'}};
+ assert.equal(requiresLiveVerification(job),false);
+ for(const outcome of ['ready','partial','blocked']){
+   const normalized=assessInvestigation(job,{...structuredClone(input),outcome});
+   assert.equal(normalized.outcome,'partial');assert.equal(normalized.handoff.checks[0].status,'not_run');
+   assert.equal(normalized.investigation.goals[0].status,'open');
+   const validated=enforceHandoff(normalized,await validateHandoff(job,normalized,dir));assert.equal(validated.outcome,'partial');assert.equal(validated.handoffGate.passed,true);
+ }
+ const live={...job,originalQuestion:'请实际打开PRD页面，确认当前账号能否创建搭赠方案'};
+ assert.equal(requiresLiveVerification(live),true);
+ const original={...input,outcome:'ready'};
+ const strict=assessInvestigation(live,original);assert.equal(enforceHandoff(strict,await validateHandoff(live,strict,dir)).outcome,'blocked');
+});

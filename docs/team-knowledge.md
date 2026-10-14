@@ -8,7 +8,7 @@
 
 默认文件为 `<AGENTOS_DATA_DIR>/knowledge/knowledge.sqlite`，SQLite 目录0700、文件0600（Windows需配本机用户ACL；未在Windows实机验收）。使用 Node >=22.13 <23 的 node:sqlite，无额外数据库服务、Redis、Embedding账号；该 Node22 API 仍为实验性，需要在升级Node时回归。现有正式 Node22.23.2 已验证。
 
-启用后自动提炼新完成、无后续任务、ready、handoffGate通过、verifiedArtifacts非空且有源码证据的analysis。失败、部分完成、具体案例、环境子任务不进入共享答案。enabledFrom控制自动恢复可扫描的任务时间，默认不回填个人历史；推荐设置为实际启用时间。入口为现有Runner完成事件，不增加飞书消费者或定时任务。重启仅恢复最近20项已配置enabledFrom范围的新任务。
+启用后自动提炼新完成、无后续任务、ready、handoffGate通过、verifiedArtifacts非空且有源码证据的analysis。失败、普通部分完成、具体案例、环境子任务不进入共享答案。例外：用户仅询问操作入口/步骤，源码路径已核实、线上只是可选补充核验，且程序交接校验通过时，允许部分结果提炼为guide。该知识始终标注source_guidance_only，程序回复明确线上菜单、账号权限及提交结果未实测；不能用于实测、原因判断或实时状态回答。enabledFrom控制自动恢复可扫描的任务时间，默认不回填个人历史；推荐设置为实际启用时间。入口为现有Runner完成事件，不增加飞书消费者或定时任务。重启仅恢复最近20项已配置enabledFrom范围的新任务。
 
 SQLite保存版本、主题、范围、依赖哈希、核实时间、状态、来源任务ID、索引和计数。内存只保留128项检索候选ID，复用仍重新检查有效性。最多默认2000版本，超限暂停新入库而保留原任务；90天前被替代版本和处理标记在新入库时清理。当前版本不会自动被容量淘汰。停机后备份knowledge目录；不修改agentos.json，不上传Git。
 
