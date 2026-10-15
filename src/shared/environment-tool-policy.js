@@ -1,6 +1,8 @@
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 export function validateToolQuery(e, q) {
   if (q.browser !== undefined && (typeof q.browser !== 'boolean' || !['nacos','website'].includes(e.kind) || q.mode !== 'investigate')) throw new Error('浏览器只支持已授权的Nacos工具排查');
+  if(q.exportMaxRows!==undefined&&(e.kind!=='mysql'||q.mode!=='investigate'||!Number.isInteger(q.exportMaxRows)||q.exportMaxRows<1||q.exportMaxRows>10000))throw new Error('完整报表行数仅支持MySQL排查的1至10000行');
+  if(q.exportTimeoutMs!==undefined&&(!q.exportMaxRows||!Number.isInteger(q.exportTimeoutMs)||q.exportTimeoutMs<1000||q.exportTimeoutMs>60000))throw new Error('完整报表单工具时限必须为1000至60000毫秒');
   if (q.mode !== 'investigate') return false;
   if (q.parameters.length !== 1 || q.parameters[0].name !== 'purpose' || q.parameters[0].type !== 'string') throw new Error('排查必须绑定本次目的');
   // Legacy maxCalls is accepted for compatibility, but no longer controls investigation.

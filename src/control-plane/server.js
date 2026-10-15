@@ -1,3 +1,5 @@
+import {ReportDelivery} from './report-delivery.js';
+import {validateReportFiles} from '../shared/report-files.js';
 import { TeamKnowledgeService } from './team-knowledge.js';
 import { queryRejection } from '../shared/query-repair.js';
 import { enrollmentTarget } from './environment-enrollment.js';
@@ -5,7 +7,7 @@ import { SharedChromeBrowser } from './shared-chrome-browser.js';
 import { WebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
 import { WebsiteCredentialService } from './website-credentials.js';
-import { loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
+import { loadEnvironments, planQuery, verifyApprovedPlan, verifyCompletedPlan } from '../shared/environment-access.js';
 import { publishQuestion, questionJob, questionView } from './questions.js';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
@@ -53,6 +55,7 @@ export async function createControlPlane(overrides = {}) {
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
   const cards = new LiveCards(store, feishu);
   context.cards = cards;
+  context.reports=new ReportDelivery(context);cards.afterRetry=state=>context.reports.retry(state);
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
   if (cards.enabled) await store.transact((state) => {
@@ -81,11 +84,12 @@ export async function createControlPlane(overrides = {}) {
 
   server.once('listening', () => {
     cards.start();
+    context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
     context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
-  server.once('close', () => { conversations.stop(); cards.stop(); void context.websiteBrowser.close(); void context.knowledge.close(); });
+  server.once('close', () => { conversations.stop(); cards.stop(); void context.reports.close(); void context.websiteBrowser.close(); void context.knowledge.close(); });
   return { server, config, projects, agents, store, conversations, cards };
 }
 
@@ -306,6 +310,7 @@ async function route(context) {
     const id = decodeURIComponent(continuousResultMatch[1]);
     const body = await readJson(request);
     const before = await store.getJob(id);
+    if(body.result&&body.result.exportFiles!==undefined)body.result.exportFiles=await validateReportFiles(config.dataDir,id,body.result.exportFiles);
     const updated = await store.completeContinuousEnvironment(id,
       { leaseId: body.leaseId, runnerId: body.runnerId }, body.result);
     if (before?.environmentAccess?.kind === 'website') await context.websiteBrowser.release(id);
@@ -402,6 +407,10 @@ async function route(context) {
       && !job.environmentAccess && job.stage === 'owner_report' && body.result?.outcome === 'partial' && !job.convergenceFinal
       && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
       routing = { ...agentRouting(context, 'developer'), reviewInvestigation: true };
+    }
+    if(body.type==='completed'&&body.result?.exportFiles!==undefined){
+      verifyCompletedPlan(await loadEnvironments(),job.environmentAccess??{},body.result.environmentEvidence);
+      body.result.exportFiles=await validateReportFiles(config.dataDir,job.id,body.result.exportFiles);
     }
     const result = await store.appendEvent(job.id, body, routing);
     if(['completed','failed','cancelled'].includes(body.type)&&!body.result?.browserLoginRequired)await context.websiteBrowser.release(job.id);
@@ -579,6 +588,7 @@ async function createJobFromMessage(context, input) {
 
 export async function notifyJobEvent(context, { job, event }) {
   if (!job.chatId && !job.replyToMessageId) return;
+  if(event.type==='completed')await context.reports?.enqueue(await context.store.getJob(job.id));
   if (context.cards?.enabled) {
     if (!['queued', 'started', 'completed', 'failed', 'cancelled', 'cancel_requested', 'progress'].includes(event.type)) return;
     if (event.type === 'progress' && !['codex_waiting', 'codex_working', 'connection_retry', 'model_capacity_retry', 'verification', 'tool_activity'].includes(event.phase)) return;

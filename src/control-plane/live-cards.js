@@ -49,6 +49,7 @@ export class LiveCards {
   async retry() {
     if (this.closed) return;
     const state = await this.store.read();
+    if(this.afterRetry)this.afterRetry(state).catch(()=>{});
     for (const [key, value] of Object.entries(state.cardMessages ?? {})) {
       if ((value.revision !== value.deliveredRevision || (value.terminalMention && !value.mentionDelivered))
         && Date.now() >= (value.retryAt ?? 0)) this.flush(key).catch(() => {});

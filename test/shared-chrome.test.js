@@ -63,3 +63,14 @@ test('daily Chrome distinguishes verification routes from a rejected credential 
  await page.goto('https://business.example/login');const status=await page.evaluate(chromePage,{baseUrl:e.baseUrl,token:'one',tool:'browser_snapshot'});
  assert.equal(status.loginRequired,true);assert.equal(status.credentialFormVisible,false);assert.equal(status.verificationRequired,true);
 });
+test('empty and iframe shells are incomplete; safe snapshots preserve hash routes',async t=>{
+ const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();
+ await page.route('**/*',r=>r.fulfill({contentType:'text/html',body:'<div id="app"></div>'}));await page.goto(e.baseUrl+'#/report/accrued');
+ const q={baseUrl:e.baseUrl,token:'empty',tool:'browser_snapshot'};let r=await page.evaluate(chromePage,q);assert.equal(r.partial,true);assert.equal(r.pageStatus,'empty');assert.match(r.url,/#\/report\/accrued/);
+ await page.setContent('<iframe src="about:blank"></iframe>');r=await page.evaluate(chromePage,q);assert.equal(r.pageStatus,'frames');assert.equal(r.partial,true);assert.equal(r.frameCount,1);
+});
+test('empty Chrome snapshots wait boundedly, recheck access and can recover',async()=>{
+ let snapshots=0,checks=0;const b=new SharedChromeBrowser(async()=>{checks++;return true;},async q=>q.operation==='find'?{tabId:'1',windowId:'1'}:(++snapshots<3?{pageStatus:'empty',partial:true,controls:[]}:{pageStatus:'ready',pageText:'Report ready',controls:[]}),async()=>{});
+ const r=await b.run({id:'j'},e,'browser_open');assert.equal(r.pageStatus,'ready');assert.equal(snapshots,3);assert.ok(checks>=4);
+ let allowed=true;const c=new SharedChromeBrowser(async()=>allowed,async q=>q.operation==='find'?{tabId:'1',windowId:'1'}:{pageStatus:'empty',partial:true,controls:[]},async()=>{allowed=false;});await assert.rejects(c.run({id:'k'},e,'browser_open'),/授权/);
+});

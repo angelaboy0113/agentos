@@ -1,3 +1,4 @@
+import { ReportDatasets, ReportInputError } from './report-datasets.js';
 import { createHash } from 'node:crypto';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { createNacosBrowser } from './environment-browser.js';
@@ -151,9 +152,27 @@ export function linkedAggregateStatement(args,tables,types,q,valueSets=new Map()
   return {sql:`SELECT ${metrics.map(x=>`${x.expression} AS \`${x.name}\``).join(', ')} FROM \`${left}\` \`l\` JOIN \`${right}\` \`r\` ON \`l\`.\`${leftJoin}\` = \`r\`.\`${rightJoin}\` WHERE ${clauses.join(' AND ')}`,params,columns:metrics.map(x=>x.name)};
 }
 
+// Grouped datasets have a deterministic key order inside one repeatable-read snapshot.
+export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map()){
+ const linked=args.leftTable!==undefined;
+ const groups=args.groupColumns;
+ if(!Array.isArray(groups)||!groups.length||groups.length>8)throw new QueryInputError('QUERY_INPUT','groupColumns必须包含1至8个分组字段。');
+ const groupNames=groups.map(g=>linked?g?.column:g);
+ if(new Set(groupNames).size!==groupNames.length)throw new QueryInputError('QUERY_INPUT','分组输出字段不能重名');
+ const quoted=groups.map(g=>{
+  const table=linked?g?.table:args.table,column=linked?g?.column:g;
+  if(linked&&![args.leftTable,args.rightTable].includes(table))throw new QueryInputError('QUERY_INPUT','分组字段必须指定已关联的左表或右表');
+  checkedColumn(tables,table,column,q);return `${linked?(table===args.leftTable?'`l`.':'`r`.'):''}\`${column}\``;
+ });
+ const base=linked?linkedAggregateStatement(args,tables,types,q,valueSets):aggregateStatement(args,tables,types,q,valueSets);
+ if(base.columns.some(c=>groupNames.includes(c))||new Set(base.columns).size!==base.columns.length)throw new QueryInputError('QUERY_INPUT','分组字段与指标别名不能重复');
+ return {...base,sql:base.sql.replace(/^SELECT /,`SELECT ${quoted.join(', ')}, `)+` GROUP BY ${quoted.join(', ')} ORDER BY ${quoted.join(', ')}`,columns:[...groupNames,...base.columns]};
+}
+
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
-  const configs = new Map(), tables = new Map(), columnTypes = new Map(), valueSets = new Map();
+  const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), valueSets = new Map();
+  const datasets=new ReportDatasets({secrets,maxRows:q.exportMaxRows,previewRows:q.maxRows,directory:adapters.exportDirectory,authorize:adapters.authorize,active:()=>active});
   const request = adapters.fetch ?? boundedFetch;
   const readCache = new Map(); let readCacheBytes = 0;
   // Only one live MySQL readonly transaction. Never import results from another task or snapshot.
@@ -185,7 +204,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         supportBigNumbers: true, bigNumberStrings: true,
         ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
       if (!active) { conn.destroy(); conn = null; throw new Error('连接已超时'); }
-      try { const [g] = await conn.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, g); await conn.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`); await conn.query('START TRANSACTION READ ONLY'); }
+      try { const [g] = await conn.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, g); await conn.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`); await conn.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ'); await conn.query('START TRANSACTION READ ONLY'); }
       catch (error) { conn.destroy(); conn = null; throw error; }
     }
     return conn;
@@ -206,6 +225,11 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'linked_aggregate', args: {leftTable:'左表',rightTable:'右表',join:{leftColumn:'左表关联字段',rightColumn:'右表关联字段'},aggregates:[{op:'sum|avg|min|max|count|count_distinct',table:'左表或右表',column:'字段',as:'结果名'}],filters:[{table:'左表或右表',column:'字段',op:'=|>|>=|<|<=|contains|in|in_set',value:'值或setRef'}]},description:'仅允许两个已读取基础表按一个等值字段关联并做受控汇总；所有表、列、数值类型和筛选均由程序校验，不接受任意SQL' },
     { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=|>|>=|<|<=|contains|in', value: '标量；in使用数组' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件；contains执行参数化子串匹配，in最多100个绑定值；仅基础表，不允许任意SQL、联表或写入` }
   ];
+  if(e.kind==='mysql'&&q.exportMaxRows){
+    spec.push({tool:'group_dataset',args:{table:'已读取结构的表',groupColumns:['经销商主键等分组字段'],aggregates:[{op:'sum',column:'数值字段',as:'amount'}],filters:'与aggregate相同'},description:`按实际分组字段汇总并由程序连续分页取完，最多${q.exportMaxRows}组；返回datasetRef、完整性和少量预览。不是前${q.maxRows}行样本；可用于完整经销商报表。`},
+    {tool:'linked_group_dataset',args:{leftTable:'左表',rightTable:'右表',join:{leftColumn:'字段',rightColumn:'字段'},groupColumns:[{table:'左表或右表',column:'经销商主键'}],aggregates:'与linked_aggregate相同',filters:'与linked_aggregate相同'},description:'两表受控等值关联后分组汇总并完整分页；先确认关联基数，不能把一对多重复金额当作真实金额。'},
+    {tool:'compose_report',args:{sources:[{name:'s1',datasetRef:'本轮完整datasetRef',keyColumn:'经销商主键'}],columns:[{label:'经销商',value:{op:'key'}},{label:'余额',total:true,value:{op:'subtract',args:[{op:'field',source:'s1',column:'amount',missing:'zero'},{op:'field',source:'s2',column:'used',missing:'zero'}]}}]},description:'按经销商主键全外连接本轮完整数据集，生成CSV文件并返回行数、校验和、列合计与预览；最多12列。固定计算key/field/add/subtract/min，后3项使用args数组；field指定source、column及可选missing=zero或empty，缺失默认报错。数字精确十进制计算。必须先核实各来源口径、关联基数及覆盖范围，不得用样本或不完整数据集导出完整报表。'});
+  }
   let browser;
   if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
   const run = async (tool, args = {}) => {
@@ -240,7 +264,9 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const found = databaseEndpoints(content);
           return { config: args.ref, rows: found.slice(0, q.maxRows).map(row=>({...row,connectionSource:{...x,contentHash:createHash('sha256').update(content).digest('hex')}})), truncated: found.length > q.maxRows, partial: found.unresolved || !found.length, stage: found.length ? '配置已读取，数据库地址已解析' : '配置已读取，未解析出数据库地址', databaseConnection: '未测试；管理员确认后可在本机提取凭据并通过受控只读模式验证' };
         }
+        if(tool==='compose_report')return datasets.compose(args);
         const c = await mysql();
+        if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect(statement,(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
         if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };
         if (tool === 'tables') {
           const offset=args.cursor===undefined?0:Number(args.cursor);
@@ -256,9 +282,10 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const offset = args.cursor === undefined ? 0 : Number(args.cursor);
           if(!Number.isInteger(offset) || offset<0 || offset>100000) throw new Error('结构分页参数无效');
           const columnClause = requestedColumns ? ` AND c.COLUMN_NAME IN (${requestedColumns.map(() => '?').join(', ')})` : '';
-          const [rows] = await read(c,{ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name,c.DATA_TYPE AS data_type FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
+          const [rows] = await read(c,{ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name,c.DATA_TYPE AS data_type,t.ENGINE AS engine FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
           const visible = new Map();
           for (const r of rows.slice(0,100)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) {
+            if(typeof r.engine==='string')tableEngines.set(r.table_name,r.engine.toLowerCase());
             visible.set(r.table_name,[...(visible.get(r.table_name)??[]),r.column_name]);
             tables.set(r.table_name,[...new Set([...(tables.get(r.table_name)??[]),r.column_name])]);
             if(typeof r.data_type==='string'){const known=columnTypes.get(r.table_name)??new Map();known.set(r.column_name,r.data_type.toLowerCase());columnTypes.set(r.table_name,known);}
@@ -292,9 +319,9 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const statement = selectStatement(args, tables, q);
         const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
-      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, q.timeoutMs); })]);
-    } catch (error) { if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
+      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['group_dataset','linked_group_dataset','compose_report'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
+    } catch (error) { if(error instanceof ReportInputError)throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
-  return { spec, run, close: async ({ abort = false } = {}) => { active = false; token = null; readCache.clear(); await browser?.close(); if (conn) { try { if (!abort) await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
+  return { spec, run, close: async ({ abort = false } = {}) => { active = false; token = null; readCache.clear(); datasets.clear(); await browser?.close(); if (conn) { try { if (!abort) await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
 }

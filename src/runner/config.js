@@ -15,6 +15,7 @@ export async function runnerConfig(overrides = {}) {
   if (!Number.isInteger(analysisTurnTimeoutMs) || analysisTurnTimeoutMs < 60000 || analysisTurnTimeoutMs > 3600000) throw new Error('AGENTOS_ANALYSIS_TURN_TIMEOUT_MS must be 60000..3600000');
   if (!Number.isInteger(analysisResumeTimeoutMs) || analysisResumeTimeoutMs < 60000 || analysisResumeTimeoutMs > 1800000) throw new Error('AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS must be 60000..1800000');
   return {
+    dataDir:path.resolve(overrides.dataDir??process.env.AGENTOS_DATA_DIR??'./data'),
     serverUrl: String(overrides.serverUrl ?? process.env.AGENTOS_SERVER_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, ''),
     runnerId: overrides.runnerId ?? process.env.AGENTOS_RUNNER_ID ?? `runner-${process.platform}-${process.pid}`,
     runnerToken: overrides.runnerToken ?? process.env.AGENTOS_RUNNER_TOKEN ?? '',

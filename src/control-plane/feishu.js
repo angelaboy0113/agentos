@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createId } from '../shared/protocol.js';
 
@@ -43,6 +43,13 @@ export class FeishuClient {
     const result = await response.json();
     if (result.code !== 0) throw new Error(`Feishu reply failed: ${result.code}`);
     return result;
+  }
+
+  async replyFile(messageId,file,options={}){
+    const form=new FormData();form.set('file_type','stream');form.set('file_name',path.basename(file));form.set('file',new Blob([await readFile(file)],{type:'text/csv'}),path.basename(file));
+    const response=await fetch(`${OPEN_API}/im/v1/files`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});
+    const result=await response.json();if(!response.ok||result.code!==0||!result.data?.file_key)throw new Error('Feishu report upload failed');
+    return this.cardRequest('POST',`/im/v1/messages/${encodeURIComponent(messageId)}/reply`,{msg_type:'file',content:JSON.stringify({file_key:result.data.file_key}),uuid:options.idempotencyKey,...(options.replyInThread?{reply_in_thread:true}:{})});
   }
 
   async replyCard(messageId, card, options = {}) {

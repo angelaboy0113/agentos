@@ -4,7 +4,7 @@ import {chromePage} from './chrome-page.js';
 import {chromeLoginPage} from './chrome-login-page.js';
 import {cleanWebsiteText,websiteUrl} from '../shared/website-policy.js';
 export class SharedChromeBrowser{
- constructor(authorize=async()=>true,transport=chromeTransport){this.authorize=authorize;this.transport=transport;this.pages=new Map();this.queue=Promise.resolve();}
+ constructor(authorize=async()=>true,transport=chromeTransport,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))){this.wait=wait;this.authorize=authorize;this.transport=transport;this.pages=new Map();this.queue=Promise.resolve();}
  serial(fn){const p=this.queue.then(fn);this.queue=p.catch(()=>{});return p;}
  async allowed(job,e,waiting=false){
   const r={url:()=>websiteUrl(e.baseUrl),method:()=> 'GET',resourceType:()=> 'document'};
@@ -30,6 +30,7 @@ export class SharedChromeBrowser{
   await this.allowed(job,e);const s=await this.state(job,e);
   let r=await this.snapshot(job,e,s,tool,args);
   if(r.acted)r=await this.snapshot(job,e,s,'browser_snapshot',{});
+  for(let attempt=0;attempt<3&&['empty','loading'].includes(r.pageStatus);attempt++){await this.wait(400);r=await this.snapshot(job,e,s,'browser_snapshot',{});}
   if(r.loginRequired)await this.transport({operation:'focus',tabId:s.tabId,windowId:s.windowId});
   return r;
  });}

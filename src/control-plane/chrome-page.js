@@ -57,10 +57,12 @@ export function chromePage(request) {
  }
  Object.defineProperty(window,key,{value:{url:location.href,refs,generation},configurable:true});
  // Read only rendered text nodes, never input values, hidden templates or noscript fallbacks.
- const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);const lines=[];let node,size=0;
+ const walker=document.createTreeWalker(document.body??document.documentElement,NodeFilter.SHOW_TEXT);const lines=[];let node,size=0;
  while((node=walker.nextNode())&&size<16000){const el=node.parentElement;
   if(!el||el.closest('script,style,noscript,input,textarea,[contenteditable], [hidden]')||!visible(el))continue;
   const t=node.textContent.trim();if(t){lines.push(t);size+=t.length;}
  }
- return {stage:'已读取日常Chrome业务页面',url:current.origin+current.pathname,pageText:lines.join('\n'),controls,blockedRequests:[],rows:[],note:'复用日常Chrome登录态；仅当前批准应用的可见内容。浏览器正常加载网络请求，不拦截登录或权限初始化。'};
+ const empty=!lines.length&&!controls.length,frameCount=document.querySelectorAll('iframe,frame').length;
+ const pageStatus=empty?(document.readyState!=='complete'?'loading':frameCount?'frames':'empty'):'ready';
+ return {stage:empty?'尚未读取到业务内容':'已读取日常Chrome业务页面',partial:empty,pageStatus,readyState:document.readyState,frameCount,url:current.origin+current.pathname+current.hash,pageText:lines.join('\n'),controls,blockedRequests:[],rows:[],...(empty?{message:frameCount?'当前只读到页面外壳，存在内嵌页面，尚未取得报表内容；不能认定没有数据或没有权限。':'页面尚无可读正文和菜单；可能尚未加载完成，不能认定没有数据或没有权限。'}:{}),note:'复用日常Chrome登录态；仅当前批准应用的可见内容。浏览器正常加载网络请求，不拦截登录或权限初始化。'};
 }

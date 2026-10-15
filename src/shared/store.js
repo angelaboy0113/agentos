@@ -277,6 +277,7 @@ export class JsonStore {
         || Date.parse(evidence.readAt) < Date.parse(plan.startedAt) || !Number.isInteger(evidence.rowCount) || evidence.rowCount < 0
         || !/^[a-f0-9]{64}$/.test(evidence.resultHash ?? '') || !result.finalMessage) throw new Error('Invalid continuous environment evidence');
       job.context = compactContext([...job.context, { stage: 'developer', kind: 'environment_result', result: structuredClone(result) }]);
+      if(result.exportFiles?.length){job.reportFiles??=[];for(const file of result.exportFiles)if(!job.reportFiles.some(x=>x.id===file.id))job.reportFiles.push({...structuredClone(file),questionGeneration:state.questions?.[job.questionId]?.generation??null});}
       delete job.environmentAccess;
       delete job.browserCheckpoint;
       delete job.browserResumeClaim;
@@ -441,6 +442,7 @@ export class JsonStore {
           || event.result.sourceSyncBlocked || event.result.handoffGate?.passed !== true
           || !event.result.verifiedArtifacts?.length || !event.result.handoff?.risks?.length
           || !event.result.sourceSync?.repositories?.length)) throw new Error('Invalid partial analysis evidence');
+        if(job.environmentAccess&&event.result?.exportFiles?.length){job.reportFiles??=[];for(const file of event.result.exportFiles)if(!job.reportFiles.some(x=>x.id===file.id))job.reportFiles.push({...structuredClone(file),questionGeneration:state.questions?.[job.questionId]?.generation??null});}
         job.result = event.result ?? null;
         job.status = event.result?.outcome === 'blocked' ? 'blocked' : needsClarification(job, event.result)
           ? 'awaiting_clarification'

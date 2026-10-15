@@ -23,6 +23,8 @@
 | `data/knowledge/knowledge.sqlite` | 显式团队范围内的通用知识、版本、依赖指纹、索引与命中计数；不包含原始聊天。见[团队知识](team-knowledge.md) | 是 | 否 |
 | `data/memory.json` | 按范围的持久摘录摘要、来源指纹及停用记录；详见[记忆管理](memory-management.md) | 是 | 否 |
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送、幂等记录及最近 200 项本机设置审计 | 是 | 否 |
+| `data/exports/<JOB>/` | 完整分组报表 CSV，含实时业务金额；通过文件校验后回复原提问。见[报表导出](report-exports.md) | 是 | 否 |
+| `data/lark-cli/reports/` | CLI 文件回复副本，需与正式导出文件分别清理 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
 | `data/lark-cli/` | lark-cli 消息资源下载工作目录 | 是 | 否 |
 | `data/lark-cli-events/<profile>/messages/<messageId>/` | 长连接消息中的图片、文件、音频和媒体 | 是 | 否 |

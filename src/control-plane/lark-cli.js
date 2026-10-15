@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, copyFile }  from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
@@ -85,6 +85,15 @@ export class LarkCliFeishuClient {
       'im', '+messages-send', '--as', 'bot', '--chat-id', chatId,
       '--text', text, '--idempotency-key', `agentos-${digest}`, '--json',
     ], { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile });
+  }
+
+  async replyFile(messageId,file,options={}){
+    await mkdir(path.join(this.cwd,'reports'),{recursive:true,mode:0o700});
+    const relative=path.join('reports',path.basename(file));
+    await copyFile(file,path.join(this.cwd,relative));
+    return runLarkCli(['im','+messages-reply','--as','bot','--message-id',messageId,'--file',relative,
+      ...(options.replyInThread?['--reply-in-thread']:[]),'--idempotency-key',larkIdempotencyKey(options.idempotencyKey),'--json'],
+      {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000});
   }
 
   async replyCard(messageId, card, options = {}) {
