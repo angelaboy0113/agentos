@@ -403,3 +403,17 @@ test('environment planner receives full original requirements and source evidenc
  assert.equal(seen,true);
  const bounded=reportInvestigationContext({originalQuestion:'x'.repeat(12001)});assert.equal(bounded.limited,true);assert.equal(bounded.originalQuestion.length,12000);
 });
+test('environment tool loop exposes verified source reading and can move straight to a named schema and aggregate',async t=>{
+ const {buildSourceQueryContext}=await import('../src/runner/source-query-context.js');
+ const {createHash}=await import('node:crypto');const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const os=await import('node:os');const path=await import('node:path');
+ const root=await mkdtemp(path.join(os.tmpdir(),'agentos-bridge-integration-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const body='SELECT customer_id,SUM(amount) AS amount FROM sales_fact WHERE status=1 GROUP BY customer_id';await writeFile(path.join(root,'Report.sql'),body);
+ const sourceQueryContext=await buildSourceQueryContext({workspace:root,sourceSync:{workspace:root},handoffGate:{passed:true},verifiedArtifacts:[{kind:'code',path:'Report.sql',sha256:createHash('sha256').update(body).digest('hex'),bytes:Buffer.byteLength(body)}]});
+ const e={...environment,kind:'mysql',host:'db',database:'demo',queries:{investigate:{...query,tables:['sales_fact']}}};delete e.baseUrl;
+ const cfg={version:1,environments:{env:e}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['only short round purpose']},'demo',{profile:'owner',senderId:'ou_member'});
+ const calls=[];let turn=0;
+ const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,sourceQueryContext,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'schema'},{tool:'aggregate'}],run:async(tool,args)=>{calls.push(tool);if(tool==='schema')assert.equal(args.table,'sales_fact');return tool==='aggregate'?{rows:[{amount:'10.2'}]}:{stage:tool};},close:async()=>{}}),
+ planner:async()=>({next:async input=>{assert.match(input.sourceQueryContext.sources[0].excerpt,/sales_fact/);return [{tool:'read_source_evidence',arguments:JSON.stringify({ref:sourceQueryContext.sources[0].ref})},{tool:'schema',arguments:JSON.stringify({table:'sales_fact'})},{tool:'aggregate',arguments:JSON.stringify({table:'sales_fact'})},{tool:'finish',summary:'已根据实际源码查得汇总',complete:true}][turn++];},close:async()=>{}})});
+ assert.equal(result.partial,false);assert.equal(result.rows[0].amount,'10.2');assert.equal(result.evidence.businessQueryCount,1);assert.deepEqual(calls,['connection','schema','aggregate']);
+});

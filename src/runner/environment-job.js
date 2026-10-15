@@ -1,3 +1,4 @@
+import {buildSourceQueryContext} from './source-query-context.js';
 import { connectionEndpoints } from '../shared/connection-endpoints.js';
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { presentEnvironmentResult } from './environment-result-presentation.js';
@@ -28,7 +29,9 @@ export async function executeEnvironmentJob(job, config, emit) {
   const { plan } = await response.json();phase='environment_read';
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
   let result, environment;
-  try { const cfg = await loadEnvironments(); environment = cfg.environments[plan.environmentId]; result = environment?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, environment.kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id),investigationContext:reportInvestigationContext(job)}) : await readEnvironment(plan); }
+  const sourceResult=(job.context??[]).filter(x=>x.kind==='analysis_turn').at(-1)?.result;
+  const sourceQueryContext=await buildSourceQueryContext(sourceResult);
+  try { const cfg = await loadEnvironments(); environment = cfg.environments[plan.environmentId]; result = environment?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, environment.kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id),investigationContext:reportInvestigationContext(job),sourceQueryContext}) : await readEnvironment(plan); }
   catch (error) {
     const diagnostic = failureDiagnostic(error);
     if (/^错误码：BROWSER_BRIDGE\b/.test(diagnostic)) return { outcome:'needs_clarification', browserLoginRequired:true,
