@@ -474,7 +474,8 @@
                       "current_source",
                       "required_output",
                       "historical_difference",
-                      "optional_followup"
+                      "optional_followup",
+                      "review_access"
                     ]
                   },
                   "evidence": {

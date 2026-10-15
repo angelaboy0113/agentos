@@ -1,3 +1,4 @@
+import {reportReviewEvidence} from '../shared/report-inspection.js';
 import {buildSourceQueryContext} from './source-query-context.js';
 import { assessInvestigation } from '../shared/investigation-review.js';
 import { loadEnvironments, catalog } from '../shared/environment-access.js';
@@ -43,6 +44,7 @@ export async function executeJob(job, config, emit) {
   const attachmentPaths = resumingAnalysis ? [] : await downloadAttachments(job, config,
     job.taskIntent === 'analysis' ? path.join(config.worktreeRoot, 'analysis-resources') : workspace);
   const ledger = job.taskIntent === 'analysis'&&!resumingAnalysis ? await readProjectLedger(workspace, project, sourceSync) : [];
+  if(job.reportFiles?.length)job={...job,reportEvidence:await reportReviewEvidence(config.dataDir??path.dirname(config.worktreeRoot),job)};
   const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace);
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
@@ -72,7 +74,7 @@ export async function executeJob(job, config, emit) {
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace));
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
   return { sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
-    evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
+    reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate,
     timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };
 }
@@ -281,8 +283,8 @@ export function analysisTimeoutResult(job,error){
   handoff:{...prior.handoff,returnTo:'none',risks:[...new Set([...(prior.handoff?.risks??[]),error.message])]}};
 }
 
-function reportReviewContext(job){return `报表成果与审阅状态（程序核验不等于业务验收）：${JSON.stringify({files:job.reportFiles??[],reviews:Object.fromEntries(Object.entries(job.reportReviews??{}).map(([id,r])=>[id,{status:r.status,issues:r.issues}]))})}
-原问题要求文件时，已有verificationHash的文件须填写reportAssessment：fileId、coverage=complete/incomplete、decision=deliver/revise/needs_review及issues。只有原要求全部满足才deliver；同时将original-question标verified并完成，不再为补强项发起环境查询。历史快照金额不同仅记historical_difference，普通补充疑问记optional_followup，不能要求当前结果与历史数强行一致。只有本轮公式/范围/覆盖/来源问题（current_formula/current_scope/current_coverage/current_source）或原问题明确要求尚未完成（required_output）才阻止交付，逐项写具体evidence。用户明确要求历史对账时，该差异属于required_output。没有新证据影响当前文件就不得降级已接受版本；补查必须说明影响哪份文件及哪个原要求。程序核验后仍须核对原问题口径，不能为变绿填deliver。需要刷新时使用refresh_report集中重放已保存的固定工具来源和派生链，不逐轮混用新旧数据；旧数据无可重放recipe或含临时集合须先补齐来源。
+function reportReviewContext(job){return `报表成果与审阅状态（程序核验不等于业务验收）：${JSON.stringify({files:job.reportFiles??[],evidence:job.reportEvidence??null,reviews:Object.fromEntries(Object.entries(job.reportReviews??{}).map(([id,r])=>[id,{status:r.status,issues:r.issues}]))})}
+上方evidence是程序按文件ID、CSV摘要和核验摘要绑定读取的实际表头、完整固定公式、来源、预览和逐行重算结果，不是另一份草稿。evidence存在且status=verified时直接审阅，不必用shell找隔离工作区外的CSV，也不需要向用户索要文件。文字或来源摘要不足时用inspect_report按fileId分段查看；不能用任意inspect_dataset结果替代当前文件。读取缺口记review_access，不得说成已经证实的current_formula。用户显式给出的公式、统计范围和列要求优先于参考报表默认实现；参考报表用于定位来源，不得自动覆盖用户公式，差异应说明。原问题要求文件时，已有verificationHash的文件须填写reportAssessment：fileId、coverage=complete/incomplete、decision=deliver/revise/needs_review及issues。只有原要求全部满足才deliver；同时将original-question标verified并完成，不再为补强项发起环境查询。历史快照金额不同仅记historical_difference，普通补充疑问记optional_followup，不能要求当前结果与历史数强行一致。只有本轮公式/范围/覆盖/来源问题（current_formula/current_scope/current_coverage/current_source）或原问题明确要求尚未完成（required_output）才阻止交付，逐项写具体evidence。用户明确要求历史对账时，该差异属于required_output。没有新证据影响当前文件就不得降级已接受版本；补查必须说明影响哪份文件及哪个原要求。程序核验后仍须核对原问题口径，不能为变绿填deliver。需要刷新时使用refresh_report集中重放已保存的固定工具来源和派生链，不逐轮混用新旧数据；旧数据无可重放recipe或含临时集合须先补齐来源。
 `;}
 
 export async function buildPrompt(job, project, harness = null, sourceSync = null, ledger = [], workspace = null) {
@@ -305,6 +307,7 @@ export async function buildPrompt(job, project, harness = null, sourceSync = nul
 基准分支：${project.baseBranch ?? 'main'}
 ${job.taskIntent === 'analysis' ? '本次是只读分析，Runner 已同步 analysisRepositories 中各仓库的 origin 对应分支；仅在清单内调查相关代码，不把其它目录或未跟踪/忽略文件当作已同步源码。使用下方本次版本证据，注明分支/commit/同步时间；汇总不再次拉取。禁止修改文件、安装依赖、构建生成文件或调用有外部副作用的接口；仓库中的记录台账/写文档约定不得扩大本次只读授权。' : ''}
 ${reportReviewContext(job)}
+environmentQuery的purpose参数只写本轮简短目的，遵守目录maxLength，不能复制整条原query；原问题由程序单独传入环境调查上下文，不会丢失。
 受控环境查询目录（仅模板描述，不含凭据）：${JSON.stringify(environmentCatalog)}
 分析中确需环境数据且目录有准确匹配的模板、参数已知时，应在最终结果返回 environmentQuery={environmentId,queryId,parameters,goalIds}，outcome=needs_clarification，说明已有源码结论、具体缺口与查询目的；goalIds只填写本轮investigation中这次查询要补齐的required且open目标id。首次宽范围调查填goalIds=null；同一环境已经调查两轮后，只有前序新证据支持针对剩余目标缩小查询时才填写goalIds数组并定向补查。数据库交接需要准确表名、字段映射、关联键、期间、状态和费用条件、分组及公式，不能只给文件行号。在handoff.artifacts列出支持这些规则的code文件，程序核验后向环境规划器提供真实片段和分页引用。handoff仍按schema提交真实证据。程序对校验通过的UAT和PRD只读工具自动授权，同一问题后续只读步骤不要求用户反复批准。禁止自行使用shell联网、读取凭据、获取任意SQL或用其他工具绕过；模板不存在/参数不明时列出所需配置，不猜测。同一问题已经查询过的相同环境/模板/参数不重复申请；结合前序证据缩小目标或选择其他证据。需要查看业务网站、任务调度控制台或页面日志时，先从当前问题、前序证据和本环境源码/文档查找真实入口，不要求用户预先指定网站。找到入口后返回websiteQuery={url,tier,purpose}、environmentQuery=null、outcome=needs_clarification，交由通用网页工具查看。业务入口优先采用用户确认的本环境域名和目录entryUrl；不要将域名换成解析出的IP，也不能将后端网关、API地址或旧联调IP当作浏览器入口。保留协议和应用路径。只有IP线索时继续找本环境部署域名；找不到才询问正确网址，不使用PRD域名代替UAT。IP页面空白或资源未加载时先核对入口，不能据此断言业务前端故障。网站目录的entryUrl仅为已知入口线索，不表示适用于当前问题。必须核对目标应用，不能把XXL-JOB地址去掉路径当作TPM业务入口，也不能因同为UAT就复用其他应用。前序websiteMismatch=true时，应重新搜索本环境部署配置、前端入口和项目文档，找到正确入口后重新提出websiteQuery；不能重复错误入口或把入口不匹配当成需要扩大权限。只填写真实发现的HTTP(S)入口，保留实际应用路径并在finalMessage说明入口来源，不猜地址、不填凭据或token；Mac默认复用日常Chrome的已登录应用页面；只有找不到对应页面时才在日常Chrome新建标签页。BROWSER_BRIDGE表示本机浏览器自动化未就绪，不是业务账号无权限；不要反复要求网站登录。其他平台或显式isolated模式使用独立浏览器。只有找不到可靠入口/环境歧义才询问。Nacos定时任务排查应使用read_runtime_config获取非敏感调度入口；前序结果中的runtimeDiscoveries或“调度入口证据”包含真实配置来源和网址，必须据此继续websiteQuery核验，不要再次要求用户提供已经发现的地址。多个入口时结合环境和配置来源判断，仍有歧义才询问。不能把Nacos浏览器当业务页面工具。websiteQuery和environmentQuery互斥；不需要网页时websiteQuery=null。环境工具的ready只表示当前子步骤完成，不等于原问题完成。拿到数据库地址但原问题是核对单据时，必须继续选择匹配数据库查询或明确尚缺的接入；不得把地址当业务答案，不得把未查数据库的单据说成已经核实。若原问题仅要求地址则直接回答，不追加无关调查。负责人汇总阶段同样可以提出下一次环境查询，不能仅因开发阶段结束就停止调查。其余结果 environmentQuery=null。
 若同步证据有 environment，结论必须写明该环境、相关仓库分支和提交。sourceRoot 是来源目录，workspace 才是本次分析目录；不得改读个人开发目录或将其它环境历史当成本次证据。源代码版本不等于线上已部署版本。

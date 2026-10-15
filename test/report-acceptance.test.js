@@ -43,3 +43,6 @@ test('store completion persists accepted review and runner stops before optional
 test('accepted state requires original-question closure as well as an explicit delivery review',()=>{
  const job=fixture(),r=assessReportDelivery(job,review());r.investigation.goals[0].status='open';recordReportReview(job,r);assert.equal(acceptedReportResult(job),null);
 });
+test('an unavailable or wrong-version inspection cannot be promoted by an old verified goal',async()=>{
+ const {assessInvestigation}=await import('../src/shared/investigation-review.js');const job=fixture();job.reportEvidence={status:'unavailable',binding:{fileId:file.id}};const r=review();r.investigation.goals[0].status='verified';assert.equal(assessInvestigation(job,r).outcome,'partial');
+});

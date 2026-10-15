@@ -2,7 +2,7 @@
 // This module never creates receipts, queries data or sends files.
 const proof=file=>/^[a-f0-9]{64}$/.test(file?.verificationHash??'');
 const material=new Set(['current_formula','current_scope','current_coverage','current_source','required_output']);
-const kinds=new Set([...material,'historical_difference','optional_followup']);
+const kinds=new Set([...material,'historical_difference','optional_followup','review_access']);
 const assessment=(job,result)=>{
  const a=result?.reportAssessment,file=job.reportFiles?.find(f=>f.id===a?.fileId&&proof(f));
  if(!file||!['deliver','revise','needs_review'].includes(a.decision)||!['complete','incomplete'].includes(a.coverage)||!Array.isArray(a.issues)||a.issues.length>12||a.issues.some(i=>!kinds.has(i?.kind)||typeof i.evidence!=='string'||!i.evidence.trim()||i.evidence.length>1200))return null;
@@ -15,6 +15,7 @@ export function recordReportFiles(job,files,generation){
 export function assessReportDelivery(job,result){
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.reportReviews||!job.reportFiles?.length||result?.sourceSyncBlocked)return result;
  const reviewed=assessment(job,result);
+ if(reviewed&&job.reportEvidence&&(job.reportEvidence.status!=='verified'||job.reportEvidence.binding?.fileId!==reviewed.file.id||job.reportEvidence.binding?.verificationHash!==reviewed.file.verificationHash||job.reportEvidence.calculationAudit?.status!=='passed'))return {...result,reportReviewRequired:true,outcome:'partial',environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,goals:(result.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),status:'continue',blocker:null,nextStep:'先读取与当前文件绑定的inspect_report资料，不能仅凭元数据接受文件。'}};
  if(reviewed&&(reviewed.a.decision==='deliver'||reviewed.a.decision==='revise'&&reviewed.a.issues.length>0)&&reviewed.a.coverage==='complete'&&!reviewed.blocking.length){
   const root={id:'original-question',required:true,status:'verified',evidence:result.investigation?.goals?.find(g=>g.id==='original-question')?.evidence||result.summary||'原要求与已核验文件已逐项审阅'};
   return {...result,reportAssessment:{...reviewed.a,decision:'deliver'},outcome:'ready',environmentQuery:null,websiteQuery:null,environmentSetup:null,

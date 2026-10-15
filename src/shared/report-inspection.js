@@ -1,0 +1,56 @@
+import {readFile,readdir,lstat} from 'node:fs/promises';
+import path from 'node:path';
+import {reportFile} from './report-files.js';
+import {TaskDatasetStore} from '../runner/task-dataset-store.js';
+export class ReportInspectionError extends Error {constructor(message){super(message);this.code='REPORT_INSPECTION';}}
+const fail=message=>{throw new ReportInspectionError(message);};
+const scale=10n**12n;
+const decimal=v=>{const s=String(v);if(!/^-?\d{1,40}(?:\.\d{1,12})?$/.test(s))fail('报表来源金额格式无效');const [a,b='']=s.replace(/^-/,'').split('.');return (s.startsWith('-')?-1n:1n)*(BigInt(a)*scale+BigInt(b.padEnd(12,'0')));};
+const format=n=>{const sign=n<0n?'-':'';if(n<0n)n=-n;const frac=String(n%scale).padStart(12,'0').replace(/0+$/,'');return sign+String(n/scale)+(frac?'.'+frac:'');};
+const cell=v=>{let s=String(v??'');if(/^[\s\uFEFF]*[=+@-]/.test(s)&&!/^-[0-9]+(?:\.[0-9]+)?$/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};
+// Only a file already registered to this job/question can select a path.
+export async function inspectReport(dataDir,job,args={}){
+ try{return await inspectBoundReport(dataDir,job,args);}
+ catch(error){if(error instanceof ReportInspectionError)throw error;throw new ReportInspectionError('当前登记文件、核验记录或绑定来源无法读取或校验；保留成果，由维护者核对本机文件，不能据此认定业务公式错误。');}
+}
+async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0,limit=4}={}){
+ const item=job.reportFiles?.find(f=>f.id===fileId);if(!item)fail('文件未登记在当前任务，不能猜测路径或读取其他任务');
+ if(!['summary','columns','sources','checks'].includes(section)||!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>4)fail('inspect_report的section或分页参数无效');
+ const sourceJobId=item.sourceJobId??job.id;
+ const verified=await reportFile(dataDir,sourceJobId,item);
+ const receipt=JSON.parse(await readFile(path.join(path.dirname(verified.file),item.id+'.verification.json'),'utf8'));
+ const directory=path.dirname(verified.file),datasetRoot=path.join(directory,'datasets');
+ if((await lstat(datasetRoot)).isSymbolicLink())fail('报表数据集目录不能是符号链接');
+ const names=receipt.datasetRef?[receipt.datasetRef+'.json']:(await readdir(datasetRoot)).filter(n=>/^dataset-[a-f0-9-]{36}\.json$/.test(n));
+ let bound=null,storage;
+ for(const name of names){
+  if(!/^dataset-[a-f0-9-]{36}\.json$/.test(name))fail('核验记录数据集引用无效');
+  const file=path.join(datasetRoot,name),info=await lstat(file);if(!info.isFile()||info.isSymbolicLink()||info.size>16_000_000)continue;
+  const candidate=JSON.parse(await readFile(file,'utf8'));if(candidate.data?.reportDraft?.file?.id!==item.id)continue;
+  const store=new TaskDatasetStore(directory,candidate.scope),saved=await store.get(candidate.id),draft=saved.data.reportDraft;
+  if(draft.file.sha256!==item.sha256||draft.file.rowCount!==item.rowCount||draft.file.bytes!==item.bytes)fail('文件与计算配方绑定不一致');
+  if(bound)fail('同一文件出现多个计算配方，不能猜选');bound=saved;storage=store;
+ }
+ if(!bound)fail('未找到与当前文件摘要绑定的计算配方；不重复生成或查询数据库');
+ const data=bound.data,draft=data.reportDraft;
+ if(JSON.stringify(data.columns)!==JSON.stringify(receipt.columnRules.map(c=>c.label))||data.rows.length!==item.rowCount||draft.keys.length!==item.rowCount)fail('文件列或对象数量与核验记录不一致');
+ const sources=new Map();for(const s of draft.sources){const saved=await storage.get(s.datasetRef);const d=saved.data,index=new Map();for(const row of d.rows){const key=row[s.keyColumn];if(typeof key!=='string'||!key||index.has(key))fail('计算来源主键为空或重复');index.set(key,row);}sources.set(s.name,{...d,index,readAt:saved.readAt,keyColumn:s.keyColumn,datasetRef:s.datasetRef});}
+ let nodes=0;const validate=(v,depth=0)=>{if(!v||++nodes>100||depth>6)fail('计算配方超出固定表达式范围');if(v.op==='key')return;if(v.op==='field'){if(!sources.get(v.source)?.columns.includes(v.column))fail('计算配方字段不存在');return;}if(!['add','subtract','min'].includes(v.op)||!Array.isArray(v.args)||v.args.length<2||v.args.length>6)fail('计算配方包含不支持的表达式');v.args.forEach(c=>validate(c,depth+1));};draft.columns.forEach(c=>validate(c.value));
+ const evaluate=(e,key)=>{if(e.op==='key')return key;if(e.op==='field'){const v=sources.get(e.source).index.get(key)?.[e.column];if(v===undefined||v===null){if(e.missing==='zero')return '0';if(e.missing==='empty')return '';fail('计算缺失值没有明确规则');}return v;}const values=e.args.map(x=>decimal(evaluate(x,key)));return format(values.slice(1).reduce((a,b)=>e.op==='add'?a+b:e.op==='subtract'?a-b:a<b?a:b,values[0]));};
+ const rows=draft.keys.map(key=>draft.columns.map(c=>evaluate(c.value,key)));
+ const csv='\uFEFF'+[data.columns,...rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n';
+ if(csv!==verified.content.toString('utf8'))fail('实际CSV与绑定配方的逐行重算不一致，不能认定已修正');
+ const columns=draft.columns.map((c,i)=>({label:c.label,value:c.value,definition:receipt.columnRules[i].definition,evidence:receipt.columnRules[i].evidence}));
+ const sourceList=[...sources].map(([name,d])=>({name,datasetRef:d.datasetRef,keyColumn:d.keyColumn,columns:d.columns,rowCount:d.rows.length,readAt:d.readAt,queryDefinition:d.queryDefinition??null,derivation:d.derivation??null}));
+ const checks=receipt.totals??[];
+ const binding={fileId:item.id,sourceJobId,datasetRef:bound.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:item.rowCount};
+ const audit={status:'passed',checkedRows:rows.length,checkedCells:rows.length*columns.length,note:'实际CSV逐行等于绑定固定公式的计算结果；业务口径仍需对照原问题和来源依据审阅。'};
+ if(section!=='summary'){const all=section==='columns'?columns:section==='sources'?sourceList:checks;const items=all.slice(offset,offset+limit);const result={binding,section,items,totalCount:all.length,nextOffset:offset+items.length<all.length?offset+items.length:null,calculationAudit:audit};if(Buffer.byteLength(JSON.stringify(result))>22000)fail('详情过长，请将limit缩小后继续分页');return result;}
+ const result={binding,status:'verified',headers:data.columns,columns:columns.map(c=>({...c,definition:c.definition.slice(0,240),evidence:c.evidence.slice(0,200)})),sources:sourceList.map(d=>({...d,queryDefinition:d.queryDefinition?{sql:d.queryDefinition.sql.slice(0,1000),params:d.queryDefinition.params.slice(0,20)}:null,derivation:d.derivation?{kind:d.derivation.kind,lookupChecks:d.derivation.lookupChecks}:null})),coverage:receipt.coverage,checks,readWindow:receipt.readWindow,calculationAudit:audit,preview:rows.slice(0,3),limited:true,note:'按文件ID绑定的实际配方与CSV审阅资料，不是新的数据库查询。文本和来源为有界摘要；细节可用inspect_report的columns/sources/checks分页读取。不因未查询数据库把已有文件说成无记录。'};
+ if(Buffer.byteLength(JSON.stringify(result))>22000){result.preview=[];result.sources=result.sources.map(s=>({...s,queryDefinition:s.queryDefinition?{sql:s.queryDefinition.sql.slice(0,200),params:s.queryDefinition.params.slice(0,3)}:null}));}
+ if(Buffer.byteLength(JSON.stringify(result))>22000)fail('审阅摘要超限，请使用分段查看');return result;
+}
+export async function reportReviewEvidence(dataDir,job){
+ const item=job.reportFiles?.filter(f=>f.verificationHash).at(-1);if(!item)return null;
+ try{return await inspectReport(dataDir,job,{fileId:item.id});}catch{return {status:'unavailable',binding:{fileId:item.id},note:'本机文件审阅校验失败；这是读取/绑定缺口，不是已证实的计算公式错误。请用inspect_report核对该文件，不能要求用户提供本机已有CSV或重复取数。'};}
+}
