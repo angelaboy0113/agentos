@@ -67,3 +67,8 @@ test('metadata-only rounds do not present zero records as a business query findi
  const r=presentEnvironmentResult({kind:'mysql',tier:'prd',description:'readonly investigation'},{partial:true,rows:[],summary:'已核对连接和结构',evidence:{businessQueryCount:0,readAt:new Date().toISOString()}});
  assert.match(r.summary,/未执行业务数据查询/);assert.doesNotMatch(r.metadata,/返回 0 条去重结果/);
 });
+test('dataset and source-input failures have fixed actionable stages, not an unclassified execution error',async()=>{
+ const {failureDiagnostic}=await import('../src/shared/failure-diagnostic.js');
+ const message=failureDiagnostic(Object.assign(new Error('[REPORT_INPUT] invalid datasetRef'),{diagnosticStage:'inspect_dataset'}));
+ assert.match(message,/REPORT_INPUT/);assert.match(message,/读取任务内数据集/);assert.doesNotMatch(message,/EXECUTION_ERROR/);
+});

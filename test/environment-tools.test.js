@@ -414,6 +414,22 @@ test('environment tool loop exposes verified source reading and can move straigh
  const calls=[];let turn=0;
  const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,sourceQueryContext,
  tools:async()=>({spec:[{tool:'connection'},{tool:'schema'},{tool:'aggregate'}],run:async(tool,args)=>{calls.push(tool);if(tool==='schema')assert.equal(args.table,'sales_fact');return tool==='aggregate'?{rows:[{amount:'10.2'}]}:{stage:tool};},close:async()=>{}}),
- planner:async()=>({next:async input=>{assert.match(input.sourceQueryContext.sources[0].excerpt,/sales_fact/);return [{tool:'read_source_evidence',arguments:JSON.stringify({ref:sourceQueryContext.sources[0].ref})},{tool:'schema',arguments:JSON.stringify({table:'sales_fact'})},{tool:'aggregate',arguments:JSON.stringify({table:'sales_fact'})},{tool:'finish',summary:'已根据实际源码查得汇总',complete:true}][turn++];},close:async()=>{}})});
+ planner:async()=>({next:async input=>{assert.match(input.sourceQueryContext.sources[0].excerpt,/sales_fact/);return [{tool:'read_source_evidence',arguments:JSON.stringify({ref:sourceQueryContext.sources[0].ref,startLine:0})},{tool:'read_source_evidence',arguments:JSON.stringify({ref:sourceQueryContext.sources[0].ref})},{tool:'schema',arguments:JSON.stringify({table:'sales_fact'})},{tool:'aggregate',arguments:JSON.stringify({table:'sales_fact'})},{tool:'finish',summary:'已根据实际源码查得汇总',complete:true}][turn++];},close:async()=>{}})});
  assert.equal(result.partial,false);assert.equal(result.rows[0].amount,'10.2');assert.equal(result.evidence.businessQueryCount,1);assert.deepEqual(calls,['connection','schema','aggregate']);
+});
+test('invalid dataset inspection and source line arguments correct within the same authorized tool loop',async()=>{
+ const cfg={version:1,environments:{env:{...environment,kind:'mysql',host:'db',database:'demo'}}};delete cfg.environments.env.baseUrl;
+ const plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['resume saved data']},'demo',{profile:'owner',senderId:'ou_member'});let step=0;
+ const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'inspect_dataset'},{tool:'aggregate'}],run:async(tool,args)=>{if(tool==='inspect_dataset'&&!args.datasetRef)throw new QueryInputError('REPORT_INPUT','datasetRef必须使用list_datasets返回的引用');return tool==='aggregate'?{rows:[{total:'1'}]}:{stage:tool};},close:async()=>{}}),
+ planner:async()=>({next:async input=>{const choices=[{tool:'inspect_dataset',arguments:'{}'},{tool:'inspect_dataset',arguments:'{"datasetRef":"dataset-valid"}'},{tool:'aggregate',arguments:'{}'},{tool:'finish',summary:'corrected and queried',complete:true}];if(step===1)assert.equal(input.results.at(-1).error.code,'REPORT_INPUT');return choices[step++];},close:async()=>{}})});
+ assert.equal(result.partial,false);assert.equal(result.failure,null);assert.equal(result.toolInputErrors[0].tool,'inspect_dataset');assert.equal(result.evidence.businessQueryCount,1);
+});
+test('successful source reading does not clear an unresolved report input failure',async()=>{
+ const cfg={version:1,environments:{env:{...environment,kind:'mysql',host:'db',database:'demo'}}};delete cfg.environments.env.baseUrl;
+ const plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['inspect and read']},'demo',{profile:'owner',senderId:'ou_member'});let n=0;
+ const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'inspect_dataset'},{tool:'read_source_evidence'}],run:async tool=>{if(tool==='inspect_dataset')throw new QueryInputError('REPORT_INPUT','invalid ref');return {stage:'read successfully'};},close:async()=>{}}),
+ planner:async()=>({next:async()=>[{tool:'inspect_dataset',arguments:'{}'},{tool:'read_source_evidence',arguments:'{}'},{tool:'finish',summary:'cannot claim complete',complete:true}][n++],close:async()=>{}})});
+ assert.equal(result.partial,true);assert.equal(result.toolInputErrors[0].code,'REPORT_INPUT');
 });
