@@ -234,3 +234,15 @@ test('timeout while submitting an environment result retains that newly collecte
  runner.post=async()=>{throw Object.assign(new Error('timeout'),{code:'LOCAL_CONTROL_TIMEOUT'});};
  const out=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(out.outcome,'blocked');assert.match(out.finalMessage,/新取得/);assert.match(out.finalMessage,/1 份中间文件/);
 });
+test('runner uses the acknowledged start event so queue time cannot exhaust the execution budget',async()=>{
+ const job={id:'queued',status:'running',createdAt:new Date(Date.now()-86400000).toISOString(),stage:'developer',taskIntent:'analysis',continuousInvestigation:true,events:[],lease:{id:'lease',runnerId:'r'},context:[]};
+ let executed=0,completed;
+ const runner=new AgentRunner({runnerId:'r'},async()=>{executed++;return {outcome:'ready',finalMessage:'done'};});
+ runner.post=async(url,body)=>{
+  if(url.endsWith('/control'))return {cancelRequested:false};
+  if(body.type==='started')return {job:{...job,events:[{type:'started',at:new Date().toISOString()}]}};
+  if(body.type==='completed'){completed=body.result;return {job:{status:'completed'}};}
+  throw new Error('unexpected '+url);
+ };
+ await runner.run(job);assert.equal(executed,1);assert.equal(completed.outcome,'ready');
+});

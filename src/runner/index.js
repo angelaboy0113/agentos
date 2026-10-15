@@ -62,7 +62,8 @@ export class AgentRunner {
         else console.warn(`[runner] cancellation control unavailable for ${job.id}`);
       } finally { checking = false; }
     };
-    await emit({ type: 'started', runnerId: this.config.runnerId });
+    const started=await emit({ type: 'started', runnerId: this.config.runnerId });
+    if(started?.job)job=started.job; // Budget starts from execution, not time spent queued.
     const controlTimer = setInterval(checkControl, 1500);
     controlTimer.unref();
     let heartbeatInFlight = false;
