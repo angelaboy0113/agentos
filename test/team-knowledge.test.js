@@ -56,7 +56,7 @@ test('live data, role difference and wrong environment cannot directly reuse',as
   }
 });
 test('screenshots and ongoing jobs cannot be silently replaced by knowledge',async t=>{
-  const x=await seeded(t);assert.equal((await x.service.candidates({...actor,attachments:[{id:'image'}]},'p')).candidates.length,0);
+  const x=await seeded(t);assert.equal((await x.service.candidates({...actor,attachments:[{id:'image'}]},'p')).candidates.length,1);
   const input={...x.input,jobs:[{status:'awaiting_clarification'}]};assert.equal((await x.service.reuse(actor,'p',decision(x.id),input)).knowledgeMatch,null);
   const d={...decision(x.id),action:'create_task',intent:'implementation',instruction:'修改代码'};
   assert.equal((await x.service.reuse(actor,'p',d,x.input)).action,'create_task');
@@ -168,4 +168,42 @@ test('legacy false conflicts upgrade environment proof without renewing verifica
  x.options.model.compare=async()=>({relation:'equivalent',reason:'同义'});await x.service.reconcile();
  assert.equal(x.service.store.get(second.id).status,'active');assert.equal(x.service.store.get(second.id).verifiedAt,before);assert.equal(x.service.store.get(second.id).sourceBindings.length,1);
  x.service.store.suspend(second.id);await x.service.reconcile();assert.equal(x.service.store.get(second.id).status,'suspended');
+});
+
+test('context screenshots retrieve and reuse generic knowledge only after all actually shown images are reviewed',async t=>{
+ const x=await seeded(t),image={id:'pic',type:'image',path:'/fixture/page.png'},turn={...actor,attachments:[image]};
+ const input={teamKnowledge:await x.service.candidates(turn,'p'),jobs:[],attachments:[image]};assert.equal(input.teamKnowledge.candidates.length,1);
+ const d=decision(x.id);d.knowledgeMatch.attachmentReview={reviewedIds:['pic'],impact:'context_only',reason:'截图仅用于定位同一功能，用户询问通用操作规则'};
+ const reply=await x.service.reuse(turn,'p',d,input);assert.equal(reply.action,'reply');assert.ok(reply.knowledgeReceipt.attachmentScope);assert.ok(reply.reply.startsWith(proposal.answer));
+ // apply() rechecks validity without resending images; only the unchanged program-generated binding is accepted.
+ assert.equal((await x.service.reuse(turn,'p',reply,{teamKnowledge:input.teamKnowledge,jobs:[]})).action,'reply');
+ const changed={...turn,attachments:[{...image,path:'/fixture/changed.png'}]};assert.equal((await x.service.reuse(changed,'p',reply,{teamKnowledge:input.teamKnowledge,jobs:[]})).action,'create_task');
+});
+test('image review cannot omit an image, claim an unseen image, or bless unread files',async t=>{
+ const x=await seeded(t),image={id:'pic',type:'image',path:'/fixture/page.png'};
+ for(const sample of [
+  {attachments:[image],review:null,shown:[image]},
+  {attachments:[image],review:{reviewedIds:[],impact:'context_only',reason:'incomplete'},shown:[image]},
+  {attachments:[image],review:{reviewedIds:['pic'],impact:'context_only',reason:'not shown'},shown:[]},
+  {attachments:[image,{...image,id:'two'}],review:{reviewedIds:['pic'],impact:'context_only',reason:'omitted'},shown:[image]},
+  {attachments:[{id:'doc',type:'file',path:'/fixture/file.pdf'}],review:{reviewedIds:['doc'],impact:'context_only',reason:'not an image'},shown:[]},
+ ]){
+  const d=decision(x.id);d.knowledgeMatch.attachmentReview=sample.review;
+  const r=await x.service.reuse({...actor,attachments:sample.attachments},'p',d,{...x.input,attachments:sample.shown});assert.equal(r.action,'create_task');assert.deepEqual(r.attachmentIds,sample.attachments.map(a=>a.id));
+ }
+});
+test('mixed live and knowledge questions pass reusable facts to a targeted investigation and retain the screenshot',async t=>{
+ const x=await seeded(t),image={id:'pic',type:'image',path:'/fixture/page.png'},turn={...actor,attachments:[image],content:'说明创建规则，并核实这张单当前为什么不能提交'};
+ for(const impact of ['requires_live','different_scope','uncertain']){
+  const d=decision(x.id);d.knowledgeMatch.attachmentReview={reviewedIds:['pic'],impact,reason:'需要核对本次上下文'};d.knowledgeMatch.currentData=impact==='requires_live';
+  const r=await x.service.reuse(turn,'p',d,{...x.input,attachments:[image]});assert.equal(r.action,'create_task');assert.equal(r.knowledgeReceipt,null);assert.equal(r.knowledgeHint.id,impact==='different_scope'?null:x.id);assert.equal(r.instruction.includes(proposal.answer),impact!=='different_scope');assert.ok(r.instruction.includes(turn.content));assert.deepEqual(r.attachmentIds,['pic']);
+ }
+ const d={...decision(x.id),action:'create_task',intent:'analysis',requiresSourceInspection:true};d.knowledgeMatch.currentData=true;
+ const r=await x.service.reuse(actor,'p',d,x.input);assert.equal(r.action,'create_task');assert.ok(r.instruction.includes(proposal.answer));
+});
+test('attachment review is typed and rejects invalid impacts and duplicate review IDs',()=>{
+ for(const review of [{reviewedIds:['x'],impact:'trust_everything',reason:'bad'},{reviewedIds:['x','x'],impact:'context_only',reason:'bad'},{reviewedIds:['x'],impact:'context_only',reason:''}]){
+  const d=decision('id');d.knowledgeMatch.attachmentReview=review;assert.throws(()=>validateDecision(d),/attachment review/);
+ }
+ const d=decision('id');d.knowledgeMatch.attachmentReview={reviewedIds:['x'],impact:'context_only',reason:'用于定位同一页面'};assert.doesNotThrow(()=>validateDecision(d));
 });

@@ -196,6 +196,8 @@ function validateDecisionValue(value) {
     const m = value.knowledgeMatch;
     if (!m || typeof m.id !== 'string' || m.id.length > 100 || typeof m.environment !== 'string' || m.environment.length > 100
       || ['sameIntent','currentData','correction','roleIndependent'].some(k => typeof m[k] !== 'boolean')) throw new Error('Invalid knowledge match');
+    const review=m.attachmentReview;
+    if(review!=null&&(!Array.isArray(review.reviewedIds)||review.reviewedIds.length>20||review.reviewedIds.some(id=>typeof id!=='string'||!id||id.length>200)||new Set(review.reviewedIds).size!==review.reviewedIds.length||!['context_only','requires_live','different_scope','uncertain'].includes(review.impact)||typeof review.reason!=='string'||!review.reason.trim()||review.reason.length>1000))throw new Error('Invalid knowledge attachment review');
   }
   // Typed AI decision, not phrase matching. Legacy persisted decisions may omit it.
   if (value.environmentQuery != null && (value.action !== 'create_task' || value.intent !== 'analysis' || value.requiresSourceInspection === true)) throw new Error('Environment query must be a separate readonly request');

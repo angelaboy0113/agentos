@@ -147,7 +147,8 @@
             "currentData",
             "correction",
             "roleIndependent",
-            "environment"
+            "environment",
+            "attachmentReview"
           ],
           "properties": {
             "id": {
@@ -167,6 +168,42 @@
             },
             "environment": {
               "type": "string"
+            },
+            "attachmentReview": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "reviewedIds",
+                    "impact",
+                    "reason"
+                  ],
+                  "properties": {
+                    "reviewedIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "impact": {
+                      "type": "string",
+                      "enum": [
+                        "context_only",
+                        "requires_live",
+                        "different_scope",
+                        "uncertain"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
             }
           }
         }
