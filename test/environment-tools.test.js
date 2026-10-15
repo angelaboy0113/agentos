@@ -390,3 +390,16 @@ test('query cache reuses identical reads only inside one live readonly transacti
   await a.close();await assert.rejects(a.run('select',args));
   const b=await createEnvironmentTools(e,query,credentials,{mysql:driver});await b.run('schema',{table:'orders'});await b.run('select',args);assert.equal(executions,5);await b.close();
 });
+test('environment planner receives full original requirements and source evidence beyond the short round purpose',async()=>{
+ const {reportInvestigationContext}=await import('../src/runner/environment-job.js');
+ const original='导出所有对象六列清单，2026年1至9月，年度调整分别扣除；不得只导出抽样对象。';
+ const context=reportInvestigationContext({originalQuestion:original,context:[{kind:'analysis_turn',result:{finalMessage:'源码表定义与业务状态规则已核实，保留对应依据。'}}]});
+ assert.equal(context.originalQuestion,original);assert.match(context.sourceAnalysis,/源码表定义/);assert.equal(context.limited,false);
+ const cfg={version:1,environments:{env:structuredClone(environment)}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['补查某户']},'demo',{profile:'owner',senderId:'ou_admin'});
+ let seen=false;
+ await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,investigationContext:context,
+  tools:async(e,q,c,options)=>{assert.equal(options.originalQuestion,original);return {spec:[{tool:'connection'}],run:async()=>({stage:'connected'}),close:async()=>{}};},
+  planner:async()=>({next:async input=>{assert.equal(input.investigationContext.originalQuestion,original);assert.notEqual(input.purpose,original);seen=true;return {tool:'finish',complete:false,summary:'保留范围'};},close:async()=>{}})});
+ assert.equal(seen,true);
+ const bounded=reportInvestigationContext({originalQuestion:'x'.repeat(12001)});assert.equal(bounded.limited,true);assert.equal(bounded.originalQuestion.length,12000);
+});

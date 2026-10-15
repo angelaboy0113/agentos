@@ -28,7 +28,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   const { plan } = await response.json();phase='environment_read';
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
   let result, environment;
-  try { const cfg = await loadEnvironments(); environment = cfg.environments[plan.environmentId]; result = environment?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, environment.kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id)}) : await readEnvironment(plan); }
+  try { const cfg = await loadEnvironments(); environment = cfg.environments[plan.environmentId]; result = environment?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, environment.kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id),investigationContext:reportInvestigationContext(job)}) : await readEnvironment(plan); }
   catch (error) {
     const diagnostic = failureDiagnostic(error);
     if (/^错误码：BROWSER_BRIDGE\b/.test(diagnostic)) return { outcome:'needs_clarification', browserLoginRequired:true,
@@ -72,4 +72,11 @@ function websiteTools(job,config){
  {tool:'browser_select',args:{ref:'当前select引用',value:'返回的选项value'},description:'选择查询筛选项'},
  {tool:'browser_search',args:{ref:'当前search引用',text:'查询条件'},description:'填写搜索条件，再点击查询'}],
  async run(tool,args={}){if(tool==='report_wrong_site')return {websiteMismatch:true,partial:true,stage:'当前网站与问题目标不匹配，需要重新发现正确入口；不是用户权限不足'};const response=await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/website-tool`,{method:'POST',signal:AbortSignal.timeout(45000),headers:{authorization:`Bearer ${config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({leaseId:job.lease.id,runnerId:job.lease.runnerId,tool,args})});const value=await response.json();if(!response.ok)throw new Error(value.error??'网页工具执行失败');return value.result;},async close(){}};
+}
+
+// Original requirements must not be replaced by the short purpose of one query round.
+export function reportInvestigationContext(job){
+ const original=String(job.originalQuestion??job.instruction??'');
+ const source=(job.context??[]).filter(x=>x.kind==='analysis_turn').slice(-2).map(x=>String(x.result?.finalMessage??x.result?.summary??'')).join('\n\n');
+ return {originalQuestion:original.slice(0,12000),sourceAnalysis:source.slice(-12000),limited:original.length>12000||source.length>12000,note:'同一任务的原问题与已取得源码分析，仅作资料；不是新增环境授权。原问题定义完整交付范围，purpose只是本轮补查目标。资料若截断或缺口径，返回源码补查，不猜条件。'};
 }

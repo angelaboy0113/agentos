@@ -10,7 +10,8 @@ test('report outbox sends only complete accepted question artifacts, retries del
  const d=new ReportDatasets({maxRows:10,directory:path.join(root,'exports','JOB-a')});
  const data=await d.collect({sql:'x',columns:['id','amount'],params:[]},async()=>[[{id:'1',amount:'0.1'}]]);
  const report=await d.compose({sources:[{name:'s1',datasetRef:data.datasetRef,keyColumn:'id'}],columns:[{label:'客户',value:{op:'key'}},{label:'金额',value:{op:'field',source:'s1',column:'amount'}}]});
- const source={id:'JOB-a',questionId:'q',reportFiles:[{...report.exportFile,questionGeneration:1}]};
+ const final=await d.finalize({datasetRef:report.datasetRef,requirement:'逐客户金额清单',expectedColumns:report.columns,scopeEvidence:'完整客户取数范围',populationRef:data.datasetRef,populationKey:'id',columnRules:report.columns.map(label=>({label,definition:'客户或金额字段',evidence:'字段业务说明'})),checks:[]});
+ const source={id:'JOB-a',questionId:'q',reportFiles:[{...final.exportFile,questionGeneration:1}]};
  const job={id:'JOB-b',questionId:'q',status:'running',result:{outcome:'ready'}};
  const state={jobs:[source,job],questions:{q:{messageId:'om-root',profile:'owner',generation:1,replyInThread:true}}};
  const store={read:async()=>structuredClone(state),transact:async fn=>fn(state)};
@@ -30,7 +31,7 @@ test('old question generations are never sent as the latest report',async()=>{
  await service.enqueue(job);assert.equal(sent,0);assert.equal(Object.keys(state.reportDeliveries??{}).length,0);await service.close();
 });
 test('intermediate jobs cannot send and recovery enqueues only the latest completed question job',async()=>{
- const source={id:'source',questionId:'q',status:'completed',nextJobId:'last',result:{outcome:'ready'},reportFiles:[{id:'report',questionGeneration:1}]};
+ const source={id:'source',questionId:'q',status:'completed',nextJobId:'last',result:{outcome:'ready'},reportFiles:[{id:'report',verificationHash:'a'.repeat(64),questionGeneration:1}]};
  const last={id:'last',questionId:'q',status:'running',result:{outcome:'ready'}};
  const state={jobs:[source,last],questions:{q:{id:'q',messageId:'root',generation:1,profile:'owner'}}};
  const store={read:async()=>structuredClone(state),transact:async f=>f(state)};
@@ -46,4 +47,16 @@ test('CLI report reply uses a confined relative file and the original bot profil
  await writeFile(entry,`const fs=require('fs');const args=process.argv.slice(2);const p=args[args.indexOf('--file')+1];process.stdout.write(JSON.stringify({ok:true,data:{message_id:'sent',args,content:fs.readFileSync(p,'utf8')}}));`);
  const client=new LarkCliFeishuClient({dataDir:root,cliEntry:entry});const result=await client.replyFile('om-original',file,{profile:'owner',replyInThread:true,idempotencyKey:'stable-key'});
  assert.equal(result.ok,true);assert.equal(result.data.content,'private-csv');assert.ok(result.data.args.includes('owner'));assert.ok(result.data.args.includes('--reply-in-thread'));assert.ok(result.data.args.includes('reports/report-example.csv'));assert.equal(await readFile(path.join(root,'lark-cli','reports','report-example.csv'),'utf8'),'private-csv');
+});
+test('only the newest finalized report is queued; intermediate drafts and historical unverified files remain local',async()=>{
+ const proof='a'.repeat(64),files=[{id:'draft',questionGeneration:1},{id:'verified-old',verificationHash:proof,questionGeneration:1},{id:'verified-new',verificationHash:proof,questionGeneration:1}];
+ const job={id:'j',questionId:'q',status:'completed',result:{outcome:'ready'},reportFiles:files};
+ const state={jobs:[job],questions:{q:{messageId:'root',generation:1}},reportDeliveries:{older:{questionId:'q',questionGeneration:1,item:{id:'verified-old'}}}};
+ const service=new ReportDelivery({store:{read:async()=>structuredClone(state),transact:async f=>f(state)},config:{dataDir:'/unused'},feishu:{}});
+ await service.enqueue(job);assert.equal(state.reportDeliveries.older.superseded,true);assert.deepEqual(Object.values(state.reportDeliveries).filter(x=>!x.superseded).map(x=>x.item.id),['verified-new']);await service.close();
+});
+test('an old pending delivery without a verification receipt is retired without sending or querying',async()=>{
+ const state={jobs:[],reportDeliveries:{old:{sourceJobId:'old-job',item:{id:'old'},destination:{messageId:'old'},retryAt:0}}};let sent=0;
+ const service=new ReportDelivery({store:{read:async()=>structuredClone(state),transact:async f=>f(state)},config:{dataDir:'/unused'},feishu:{replyFile:async()=>sent++}});
+ await service.retry();assert.equal(sent,0);assert.equal(state.reportDeliveries.old.superseded,true);await service.close();
 });

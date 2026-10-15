@@ -18,7 +18,7 @@ test('complete datasets page beyond samples, prove exact-cap completion and reje
   let checks=0;const d=new ReportDatasets({maxRows:1000,previewRows:5,directory:root,authorize:async()=>checks++});
   const r=await d.collect(statement,pages(rows(n)));assert.equal(r.complete,n<=1000);assert.equal(r.rowCount,Math.min(n,1000));assert.ok(r.preview.length<=5);assert.ok(checks>=3);
   if(n>1000)await assert.rejects(d.compose(compose(r.datasetRef)),/完整数据集/);
-  else{const out=await d.compose(compose(r.datasetRef));assert.equal(out.rowCount,n);assert.equal(out.totals['金额'],String(n/10));const csv=await readFile(path.join(root,out.exportFile.filename),'utf8');assert.equal(csv.charCodeAt(0),0xfeff);assert.equal(csv.split('\r\n').length,n+2);}
+  else{const out=await d.compose(compose(r.datasetRef));assert.equal(out.rowCount,n);assert.equal(out.totals['金额'],String(n/10));const csv=await readFile(path.join(root,out.draftFile.filename),'utf8');assert.equal(csv.charCodeAt(0),0xfeff);assert.equal(csv.split('\r\n').length,n+2);}
  }
 });
 test('decimal union joins calculate financial balances exactly and preserve other-source dealers',async t=>{
@@ -41,11 +41,12 @@ test('duplicates, missing values, foreign refs and revoked authorization cannot 
 });
 test('CSV protects formula-like text and file lookup requires scope, digest and regular file',async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'agentos-report-'));t.after(()=>rm(root,{recursive:true,force:true}));const dir=path.join(root,'exports','JOB-demo');
- const d=new ReportDatasets({maxRows:10,directory:dir});const r=await d.collect(statement,pages([{dealer:'1',amount:'=CMD("x")'}]));const out=await d.compose({sources:[{name:'s1',datasetRef:r.datasetRef,keyColumn:'dealer'}],columns:[{label:'名称',value:field('s1')}]});
- const f=await reportFile(root,'JOB-demo',out.exportFile);assert.match(f.content.toString(),/'=CMD\(""x""\)/);
- await assert.rejects(reportFile(root,'../JOB-demo',out.exportFile));await assert.rejects(reportFile(root,'JOB-other',out.exportFile));
- await writeFile(f.file,'changed');await assert.rejects(reportFile(root,'JOB-demo',out.exportFile));
- await rm(f.file);await symlink(path.join(root,'outside'),f.file);await assert.rejects(reportFile(root,'JOB-demo',out.exportFile));
+ const d=new ReportDatasets({maxRows:10,directory:dir});const r=await d.collect(statement,pages([{dealer:'1',amount:'=CMD("x")'}]));const out=await d.compose({sources:[{name:'s1',datasetRef:r.datasetRef,keyColumn:'dealer'}],columns:[{label:'编号',value:{op:'key'}},{label:'名称',value:field('s1')}]});
+ const final=await d.finalize({datasetRef:out.datasetRef,requirement:'按编号列出名称',expectedColumns:out.columns,scopeEvidence:'完整名称表范围',populationRef:r.datasetRef,populationKey:'dealer',columnRules:out.columns.map(label=>({label,definition:'原始名称和编号',evidence:'名称表字段定义'})),checks:[]});
+ const f=await reportFile(root,'JOB-demo',final.exportFile);assert.match(f.content.toString(),/'=CMD\(""x""\)/);
+ await assert.rejects(reportFile(root,'../JOB-demo',final.exportFile));await assert.rejects(reportFile(root,'JOB-other',final.exportFile));
+ await writeFile(f.file,'changed');await assert.rejects(reportFile(root,'JOB-demo',final.exportFile));
+ await rm(f.file);await symlink(path.join(root,'outside'),f.file);await assert.rejects(reportFile(root,'JOB-demo',final.exportFile));
 });
 test('grouped SQL has validated columns, bound values, stable order and alias collisions fail',()=>{
  const tables=new Map([['budget',['dealer','amount','deleted']],['dealer',['id','name']]]),types=new Map([['budget',new Map([['amount','decimal']])]]),q={tables:['*']};

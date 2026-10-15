@@ -14,9 +14,14 @@ export class ReportDelivery {
    if(q&&state.jobs.filter(j=>j.questionId===job.questionId).at(-1)?.id!==job.id)return;
    const jobs=job.questionId?state.jobs.filter(j=>j.questionId===job.questionId):[current];
    state.reportDeliveries??={};
-   for(const source of jobs)for(const item of source.reportFiles??[]){
+   // Only the latest finalized file is the deliverable. Earlier versions stay local.
+   const candidates=jobs.flatMap(source=>(source.reportFiles??[]).filter(item=>/^[a-f0-9]{64}$/.test(item.verificationHash??'')).map(item=>({source,item})));
+   const selected=candidates.filter(({item})=>!q||item.questionGeneration===q.generation).slice(-1);
+   for(const {source,item} of selected){
     if(q&&item.questionGeneration!==q.generation)continue;
-    const key=source.id+':'+item.id;if(state.reportDeliveries[key])continue;
+    const key=source.id+':'+item.id;
+    for(const [oldKey,entry] of Object.entries(state.reportDeliveries))if(oldKey!==key&&!entry.messageId&&entry.questionId===job.questionId&&entry.questionGeneration===q?.generation)entry.superseded=true;
+    if(state.reportDeliveries[key])continue;
     const messageId=q?.messageId??job.originMessageId??job.replyToMessageId;if(!messageId)continue;
     state.reportDeliveries[key]={sourceJobId:source.id,questionId:job.questionId,questionGeneration:q?.generation,item,destination:{messageId,profile:q?.profile??job.originProfile??job.agentProfile,replyInThread:q?.replyInThread??job.originReplyInThread??false},createdAt:new Date().toISOString()};
    }
@@ -38,7 +43,10 @@ export class ReportDelivery {
  }
  async deliver(key,entry){
   try{
+   if(!/^[a-f0-9]{64}$/.test(entry.item.verificationHash??'')){await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{superseded:true,error:'旧文件无最终核验记录，保留本地，不自动发送'}));return;}
    const {file}=await reportFile(this.context.config.dataDir,entry.sourceJobId,entry.item);
+   const current=await this.context.store.read();
+   if(current.reportDeliveries[key]?.superseded||(entry.questionId&&current.questions?.[entry.questionId]?.generation!==entry.questionGeneration))return;
    const result=await this.context.feishu.replyFile(entry.destination.messageId,file,{...entry.destination,idempotencyKey:'aos-report-'+createHash('sha256').update(key).digest('hex').slice(0,32)});
    const id=messageIdOf(result);if(!id)throw new Error('没有文件消息编号');
    await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{messageId:id,deliveredAt:new Date().toISOString(),failures:0,retryAt:0}));
