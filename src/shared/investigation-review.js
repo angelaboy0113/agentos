@@ -1,3 +1,4 @@
+import {investigationLimits,investigationElapsed} from './investigation-budget.js';
 import { createHash } from 'node:crypto';
 const nonempty = s => typeof s === 'string' && s.trim().length > 0;
 export const QUESTION_GOAL_ID = 'original-question';
@@ -180,6 +181,11 @@ const continuationMetadata = (request,currentResult) => {
 // same target without closing another goal is a stalled orchestration loop.
 export function environmentContinuation(state,job,request,currentResult){
  const jobs=(state.jobs??[]).filter(item=>item.questionId===job.questionId&&item.taskIntent==='analysis');
+ const limits=investigationLimits();
+ if(jobs.reduce((n,j)=>n+investigationElapsed(j),0)>=limits.maxMs)return {continue:false,terminal:true,reason:'整个问题已达到自动调查时限；保留已有结果并停止追加查询。'};
+ const roundCount=jobs.reduce((n,j)=>n+Math.max((j.events??[]).filter(e=>e.type==='environment_query_started').length,(j.events??[]).filter(e=>e.type==='continuous_environment_started').length),0);
+ if(roundCount>=limits.maxRounds)return {continue:false,terminal:true,reason:'整个问题已达到环境调查轮次上限；不能通过改写描述重置预算。'};
+ if((job.investigationProgress?.stagnant??0)>=limits.maxStagnant)return {continue:false,terminal:true,reason:'连续多轮没有新增业务数据或已核实目标；停止重复调查，保留已有成果。'};
  const contexts=jobs.flatMap(item=>item.context??[]).map(entry=>entry.result).filter(Boolean);
  const targeted=continuationMetadata(request,currentResult);
  if(!targeted.ok)return {continue:false,reason:targeted.reason};

@@ -1,3 +1,4 @@
+import {interruptedInvestigation} from './investigation-budget.js';
 import { continuousReviewDecision, reviewDecision } from './investigation-review.js';
 import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint } from './environment-access.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -256,6 +257,10 @@ export class JsonStore {
       job.continuousQueryKeys.push(queryKey);
       if(plan.continuationKey){job.continuousContinuationKeys??=[];job.continuousContinuationKeys.push(plan.continuationKey);}
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(sourceResult) }]);
+      const progress=job.investigationProgress??{rounds:0,stagnant:0,seen:[]};
+      const verified=(sourceResult.investigation?.goals??[]).filter(g=>g.required!==false&&g.status==='verified').map(g=>g.id);
+      if(verified.some(id=>!(progress.verified??[]).includes(id)))progress.stagnant=0;
+      progress.verified=[...new Set([...(progress.verified??[]),...verified])].slice(0,64);job.investigationProgress=progress;
       job.environmentAccess = structuredClone(plan);
       job.updatedAt = new Date().toISOString();
       job.events.push({ id: createId('EVT'), type: 'continuous_environment_started', at: job.updatedAt,
@@ -277,6 +282,13 @@ export class JsonStore {
         || Date.parse(evidence.readAt) < Date.parse(plan.startedAt) || !Number.isInteger(evidence.rowCount) || evidence.rowCount < 0
         || !/^[a-f0-9]{64}$/.test(evidence.resultHash ?? '') || !result.finalMessage) throw new Error('Invalid continuous environment evidence');
       job.context = compactContext([...job.context, { stage: 'developer', kind: 'environment_result', result: structuredClone(result) }]);
+      const ledger=job.investigationProgress??{rounds:0,stagnant:0,seen:[]};
+      const useful=evidence.businessProgressHash;
+      const newData=typeof useful==='string'&&/^[a-f0-9]{64}$/.test(useful)&&!ledger.seen.includes(useful);
+      job.continuousRejectedCount=0;
+      ledger.rounds++;ledger.stagnant=newData?0:ledger.stagnant+1;
+      if(newData)ledger.seen=[...ledger.seen,useful].slice(-64);
+      job.investigationProgress=ledger;
       if(result.exportFiles?.length){job.reportFiles??=[];for(const file of result.exportFiles)if(!job.reportFiles.some(x=>x.id===file.id))job.reportFiles.push({...structuredClone(file),questionGeneration:state.questions?.[job.questionId]?.generation??null});}
       delete job.environmentAccess;
       delete job.browserCheckpoint;
@@ -312,7 +324,8 @@ export class JsonStore {
       const rejectionKey = fingerprint({ code: diagnostic.code ?? 'INVALID_QUERY', environmentQuery: sourceResult?.environmentQuery ?? null,
         websiteQuery: sourceResult?.websiteQuery ?? null });
       job.continuousRejectionKeys ??= [];
-      const stalled = job.continuousRejectionKeys.includes(rejectionKey);
+      job.continuousRejectedCount=(job.continuousRejectedCount??0)+1;
+      const stalled = diagnostic.retry===false||job.continuousRejectedCount>=3||job.continuousRejectionKeys.includes(rejectionKey);
       if (!stalled) job.continuousRejectionKeys.push(rejectionKey);
       const message = `${diagnostic.code === 'REPEATED_TARGET' ? '本次追加查询由 AgentOS 自动暂停' : '本次追加查询尚未执行'}：${diagnostic.reason} ${diagnostic.correction ?? ''}`.trim();
       const result = { ...structuredClone(sourceResult), outcome: stalled ? 'blocked' : 'needs_clarification', environmentQuery: null, websiteQuery: null,
@@ -321,7 +334,7 @@ export class JsonStore {
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'query_rejection', result }]);
       job.updatedAt = new Date().toISOString();
       job.events.push({ id: createId('EVT'), type: 'continuous_query_rejected', at: job.updatedAt, code: diagnostic.code ?? 'INVALID_QUERY' });
-      return { job: structuredClone(job), stalled, terminalResult: stalled ? result : null };
+      return { job: structuredClone(job), stalled, terminalResult: stalled ? interruptedInvestigation({...job,context:[...job.context,{kind:'analysis_turn',result:sourceResult}]},message,diagnostic.code) : null };
     });
   }
 

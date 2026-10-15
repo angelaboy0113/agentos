@@ -272,7 +272,7 @@ async function route(context) {
       const plan = planQuery(await loadEnvironments(), query, job.projectId,
         { senderId: job.senderId, profile: job.originProfile });
       const convergence = environmentContinuation(await store.read(), job, query, sourceResult);
-      if (!convergence.continue) throw Object.assign(new Error(convergence.reason), { queryDiagnostic: { code: 'REPEATED_TARGET', reason: convergence.reason } });
+      if (!convergence.continue) throw Object.assign(new Error(convergence.reason), { queryDiagnostic: { code: convergence.terminal?'CONVERGENCE_STALLED':'REPEATED_TARGET', reason: convergence.reason } });
       if(convergence.metadata)Object.assign(plan,convergence.metadata);
       const updated = await store.beginContinuousEnvironment(id, identity, plan, sourceResult);
       return json(response, 200, { ok: true, planned: true, plan, job: updated });

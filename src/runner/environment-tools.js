@@ -172,7 +172,7 @@ export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map())
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), valueSets = new Map();
-  const datasets=new ReportDatasets({secrets,maxRows:q.exportMaxRows,previewRows:q.maxRows,directory:adapters.exportDirectory,authorize:adapters.authorize,active:()=>active});
+  const datasets=new ReportDatasets({scope:createHash('sha256').update(JSON.stringify(e)).digest('hex'),secrets,maxRows:q.exportMaxRows,previewRows:q.maxRows,directory:adapters.exportDirectory,authorize:adapters.authorize,active:()=>active});
   const request = adapters.fetch ?? boundedFetch;
   const readCache = new Map(); let readCacheBytes = 0;
   // Only one live MySQL readonly transaction. Never import results from another task or snapshot.
@@ -226,7 +226,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'select', args: { table: 'schema返回的表', columns: ['字段'], filters: [{ column: '字段', op: '=|>|>=|<|<=|contains|in', value: '标量；in使用数组' }] }, description: `按明确条件读取最多${q.maxRows}行；columns最多12个已读取字段，filters必须有1至6个条件；contains执行参数化子串匹配，in最多100个绑定值；仅基础表，不允许任意SQL、联表或写入` }
   ];
   if(e.kind==='mysql'&&q.exportMaxRows){
-    spec.push({tool:'group_dataset',args:{table:'已读取结构的表',groupColumns:['经销商主键等分组字段'],aggregates:[{op:'sum',column:'数值字段',as:'amount'}],filters:'与aggregate相同'},description:`按实际分组字段汇总并由程序连续分页取完，最多${q.exportMaxRows}组；返回datasetRef、完整性和少量预览。不是前${q.maxRows}行样本；可用于完整经销商报表。`},
+    spec.push({tool:'compare_datasets',args:{leftRef:'左数据集引用',rightRef:'右数据集引用',leftKey:'左主键列',rightKey:'右主键列'},description:'在任务内精确比较两个完整数据集的业务主键；返回各自数量、匹配数、左右缺失数量和有限缺失行预览，不重新查询数据库。不接受任意文件路径。'}, {tool:'list_datasets',args:{},description:'列出当前任务在本环境已完整读取并持久保存的数据集、字段、取数时间和摘要。新一轮先查看已有成果，compose_report可直接引用这些datasetRef，不要重复查询已取得的金额。跨轮引用需核对取数时点；不能把旧数据当实时状态。'}, {tool:'group_dataset',args:{table:'已读取结构的表',groupColumns:['经销商主键等分组字段'],aggregates:[{op:'sum',column:'数值字段',as:'amount'}],filters:'与aggregate相同'},description:`按实际分组字段汇总并由程序连续分页取完，最多${q.exportMaxRows}组；返回datasetRef、完整性和少量预览。不是前${q.maxRows}行样本；可用于完整经销商报表。`},
     {tool:'linked_group_dataset',args:{leftTable:'左表',rightTable:'右表',join:{leftColumn:'字段',rightColumn:'字段'},groupColumns:[{table:'左表或右表',column:'经销商主键'}],aggregates:'与linked_aggregate相同',filters:'与linked_aggregate相同'},description:'两表受控等值关联后分组汇总并完整分页；先确认关联基数，不能把一对多重复金额当作真实金额。'},
     {tool:'compose_report',args:{sources:[{name:'s1',datasetRef:'本轮完整datasetRef',keyColumn:'经销商主键'}],columns:[{label:'经销商',value:{op:'key'}},{label:'余额',total:true,value:{op:'subtract',args:[{op:'field',source:'s1',column:'amount',missing:'zero'},{op:'field',source:'s2',column:'used',missing:'zero'}]}}]},description:'按经销商主键全外连接本轮完整数据集，生成CSV文件并返回行数、校验和、列合计与预览；最多12列。固定计算key/field/add/subtract/min，后3项使用args数组；field指定source、column及可选missing=zero或empty，缺失默认报错。数字精确十进制计算。必须先核实各来源口径、关联基数及覆盖范围，不得用样本或不完整数据集导出完整报表。'});
   }
@@ -264,6 +264,8 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const found = databaseEndpoints(content);
           return { config: args.ref, rows: found.slice(0, q.maxRows).map(row=>({...row,connectionSource:{...x,contentHash:createHash('sha256').update(content).digest('hex')}})), truncated: found.length > q.maxRows, partial: found.unresolved || !found.length, stage: found.length ? '配置已读取，数据库地址已解析' : '配置已读取，未解析出数据库地址', databaseConnection: '未测试；管理员确认后可在本机提取凭据并通过受控只读模式验证' };
         }
+        if(tool==='compare_datasets')return datasets.compare(args);
+        if(tool==='list_datasets')return datasets.list();
         if(tool==='compose_report')return datasets.compose(args);
         const c = await mysql();
         if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect(statement,(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
@@ -319,7 +321,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const statement = selectStatement(args, tables, q);
         const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
-      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['group_dataset','linked_group_dataset','compose_report'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
+      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['group_dataset','linked_group_dataset','compose_report','compare_datasets','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
     } catch (error) { if(error instanceof ReportInputError)throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };

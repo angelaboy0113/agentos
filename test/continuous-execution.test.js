@@ -210,3 +210,27 @@ test('continuous environment accepts evidence returned shortly after tool expiry
   assert.equal(resumed.status, 'running');
   assert.equal(resumed.environmentAccess, undefined);
 });
+test('whole-task deadline and execution timeouts preserve prior findings without rerunning mutating requests',async()=>{
+ const source={handoffGate:{passed:true},verifiedArtifacts:[{path:'a'}],finalMessage:'已经核实的业务规则',investigation:{goals:[{id:'original-question',status:'open',evidence:'区域列未补齐'}]}};
+ const job={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,context:[{kind:'analysis_turn',result:source}],reportFiles:[{id:'report'}],lease:{id:'l'}};
+ let runs=0;const runner=new AgentRunner({},async()=>{runs++;throw Object.assign(new Error('The operation was aborted due to timeout'),{code:'LOCAL_CONTROL_TIMEOUT'});});
+ const result=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(result.outcome,'blocked');assert.match(result.finalMessage,/已经核实/);assert.match(result.finalMessage,/区域列/);assert.match(result.finalMessage,/中间文件/);assert.equal(result.investigationStopped.code,'LOCAL_CONTROL_TIMEOUT');assert.equal(runs,1);
+ const expired=await runner.executeContinuous({...job,events:[{type:'started',at:new Date(Date.now()-21*60000).toISOString()}]},async()=>{},new AbortController().signal);assert.equal(expired.investigationStopped.code,'INVESTIGATION_BUDGET');assert.equal(runs,1);
+});
+test('a task deadline aborts the active worker before returning the retained result; user cancellation stays cancellation',async t=>{
+ const keep=setTimeout(()=>{},1000);t.after(()=>clearTimeout(keep));
+ const base={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,context:[],lease:{id:'l'}};
+ let stopped=false;const runner=new AgentRunner({},async(job,cfg,emit,signal)=>new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{stopped=true;reject(Object.assign(new Error('worker exited'),{processesExited:true}));},{once:true});}));
+ const result=await runner.executeContinuous({...base,events:[{type:'started',at:new Date(Date.now()-1200000+40).toISOString()}]},async()=>{},new AbortController().signal);assert.equal(stopped,true);assert.equal(result.investigationStopped.code,'INVESTIGATION_BUDGET');
+ const user=new AbortController();const promise=runner.executeContinuous(base,async()=>{},user.signal);user.abort();await assert.rejects(promise,/worker exited/);
+});
+test('waiting for a human does not consume the active investigation budget',async()=>{
+ const {investigationElapsed}=await import('../src/shared/investigation-budget.js');const now=Date.now();
+ const job={events:[{type:'started',at:new Date(now-86400000).toISOString()},{type:'completed',at:new Date(now-86400000+1000).toISOString()},{type:'started',at:new Date(now-2000).toISOString()}]};assert.equal(investigationElapsed(job,now),3000);
+});
+test('timeout while submitting an environment result retains that newly collected evidence',async()=>{
+ const job={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,lease:{id:'l'},environmentAccess:{kind:'mysql'},context:[]};
+ const runner=new AgentRunner({},async()=>({outcome:'partial',environmentEvidence:{rowCount:3},finalMessage:'新取得的三条业务记录',exportFiles:[{id:'file'}]}));
+ runner.post=async()=>{throw Object.assign(new Error('timeout'),{code:'LOCAL_CONTROL_TIMEOUT'});};
+ const out=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(out.outcome,'blocked');assert.match(out.finalMessage,/新取得/);assert.match(out.finalMessage,/1 份中间文件/);
+});

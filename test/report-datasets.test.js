@@ -67,3 +67,20 @@ test('runtime tools page grouped datasets in an InnoDB readonly snapshot and pro
  await tools.run('schema',{table:'budget'});const r=await tools.run('group_dataset',{table:'budget',groupColumns:['dealer'],aggregates:[{op:'sum',column:'amount',as:'amount'}],filters:[{column:'deleted',op:'=',value:0}]});assert.equal(r.rowCount,1001);assert.equal(r.complete,true);assert.equal(r.preview.length,5);assert.ok(checks>=7);assert.ok(calls.includes('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ'));assert.ok(calls.includes('START TRANSACTION READ ONLY'));
  const out=await tools.run('compose_report',compose(r.datasetRef));assert.equal(out.rowCount,1001);assert.equal(out.totals['金额'],'100.1');
 });
+test('task-local durable datasets resume precise composition and compare missing keys across rounds without SQL',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'agentos-resume-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const first=new ReportDatasets({maxRows:1000,directory:root,scope:'same-approved-environment'});
+ const a=await first.collect(statement,pages([{dealer:'1',amount:'0.1'},{dealer:'2',amount:'0.2'}]));const report=await first.compose(compose(a.datasetRef));first.clear();
+ const next=new ReportDatasets({maxRows:1000,directory:root,scope:'same-approved-environment'});const catalog=await next.list();assert.equal(catalog.datasets.length,2);assert.ok(catalog.datasets.some(d=>d.datasetRef===report.datasetRef));
+ const b=await next.collect(statement,pages([{dealer:'1',amount:'0.1'}]));const diff=await next.compare({leftRef:a.datasetRef,rightRef:b.datasetRef,leftKey:'dealer',rightKey:'dealer'});assert.equal(diff.onlyLeftCount,1);assert.equal(diff.onlyLeft[0].dealer,'2');assert.equal(diff.onlyRightCount,0);
+ const out=await next.compose({sources:[{name:'s1',datasetRef:report.datasetRef,keyColumn:'经销商'}],columns:[{label:'编码',value:{op:'key'}},{label:'结余',total:true,value:{op:'field',source:'s1',column:'金额'}}]});assert.equal(out.rowCount,2);assert.equal(out.totals['结余'],'0.3');assert.equal(out.readAt,report.readAt);
+ const foreign=new ReportDatasets({maxRows:1000,directory:root,scope:'other-environment'});assert.equal((await foreign.list()).datasets.length,0);await assert.rejects(foreign.compose(compose(a.datasetRef)),/范围/);
+ const otherJob=new ReportDatasets({maxRows:1000,directory:path.join(root,'other-job'),scope:'same-approved-environment'});await assert.rejects(otherJob.compose(compose(a.datasetRef)));
+});
+test('persisted datasets reject tampering and renewed grants still recheck permission on restore',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'agentos-resume-security-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const first=new ReportDatasets({maxRows:100,directory:root,scope:'scope'}),a=await first.collect(statement,pages(rows(2)));
+ const file=path.join(root,'datasets',a.datasetRef+'.json'),saved=JSON.parse(await readFile(file,'utf8'));saved.data.rows[0].amount='999';await writeFile(file,JSON.stringify(saved));
+ const next=new ReportDatasets({maxRows:100,directory:root,scope:'scope'});assert.equal((await next.list()).datasets.length,0);await assert.rejects(next.compose(compose(a.datasetRef)),/摘要/);
+ const revoked=new ReportDatasets({maxRows:100,directory:root,scope:'scope',authorize:async()=>{throw new Error('revoked');}});await assert.rejects(revoked.list(),/revoked/);await assert.rejects(revoked.compose(compose(a.datasetRef)),/revoked/);
+});

@@ -1,3 +1,4 @@
+import {investigationLimits,interruptedInvestigation,investigationElapsed} from '../shared/investigation-budget.js';
 import { fileURLToPath } from 'node:url';
 import { runnerConfig } from './config.js';
 import { executeTaskProcess } from './task-process.js';
@@ -77,6 +78,7 @@ export class AgentRunner {
       }
     }, 30_000);
     heartbeatTimer.unref();
+    let executionResult;
     try {
       await checkControl();
       if (controller.signal.aborted) {
@@ -84,6 +86,7 @@ export class AgentRunner {
         return;
       }
       const result = await this.executeContinuous(job, emit, controller.signal);
+      executionResult=result;
       const completed = await emit({ type: 'completed', result });
       // Cancellation may win the transaction race just after the worker exited naturally.
       if (completed.job.status === 'cancelling') await emit({ type: 'cancelled', processesExited: true });
@@ -94,7 +97,7 @@ export class AgentRunner {
       }
       if (!lostLease) await emit(controller.signal.aborted && error.processesExited
         ? { type: 'cancelled', processesExited: true }
-        : { type: 'failed', message: error.message, result: { error: error.message } });
+        : { type:'failed',message:job.continuousInvestigation?'连续调查执行或状态回传中断，已保留现有成果':error.message,result:job.continuousInvestigation?interruptedInvestigation({...job,context:[...(job.context??[]),...(executionResult?[{kind:'environment_result',result:executionResult}]:[])]},error.code==='LOCAL_CONTROL_TIMEOUT'?'本机状态接口等待超时；请求可能已受理，未重复提交':'执行步骤中断，不能据此判断业务故障',error.code??'EXECUTION_INTERRUPTED'):{error:error.message} });
     } finally {
       clearInterval(controlTimer);
       clearInterval(heartbeatTimer);
@@ -105,19 +108,35 @@ export class AgentRunner {
     if (!job.continuousInvestigation || job.taskIntent !== 'analysis' || job.stage !== 'developer') {
       return this.execute(job, this.config, emit, signal);
     }
+    const limits=investigationLimits(),remaining=limits.maxMs-investigationElapsed(job);
+    if(remaining<=0)return interruptedInvestigation(job,'整个任务已达到自动调查时限','INVESTIGATION_BUDGET');
+    const deadline=new AbortController();const timer=setTimeout(()=>deadline.abort(),remaining);timer.unref();
+    let checkpoint=job;
+    try{return await this.continueInvestigation(job,emit,AbortSignal.any([signal,deadline.signal]),current=>{checkpoint=current;});}
+    catch(error){
+      if(signal.aborted||error.processesExited===false)throw error;
+      const reason=deadline.signal.aborted?'整个任务已达到自动调查时限':error.code==='LOCAL_CONTROL_TIMEOUT'?'本机任务状态接口等待超时，不能确认该次请求是否已受理；未自动重试修改请求':'本轮执行中断，已有结果已保留：'+(/timeout|超时/i.test(error.message)?'等待响应超时':'执行器未完成后续步骤');
+      return interruptedInvestigation(checkpoint,reason,deadline.signal.aborted?'INVESTIGATION_BUDGET':error.code??'EXECUTION_INTERRUPTED');
+    }finally{clearTimeout(timer);}
+  }
+
+  async continueInvestigation(job,emit,signal,save){
     const identity = { runnerId: this.config.runnerId, leaseId: job.lease.id };
     let current = job;
     if (current.environmentAccess) {
-      const environmentResult = await this.execute(current, this.config, emit, signal);
+      save(current);const environmentResult = await this.execute(current, this.config, emit, signal);
+      if(environmentResult?.investigationStopped)return interruptedInvestigation(current,environmentResult.investigationStopped.reason,environmentResult.investigationStopped.code);
       if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
         return preserveContinuousEnvironmentEvidence(current, environmentResult);
       }
+      save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}],reportFiles:[...(current.reportFiles??[]),...(environmentResult.exportFiles??[])]});
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
         { ...identity, result: environmentResult })).job;
     }
     for (;;) {
-      signal.throwIfAborted();
+      save(current);signal.throwIfAborted();
       const result = await this.execute(current, this.config, emit, signal);
+      save({...current,context:[...(current.context??[]),{kind:'analysis_turn',result}]});
       if (result?.outcome === 'partial' && result.investigation?.status === 'continue' && !result.investigation?.blocker) {
         const continued = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-analysis-continue`,
           { ...identity, result });
@@ -131,23 +150,25 @@ export class AgentRunner {
       current = prepared.job;
       if (prepared.terminalResult) return prepared.terminalResult;
       if (!prepared.planned) continue;
-      const environmentResult = await this.execute(current, this.config, emit, signal);
+      save(current);const environmentResult = await this.execute(current, this.config, emit, signal);
+      if(environmentResult?.investigationStopped)return interruptedInvestigation(current,environmentResult.investigationStopped.reason,environmentResult.investigationStopped.code);
       if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
         return preserveContinuousEnvironmentEvidence(current, environmentResult);
       }
+      save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}],reportFiles:[...(current.reportFiles??[]),...(environmentResult.exportFiles??[])]});
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
         { ...identity, result: environmentResult })).job;
     }
   }
 
   async post(path, body) {
-    const response = await fetch(`${this.config.serverUrl}${path}`, {
+    let response;try{response = await fetch(`${this.config.serverUrl}${path}`, {
       signal: AbortSignal.timeout(10_000),
       method: 'POST',
       headers: { authorization: `Bearer ${this.config.runnerToken}`, 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => ({}));
+    });}catch(error){if(error.name==='TimeoutError'||/timeout/i.test(error.message))throw Object.assign(new Error('本机任务状态接口等待超时；请求可能已被受理，未自动重复提交'),{code:'LOCAL_CONTROL_TIMEOUT'});throw error;}
+    const payload = await response.json().catch(()=>{throw Object.assign(new Error('本机任务状态响应未完整收到；未自动重复提交'),{code:'LOCAL_CONTROL_RESPONSE'});});
     if (!response.ok) {
       const error = new Error(`${path} failed (${response.status}): ${payload.error ?? 'unknown error'}`);
       error.statusCode = response.status;
