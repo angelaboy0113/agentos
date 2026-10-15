@@ -31,3 +31,10 @@ test('malformed lookup structures return input errors without crashing the execu
  const f=await fixture(t),base=await f.collect('base',[{id:'1'}]);
  for(const lookups of [[null],[{name:'x',datasetRef:base.datasetRef,sourceColumn:'id',targetColumn:'id',fields:[null],missing:'empty'}]])await assert.rejects(f.d.enrich({datasetRef:base.datasetRef,keyColumn:'id',lookups}),error=>error.code==='REPORT_INPUT');
 });
+
+test('explicit fallback lookup uses verified default rows and records inherited matches without replacing specific values',async t=>{
+ const f=await fixture(t),master=await f.collect('master',[{id:'a'},{id:'b'},{id:'c'}]),settings=await f.collect('settings',[{id:'a',value:'quarter'},{id:'default',value:'month'}]);
+ const args={datasetRef:master.datasetRef,keyColumn:'id',lookups:[{name:'setting',datasetRef:settings.datasetRef,sourceColumn:'id',targetColumn:'id',fields:[{column:'value',as:'effective'}],fallbackKey:'default',missing:'error'}]};
+ const r=await f.d.enrich(args);assert.equal(r.lookupChecks[0].fallbackCount,2);assert.equal(r.lookupChecks[0].unmatchedCount,0);assert.deepEqual(r.preview.map(x=>x.effective),['quarter','month','month']);assert.equal(r.preview[1].setting_status,'沿用默认配置');
+ args.lookups[0].fallbackKey='nonexistent';await assert.rejects(f.d.enrich(args),/默认/);
+});

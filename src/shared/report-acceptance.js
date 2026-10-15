@@ -1,7 +1,8 @@
+import {normalizeReportFormatReview} from './report-output-policy.js';
 // Program verification and review against the user's request are separate states.
 // This module never creates receipts, queries data or sends files.
 const proof=file=>/^[a-f0-9]{64}$/.test(file?.verificationHash??'');
-const material=new Set(['current_formula','current_scope','current_coverage','current_source','required_output']);
+const material=new Set(['current_formula','current_scope','current_coverage','current_source','current_format','required_output']);
 const kinds=new Set([...material,'historical_difference','optional_followup','review_access']);
 const assessment=(job,result)=>{
  const a=result?.reportAssessment,file=job.reportFiles?.find(f=>f.id===a?.fileId&&proof(f));
@@ -13,6 +14,7 @@ export function recordReportFiles(job,files,generation){
  for(const f of files){if(!job.reportFiles.some(x=>x.id===f.id))job.reportFiles.push({...structuredClone(f),sourceJobId:job.id,questionGeneration:generation??null});job.reportReviews[f.id]??={status:proof(f)?'awaiting_review':'draft',verificationHash:f.verificationHash};}
 }
 export function assessReportDelivery(job,result){
+ result=normalizeReportFormatReview(job,result);
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.reportReviews||!job.reportFiles?.length||result?.sourceSyncBlocked)return result;
  const reviewed=assessment(job,result);
  if(reviewed&&job.reportEvidence&&(job.reportEvidence.status!=='verified'||job.reportEvidence.binding?.fileId!==reviewed.file.id||job.reportEvidence.binding?.verificationHash!==reviewed.file.verificationHash||job.reportEvidence.calculationAudit?.status!=='passed'))return {...result,reportReviewRequired:true,outcome:'partial',environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,goals:(result.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),status:'continue',blocker:null,nextStep:'先读取与当前文件绑定的inspect_report资料，不能仅凭元数据接受文件。'}};

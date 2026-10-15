@@ -476,7 +476,8 @@
                       "required_output",
                       "historical_difference",
                       "optional_followup",
-                      "review_access"
+                      "review_access",
+                      "current_format"
                     ]
                   },
                   "evidence": {
