@@ -442,3 +442,10 @@ test('actionable input errors are preserved and credentials redacted for next-ro
  assert.match(result.toolInputErrors[0].message,/s2:used/);assert.equal(result.toolInputErrors[0].resolved,false);assert.ok(!result.toolInputErrors[0].message.includes(credentials.password));
  const context=reportInvestigationContext({originalQuestion:'all records',context:[{result}]});assert.match(context.corrections[0].message,/s2:used/);
 });
+test('a finalized report returns to semantic review immediately without optional extra database calls',async()=>{
+ const cfg={version:1,environments:{env:structuredClone(environment)}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['finish report']},'demo',{profile:'owner',senderId:'ou_admin'});let calls=0;
+ const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'finalize_report'}],run:async tool=>tool==='finalize_report'?{exportFile:{id:'report-proof',verificationHash:'a'.repeat(64)},stage:'program verified'}:{stage:'connected'},close:async()=>{}}),
+ planner:async()=>({next:async()=>{calls++;assert.equal(calls,1);return {tool:'finalize_report',arguments:'{}'};},close:async()=>{}})});
+ assert.equal(result.exportFiles.length,1);assert.match(result.summary,/按原问题审阅/);assert.equal(calls,1);
+});

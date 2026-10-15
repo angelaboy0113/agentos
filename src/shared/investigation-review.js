@@ -1,3 +1,4 @@
+import {assessReportDelivery} from './report-acceptance.js';
 import {sourcePreparationProgress} from './source-preparation.js';
 import {investigationLimits,investigationElapsed} from './investigation-budget.js';
 import { createHash } from 'node:crypto';
@@ -103,6 +104,7 @@ export function isSourceBackedOperationGuidance(job,result){
    &&result.sourceSync?.repositories?.length>0;
 }
 export function assessInvestigation(job,result){
+ result=assessReportDelivery(job,result);
  result=normalizeQuestionScope(job,result);
  // Models may label the same evidence ready, partial or blocked. Normalize all three
  // before the handoff gate, rather than leaving a failed original-question check in partial.

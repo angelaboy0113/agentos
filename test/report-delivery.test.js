@@ -60,3 +60,15 @@ test('an old pending delivery without a verification receipt is retired without 
  const service=new ReportDelivery({store:{read:async()=>structuredClone(state),transact:async f=>f(state)},config:{dataDir:'/unused'},feishu:{replyFile:async()=>sent++}});
  await service.retry();assert.equal(sent,0);assert.equal(state.reportDeliveries.old.superseded,true);await service.close();
 });
+test('new lifecycle sends accepted versions only and retires a queued version when a material issue is recorded',async()=>{
+ const item={id:'verified',verificationHash:'a'.repeat(64),questionGeneration:1},job={id:'j',questionId:'q',status:'completed',result:{outcome:'ready'},reportFiles:[item],reportReviews:{verified:{status:'awaiting_review',verificationHash:item.verificationHash}}};
+ const state={jobs:[job],questions:{q:{generation:1,messageId:'root'}}},store={read:async()=>structuredClone(state),transact:async f=>f(state)};
+ const service=new ReportDelivery({store,config:{dataDir:'/unused'},feishu:{}});await service.enqueue(job);assert.equal(Object.keys(state.reportDeliveries??{}).length,0);
+ job.reportReviews.verified.status='accepted';await service.enqueue(job);assert.equal(Object.keys(state.reportDeliveries).length,1);
+ job.reportReviews.verified.status='revision_required';service.context.feishu.replyFile=async()=>assert.fail('invalidated version must not send');await service.retry();assert.equal(Object.values(state.reportDeliveries)[0].superseded,true);await service.close();
+});
+test('a later review preserves the original file location when accepted report metadata is inherited',async()=>{
+ const item={id:'verified',verificationHash:'a'.repeat(64),questionGeneration:1,sourceJobId:'origin'},source={id:'origin',questionId:'q',reportFiles:[item],reportReviews:{verified:{status:'awaiting_review',verificationHash:item.verificationHash}}},reviewer={...source,id:'reviewer',status:'completed',result:{outcome:'ready'},reportReviews:{verified:{status:'accepted',verificationHash:item.verificationHash}}};
+ const state={jobs:[source,reviewer],questions:{q:{generation:1,messageId:'root'}}};const service=new ReportDelivery({store:{read:async()=>structuredClone(state),transact:async f=>f(state)},config:{dataDir:'/unused'},feishu:{}});
+ await service.enqueue(reviewer);assert.equal(Object.values(state.reportDeliveries)[0].sourceJobId,'origin');await service.close();
+});

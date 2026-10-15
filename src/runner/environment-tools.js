@@ -233,6 +233,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   }
   let browser;
   if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
+  if(e.kind==='mysql'&&q.exportMaxRows){const final=spec.find(x=>x.tool==='finalize_report');spec.push({...final,tool:'refresh_report',description:'参数与finalize_report相同。仅当当前口径变更或取数时点超窗需要重算时使用：预检已有来源recipe及派生依赖，在一个新只读事务里集中刷新完整来源、独立基准、维度和对象范围，再重做草稿并核验。不能执行保存SQL；旧数据无recipe或含临时in_set须先补齐。历史快照差异本身不要求重算。返回新文件供原问题审阅，不自动发群。'});}
   const run = async (tool, args = {}) => {
     if (!active) throw new Error('工具执行已结束');
     if (!spec.some(x => x.tool === tool) || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('不支持的工具或参数');
@@ -271,8 +272,12 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         if(tool==='enrich_dataset')return datasets.enrich(args);
         if(tool==='inspect_dataset')return datasets.inspect(args);
         if(tool==='finalize_report')return datasets.finalize(args);
+        if(tool==='refresh_report')return datasets.refresh(args,{
+         begin:async()=>{const c=await mysql();await adapters.authorize?.();await c.rollback();readCache.clear();readCacheBytes=0;await c.query('START TRANSACTION READ ONLY');},
+         reload:async recipe=>{for(const table of [recipe.args.table,recipe.args.leftTable,recipe.args.rightTable].filter(Boolean)){let cursor;do{const page=await run('schema',{table,...(cursor!==undefined?{cursor}:{})});cursor=page.nextCursor;}while(cursor!==null&&cursor!==undefined);}return run(recipe.tool,structuredClone(recipe.args));}
+        });
         const c = await mysql();
-        if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect(statement,(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
+        if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect({...statement,recipe:{tool,args:structuredClone(args)}},(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
         if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };
         if (tool === 'tables') {
           const offset=args.cursor===undefined?0:Number(args.cursor);
@@ -325,7 +330,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const statement = selectStatement(args, tables, q);
         const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
-      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['group_dataset','linked_group_dataset','compose_report','finalize_report','enrich_dataset','compare_datasets','inspect_dataset','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
+      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['group_dataset','linked_group_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','inspect_dataset','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
     } catch (error) { if(error instanceof DatasetCapacityError)throw new QueryInputError(error.code,error.message); if(error instanceof ReportInputError)throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };

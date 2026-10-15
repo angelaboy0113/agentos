@@ -214,7 +214,7 @@ test('whole-task deadline and execution timeouts preserve prior findings without
  const source={handoffGate:{passed:true},verifiedArtifacts:[{path:'a'}],finalMessage:'已经核实的业务规则',investigation:{goals:[{id:'original-question',status:'open',evidence:'区域列未补齐'}]}};
  const job={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,context:[{kind:'analysis_turn',result:source}],reportFiles:[{id:'report'}],lease:{id:'l'}};
  let runs=0;const runner=new AgentRunner({},async()=>{runs++;throw Object.assign(new Error('The operation was aborted due to timeout'),{code:'LOCAL_CONTROL_TIMEOUT'});});
- const result=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(result.outcome,'blocked');assert.match(result.finalMessage,/已经核实/);assert.match(result.finalMessage,/区域列/);assert.match(result.finalMessage,/中间文件/);assert.equal(result.investigationStopped.code,'LOCAL_CONTROL_TIMEOUT');assert.equal(runs,1);
+ const result=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(result.outcome,'blocked');assert.match(result.finalMessage,/已经核实/);assert.match(result.finalMessage,/区域列/);assert.match(result.finalMessage,/1 份文件，其中 0 份通过程序核验/);assert.equal(result.investigationStopped.code,'LOCAL_CONTROL_TIMEOUT');assert.equal(runs,1);
  const expired=await runner.executeContinuous({...job,events:[{type:'started',at:new Date(Date.now()-21*60000).toISOString()}]},async()=>{},new AbortController().signal);assert.equal(expired.investigationStopped.code,'INVESTIGATION_BUDGET');assert.equal(runs,1);
 });
 test('a task deadline aborts the active worker before returning the retained result; user cancellation stays cancellation',async t=>{
@@ -232,7 +232,7 @@ test('timeout while submitting an environment result retains that newly collecte
  const job={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,lease:{id:'l'},environmentAccess:{kind:'mysql'},context:[]};
  const runner=new AgentRunner({},async()=>({outcome:'partial',environmentEvidence:{rowCount:3},finalMessage:'新取得的三条业务记录',exportFiles:[{id:'file'}]}));
  runner.post=async()=>{throw Object.assign(new Error('timeout'),{code:'LOCAL_CONTROL_TIMEOUT'});};
- const out=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(out.outcome,'blocked');assert.match(out.finalMessage,/新取得/);assert.match(out.finalMessage,/1 份中间文件/);
+ const out=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(out.outcome,'blocked');assert.match(out.finalMessage,/新取得/);assert.match(out.finalMessage,/1 份文件，其中 0 份通过程序核验/);
 });
 test('runner uses the acknowledged start event so queue time cannot exhaust the execution budget',async()=>{
  const job={id:'queued',status:'running',createdAt:new Date(Date.now()-86400000).toISOString(),stage:'developer',taskIntent:'analysis',continuousInvestigation:true,events:[],lease:{id:'lease',runnerId:'r'},context:[]};

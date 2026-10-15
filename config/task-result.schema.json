@@ -9,7 +9,8 @@
     "environmentQuery",
     "websiteQuery",
     "investigation",
-    "environmentSetup"
+    "environmentSetup",
+    "reportAssessment"
   ],
   "properties": {
     "outcome": {
@@ -415,6 +416,74 @@
             },
             "url": {
               "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "reportAssessment": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fileId",
+            "coverage",
+            "decision",
+            "issues"
+          ],
+          "properties": {
+            "fileId": {
+              "type": "string"
+            },
+            "coverage": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "incomplete"
+              ]
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "deliver",
+                "revise",
+                "needs_review"
+              ]
+            },
+            "issues": {
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "evidence"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "current_formula",
+                      "current_scope",
+                      "current_coverage",
+                      "current_source",
+                      "required_output",
+                      "historical_difference",
+                      "optional_followup"
+                    ]
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1200
+                  }
+                }
+              }
             }
           }
         }

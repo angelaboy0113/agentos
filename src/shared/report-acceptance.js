@@ -1,0 +1,42 @@
+// Program verification and review against the user's request are separate states.
+// This module never creates receipts, queries data or sends files.
+const proof=file=>/^[a-f0-9]{64}$/.test(file?.verificationHash??'');
+const material=new Set(['current_formula','current_scope','current_coverage','current_source','required_output']);
+const kinds=new Set([...material,'historical_difference','optional_followup']);
+const assessment=(job,result)=>{
+ const a=result?.reportAssessment,file=job.reportFiles?.find(f=>f.id===a?.fileId&&proof(f));
+ if(!file||!['deliver','revise','needs_review'].includes(a.decision)||!['complete','incomplete'].includes(a.coverage)||!Array.isArray(a.issues)||a.issues.length>12||a.issues.some(i=>!kinds.has(i?.kind)||typeof i.evidence!=='string'||!i.evidence.trim()||i.evidence.length>1200))return null;
+ return {a,file,blocking:a.issues.filter(i=>material.has(i.kind))};
+};
+export function recordReportFiles(job,files,generation){
+ job.reportFiles??=[];job.reportReviews??={};
+ for(const f of files){if(!job.reportFiles.some(x=>x.id===f.id))job.reportFiles.push({...structuredClone(f),sourceJobId:job.id,questionGeneration:generation??null});job.reportReviews[f.id]??={status:proof(f)?'awaiting_review':'draft',verificationHash:f.verificationHash};}
+}
+export function assessReportDelivery(job,result){
+ if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.reportReviews||!job.reportFiles?.length||result?.sourceSyncBlocked)return result;
+ const reviewed=assessment(job,result);
+ if(reviewed&&(reviewed.a.decision==='deliver'||reviewed.a.decision==='revise'&&reviewed.a.issues.length>0)&&reviewed.a.coverage==='complete'&&!reviewed.blocking.length){
+  const root={id:'original-question',required:true,status:'verified',evidence:result.investigation?.goals?.find(g=>g.id==='original-question')?.evidence||result.summary||'原要求与已核验文件已逐项审阅'};
+  return {...result,reportAssessment:{...reviewed.a,decision:'deliver'},outcome:'ready',environmentQuery:null,websiteQuery:null,environmentSetup:null,
+   investigation:{...result.investigation,status:'complete',blocker:null,nextStep:'',goals:[root,...(result.investigation?.goals??[]).filter(g=>g.id!=='original-question').map(g=>({...g,required:false}))]}};
+ }
+ if(result?.outcome==='ready')return {...result,reportReviewRequired:true,outcome:'partial',environmentQuery:null,websiteQuery:null,
+  summary:'文件已完成程序核验，仍需明确审阅是否满足原问题；不能仅凭文件存在认定交付完成。',
+  investigation:{...result.investigation,goals:(result.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),status:'continue',blocker:null,nextStep:'对照原问题填写reportAssessment；历史快照差异仅作补充，只有当前结果或原要求缺口才阻止交付。'}};
+ return result;
+}
+export function recordReportReview(job,result){
+ if(!job.reportReviews||result?.handoffGate?.passed!==true||result.sourceSyncBlocked)return;
+ const reviewed=assessment(job,result);if(!reviewed)return;
+ const {a,file,blocking}=reviewed,previous=job.reportReviews[file.id];
+ if(blocking.length){job.reportReviews[file.id]={status:'revision_required',verificationHash:file.verificationHash,issues:structuredClone(blocking),at:new Date().toISOString()};return;}
+ if(a.decision==='deliver'&&a.coverage==='complete'&&result.outcome==='ready'&&result.investigation?.status==='complete'&&result.investigation.goals?.some(g=>g.id==='original-question'&&g.required===true&&g.status==='verified'&&g.evidence?.trim())){
+  job.reportReviews[file.id]={status:'accepted',verificationHash:file.verificationHash,issues:structuredClone(a.issues),at:new Date().toISOString(),result:structuredClone(result)};
+ }else if(!previous)job.reportReviews[file.id]={status:'awaiting_review',verificationHash:file.verificationHash};
+}
+export function reportEligible(job,file){return proof(file)&&(!job.reportReviews||(job.reportReviews[file.id]?.status==='accepted'&&job.reportReviews[file.id]?.verificationHash===file.verificationHash));}
+export function acceptedReportResult(job){
+ const f=[...(job.reportFiles??[])].reverse().find(f=>job.reportReviews?.[f.id]?.status==='accepted'&&reportEligible(job,f));
+ if(!f)return null;const r=job.reportReviews[f.id].result;
+ return r?.outcome==='ready'?{...structuredClone(r),environmentQuery:null,websiteQuery:null,environmentSetup:null}:null;
+}

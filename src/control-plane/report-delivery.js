@@ -1,3 +1,4 @@
+import {reportEligible} from '../shared/report-acceptance.js';
 import {createHash} from 'node:crypto';
 import {reportFile} from '../shared/report-files.js';
 import {messageIdOf} from './live-cards.js';
@@ -15,7 +16,7 @@ export class ReportDelivery {
    const jobs=job.questionId?state.jobs.filter(j=>j.questionId===job.questionId):[current];
    state.reportDeliveries??={};
    // Only the latest finalized file is the deliverable. Earlier versions stay local.
-   const candidates=jobs.flatMap(source=>(source.reportFiles??[]).filter(item=>/^[a-f0-9]{64}$/.test(item.verificationHash??'')).map(item=>({source,item})));
+   const candidates=jobs.flatMap(source=>(source.reportFiles??[]).filter(item=>reportEligible(current.reportReviews?current:source,item)).map(item=>({source:state.jobs.find(j=>j.id===item.sourceJobId)??source,item})));
    const selected=candidates.filter(({item})=>!q||item.questionGeneration===q.generation).slice(-1);
    for(const {source,item} of selected){
     if(q&&item.questionGeneration!==q.generation)continue;
@@ -36,6 +37,7 @@ export class ReportDelivery {
   if(this.closed||typeof this.context.feishu.replyFile!=='function')return;
   const state=snapshot??await this.context.store.read();
   for(const [key,entry] of Object.entries(state.reportDeliveries??{}))if(!entry.messageId&&!entry.superseded&&Date.now()>=(entry.retryAt??0)&&!this.workers.has(key)){
+   if(!deliveryEligible(state,entry)){await this.context.store.transact(s=>{s.reportDeliveries[key].superseded=true;});continue;}
    if(entry.questionId&&state.questions?.[entry.questionId]?.generation!==entry.questionGeneration){await this.context.store.transact(s=>{s.reportDeliveries[key].superseded=true;});continue;}
    const work=this.deliver(key,entry);this.workers.set(key,work);work.finally(()=>this.workers.delete(key)).catch(()=>{});
   }
@@ -46,7 +48,7 @@ export class ReportDelivery {
    if(!/^[a-f0-9]{64}$/.test(entry.item.verificationHash??'')){await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{superseded:true,error:'旧文件无最终核验记录，保留本地，不自动发送'}));return;}
    const {file}=await reportFile(this.context.config.dataDir,entry.sourceJobId,entry.item);
    const current=await this.context.store.read();
-   if(current.reportDeliveries[key]?.superseded||(entry.questionId&&current.questions?.[entry.questionId]?.generation!==entry.questionGeneration))return;
+   if(!deliveryEligible(current,entry)||current.reportDeliveries[key]?.superseded||(entry.questionId&&current.questions?.[entry.questionId]?.generation!==entry.questionGeneration))return;
    const result=await this.context.feishu.replyFile(entry.destination.messageId,file,{...entry.destination,idempotencyKey:'aos-report-'+createHash('sha256').update(key).digest('hex').slice(0,32)});
    const id=messageIdOf(result);if(!id)throw new Error('没有文件消息编号');
    await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{messageId:id,deliveredAt:new Date().toISOString(),failures:0,retryAt:0}));
@@ -56,3 +58,5 @@ export class ReportDelivery {
  }
  async close(){this.closed=true;await Promise.allSettled([...this.workers.values()]);}
 }
+
+function deliveryEligible(state,entry){const source=state.jobs.find(j=>j.id===entry.sourceJobId);const reviewer=state.jobs.filter(j=>(entry.questionId?j.questionId===entry.questionId:j.id===entry.sourceJobId)&&j.reportReviews?.[entry.item.id]).at(-1);return reportEligible(reviewer??source??{},entry.item);}

@@ -1,3 +1,4 @@
+import {recordReportFiles,recordReportReview} from './report-acceptance.js';
 import {interruptedInvestigation} from './investigation-budget.js';
 import { continuousReviewDecision, reviewDecision } from './investigation-review.js';
 import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint } from './environment-access.js';
@@ -256,6 +257,7 @@ export class JsonStore {
       if (job.continuousQueryKeys.includes(queryKey)) throw Object.assign(new Error('重复环境查询，需要调整范围或补充新证据'), { code: 'DUPLICATE_QUERY' });
       job.continuousQueryKeys.push(queryKey);
       if(plan.continuationKey){job.continuousContinuationKeys??=[];job.continuousContinuationKeys.push(plan.continuationKey);}
+      recordReportReview(job,sourceResult);
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(sourceResult) }]);
       const progress=job.investigationProgress??{rounds:0,stagnant:0,seen:[]};
       const verified=(sourceResult.investigation?.goals??[]).filter(g=>g.required!==false&&g.status==='verified').map(g=>g.id);
@@ -290,7 +292,7 @@ export class JsonStore {
       ledger.rounds++;ledger.stagnant=newData?0:ledger.stagnant+1;
       if(newData)ledger.seen=[...ledger.seen,useful].slice(-64);
       job.investigationProgress=ledger;
-      if(result.exportFiles?.length){job.reportFiles??=[];for(const file of result.exportFiles)if(!job.reportFiles.some(x=>x.id===file.id))job.reportFiles.push({...structuredClone(file),questionGeneration:state.questions?.[job.questionId]?.generation??null});}
+      if(result.exportFiles?.length)recordReportFiles(job,result.exportFiles,state.questions?.[job.questionId]?.generation);
       delete job.environmentAccess;
       delete job.browserCheckpoint;
       delete job.browserResumeClaim;
@@ -310,6 +312,7 @@ export class JsonStore {
       }
       const decision = continuousReviewDecision(job, result);
       if (!decision.continue) return { job: structuredClone(job), continued: false, terminalResult: structuredClone(result), reason: decision.reason ?? null };
+      recordReportReview(job,result);
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(result) }]);
       job.updatedAt = new Date().toISOString();
       job.events.push({ id: createId('EVT'), type: 'continuous_analysis_continued', at: job.updatedAt });
@@ -456,7 +459,8 @@ export class JsonStore {
           || event.result.sourceSyncBlocked || event.result.handoffGate?.passed !== true
           || !event.result.verifiedArtifacts?.length || !event.result.handoff?.risks?.length
           || !event.result.sourceSync?.repositories?.length)) throw new Error('Invalid partial analysis evidence');
-        if(job.environmentAccess&&event.result?.exportFiles?.length){job.reportFiles??=[];for(const file of event.result.exportFiles)if(!job.reportFiles.some(x=>x.id===file.id))job.reportFiles.push({...structuredClone(file),questionGeneration:state.questions?.[job.questionId]?.generation??null});}
+        if(job.environmentAccess&&event.result?.exportFiles?.length)recordReportFiles(job,event.result.exportFiles,state.questions?.[job.questionId]?.generation);
+        recordReportReview(job,event.result);
         job.result = event.result ?? null;
         job.status = event.result?.outcome === 'blocked' ? 'blocked' : needsClarification(job, event.result)
           ? 'awaiting_clarification'

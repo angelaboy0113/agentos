@@ -33,7 +33,7 @@
 6. 计算仅支持固定的加、减、取较小值及字段引用；使用整数定点计算，支持至多 12 位小数，拒绝浮点结果和任意表达式。生成 UTF-8 BOM CSV，Excel 可打开，转义公式样式文本。最多 12 列、10000 行、10MB、每轮4个文件。合成结果本身也保存为可接续数据集，方便后续补列而不重算全部金额。派生数据沿用最早来源取数时间，不刷新旧证据寿命。结果提供sourceSnapshots和snapshotConsistency：跨轮拼接为multiple_read_times，不能声称同一个数据库事务，也不证明当前实时余额；最终核对仍须评估时点、业务范围和金额一致性。
 7. `compose_report`只返回`draftFile`，不登记可交付文件。下一步调用`finalize_report`，填写原要求摘要`requirement`、按原问题列顺序的`expectedColumns`、范围依据`scopeEvidence`、独立原始范围集`populationRef/populationKey`、每列`columnRules: [{label, definition, evidence}]`及计算分量核对`checks: [{source, column, referenceRef, referenceColumn, evidence}]`。程序要求列完全一致、对象内部主键集合相等（不要求在用户CSV额外增加主键列）；算术或数值指标列用到的每个来源分量，其合计必须与另一原始查询的完整基准集精确相等。基准可以按月份等较粗粒度分组，避免重新读取明细。不能引用同一SQL+参数或草稿自证；同样错误的业务筛选仍可能产生相同合计，业务条件需源码核实。原要求和口径依据是Agent解释的结构化资料，程序不声称已经自动理解或证明自然语言语义。
 8. 所有来源（含派生链最晚取数时点）、范围集、基准和草稿的取数差异按exportSnapshotWindowMs核验；超出窗口集中刷新受影响来源和独立基准，重做草稿。窗口内不等于多轮同一事务。通过后保存0600的`report-<uuid>.verification.json`，绑定文件摘要、原问题、逐列依据、范围、分量合计、来源版本及readWindow实际起止时间/差值/允许窗口，并返回含`verificationHash`的`exportFile`。定稿记录不可覆盖；修改需生成新草稿。
-9. 控制面核验任务目录、普通文件、大小、SHA-256和核验记录后登记文件。最终任务完成且结果为`ready`时，只回复当前问题轮次**最后一份通过核验的文件**，旧版本和中间草稿留本机。本入口目前每个问题交付一份最终文件；不自动把多份过程文件批量发群。旧版本缺核验记录的待发文件停用，避免升级后误发。
+9. 控制面核验任务目录、普通文件、大小、SHA-256和核验记录后登记文件。程序核验后还需对照原问题完成交付审阅；最终任务完成且结果为`ready`时，只回复当前问题轮次**最后一份通过程序核验且交付审阅已接受的文件**，旧版本和中间草稿留本机。本入口目前每个问题交付一份最终文件；不自动把多份过程文件批量发群。旧版本缺核验记录的待发文件停用，避免升级后误发。
 10. 文件消息使用固定幂等键及持久 outbox；失败重试发送，不重跑 Codex 和数据库查询。发送期间保留冻结的原消息和机器人身份，重启后继续重试。
 
 CSV 完整读取只证明本次筛选数据已取完，不代表期间、来源表、状态口径、调整方向或用户全部要求已经正确。最终仍需核对经销商数量、各列合计、必要抽样与参考报表。不同数据库、不同事务之间没有全局一致性保证；MyISAM 等非事务引擎不支持此完整分页能力。
@@ -87,3 +87,19 @@ CSV 完整读取只证明本次筛选数据已取完，不代表期间、来源�
 工具输入错误的具体说明（隐藏凭据、有界长度）随toolInputErrors保留，包含是否已修正；下一轮investigationContext.corrections和源码调查记录能看到缺口。inspect_dataset为草稿提供实际expectedColumns和requiredChecks来源/数值列，缺少独立基准时直接列出缺项。不因为REPORT_INPUT重新读取整套数据。
 
 磁盘预算包含目录内实际文件，过期/无效文件也占空间；不自动删除被引用的证据。达到预算返回明确DATASET_CAPACITY，保留已有成果并停止新增取数，维护者评估后调整配置或按保留要求清理，不显示为数据库未知故障。内存释放不修改文件引用或证据时间。目录、授权、摘要和独立金额核验仍保留。以上能力适用于不同业务对象的多源清单，不绑定具体报表或项目。
+
+## 交付审阅、版本与补查
+
+程序核验与原问题交付审阅分别保存。任务reportFiles登记verificationHash、原生成任务sourceJobId和问题轮次；reportReviews按文件保存awaiting_review（待审阅）、accepted（原要求已满足）或revision_required（发现影响结果的问题）。草稿不进入可投递状态；旧记录没有新状态时沿用原有最终任务与核验门控，不自动给旧受阻任务补发。
+
+源码Agent收到文件目录与审阅状态，填写task-result.schema.json的reportAssessment（其他任务为null）：fileId、coverage（complete/incomplete）、decision（deliver/revise/needs_review）、issues（kind及具体evidence）。current_formula/current_scope/current_coverage/current_source以及required_output属于影响交付的问题；historical_difference、optional_followup单独说明。用户明确要求历史对账时，未解释的差额属于required_output。coverage仍需Agent对照全部原要求判断，程序不能自动证明财务业务语义。
+
+已声明原要求完整满足、文件程序核验有效，且没有当前实质问题时，归一为ready，关闭original-question，清除额外环境查询；不能因另一时点历史金额不同无限追查。还需通过既有源码/工件交接门控才记accepted。发现具体当前问题则保存revision_required及依据，禁止该版本投递；修正后生成、核验并审阅新版本，不覆盖旧核验记录。历史差异本身不能推翻已接受版本。
+
+超时或自动调查停止时，已有accepted且未被具体问题推翻的版本可保留原ready结论；只有程序核验但尚未完成审阅的文件不会因此自动变为正式成果。实际发送仍检查文件、核验摘要、当前问题轮次、原机器人和投递状态，旧目录与状态故障不触发重新查库。
+
+## 集中刷新报表
+
+当前口径修正或多源取数超窗时，refresh_report接收与finalize_report相同的草稿、范围、列定义及独立基准参数。程序先检查依赖图，再结束当前只读事务并开启新的READ ONLY事务，统一重放原始分组来源、独立基准、对象范围和左连接派生链，重做草稿并执行原有最终核验。共享依赖只刷新一次，仍逐页检查授权、行数、表范围、InnoDB与时间/空间预算；一个工具的时限仍受exportTimeoutMs约束，失败保留原成果。
+
+新取得的分组数据保存固定工具recipe（group_dataset/linked_group_dataset及已验证参数）。刷新通过当前工具重新校验结构与范围，绝不执行文件里保存的SQL文本。旧数据没有recipe、参数被脱敏改变或依赖临时in_set集合时，预检阶段拒绝自动重放；应在当前授权内重新取得可重放来源。它不支持任意脚本或SQL，不能跨任务/环境恢复，也不表示已实现任意复杂报表。通过刷新后的文件依然需要原问题审阅和真实业务验收。

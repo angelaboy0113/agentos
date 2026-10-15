@@ -33,6 +33,7 @@ export class ReportDatasets {
   }
   // A short final page proves completion; exactly-at-cap requires one look-ahead.
   const ref=`dataset-${randomUUID()}`,data={rows,columns:statement.columns,complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
+  if(statement.recipe){const original=JSON.stringify(statement.recipe),safe=this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),original);data.recipe={...JSON.parse(safe),replayable:original===safe};}
   const dataHash=createHash('sha256').update(JSON.stringify(data)).digest('hex');
   let readAt=new Date().toISOString();if(complete&&this.storage){await this.check();const saved=await this.storage.save(ref,data,this.snapshotId);readAt=saved.readAt;await this.check();}
   this.remember(ref,{...data,snapshotId:this.snapshotId,readAt});
@@ -131,6 +132,36 @@ export class ReportDatasets {
   const bytes=Buffer.byteLength(JSON.stringify(data));if(bytes>16_000_000)throw new ReportInputError('单个组合数据集超过16MB；减少非必要字段');
   await this.check();if(this.storage)await this.storage.save(ref,data,snapshotId,readAt);await this.check();this.remember(ref,{...data,readAt,snapshotId});
   return {datasetRef:ref,dataHash:hash({rows,columns,numericColumns}),readAt,snapshotId,complete:true,rowCount:rows.length,columns,lookupChecks,preview:preview(rows,this.previewRows),stage:'主对象完整保留，维度字段已组合；未匹配和多时点不代表业务数据已验收'};
+ }
+ async refresh(args,{begin,reload}){
+  await this.check();if(!Array.isArray(args.checks)||args.checks.length>36||typeof args.populationRef!=='string')throw new ReportInputError('refresh_report需要与finalize_report相同的范围、列定义及独立基准参数');
+  const root=await this.restore(args.datasetRef);if(!root?.reportDraft)throw new ReportInputError('refresh_report需要已有草稿引用');
+  const graph=new Map(),visiting=new Set();
+  const visit=async(ref,depth=0)=>{
+   if(graph.has(ref))return;if(depth>8||visiting.has(ref)||graph.size+visiting.size>=128)throw new ReportInputError('报表来源图循环或过大，不能安全集中刷新');
+   visiting.add(ref);const d=await this.restore(ref);if(!d?.complete)throw new ReportInputError('刷新来源不完整');
+   if(d.reportDraft){for(const source of d.reportDraft.sources)await visit(source.datasetRef,depth+1);}
+   else if(d.derivation?.kind==='left_lookup'){await visit(d.derivation.datasetRef,depth+1);for(const lookup of d.derivation.lookups)await visit(lookup.datasetRef,depth+1);}
+   else{
+    const recipe=d.recipe;
+    const temporary=value=>value&&typeof value==='object'&&(value.op==='in_set'||Object.values(value).some(temporary));
+    if(!recipe||recipe.replayable===false||!['group_dataset','linked_group_dataset'].includes(recipe.tool)||!recipe.args||temporary(recipe.args))throw new ReportInputError('来源缺少可重放的固定工具recipe，或依赖临时in_set集合；先在当前授权下补齐来源，不执行保存的SQL');
+   }
+   visiting.delete(ref);graph.set(ref,d);
+  };
+  await visit(args.populationRef);for(const c of args.checks){if(!c||typeof c.referenceRef!=='string')throw new ReportInputError('checks缺少referenceRef');await visit(c.referenceRef);}await visit(args.datasetRef);
+  // Finish the entire dependency check before touching the live connection.
+  await this.check();await begin();await this.check();this.snapshotId=randomUUID();this.collected.clear();
+  const mapped=new Map();let rawCount=0;
+  for(const [ref,d] of graph){await this.check();let output;
+   if(d.reportDraft){output=await this.compose({sources:d.reportDraft.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)})),columns:d.reportDraft.columns,...(ref===args.datasetRef?{population:{datasetRef:mapped.get(args.populationRef),keyColumn:args.populationKey}}:{})});}
+   else if(d.derivation?.kind==='left_lookup')output=await this.enrich({...d.derivation,datasetRef:mapped.get(d.derivation.datasetRef),lookups:d.derivation.lookups.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
+   else {output=await reload(d.recipe);rawCount++;if(!output?.complete)throw new ReportInputError('集中刷新返回不完整来源，不能定稿');}
+   mapped.set(ref,output.datasetRef);
+  }
+  const refreshedDatasetRef=mapped.get(args.datasetRef);
+  const final=await this.finalize({...args,datasetRef:refreshedDatasetRef,populationRef:mapped.get(args.populationRef),checks:args.checks.map(c=>({...c,referenceRef:mapped.get(c.referenceRef)}))});
+  return {...final,refreshedDatasetRef,refresh:{sourceCount:rawCount,mode:'new_readonly_transaction',previousDatasetRef:args.datasetRef},stage:'在新只读事务内集中刷新、重算并通过程序核验；仍需按原问题审阅'};
  }
  async finalize(args){
   await this.check();const data=await this.restore(args.datasetRef),draft=data?.reportDraft;

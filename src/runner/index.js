@@ -1,3 +1,4 @@
+import {recordReportFiles,recordReportReview} from '../shared/report-acceptance.js';
 import {investigationLimits,interruptedInvestigation,investigationElapsed} from '../shared/investigation-budget.js';
 import { fileURLToPath } from 'node:url';
 import { runnerConfig } from './config.js';
@@ -130,13 +131,15 @@ export class AgentRunner {
       if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
         return preserveContinuousEnvironmentEvidence(current, environmentResult);
       }
-      save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}],reportFiles:[...(current.reportFiles??[]),...(environmentResult.exportFiles??[])]});
+      if(environmentResult.exportFiles?.length)recordReportFiles(current,environmentResult.exportFiles,current.reportFiles?.at(-1)?.questionGeneration);
+      save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}]});
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
         { ...identity, result: environmentResult })).job;
     }
     for (;;) {
       save(current);signal.throwIfAborted();
       const result = await this.execute(current, this.config, emit, signal);
+      recordReportReview(current,result);
       save({...current,context:[...(current.context??[]),{kind:'analysis_turn',result}]});
       if (result?.outcome === 'partial' && result.investigation?.status === 'continue' && !result.investigation?.blocker) {
         const continued = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-analysis-continue`,
@@ -156,7 +159,8 @@ export class AgentRunner {
       if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
         return preserveContinuousEnvironmentEvidence(current, environmentResult);
       }
-      save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}],reportFiles:[...(current.reportFiles??[]),...(environmentResult.exportFiles??[])]});
+      if(environmentResult.exportFiles?.length)recordReportFiles(current,environmentResult.exportFiles,current.reportFiles?.at(-1)?.questionGeneration);
+      save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}]});
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
         { ...identity, result: environmentResult })).job;
     }
