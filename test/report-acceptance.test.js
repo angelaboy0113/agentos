@@ -46,3 +46,10 @@ test('accepted state requires original-question closure as well as an explicit d
 test('an unavailable or wrong-version inspection cannot be promoted by an old verified goal',async()=>{
  const {assessInvestigation}=await import('../src/shared/investigation-review.js');const job=fixture();job.reportEvidence={status:'unavailable',binding:{fileId:file.id}};const r=review();r.investigation.goals[0].status='verified';assert.equal(assessInvestigation(job,r).outcome,'partial');
 });
+
+test('a narrower population cannot pass without reviewing the bound scope differences',()=>{
+ const job=fixture();job.reportEvidence={status:'verified',binding:{fileId:file.id,verificationHash:file.verificationHash},calculationAudit:{status:'passed'},populationAudit:{selected:{datasetRef:'population'},comparisons:[{datasetRef:'all-customers',keyColumn:'id',onlyReferenceCount:3,onlyFileCount:0}]}};
+ const r=review();r.outcome='ready';assert.equal(assessReportDelivery(job,r).outcome,'partial');
+ r.reportAssessment.scopeReview={populationRef:'population',evidence:'用户明确只要有交易的客户',comparisons:[{datasetRef:'all-customers',keyColumn:'id',decision:'covered',evidence:'all'}]};assert.equal(assessReportDelivery(job,r).outcome,'partial');
+ r.reportAssessment.scopeReview.comparisons[0]={datasetRef:'all-customers',keyColumn:'id',decision:'out_of_scope',evidence:'原问题限定有交易客户，另3户无交易，按已核实业务规则排除'};assert.equal(assessReportDelivery(job,r).outcome,'ready');
+});

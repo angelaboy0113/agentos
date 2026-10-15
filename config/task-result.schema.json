@@ -433,7 +433,8 @@
             "fileId",
             "coverage",
             "decision",
-            "issues"
+            "issues",
+            "scopeReview"
           ],
           "properties": {
             "fileId": {
@@ -485,6 +486,66 @@
                   }
                 }
               }
+            },
+            "scopeReview": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "populationRef",
+                    "evidence",
+                    "comparisons"
+                  ],
+                  "properties": {
+                    "populationRef": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1200
+                    },
+                    "comparisons": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "datasetRef",
+                          "keyColumn",
+                          "decision",
+                          "evidence"
+                        ],
+                        "properties": {
+                          "datasetRef": {
+                            "type": "string"
+                          },
+                          "keyColumn": {
+                            "type": "string"
+                          },
+                          "decision": {
+                            "type": "string",
+                            "enum": [
+                              "covered",
+                              "out_of_scope"
+                            ]
+                          },
+                          "evidence": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1200
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         }

@@ -235,7 +235,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   let browser;
   if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
   if(e.kind==='mysql'&&q.exportMaxRows){const final=spec.find(x=>x.tool==='finalize_report');spec.push({...final,tool:'refresh_report',description:'参数与finalize_report相同。仅当当前口径变更或取数时点超窗需要重算时使用：预检已有来源recipe及派生依赖，在一个新只读事务里集中刷新完整来源、独立基准、维度和对象范围，再重做草稿并核验。不能执行保存SQL；旧数据无recipe或含临时in_set须先补齐。历史快照差异本身不要求重算。返回新文件供原问题审阅，不自动发群。'});}
-  if(e.kind==='mysql'&&q.exportMaxRows)spec.push({tool:'inspect_report',args:{fileId:'本任务已登记的report-ID',section:'可选summary/columns/sources/checks，默认summary',offset:'可选非负整数',limit:'可选1至4'},description:'只读查看与某份已登记CSV摘要和核验记录绑定的实际表头、完整公式、来源、预览及全文件逐行重算校验；不查数据库，不执行路径，不用另一个数据集冒充该文件。默认摘要，长文本用section分页。新文件审阅优先使用，不重新compose或让用户上传已有CSV。'});
+  if(e.kind==='mysql'&&q.exportMaxRows)spec.push({tool:'inspect_report',args:{fileId:'本任务已登记的report-ID',section:'可选summary/columns/sources/checks/scope，默认summary',offset:'可选非负整数',limit:'可选1至4'},description:'只读查看与某份已登记CSV摘要和核验记录绑定的实际表头、完整公式、来源、预览、主键范围对照及全文件逐行重算校验；不查数据库，不执行路径，不用另一个数据集冒充该文件。默认摘要，长文本用section分页。新文件审阅优先使用，不重新compose或让用户上传已有CSV。'});
   const run = async (tool, args = {}) => {
     if (!active) throw new Error('工具执行已结束');
     if (!spec.some(x => x.tool === tool) || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('不支持的工具或参数');
