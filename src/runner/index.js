@@ -1,5 +1,5 @@
 import {recordReportFiles,recordReportReview} from '../shared/report-acceptance.js';
-import {investigationLimits,interruptedInvestigation,investigationElapsed} from '../shared/investigation-budget.js';
+import {interruptedInvestigation} from '../shared/investigation-budget.js';
 import { fileURLToPath } from 'node:url';
 import { runnerConfig } from './config.js';
 import { executeTaskProcess } from './task-process.js';
@@ -110,16 +110,13 @@ export class AgentRunner {
     if (!job.continuousInvestigation || job.taskIntent !== 'analysis' || job.stage !== 'developer') {
       return this.execute(job, this.config, emit, signal);
     }
-    const limits=investigationLimits(),remaining=limits.maxMs-investigationElapsed(job);
-    if(remaining<=0)return interruptedInvestigation(job,'整个任务已达到自动调查时限','INVESTIGATION_BUDGET');
-    const deadline=new AbortController();const timer=setTimeout(()=>deadline.abort(),remaining);timer.unref();
     let checkpoint=job;
-    try{return await this.continueInvestigation(job,emit,AbortSignal.any([signal,deadline.signal]),current=>{checkpoint=current;});}
+    try{return await this.continueInvestigation(job,emit,signal,current=>{checkpoint=current;});}
     catch(error){
       if(signal.aborted||error.processesExited===false)throw error;
-      const reason=deadline.signal.aborted?'整个任务已达到自动调查时限':error.code==='LOCAL_CONTROL_TIMEOUT'?'本机任务状态接口等待超时，不能确认该次请求是否已受理；未自动重试修改请求':'本轮执行中断，已有结果已保留：'+(/timeout|超时/i.test(error.message)?'等待响应超时':'执行器未完成后续步骤');
-      return interruptedInvestigation(checkpoint,reason,deadline.signal.aborted?'INVESTIGATION_BUDGET':error.code??'EXECUTION_INTERRUPTED');
-    }finally{clearTimeout(timer);}
+      const reason=error.code==='LOCAL_CONTROL_TIMEOUT'?'本机任务状态接口等待超时，不能确认该次请求是否已受理；未自动重试修改请求':'本轮执行中断，已有结果已保留：'+(/timeout|超时/i.test(error.message)?'等待响应超时':'执行器未完成后续步骤');
+      return interruptedInvestigation(checkpoint,reason,error.code??'EXECUTION_INTERRUPTED');
+    }
   }
 
   async continueInvestigation(job,emit,signal,save){

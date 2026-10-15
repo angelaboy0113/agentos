@@ -115,7 +115,7 @@ test('continuous analysis automatically resumes a partial investigation without 
 
 test('runner pool provides bounded unique parallel execution slots', async () => {
   const config = await runnerConfig({ projects: {}, runnerId: 'mac-mini', concurrency: 3 });
-  assert.equal(config.analysisTurnTimeoutMs,900000);assert.equal(config.analysisResumeTimeoutMs,480000);
+  assert.equal(config.analysisTurnTimeoutMs,0);assert.equal(config.analysisResumeTimeoutMs,0);
   let active = 0, peak = 0;
   const pool = createRunnerPool(config, async () => {
     active++; peak = Math.max(peak, active);
@@ -130,7 +130,7 @@ test('runner pool provides bounded unique parallel execution slots', async () =>
   }, async () => {}, new AbortController().signal)));
   assert.equal(peak, 3);
   await assert.rejects(runnerConfig({ projects: {}, concurrency: 9 }), /1 to 8/);
-  await assert.rejects(runnerConfig({projects:{},analysisResumeTimeoutMs:1000}),/60000\.\.1800000/);
+  assert.equal((await runnerConfig({projects:{},analysisResumeTimeoutMs:1000,analysisTurnTimeoutMs:1})).analysisResumeTimeoutMs,0);
 });
 
 test('continuous environment evidence stays on the same job and final completion creates no successor', async (t) => {
@@ -210,19 +210,20 @@ test('continuous environment accepts evidence returned shortly after tool expiry
   assert.equal(resumed.status, 'running');
   assert.equal(resumed.environmentAccess, undefined);
 });
-test('whole-task deadline and execution timeouts preserve prior findings without rerunning mutating requests',async()=>{
+test('execution request timeouts preserve prior findings without rerunning mutating requests',async()=>{
  const source={handoffGate:{passed:true},verifiedArtifacts:[{path:'a'}],finalMessage:'已经核实的业务规则',investigation:{goals:[{id:'original-question',status:'open',evidence:'区域列未补齐'}]}};
  const job={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,context:[{kind:'analysis_turn',result:source}],reportFiles:[{id:'report'}],lease:{id:'l'}};
  let runs=0;const runner=new AgentRunner({},async()=>{runs++;throw Object.assign(new Error('The operation was aborted due to timeout'),{code:'LOCAL_CONTROL_TIMEOUT'});});
  const result=await runner.executeContinuous(job,async()=>{},new AbortController().signal);assert.equal(result.outcome,'blocked');assert.match(result.finalMessage,/已经核实/);assert.match(result.finalMessage,/区域列/);assert.match(result.finalMessage,/1 份文件，其中 0 份通过程序核验/);assert.equal(result.investigationStopped.code,'LOCAL_CONTROL_TIMEOUT');assert.equal(runs,1);
- const expired=await runner.executeContinuous({...job,events:[{type:'started',at:new Date(Date.now()-21*60000).toISOString()}]},async()=>{},new AbortController().signal);assert.equal(expired.investigationStopped.code,'INVESTIGATION_BUDGET');assert.equal(runs,1);
+
 });
-test('a task deadline aborts the active worker before returning the retained result; user cancellation stays cancellation',async t=>{
- const keep=setTimeout(()=>{},1000);t.after(()=>clearTimeout(keep));
- const base={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,context:[],lease:{id:'l'}};
- let stopped=false;const runner=new AgentRunner({},async(job,cfg,emit,signal)=>new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{stopped=true;reject(Object.assign(new Error('worker exited'),{processesExited:true}));},{once:true});}));
- const result=await runner.executeContinuous({...base,events:[{type:'started',at:new Date(Date.now()-1200000+40).toISOString()}]},async()=>{},new AbortController().signal);assert.equal(stopped,true);assert.equal(result.investigationStopped.code,'INVESTIGATION_BUDGET');
- const user=new AbortController();const promise=runner.executeContinuous(base,async()=>{},user.signal);user.abort();await assert.rejects(promise,/worker exited/);
+test('long investigations ignore legacy time caps while user cancellation still stops the worker',async t=>{
+ const previous=process.env.AGENTOS_ANALYSIS_TOTAL_TIMEOUT_MS;process.env.AGENTOS_ANALYSIS_TOTAL_TIMEOUT_MS='60000';t.after(()=>{if(previous===undefined)delete process.env.AGENTOS_ANALYSIS_TOTAL_TIMEOUT_MS;else process.env.AGENTOS_ANALYSIS_TOTAL_TIMEOUT_MS=previous;});
+ const base={id:'j',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,context:[],lease:{id:'l'},events:[{type:'started',at:new Date(Date.now()-4*3600000).toISOString()}]};
+ let executions=0;const runner=new AgentRunner({},async(job,cfg,emit,signal)=>{executions++;await new Promise(r=>setTimeout(r,30));assert.equal(signal.aborted,false);return {outcome:'ready',finalMessage:'completed long investigation'};});
+ const result=await runner.executeContinuous(base,async()=>{},new AbortController().signal);assert.equal(result.outcome,'ready');assert.equal(executions,1);
+ const cancellable=new AgentRunner({},async(job,cfg,emit,signal)=>new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>reject(Object.assign(new Error('worker exited'),{processesExited:true})),{once:true});}));
+ const user=new AbortController();const pending=cancellable.executeContinuous(base,async()=>{},user.signal);user.abort();await assert.rejects(pending,/worker exited/);
 });
 test('waiting for a human does not consume the active investigation budget',async()=>{
  const {investigationElapsed}=await import('../src/shared/investigation-budget.js');const now=Date.now();

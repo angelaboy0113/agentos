@@ -114,7 +114,6 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
     let threadId = resumeThreadId;
     let finalMessage = '';
     let failure = '';
-    let timedOut = false;
     const began = Date.now();
     const activity = new ExecutionActivity();
     let outgoing = Promise.resolve();
@@ -124,16 +123,8 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
       publish({ type: 'progress', phase, elapsedSeconds: Math.round((Date.now() - began) / 1000) });
     }, 15_000);
     progress.unref();
-    const timeoutMs = job.taskIntent === 'analysis'
-      ? (resumeThreadId ? Number(config.analysisResumeTimeoutMs ?? 480000) : Number(config.analysisTurnTimeoutMs ?? 900000)) : 0;
-    let forceKill;
-    const timeout = timeoutMs > 0 ? setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      forceKill = setTimeout(() => child.kill('SIGKILL'), 1500);
-      forceKill.unref();
-    }, timeoutMs) : null;
-    timeout?.unref();
+    // No wall-clock cutoff for a healthy Codex analysis. Parent worker cancellation
+    // still terminates the process tree when the user explicitly stops the task.
 
     child.stdin.on('error', () => {});
     child.stdin.end(prompt);
@@ -162,11 +153,9 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
       }
     });
     child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-4000); });
-    child.once('error', (error) => { clearInterval(progress);if(timeout)clearTimeout(timeout);if(forceKill)clearTimeout(forceKill);reject(error); });
+    child.once('error', (error) => { clearInterval(progress);reject(error); });
     child.once('close', async (code) => {
       clearInterval(progress);
-      if(timeout)clearTimeout(timeout);
-      if(forceKill)clearTimeout(forceKill);
       if (pending.trim()) {
         try {
           const event = JSON.parse(pending);
@@ -177,11 +166,6 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
         } catch { /* Incomplete diagnostics are not a successful result. */ }
       }
       await outgoing; // Complete event delivery before the runner publishes terminal status.
-      if(timedOut){
-        const error=Object.assign(new Error(`只读分析单轮超过 ${Math.round(timeoutMs/60000)} 分钟，已停止该轮并保留此前证据。`),{code:'ANALYSIS_TURN_TIMEOUT'});
-        if(threadId)error.threadId=threadId;
-        return reject(error);
-      }
       if (code !== 0 || failure) {
         const error = new Error(failure || `Codex exited ${code}: ${stderr.slice(-4000)}`);
         if (threadId) error.threadId = threadId;

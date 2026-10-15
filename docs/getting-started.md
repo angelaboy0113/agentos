@@ -232,16 +232,14 @@ Invoke-RestMethod http://127.0.0.1:8787/health
 
 `start:local` 默认启动 3 个 Runner 执行槽，因此三张不同问题卡可以真正同时排查。Mac mini 先使用默认值；根据内存、CPU 和 Codex 账号承载情况，可在 `.env` 设置 `AGENTOS_RUNNER_CONCURRENCY=1..8` 后重启。`/health` 的 `runnerConcurrency` 和管理页面的 Runner 池状态必须与配置一致。它只改变并发槽数，不改变模型、账号、项目权限或网页登录态。
 
-持续分析的默认性能边界也可在 `.env` 调整，修改后必须重启：
+一次环境工具调查的资源预算可在 `.env` 调整，修改后必须重启；新增或收紧会截停任务的限制前，须先征得用户明确同意：
 
 ```dotenv
-AGENTOS_ANALYSIS_TURN_TIMEOUT_MS=900000
-AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS=480000
 AGENTOS_ENV_INVESTIGATION_MAX_CALLS=24
 AGENTOS_ENV_INVESTIGATION_MAX_MS=150000
 ```
 
-前两项分别限制首轮和续轮 Codex 分析；后两项限制一次环境调查的调用数和耗时。超时或预算用尽会保留已有证据并显示部分结果，不代表连接失败或已经查清根因。同一环境模板不再按固定轮数截断；只有相同核心目标在证据没有变化时重复申请，程序才自动暂停并改走其他已登记证据路径。旧部署若仍保留 `AGENTOS_ENV_TARGET_MAX_ROUNDS` 可直接删除，该变量已不再生效。重复批次应使用 `group_count`，源码已有汇总口径时应在一轮内使用 `aggregate` 或 `collect_values` + `linked_aggregate`。
+这两项只限制一次环境工具调查，不给整个问题或源码分析设置总执行时间。整个问题的固定总时长和总轮次限制已移除，源码分析首轮/续轮也不会因执行较久被杀进程；旧 `AGENTOS_ANALYSIS_TOTAL_TIMEOUT_MS`、`AGENTOS_ANALYSIS_MAX_ENV_ROUNDS`、`AGENTOS_ANALYSIS_TURN_TIMEOUT_MS`、`AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS` 不再生效。超时或预算用尽会保留已有证据并显示部分结果，不代表连接失败或已经查清根因。同一环境模板不再按固定轮数截断；只有相同核心目标在证据没有变化时重复申请，程序才自动暂停并改走其他已登记证据路径。旧部署若仍保留 `AGENTOS_ENV_TARGET_MAX_ROUNDS` 可直接删除，该变量已不再生效。重复批次应使用 `group_count`，源码已有汇总口径时应在一轮内使用 `aggregate` 或 `collect_values` + `linked_aggregate`。
 
 ## 11. 拉机器人进群并发送第一条消息
 

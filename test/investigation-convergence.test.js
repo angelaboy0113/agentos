@@ -90,10 +90,15 @@ test('startup migration compacts legacy history and turns a runaway chain into o
  assert.ok(final.context.length<=8);assert.ok(state.jobs.slice(0,-1).every(job=>job.context.length===0));
  assert.deepEqual(await store.reconcileInvestigationState('owner'),{compacted:0,finalized:0});
 });
-test('question-wide round and no-progress guards cannot reset by rewording evidence or compacting context',()=>{
+test('only actual no-progress protection stops repeated investigation, not elapsed time or total rounds',()=>{
  const active={id:'j',questionId:'q',taskIntent:'analysis',events:Array.from({length:8},()=>({type:'continuous_environment_started'})),context:[]};
  const changed=result(['source']);changed.investigation.goals[1].evidence='new wording';const request2={...request,parameters:['new wording'],goalIds:['runtime']};
- assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).terminal,true);
+ assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).continue,true);
  active.events=[];active.investigationProgress={stagnant:2,seen:['a']};assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).terminal,true);
- active.investigationProgress.stagnant=0;active.events=[{type:'started',at:new Date(Date.now()-21*60000).toISOString()}];assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).terminal,true);
+ active.investigationProgress.stagnant=0;active.events=[{type:'started',at:new Date(Date.now()-21*60000).toISOString()}];assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).continue,true);
+});
+
+test('elapsed hours and many rounds cannot stop a task that verifies a new goal',()=>{
+ const job={id:'long',questionId:'long-question',taskIntent:'analysis',events:[{type:'started',at:new Date(Date.now()-5*3600000).toISOString()},...Array.from({length:20},()=>({type:'environment_query_started'}))]};
+ const answer=environmentContinuation({jobs:[job]},job,request,result(['source']));assert.equal(answer.continue,true);assert.notEqual(answer.terminal,true);
 });

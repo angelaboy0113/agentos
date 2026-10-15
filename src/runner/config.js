@@ -10,10 +10,8 @@ export async function runnerConfig(overrides = {}) {
   }
   const concurrency = Number(overrides.concurrency ?? process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('AGENTOS_RUNNER_CONCURRENCY must be an integer from 1 to 8');
-  const analysisTurnTimeoutMs = Number(overrides.analysisTurnTimeoutMs ?? process.env.AGENTOS_ANALYSIS_TURN_TIMEOUT_MS ?? 900000);
-  const analysisResumeTimeoutMs = Number(overrides.analysisResumeTimeoutMs ?? process.env.AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS ?? 480000);
-  if (!Number.isInteger(analysisTurnTimeoutMs) || analysisTurnTimeoutMs < 60000 || analysisTurnTimeoutMs > 3600000) throw new Error('AGENTOS_ANALYSIS_TURN_TIMEOUT_MS must be 60000..3600000');
-  if (!Number.isInteger(analysisResumeTimeoutMs) || analysisResumeTimeoutMs < 60000 || analysisResumeTimeoutMs > 1800000) throw new Error('AGENTOS_ANALYSIS_RESUME_TIMEOUT_MS must be 60000..1800000');
+  // Kept as disabled compatibility fields; legacy env/overrides cannot restore a task cutoff.
+  const analysisTurnTimeoutMs = 0, analysisResumeTimeoutMs = 0;
   return {
     dataDir:path.resolve(overrides.dataDir??process.env.AGENTOS_DATA_DIR??'./data'),
     serverUrl: String(overrides.serverUrl ?? process.env.AGENTOS_SERVER_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, ''),

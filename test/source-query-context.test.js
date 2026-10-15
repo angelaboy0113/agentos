@@ -30,7 +30,7 @@ test('new verified source preparation can recover a stalled data step once; pros
  job.investigationProgress.preparationSeen=decision.metadata.sourcePreparationKeys;
  assert.equal(environmentContinuation({jobs:[job]},job,{...request,parameters:['reword']},{...current,finalMessage:'new words'}).terminal,true);
  job.investigationProgress.preparationSeen=[];job.investigationProgress.preparationRecoveries=2;assert.equal(environmentContinuation({jobs:[job]},job,request,current).terminal,true);
- job.investigationProgress.preparationRecoveries=0;job.events=Array.from({length:8},()=>({type:'continuous_environment_started'}));assert.equal(environmentContinuation({jobs:[job]},job,request,current).terminal,true);
+ job.investigationProgress.preparationRecoveries=0;job.events=Array.from({length:20},()=>({type:'continuous_environment_started'}));assert.equal(environmentContinuation({jobs:[job]},job,request,current).continue,true);
 });
 test('source pages redact connection credentials, remain bounded and recheck authorization',async t=>{
  const f=await fixture(t),context=await buildSourceQueryContext(f.result);let allowed=true,calls=0;
