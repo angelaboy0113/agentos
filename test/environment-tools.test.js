@@ -431,5 +431,5 @@ test('successful source reading does not clear an unresolved report input failur
  const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
  tools:async()=>({spec:[{tool:'connection'},{tool:'inspect_dataset'},{tool:'read_source_evidence'}],run:async tool=>{if(tool==='inspect_dataset')throw new QueryInputError('REPORT_INPUT','invalid ref');return {stage:'read successfully'};},close:async()=>{}}),
  planner:async()=>({next:async()=>[{tool:'inspect_dataset',arguments:'{}'},{tool:'read_source_evidence',arguments:'{}'},{tool:'finish',summary:'cannot claim complete',complete:true}][n++],close:async()=>{}})});
- assert.equal(result.partial,true);assert.equal(result.toolInputErrors[0].code,'REPORT_INPUT');
+ assert.equal(result.partial,true);assert.equal(result.toolInputErrors[0].code,'REPORT_INPUT');assert.match(result.summary,/已取得的结果继续保留/);assert.doesNotMatch(result.summary,/未取得本次业务/);
 });

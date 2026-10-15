@@ -157,7 +157,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     if (!summary) summary = '本次排查未完成；以下为已取得的证据。';
     // A planner cannot turn unresolved extraction or an empty evidence trail into success.
     if (stopReason || results.filter(x => x.result).length < 2 || unresolvedInput || unresolvedTimeout || results.some(x => x.result?.partial)) complete = false;
-    if (unresolvedInput) summary = '查询参数尚未修正完成，未取得本次业务查询结果。';
+    if (unresolvedInput) summary = '仍有工具参数尚未修正；已取得的结果继续保留，完整交付尚未通过核验。';
     if (stopReason) summary = `${stopReason}\n\n${summary}`;
     const serialized = JSON.stringify(results);
     for (const secret of [cred.username, cred.password].filter(Boolean)) summary = summary.split(secret).join('[已隐藏]');
