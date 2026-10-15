@@ -433,3 +433,12 @@ test('successful source reading does not clear an unresolved report input failur
  planner:async()=>({next:async()=>[{tool:'inspect_dataset',arguments:'{}'},{tool:'read_source_evidence',arguments:'{}'},{tool:'finish',summary:'cannot claim complete',complete:true}][n++],close:async()=>{}})});
  assert.equal(result.partial,true);assert.equal(result.toolInputErrors[0].code,'REPORT_INPUT');assert.match(result.summary,/已取得的结果继续保留/);assert.doesNotMatch(result.summary,/未取得本次业务/);
 });
+test('actionable input errors are preserved and credentials redacted for next-round correction',async()=>{
+ const {reportInvestigationContext}=await import('../src/runner/environment-job.js');
+ const cfg={version:1,environments:{env:structuredClone(environment)}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['correct report']},'demo',{profile:'owner',senderId:'ou_admin'});let n=0;
+ const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'finalize_report'},{tool:'read_source_evidence'}],run:async tool=>{if(tool==='finalize_report')throw new QueryInputError('REPORT_INPUT',`checks缺少s2:used；${credentials.password}`);return {stage:'read'};},close:async()=>{}}),
+ planner:async()=>({next:async()=>[{tool:'finalize_report',arguments:'{}'},{tool:'read_source_evidence',arguments:'{}'},{tool:'finish',summary:'unresolved',complete:false}][n++],close:async()=>{}})});
+ assert.match(result.toolInputErrors[0].message,/s2:used/);assert.equal(result.toolInputErrors[0].resolved,false);assert.ok(!result.toolInputErrors[0].message.includes(credentials.password));
+ const context=reportInvestigationContext({originalQuestion:'all records',context:[{result}]});assert.match(context.corrections[0].message,/s2:used/);
+});

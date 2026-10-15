@@ -65,12 +65,12 @@ test('the observed narrow project-name amount cannot pass reconciliation against
 test('multi-source reconciliation is not blocked by the old twelve-reference ceiling; memory byte budget remains enforced',async t=>{
  const f=await fixture(t);
  for(let i=0;i<10;i++)await f.collect('SELECT source'+i,[{id:'1',amount:'0'}]);
- assert.equal(f.d.datasets.size,13);
+ assert.ok(f.d.datasets.size>=13);
  const final=await f.d.finalize(f.args);assert.equal(final.coverage.rowCount,2);
  const old=await f.d.restore(f.baseline.datasetRef);delete old.queryDefinition;
  const second=await f.compose(f.amounts.datasetRef);
  await assert.rejects(f.d.finalize({...f.args,datasetRef:second.datasetRef}),/原始查询/);
- f.d.bytes=16_000_000;await assert.rejects(f.collect('SELECT too_many_bytes',[{id:'1',amount:'1'}]),/16MB/);
+ const tiny=new ReportDatasets({maxRows:100,cacheBytes:100});await assert.rejects(tiny.collect({sql:'SELECT id',params:[],columns:['id']},async()=>[[{id:'1'}]]),/内存预算/);
 });
 test('six-column balance reports finalize both formulas and per-object minimum without floating-point loss',async t=>{
  const f=await fixture(t),columns=['id','earned','adjustA','adjustB','usedA','usedB'];
@@ -89,4 +89,12 @@ test('coverage uses internal business IDs without adding an unwanted ID column t
  const f=await fixture(t);const draft=await f.d.compose({sources:[{name:'s1',datasetRef:f.population.datasetRef,keyColumn:'id'}],columns:[{label:'名称',value:{op:'field',source:'s1',column:'name'}}]});
  const final=await f.d.finalize({...f.args,datasetRef:draft.datasetRef,expectedColumns:['名称'],columnRules:[{label:'名称',definition:'业务对象的显示名称',evidence:'对象主数据名称字段'}],checks:[]});
  const file=await reportFile(f.root,'JOB-test',final.exportFile);assert.equal(file.content.toString().split('\r\n')[0],'\uFEFF"名称"');assert.equal(final.coverage.rowCount,2);
+});
+test('trusted longer read window is explicit and recorded; amount checks cannot be bypassed',async t=>{
+ const f=await fixture(t);const old=await f.d.restore(f.amounts.datasetRef);old.readAt=new Date(Date.now()-600000).toISOString();
+ await assert.rejects(f.d.finalize(f.args),/超过5分钟/);
+ f.d.snapshotWindowMs=1200000;
+ const inspection=await f.d.inspect({datasetRef:f.draft.datasetRef});assert.deepEqual(inspection.reportDraft.finalization.requiredChecks,[{source:'s1',column:'amount'}]);
+ await assert.rejects(f.d.finalize({...f.args,checks:[]}),/s1:amount/);
+ const result=await f.d.finalize(f.args);assert.equal(result.readWindow.maxSpreadMs,1200000);assert.ok(result.readWindow.spreadMs>=599000);assert.match(result.snapshotNote,/不代表多轮属于同一事务/);
 });

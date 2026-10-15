@@ -7,13 +7,17 @@ export class ReportInputError extends Error {constructor(message){super(message)
 
 // Task-scoped evidence can resume under renewed authorization; never shared as knowledge.
 export class ReportDatasets {
- constructor({maxRows,previewRows=20,directory,authorize=async()=>{},active=()=>true,secrets=[],scope,originalQuestion=''}){
-  this.originalQuestion=originalQuestion;this.snapshotId=randomUUID();this.storage=directory&&scope?new TaskDatasetStore(directory,scope):null;
-  this.secrets=secrets.filter(Boolean);this.maxRows=maxRows;this.previewRows=Math.min(previewRows,20);this.directory=directory;this.authorize=authorize;this.active=active;this.datasets=new Map();this.bytes=0;this.files=0;
+ constructor({maxRows,previewRows=20,directory,authorize=async()=>{},active=()=>true,secrets=[],scope,originalQuestion='',cacheBytes=16_000_000,snapshotWindowMs=300000,dataBudgetBytes=32_000_000,reuseQueries=false}){
+  this.reuseQueries=reuseQueries;this.cacheBytes=cacheBytes;this.snapshotWindowMs=snapshotWindowMs;this.originalQuestion=originalQuestion;this.snapshotId=randomUUID();this.storage=directory&&scope?new TaskDatasetStore(directory,scope,{maxBytes:dataBudgetBytes}):null;
+  this.secrets=secrets.filter(Boolean);this.maxRows=maxRows;this.previewRows=Math.min(previewRows,20);this.directory=directory;this.authorize=authorize;this.active=active;this.collected=new Map();this.datasets=new Map();this.bytes=0;this.files=0;
  }
  async check(){if(!this.active())throw new ReportInputError('报表查询已结束');await this.authorize();if(!this.active())throw new ReportInputError('报表查询已结束');}
  async collect(statement,execute){
-  await this.check();if(this.datasets.size>=24)throw new ReportInputError('本轮完整数据集最多24份');
+  await this.check();
+  const queryHash=createHash('sha256').update(JSON.stringify([statement.sql,statement.params])).digest('hex');
+  const signature=hash([queryHash,statement.columns,statement.numericColumns??[]]);
+  const previous=this.reuseQueries?this.collected.get(signature):null;
+  if(previous){const d=await this.restore(previous.datasetRef);if(d?.complete)return {...previous,reused:true,stage:'复用本轮同一只读事务中已完成的相同查询；保留原取数时间'};}
   const rows=[];const batch=500;let complete=false,bytes=0;
   for(let offset=0;offset<=this.maxRows;offset+=batch){
    await this.check();const size=Math.min(batch,this.maxRows-offset+1);
@@ -22,26 +26,35 @@ export class ReportDatasets {
    for(const row of page){
     if(rows.length===this.maxRows)break;
     const clean=Object.fromEntries(statement.columns.map(c=>{const v=row[c];if(v!==null&&!['string','number','bigint'].includes(typeof v))throw new ReportInputError('报表含不支持的字段值');if(typeof v==='number'&&!Number.isSafeInteger(v))throw new ReportInputError('报表数值未以精确字符串返回，停止导出');if(String(v??'').length>2000)throw new ReportInputError('报表字段过长');return [c,v===null?null:this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v))];}));
-    bytes+=Buffer.byteLength(JSON.stringify(clean));if(bytes+this.bytes>16_000_000)throw new ReportInputError('完整数据集超过16MB限制；未生成文件');rows.push(clean);
+    bytes+=Buffer.byteLength(JSON.stringify(clean));if(bytes>16_000_000)throw new ReportInputError('完整数据集超过16MB限制；未生成文件');rows.push(clean);
    }
    if(page.length<size){complete=true;break;}
    if(page.length>this.maxRows-offset)break;
   }
   // A short final page proves completion; exactly-at-cap requires one look-ahead.
-  const ref=`dataset-${randomUUID()}`,queryHash=createHash('sha256').update(JSON.stringify([statement.sql,statement.params])).digest('hex'),data={rows,columns:statement.columns,complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
+  const ref=`dataset-${randomUUID()}`,data={rows,columns:statement.columns,complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
   const dataHash=createHash('sha256').update(JSON.stringify(data)).digest('hex');
   let readAt=new Date().toISOString();if(complete&&this.storage){await this.check();const saved=await this.storage.save(ref,data,this.snapshotId);readAt=saved.readAt;await this.check();}
-  this.datasets.set(ref,{...data,snapshotId:this.snapshotId,readAt});this.bytes+=bytes;
-  return {datasetRef:ref,queryHash,dataHash,snapshotId:this.snapshotId,readAt,queryDefinition:queryPreview(data.queryDefinition),rowCount:rows.length,complete,truncated:!complete,partial:!complete,columns:statement.columns,preview:preview(rows,this.previewRows),stage:complete?'分组数据已完整读取':'达到报表行数上限；数据不完整，不能合成完整报表'};
+  this.remember(ref,{...data,snapshotId:this.snapshotId,readAt});
+  const result={datasetRef:ref,queryHash,dataHash,snapshotId:this.snapshotId,readAt,queryDefinition:queryPreview(data.queryDefinition),rowCount:rows.length,complete,truncated:!complete,partial:!complete,columns:statement.columns,preview:preview(rows,this.previewRows),stage:complete?'分组数据已完整读取':'达到报表行数上限；数据不完整，不能合成完整报表'};
+  if(complete&&this.reuseQueries)this.collected.set(signature,result);return result;
  }
- async list(){await this.check();const datasets=this.storage?await this.storage.list():[];await this.check();return {datasets,note:'仅当前任务、相同环境配置且24小时内的完整数据集；历史取数不是当前实时状态，多轮快照不是同一个事务。'};}
- async inspect(args){await this.check();const data=await this.restore(args.datasetRef);if(!data)throw new ReportInputError('数据集引用无效');const q=data.queryDefinition;return {datasetRef:args.datasetRef,columns:data.columns,rowCount:data.rows.length,readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns}:undefined};}
+ async list({offset=0,limit=20}={}){await this.check();if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>20)throw new ReportInputError('数据集目录offset须为非负整数，limit为1至20');const all=this.storage?await this.storage.list():[];await this.check();const candidates=all.sort((a,b)=>b.readAt.localeCompare(a.readAt)||a.datasetRef.localeCompare(b.datasetRef)).slice(offset,offset+limit),datasets=[];let bytes=0;for(const item of candidates){const size=Buffer.byteLength(JSON.stringify(item));if(datasets.length&&bytes+size>16000)break;datasets.push(item);bytes+=size;}return {datasets,totalCount:all.length,nextOffset:offset+datasets.length<all.length?offset+datasets.length:null,note:'仅当前任务、相同环境配置且24小时内的完整数据集；目录分页，历史取数不是当前实时状态，多轮快照不是同一个事务。'};}
+ async inspect(args){await this.check();const data=await this.restore(args.datasetRef);if(!data)throw new ReportInputError('数据集引用无效');const q=data.queryDefinition;return {datasetRef:args.datasetRef,columns:data.columns,rowCount:data.rows.length,readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns,finalization:{expectedColumns:data.columns,requiredChecks:requiredChecks(data),snapshotWindowMs:this.snapshotWindowMs,note:'每个requiredChecks项需另一原始查询的完整独立基准；范围population必须为独立原始对象集合。'}}:undefined};}
  async restore(ref){
-  if(this.datasets.has(ref))return this.datasets.get(ref);
+  if(this.datasets.has(ref)){const data=this.datasets.get(ref);this.datasets.delete(ref);this.datasets.set(ref,data);return data;}
   await this.check();if(!this.storage)return null;
   let saved;try{saved=await this.storage.get(ref);}catch{throw new ReportInputError('数据集范围、有效期、文件或摘要校验失败；先调用list_datasets核对本任务已有成果，必要时重新取数。');}await this.check();const bytes=Buffer.byteLength(JSON.stringify(saved.data));
-  if(this.datasets.size>=24||this.bytes+bytes>16_000_000||saved.data.rows.length>this.maxRows)throw new ReportInputError('恢复数据集超过当前任务内存或行数上限');
-  this.bytes+=bytes;const data={...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};this.datasets.set(ref,data);return data;
+  if(saved.data.rows.length>this.maxRows)throw new ReportInputError('恢复数据集超过当前授权行数上限');
+  const data={...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};this.remember(ref,data);return data;
+ }
+ // Only evict memory copies backed by validated task storage; disk references stay immutable.
+ remember(ref,data){
+  const size=Buffer.byteLength(JSON.stringify(data));
+  if(this.datasets.has(ref)){this.bytes-=Buffer.byteLength(JSON.stringify(this.datasets.get(ref)));this.datasets.delete(ref);}
+  if(this.storage){while(this.bytes+size>this.cacheBytes&&this.datasets.size){const oldest=this.datasets.keys().next().value;this.bytes-=Buffer.byteLength(JSON.stringify(this.datasets.get(oldest)));this.datasets.delete(oldest);}if(size>this.cacheBytes)return;}
+  else if(this.bytes+size>this.cacheBytes)throw new ReportInputError('无持久存储时数据超过内存预算；请配置任务输出目录后接续');
+  this.datasets.set(ref,data);this.bytes+=size;
  }
  async compare(args){
   await this.check();const left=await this.restore(args.leftRef),right=await this.restore(args.rightRef);
@@ -88,11 +101,12 @@ export class ReportDatasets {
   try{await writeFile(temp,csv,{mode:0o600,flag:'wx'});await this.check();await rename(temp,file);await this.check();}
   catch(error){await rm(temp,{force:true});await rm(file,{force:true});throw error;}
   this.files++;
+  composed.readThroughAt=[...sources.values()].map(d=>d.readThroughAt??d.readAt).sort().at(-1);
   composed.reportDraft={keys:[...keys].sort(),file:{id,filename,bytes,sha256:createHash('sha256').update(csv).digest('hex'),rowCount:rows.length,complete:true},sources:args.sources,columns:args.columns,sourceSnapshots:[...sources].map(([name,data])=>({name,readAt:data.readAt,snapshotId:data.snapshotId}))};
   if(this.storage){await this.check();await this.storage.save(datasetRef,composed,snapshotId,readAt);await this.check();}
 
   // Persisted derived datasets can be resumed without repeating SQL or resetting their evidence age.
-  if(!this.storage&&(this.datasets.size<24&&this.bytes+Buffer.byteLength(JSON.stringify(composed))<=16_000_000)){this.datasets.set(datasetRef,{...composed,snapshotId,readAt});this.bytes+=Buffer.byteLength(JSON.stringify(composed));}
+  this.remember(datasetRef,{...composed,snapshotId,readAt});
   return {datasetRef,dataHash,readAt,snapshotId,sourceSnapshots:[...sources].map(([name,data])=>({name,readAt:data.readAt,snapshotId:data.snapshotId})),snapshotConsistency:new Set([...sources.values()].map(d=>d.snapshotId)).size>1?'multiple_read_times':'single_transaction',complete:true,truncated:false,rowCount:rows.length,columns:headers,totals,preview:preview(rows,this.previewRows),draftFile:composed.reportDraft.file,stage:'CSV草稿已生成，尚不可交付；先用finalize_report核验原要求、完整对象范围及各计算分量合计'};
  }
  async enrich(args){
@@ -108,14 +122,14 @@ export class ReportDatasets {
    if(columns.length+outputs.length+1>32)throw new ReportInputError('组合数据集最多32列');
    const index=new Map();for(const row of right.rows){const key=row[lookup.targetColumn];if(key===null||key==='')continue;if(index.has(key))throw new ReportInputError('lookup关联键重复，不能猜测选哪条记录或重复累计；先核对业务维度并消除歧义');index.set(key,row);}
    let matchedCount=0;const unmatched=[];
-   for(const row of rows){const found=index.get(row[lookup.sourceColumn]);if(found)matchedCount++;else unmatched.push(row[args.keyColumn]);for(const f of lookup.fields){const value=found?.[f.column]??'';approxBytes+=Buffer.byteLength(JSON.stringify([f.as,value]))+8;if(approxBytes+this.bytes>16_000_000)throw new ReportInputError('组合数据集超过16MB内存限制');row[f.as]=value;}row[status]=found?'已匹配':'未匹配';}
+   for(const row of rows){const found=index.get(row[lookup.sourceColumn]);if(found)matchedCount++;else unmatched.push(row[args.keyColumn]);for(const f of lookup.fields){const value=found?.[f.column]??'';approxBytes+=Buffer.byteLength(JSON.stringify([f.as,value]))+8;if(approxBytes>16_000_000)throw new ReportInputError('组合数据集超过16MB内存限制');row[f.as]=value;}row[status]=found?'已匹配':'未匹配';}
    if(unmatched.length&&lookup.missing==='error')throw new ReportInputError(`lookup ${lookup.name}有${unmatched.length}个对象未匹配；核对关联键或明确允许保留空值`);
    columns.push(...outputs,status);numericColumns.push(...lookup.fields.filter(f=>right.numericColumns?.includes(f.column)).map(f=>f.as));lookupChecks.push({name:lookup.name,matchedCount,unmatchedCount:unmatched.length,unmatchedKeys:unmatched.slice(0,this.previewRows),previewLimited:unmatched.length>this.previewRows});inputs.push(right);
   }
-  const data={rows,columns,numericColumns,complete:true,derivation:{kind:'left_lookup',datasetRef:args.datasetRef,keyColumn:args.keyColumn,lookups:args.lookups,lookupChecks}};
+  const data={rows,columns,numericColumns,complete:true,readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),derivation:{kind:'left_lookup',datasetRef:args.datasetRef,keyColumn:args.keyColumn,lookups:args.lookups,lookupChecks}};
   const readAt=inputs.map(d=>d.readAt).sort()[0],snapshotIds=[...new Set(inputs.map(d=>d.snapshotId))].sort(),snapshotId=snapshotIds.length===1?snapshotIds[0]:hash(snapshotIds),ref='dataset-'+randomUUID();
-  const bytes=Buffer.byteLength(JSON.stringify(data));if(this.datasets.size>=24||this.bytes+bytes>16_000_000)throw new ReportInputError('组合数据集超过24份或16MB内存限制');
-  await this.check();if(this.storage)await this.storage.save(ref,data,snapshotId,readAt);await this.check();this.datasets.set(ref,{...data,readAt,snapshotId});this.bytes+=bytes;
+  const bytes=Buffer.byteLength(JSON.stringify(data));if(bytes>16_000_000)throw new ReportInputError('单个组合数据集超过16MB；减少非必要字段');
+  await this.check();if(this.storage)await this.storage.save(ref,data,snapshotId,readAt);await this.check();this.remember(ref,{...data,readAt,snapshotId});
   return {datasetRef:ref,dataHash:hash({rows,columns,numericColumns}),readAt,snapshotId,complete:true,rowCount:rows.length,columns,lookupChecks,preview:preview(rows,this.previewRows),stage:'主对象完整保留，维度字段已组合；未匹配和多时点不代表业务数据已验收'};
  }
  async finalize(args){
@@ -146,19 +160,19 @@ export class ReportDatasets {
    if(actualTotal!==expectedTotal)throw new ReportInputError(`分量合计不一致：${name}为${format(actualTotal)}，独立基准为${format(expectedTotal)}；不能交付，先核对期间、状态、费用范围及关联重复。`);
    times.push(ref);totals.push({name,total:format(actualTotal),referenceRef:c.referenceRef,referenceColumn:c.referenceColumn,evidence:c.evidence});proofs.push({datasetRef:c.referenceRef,dataHash:hash(ref),queryHash:ref.queryHash});
   }
-  if([...required].some(k=>!totals.some(c=>c.name===k)))throw new ReportInputError('计算或标记total的每个来源分量都必须通过独立合计核验；不要反复抽样替代基准汇总');
-  const timestamps=times.map(d=>Date.parse(d.readAt));
-  if(timestamps.some(t=>!Number.isFinite(t))||Math.max(...timestamps)-Math.min(...timestamps)>300000)throw new ReportInputError('取数时点相差超过5分钟；复用不变规则，重新读取受影响数据并重做草稿，不能把跨时点余额当同一快照');
+  if([...required].some(k=>!totals.some(c=>c.name===k)))throw new ReportInputError('计算或标记total的每个来源分量都必须通过独立合计核验；缺少基准：'+[...required].filter(k=>!totals.some(c=>c.name===k)).join('、')+'；补充这些分量的checks，不重复已核验取数');
+  const timestamps=times.flatMap(d=>[Date.parse(d.readAt),Date.parse(d.readThroughAt??d.readAt)]);
+  if(timestamps.some(t=>!Number.isFinite(t))||Math.max(...timestamps)-Math.min(...timestamps)>this.snapshotWindowMs)throw new ReportInputError(`取数时点相差超过${this.snapshotWindowMs/60000}分钟（管理员配置窗口）；复用不变规则，集中刷新受影响来源与独立基准后重做草稿，不逐轮盲目刷新。`);
   const info=await lstat(path.join(this.directory,draft.file.filename));
   if(!info.isFile()||info.isSymbolicLink()||info.size!==draft.file.bytes||createHash('sha256').update(await readFile(path.join(this.directory,draft.file.filename))).digest('hex')!==draft.file.sha256)throw new ReportInputError('草稿文件已变化，不能交付');
-  const receipt={version:1,status:'verified',originalQuestion:this.originalQuestion,verifiedAt:new Date().toISOString(),file:draft.file,requirement:args.requirement,scopeEvidence:args.scopeEvidence,columnRules:args.columnRules,coverage:{populationRef:args.populationRef,populationKey:args.populationKey,rowCount:actual.size},totals,sources:[...sources].map(([name,d])=>({name,dataHash:hash(d),queryHash:d.queryHash,queryDefinition:queryPreview(d.queryDefinition),readAt:d.readAt,snapshotId:d.snapshotId})),proofs,snapshotNote:'5分钟内取数窗口，不代表多轮属于同一事务；业务定义依据由Agent核实，程序不能理解并证明业务语义正确。'};
+  const receipt={version:1,status:'verified',originalQuestion:this.originalQuestion,verifiedAt:new Date().toISOString(),file:draft.file,requirement:args.requirement,scopeEvidence:args.scopeEvidence,columnRules:args.columnRules,coverage:{populationRef:args.populationRef,populationKey:args.populationKey,rowCount:actual.size},totals,sources:[...sources].map(([name,d])=>({name,dataHash:hash(d),queryHash:d.queryHash,queryDefinition:queryPreview(d.queryDefinition),readAt:d.readAt,snapshotId:d.snapshotId})),proofs,readWindow:{earliest:new Date(Math.min(...timestamps)).toISOString(),latest:new Date(Math.max(...timestamps)).toISOString(),spreadMs:Math.max(...timestamps)-Math.min(...timestamps),maxSpreadMs:this.snapshotWindowMs},snapshotNote:'按管理员配置的取数窗口核验，不代表多轮属于同一事务；业务定义依据由Agent核实，程序不能理解并证明业务语义正确。'};
   const body=JSON.stringify(receipt);if(Buffer.byteLength(body)>64000)throw new ReportInputError('验收记录过大');
   const file=path.join(this.directory,draft.file.id+'.verification.json'),temp=file+'.tmp';
   try{await lstat(file);throw new ReportInputError('该草稿已定稿；修改口径请重新compose_report，保留旧核验记录');}catch(error){if(error.code!=='ENOENT')throw error;}
   try{await this.check();await writeFile(temp,body,{flag:'wx',mode:0o600});await this.check();await rename(temp,file);await this.check();}catch(error){await rm(temp,{force:true});throw error;}
-  return {exportFile:{...draft.file,verificationHash:createHash('sha256').update(body).digest('hex')},coverage:receipt.coverage,totals,stage:'列、对象覆盖和计算分量合计核验通过；业务语义仍以所列依据为准，可在最终任务通过后回复文件'};
+  return {exportFile:{...draft.file,verificationHash:createHash('sha256').update(body).digest('hex')},coverage:receipt.coverage,totals,readWindow:receipt.readWindow,snapshotNote:receipt.snapshotNote,stage:'列、对象覆盖和计算分量合计核验通过；业务语义仍以所列依据为准，可在最终任务通过后回复文件'};
  }
- clear(){this.datasets.clear();this.bytes=0;}
+ clear(){this.collected.clear();this.datasets.clear();this.bytes=0;}
 }
 const scale=10n**12n;
 function decimal(value){const s=String(value);if(!/^-?\d{1,40}(?:\.\d{1,12})?$/.test(s))throw new ReportInputError('金额必须为最多12位小数的精确十进制值');const negative=s[0]==='-',parts=s.replace(/^-/,'').split('.');return (negative?-1n:1n)*(BigInt(parts[0])*scale+BigInt((parts[1]??'').padEnd(12,'0')));}
@@ -170,3 +184,5 @@ function preview(rows,limit){const out=[];let bytes=0;for(const row of rows.slic
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function uniqueKeys(data,column){const keys=new Set();for(const row of data.rows){const key=row[column];if(typeof key!=='string'||!key||keys.has(key))throw new ReportInputError('覆盖核验主键必须为非空唯一字符串');keys.add(key);}return keys;}
 function queryPreview(definition){return definition?{sql:definition.sql.slice(0,200),params:definition.params.slice(0,3).map(v=>v.slice(0,80)),limited:definition.sql.length>200||definition.params.length>3||definition.params.some(v=>v.length>80)}:undefined;}
+
+function requiredChecks(data){const required=new Map();const walk=(e,numeric)=>{if(e.op==='field'&&numeric)required.set(e.source+':'+e.column,{source:e.source,column:e.column});for(const c of e.args??[])walk(c,true);};for(const c of data.reportDraft.columns)walk(c.value,data.numericColumns?.includes(c.label)||c.total===true);return [...required.values()];}
