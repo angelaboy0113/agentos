@@ -41,7 +41,7 @@ export class ContactDirectory{
  async users(turn,force=false){const ids=new Set(),departments=new Set(),users=new Map(),groupIds=new Set();let groups=false;
   await this.pages('/open-apis/contact/v3/scopes',{},turn,async d=>{for(const id of d.user_ids??[])ids.add(id);for(const id of d.department_ids??[])departments.add(id);for(const id of d.group_ids??[])groupIds.add(id);groups ||= Boolean(d.group_ids?.length);});
   const scopeFingerprint=digest({ids:[...ids].sort(),departments:[...departments].sort(),groups:[...groupIds].sort(),
-    permissions:(await this.request('/open-apis/application/v6/scopes',{},turn)).scopes??[]});
+    permissions:((await this.request('/open-apis/application/v6/scopes',{},turn)).scopes??[]).map(s=>({scope_name:s.scope_name,scope_type:s.scope_type,grant_status:s.grant_status})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))});
   const fresh=(await this.settings()).indexFreshnessMs;
   if(!force){let cached;try{cached=await this.index.get(turn.profile,scopeFingerprint,fresh);}catch{}if(cached){Object.assign(cached.users,{indexAsOf:cached.checkedAt,indexHit:true});return cached.users;}}
   const flightKey=turn.profile+':'+scopeFingerprint;if(this.directoryFlights.has(flightKey))return this.directoryFlights.get(flightKey);
