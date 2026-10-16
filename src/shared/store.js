@@ -103,6 +103,7 @@ export class JsonStore {
       const now = new Date().toISOString();
       const job = {
         id: createId('JOB'),
+        ...(input.visibility==='requester'?{visibility:'requester'}:{}),
         ...(input.questionId ? { questionId: input.questionId } : {}),
         ...(input.connectionEnrollmentPending ? {connectionEnrollmentPending:true} : {}),
         ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),

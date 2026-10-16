@@ -91,8 +91,8 @@ export class LarkCliFeishuClient {
     await mkdir(path.join(this.cwd,'reports'),{recursive:true,mode:0o700});
     const relative=path.join('reports',path.basename(file));
     await copyFile(file,path.join(this.cwd,relative));
-    return runLarkCli(['im','+messages-reply','--as','bot','--message-id',messageId,'--file',relative,
-      ...(options.replyInThread?['--reply-in-thread']:[]),'--idempotency-key',larkIdempotencyKey(options.idempotencyKey),'--json'],
+    return runLarkCli(['im',options.privateRecipient?'+messages-send':'+messages-reply','--as','bot',...(options.privateRecipient?['--user-id',options.privateRecipient]:['--message-id',messageId]),'--file',relative,
+      ...(!options.privateRecipient&&options.replyInThread?['--reply-in-thread']:[]),'--idempotency-key',larkIdempotencyKey(options.idempotencyKey),'--json'],
       {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000});
   }
 
@@ -106,11 +106,18 @@ export class LarkCliFeishuClient {
   async replyImage(messageId,file,options={}){
     await mkdir(path.join(this.cwd,'images'),{recursive:true,mode:0o700});
     const relative=path.join('images',path.basename(file));await copyFile(file,path.join(this.cwd,relative));
-    return runLarkCli(['im','+messages-reply','--as','bot','--message-id',messageId,'--image',relative,
-      ...(options.replyInThread?['--reply-in-thread']:[]),'--idempotency-key',larkIdempotencyKey(options.idempotencyKey),'--json'],
+    return runLarkCli(['im',options.privateRecipient?'+messages-send':'+messages-reply','--as','bot',...(options.privateRecipient?['--user-id',options.privateRecipient]:['--message-id',messageId]),'--image',relative,
+      ...(!options.privateRecipient&&options.replyInThread?['--reply-in-thread']:[]),'--idempotency-key',larkIdempotencyKey(options.idempotencyKey),'--json'],
       {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
   }
 
+  async sendPrivateCard(chatId,openId,card,options={}){
+    if(!chatId||!/^ou_[A-Za-z0-9]+$/.test(openId??''))throw new Error('Private card recipient missing');
+    try{return await this.cardRequest('POST','/open-apis/ephemeral/v1/send',{chat_id:chatId,open_id:openId,msg_type:'interactive',card},options);}
+    catch(error){if(!/18053/.test(error.message)||!/chat can not be thread/.test(error.message))throw error;
+      const result=await this.cardRequest('POST','/open-apis/im/v1/messages',{receive_id:openId,msg_type:'interactive',content:JSON.stringify(card)},{...options,params:{receive_id_type:'open_id'}});return {...result,private_delivery_kind:'dm'};}
+  }
+  async deletePrivateCard(messageId,options={}){try{return await this.cardRequest('POST','/open-apis/ephemeral/v1/delete',{message_id:messageId},options);}catch(e){if(!/18051/.test(e.message))throw e;}}
   async replyCard(messageId, card, options = {}) {
     await mkdir(this.cwd, { recursive: true });
     return runLarkCli(['im', '+messages-reply', '--as', 'bot', '--message-id', messageId,

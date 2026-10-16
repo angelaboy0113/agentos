@@ -1,3 +1,4 @@
+import {isPrivate,cardDestination} from './private-cards.js';
 import {ContactDirectory} from './contact-directory.js';
 import {ReportDelivery} from './report-delivery.js';
 import {validateReportFiles} from '../shared/report-files.js';
@@ -603,7 +604,7 @@ export async function notifyJobEvent(context, { job, event }) {
     // Once queued, keep the exact recipients across retries/config changes.
     const frozenMention = (await context.store.read()).cardMessages?.[key]?.terminalMention;
     const id = await context.cards.upsert(key, jobCard(current),
-      { chatId: current.chatId, replyTo: current.chatId ? null : current.replyToMessageId, profile: current.agentProfile },
+      current.visibility==='requester'?cardDestination(current):{ chatId: current.chatId, replyTo: current.chatId ? null : current.replyToMessageId, profile: current.agentProfile },
       { terminal, immediate: terminal, resultText: terminal ? current.result?.finalMessage : '',
         terminalMention: frozenMention ?? jobTerminalMention(current, context.projects) });
     if (id) await context.store.transact((state) => {
@@ -656,6 +657,7 @@ function nextAgentRole(job) {
 }
 
 async function sendAsJobAgent({ feishu, store }, job, text) {
+  if(isPrivate(await store.read(),job))return; // Never fall back to a public message.
   let result;
   if (job.chatId && typeof feishu.send === 'function') {
     result = await feishu.send(job.chatId, text, { profile: job.agentProfile });

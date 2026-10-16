@@ -1,3 +1,4 @@
+import {cardActionChat} from './private-cards.js';
 import { questionView } from './questions.js';
 import { detailVersion, resultPages, withResultPage } from './result-presentation.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
@@ -14,10 +15,11 @@ export async function handleResultPage(context, event) {
         && item.destination.profile === event.agent_profile);
       if (!found) throw new Error('unknown card');
       const [key, entry] = found;
+      if(entry.destination.visibility==='requester'&&entry.destination.openId!==event.operator_id)throw new Error('private recipient mismatch');
       const view = key.startsWith('question:') ? questionView(state, key.slice(9), context.projects) : null;
       const record = view ? view.question : key.startsWith('job:') ? state.jobs.find((job) => job.id === key.split(':')[1])
         : state.conversations?.find((turn) => `chat:${turn.id}` === key);
-      if (!record || record.chatId !== event.chat_id || !entry.terminal) throw new Error('wrong scope');
+      if (!record || record.chatId !== cardActionChat(entry,event) || !entry.terminal) throw new Error('wrong scope');
       const admin = isAdministrator(context.projects, { profile: event.agent_profile, senderId: event.operator_id });
       const creator = isTaskCreator(context.projects, record, { profile: event.agent_profile, senderId: event.operator_id });
       if (!admin && !creator) throw new Error('not authorized');

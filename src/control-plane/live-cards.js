@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { resultPages } from './result-presentation.js';
 
+const chatIdOf=value=>{if(!value||typeof value!=='object')return null;if(typeof value.chat_id==='string')return value.chat_id;for(const child of Object.values(value)){const id=chatIdOf(child);if(id)return id;}return null;};
+
 export function messageIdOf(value) {
   if (!value || typeof value !== 'object') return null;
   if (typeof value.message_id === 'string') return value.message_id;
@@ -23,6 +25,12 @@ export class LiveCards {
   }
   async stop() { this.closed = true; clearInterval(this.timer); await Promise.allSettled(this.workers.values()); }
   async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '', terminalMention = null, generation = 0, guard } = {}) {
+    if(destination.visibility==='requester'&&(!destination.chatId||!/^ou_[A-Za-z0-9]+$/.test(destination.openId??'')))throw new Error('Private card destination invalid');
+    if(destination.visibility==='requester'&&card.body?.elements){
+      card=structuredClone(card);
+      card.body.elements.push({tag:'markdown',text_size:'notation',content:'私有交付：普通群仅你可见；话题群转机器人私聊。附件若有将通过私聊发送。你发在群里的原提问仍是群消息。'});
+      const rewrite=node=>{if(!node||typeof node!=='object')return;for(const [k,v] of Object.entries(node)){if(typeof v==='string')node[k]=v.replace('结果将在本群卡片显示','结果仅向提问者交付');else rewrite(v);}};rewrite(card);
+    }
     if (Buffer.byteLength(JSON.stringify(card)) > 28_000) throw new Error('Card exceeds safe message limit');
     await this.store.transact((state) => {
       guard?.(state);
@@ -30,16 +38,16 @@ export class LiveCards {
       const existing = state.cardMessages[key];
       if (generation && (!key.startsWith('question:') || !Number.isSafeInteger(generation) || generation < 1)) throw new Error('Invalid card generation');
       if ((existing?.generation ?? 0) > generation) return;
+      if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
       const reopening = generation > (existing?.generation ?? 0);
       if (existing?.terminal && !terminal && !reopening) return; // Late progress cannot overwrite a conclusion.
-      if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
       const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval'].includes(existing?.terminalMention?.kind)
         && terminalMention && !terminalMention.kind;
       if (!reopening && !replacingWaitingMention && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
       state.cardMessages[key] = { ...existing, destination, card, terminal, generation, overflow: [],
         mentionDelivered: reopening || replacingWaitingMention ? false : existing?.mentionDelivered,
-        terminalMention: replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal ? terminalMention : null),
+        terminalMention: destination.visibility==='requester'?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });
@@ -51,7 +59,7 @@ export class LiveCards {
     const state = await this.store.read();
     if(this.afterRetry)this.afterRetry(state).catch(()=>{});
     for (const [key, value] of Object.entries(state.cardMessages ?? {})) {
-      if ((value.revision !== value.deliveredRevision || (value.terminalMention && !value.mentionDelivered))
+      if ((value.retiredMessageIds?.length || value.revision !== value.deliveredRevision || (value.terminalMention && !value.mentionDelivered))
         && Date.now() >= (value.retryAt ?? 0)) this.flush(key).catch(() => {});
     }
   }
@@ -65,7 +73,17 @@ export class LiveCards {
     this.workers.set(key, worker);
     try { return await worker; } finally { if (this.workers.get(key) === worker) this.workers.delete(key); }
   }
+  async cleanupPrivate(key){
+    const entry=(await this.store.read()).cardMessages?.[key];
+    if(entry?.destination.visibility!=='requester')return;
+    for(const id of entry.retiredMessageIds??[]){
+      try{await this.feishu.deletePrivateCard(id,{profile:entry.destination.profile});
+        await this.store.transact(s=>{const e=s.cardMessages[key];e.retiredMessageIds=(e.retiredMessageIds??[]).filter(x=>x!==id);});
+      }catch{return;} // Retain cleanup outbox. Never publish or rerun the business task.
+    }
+  }
   async deliver(key, force) {
+    await this.cleanupPrivate(key);
     const entry = (await this.store.read()).cardMessages?.[key];
     if (!entry || (entry.revision === entry.deliveredRevision && (!entry.terminalMention || entry.mentionDelivered))) return entry?.messageId;
     // A local maintenance hold prevents external edits while operator approval is pending.
@@ -80,7 +98,15 @@ export class LiveCards {
     try {
       const options = { replyInThread: entry.destination.replyInThread, profile: entry.destination.profile, idempotencyKey: `aos-card-${createHash('sha256').update(key).digest('hex').slice(0, 32)}` };
       let messageId = entry.messageId;
-      if (messageId) {
+      const privateCard=entry.destination.visibility==='requester';
+      let privateDeliveryKind=entry.privateDeliveryKind,privateDeliveryChatId=entry.privateDeliveryChatId;
+      if(privateCard){
+        if(typeof this.feishu.sendPrivateCard!=='function'||typeof this.feishu.deletePrivateCard!=='function')throw new Error('Private card transport unavailable');
+        if(privateDeliveryKind==='dm'&&messageId){await this.feishu.updateCard(messageId,entry.card,options);}
+        else {const result=await this.feishu.sendPrivateCard(entry.destination.chatId,entry.destination.openId,entry.card,options);
+          messageId=messageIdOf(result);if(!messageId)throw new Error('Private card returned no message ID');privateDeliveryKind=result.private_delivery_kind??'ephemeral';privateDeliveryChatId=privateDeliveryKind==='dm'?chatIdOf(result):null;}
+      }
+      else if (messageId) {
         if (entry.revision !== entry.deliveredRevision) await this.feishu.updateCard(messageId, entry.card, options);
       }
       else {
@@ -91,15 +117,17 @@ export class LiveCards {
         if (!messageId) throw new Error('Card send returned no message ID');
       }
       await this.store.transact((state) => {
-        Object.assign(state.cardMessages[key], { messageId, deliveredRevision: entry.revision,
+        if(privateCard&&entry.messageId&&entry.messageId!==messageId){state.cardMessages[key].retiredMessageIds=[...new Set([...(state.cardMessages[key].retiredMessageIds??[]),entry.messageId])];}
+        Object.assign(state.cardMessages[key], { messageId, ...(privateCard?{privateDeliveryKind,privateDeliveryChatId}:{}), deliveredRevision: entry.revision,
           sentAt: Date.now(), failures: 0, retryAt: 0 });
       });
+      if(privateCard)await this.cleanupPrivate(key);
       const fresh = await this.store.read(), latest = fresh.cardMessages[key];
       const question = key.startsWith('question:') ? fresh.questions?.[key.slice(9)] : null;
       const questionReady = !question || (question.generation <= entry.generation
         && !fresh.conversations.some((t) => t.questionId === question.id && ['queued', 'thinking', 'decided'].includes(t.status))
         && !fresh.jobs.some((j) => j.questionId === question.id && ['queued', 'running', 'cancelling', 'awaiting_approval', ...(entry.terminalMention?.kind==='browser_login'?[]:['awaiting_clarification']), ...(entry.terminalMention?.kind === 'environment_approval' ? [] : ['awaiting_environment_approval'])].includes(j.status)));
-      if (entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
+      if (!privateCard && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile, replyInThread: entry.terminalMention.replyInThread ?? entry.destination.replyInThread,
           idempotencyKey: `aos-mention-${createHash('sha256').update(entry.generation ? `${key}:${entry.generation}` : key).digest('hex').slice(0, 32)}`,

@@ -1,3 +1,4 @@
+import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
 import { refreshExpiredApprovalCards } from './approval-expiry.js';
 import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/source-environments.js';
 import { connectionCandidates } from '../shared/connection-endpoints.js';
@@ -74,18 +75,23 @@ export class ConversationService {
       state.conversations ??= [];
       const existing = state.conversations.find((turn) => turn.messageId === event.message_id && turn.profile === profile);
       if (existing) return { conversation: true, turnId: existing.id, duplicate: true };
+      const privateReply=event.chat_type==='p2p'&&Object.values(state.cardMessages??{}).find(c=>c.destination.visibility==='requester'&&c.privateDeliveryKind==='dm'&&c.privateDeliveryChatId===event.chat_id&&c.destination.openId===event.sender_id&&c.destination.profile===profile&&c.messageId===event.reply_to);
+      const routedChatId=privateReply?.destination?.chatId??event.chat_id;
       const turn = {
-        id: createId('CHAT'), messageId: event.message_id, chatId: event.chat_id,
-        senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake', chatType: event.chat_type ?? null,
-        projectId: this.context.projects.chatProjectMap[event.chat_id] ?? null,
+        ...(privateReply?{sourceChatId:event.chat_id}:{}),
+        id: createId('CHAT'), messageId: event.message_id, chatId: routedChatId,
+        senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake', chatType: privateReply?'group':event.chat_type ?? null,
+        projectId: this.context.projects.chatProjectMap[routedChatId] ?? null,
         parentId: event.reply_to ?? event.root_id ?? null,
         ...(this.context.projects.topicChatIds?.includes(event.chat_id) || event.thread_id ? { replyInThread: true } : {}),
         content: event.content ?? '', attachments: event.attachments ?? [],
         status: 'queued', createdAt: new Date().toISOString(),
-        sessionKey: JSON.stringify([event.chat_id, event.sender_id, profile, event.agent_role ?? 'owner_intake',
-          this.context.projects.chatProjectMap[event.chat_id] ?? null]),
+        sessionKey: JSON.stringify([routedChatId, event.sender_id, profile, event.agent_role ?? 'owner_intake',
+          this.context.projects.chatProjectMap[routedChatId] ?? null]),
       };
-      if (this.questionCards && turn.chatType === 'group' && this.context.cards?.enabled) attachQuestion(state, turn, event, this.context.projects);
+      const privateParent=Object.values(state.questions??{}).find(q=>q.visibility==='requester'&&q.chatId===turn.chatId&&q.profile===turn.profile&&q.senderId===turn.senderId&&q.projectId===turn.projectId&&[event.reply_to,event.root_id].filter(Boolean).some(id=>id===q.messageId||id===state.cardMessages?.[`question:${q.id}`]?.messageId||state.conversations.some(t=>t.questionId===q.id&&t.messageId===id)));
+      if(turn.chatType==='group'&&(requestsPrivateCard(turn.content)||privateParent))turn.visibility='requester';
+      if ((this.questionCards||turn.visibility==='requester') && turn.chatType === 'group' && this.context.cards?.enabled) attachQuestion(state, turn, event, this.context.projects);
       state.conversations.push(turn);
       return { conversation: true, turnId: turn.id, duplicate: false };
     });
@@ -171,10 +177,11 @@ export class ConversationService {
     if (this.context.cards?.enabled) {
       if (!turn || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
       const messageId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
-        { replyTo: turn.messageId, profile: turn.profile, ...(turn.replyInThread ? { replyInThread: true } : {}) }, { immediate: true });
+        cardDestination(turn), { immediate: true });
       if (messageId) await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: messageId });
       return;
     }
+    if (turn?.visibility==='requester')return;
     if (!turn || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact') || turn.feedbackState) return;
     // Best-effort factual receipt, not a semantic/template answer. Persist before send.
     await this.update(id, { feedbackState: 'sending' });
@@ -237,11 +244,12 @@ export class ConversationService {
         let parts;
         if (this.context.cards?.enabled) {
           const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
-            { replyTo: turn.messageId, profile: turn.profile, ...(turn.replyInThread ? { replyInThread: true } : {}) }, { terminal: true, immediate: true,
+            cardDestination(turn), { terminal: true, immediate: true,
               resultText: Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT ? turn.response : '', terminalMention: conversationTerminalMention(turn) });
           if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
           parts = [];
         } else {
+          if(turn.visibility==='requester')throw new Error('私有卡片投递不可用，未回退公开消息');
           parts = splitReply(turn.response);
           const mention = conversationTerminalMention(turn);
           if (mention && parts.length) parts[parts.length - 1] = `${parts.at(-1)}\n\n${mention.text}`;
@@ -257,7 +265,7 @@ export class ConversationService {
           try{file=await this.context.contacts.validateImage(turn,turn.outcome.contactImage);}
           catch{await this.update(turn.id,{outcome:{...turn.outcome,contactImage:null},response:'联系人资料、授权或图片检查未通过，本次没有发送图片，请重新查询。',sentParts:0,contactImageError:'资料、授权或图片检查未通过，未发送；请重新查询。'});continue;}
           if(typeof this.context.feishu.replyImage!=='function')throw new Error('Image transport unavailable');
-          const result=await this.context.feishu.replyImage(turn.messageId,file,{profile:turn.profile,replyInThread:turn.replyInThread,idempotencyKey:'aos-contact-'+turn.id+'-'+turn.outcome.contactImage.sha256.slice(0,32)});
+          const result=await this.context.feishu.replyImage(turn.messageId,file,{profile:turn.profile,replyInThread:turn.replyInThread,privateRecipient:privateRecipient(await this.context.store.read(),turn),idempotencyKey:'aos-contact-'+turn.id+'-'+turn.outcome.contactImage.sha256.slice(0,32)});
           const imageId=responseMessageId(result);if(!imageId)throw new Error('Image delivery has no message ID');
           responseIds.push(imageId);await this.update(turn.id,{contactImageMessageId:imageId,responseIds});
         }
@@ -281,12 +289,12 @@ export class ConversationService {
     const scoped = Boolean(turn.questionId);
     const questionIds = new Set();
     let q = state.questions?.[turn.questionId];
-    while (q && !questionIds.has(q.id) && q.chatId === turn.chatId && q.profile === turn.profile && q.projectId === projectId) {
+    while (q && !questionIds.has(q.id) && q.chatId === turn.chatId && q.profile === turn.profile && q.projectId === projectId && (q.visibility!=='requester'||turn.visibility==='requester'&&q.senderId===turn.senderId)) {
       questionIds.add(q.id); q = state.questions?.[q.parentQuestionId];
     }
     if (scoped) questionIds.add(turn.questionId);
     const preceding = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.chatId === turn.chatId
-      && item.profile === turn.profile && (scoped ? questionIds.has(item.questionId) : item.senderId === turn.senderId) && item.status === 'sent'
+      && item.profile === turn.profile && (item.visibility!=='requester'||turn.visibility==='requester'&&item.senderId===turn.senderId) && (scoped ? questionIds.has(item.questionId) : item.senderId === turn.senderId) && item.status === 'sent'
       && conversationProject(item) === projectId);
     const memory = scoped ? { enabled: false, available: true, policy: 'question-scoped-native-v2' } : await this.memory.retrieve(state, turn, projectId);
     const suppressed = new Set(memory.suppressedRefs ?? []);
@@ -300,7 +308,7 @@ export class ConversationService {
     const relatedMessages = new Set(preceding.flatMap(item => [item.id,item.messageId]).filter(Boolean));
     relatedMessages.add(turn.id); relatedMessages.add(turn.messageId);
     const explicitJob = job => !scoped && isAdministrator(projects,turn) && String(turn.content).split(/[^A-Za-z0-9_-]+/).includes(job.id);
-    const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId
+    const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId && (!isPrivate(state,job)||turn.visibility==='requester'&&job.senderId===turn.senderId)
       && (explicitJob(job) || (job.originProfile ?? job.agentProfile ?? null) === (turn.profile ?? null))
       && (scoped ? questionIds.has(job.questionId) : relatedMessages.has(job.originMessageId) || relatedMessages.has(job.sourceMessageId) || explicitJob(job))
       && !suppressed.has(`job:${job.id}`) && !suppressed.has(`conversation:${job.sourceMessageId}`) && !suppressedMessages.has(job.originMessageId)).slice(-20).map((job) => ({
@@ -315,6 +323,7 @@ export class ConversationService {
     }));
     delete memory.suppressedRefs;
     return fitContext({
+      delivery:{visibility:turn.visibility??'public',rule:turn.visibility==='requester'?'只向提问者投递临时卡片；附件通过同一机器人私聊，不得公开。':'普通公开回复'},
       contactDirectory: this.context.contacts ? await this.context.contacts.catalog(turn) : {enabled:false,pending:[]},
       teamKnowledge: this.context.knowledge ? await this.context.knowledge.candidates(turn, projectId) : { enabled: false, candidates: [] },
       memory, nativeSession: scoped, contextIsolation: { policy: 'question-v2', questionIds: [...questionIds], rule: '只回答当前问题；关联问题历史不是其他任务的授权。不得引入无关话题。' }, requestId: turn.id, questionId: turn.questionId ?? null,
@@ -435,7 +444,7 @@ export class ConversationService {
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         ...(turn.setupSourceJobId?{context:turn.investigationContext??[],missionId:turn.resumeMissionId}:{}),
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
-        originChatType: turn.chatType, questionId: turn.questionId, environmentAccess, sourceEnvironment,
+        originChatType: turn.chatType, visibility:turn.visibility, questionId: turn.questionId, environmentAccess, sourceEnvironment,
         connectionEnrollmentPending: decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url,
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
@@ -451,6 +460,7 @@ export class ConversationService {
     }
     const job = await store.getJob(decision.jobId);
     if (!job || job.chatId !== turn.chatId || job.projectId !== projectId) throw new Error('本群没有这个任务，不能跨群操作。');
+    if(isPrivate(await store.read(),job)&&(turn.visibility!=='requester'||job.senderId!==turn.senderId))throw new Error('请在原私有问题中操作，不能公开其他私有结果');
     if (turn.questionId && job.questionId !== turn.questionId) throw new Error('请回复对应问题的主卡片操作任务，不能在一个问题里推进另一个问题。');
     if (decision.action === 'approve_environment') {
       const e = verifyPlan(await loadEnvironments(), job.environmentAccess ?? {});

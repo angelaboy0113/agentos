@@ -107,3 +107,7 @@ MySQL investigate templates expose `count` alongside schema and select. It requi
 This is not full desktop-tool parity. Available live tools remain scoped MySQL and Nacos (including its browser adapter). Generic business websites, arbitrary application logs, arbitrary SQL/joins, and mutation operations are not automatically available. When evidence requires an unsupported capability, the agent must identify the missing system/tool and required cooperation instead of pretending it inspected it. Model selection of the next request is guided by prompts; execution scope, approval and task isolation are enforced in code. No guarantee of identical answers to interactive Codex is made.
 
 Validation: automated source-owner escalation, runtime-to-source continuation, grant stripping, preserved original question and evidence, duplicate completion and repeated-scope rejection, validated aggregate SQL and actual adapter count results. Existing historical jobs are not automatically restarted.
+
+## 按需私有
+
+提问正文以“仅我可见：”开头，普通群仅提问者可见；话题群转同一机器人私聊，附件仅私聊。原提问仍公开、不会追溯隐藏旧卡片。生命周期、平台限制与验收见[私有卡片](private-cards.md)。

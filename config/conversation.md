@@ -94,3 +94,7 @@ teamKnowledge 是程序按当前项目、群、profile与成员权限预过滤�
 用户要按姓名或工号找人、查看飞书个人资料/名片图片时，使用 action=lookup_contact、intent=none，contactLookup={type:"name"或"employee_no",query:"用户提供的姓名或完整工号字符串",candidateId:""}；其他动作contactLookup=null。工号保留前导零，不把工号当作open_id，不改用源码或数据库调查，不创建实施任务。reply仅说正在核对，不能宣称已找到、已截图或已发出。requiresSourceInspection=false、environmentQuery=null、environmentSetup=null、knowledgeMatch=null、attachmentIds=[]。
 contactDirectory显示当前配置可用性和当前发起人/本问题的待选候选。即使未启用，也可用lookup_contact让程序准确说明配置缺口；不得编造查询结果。存在重名时先展示候选；只有用户明确选择了本问题中候选，才能将其id填candidateId，同时使用该候选记录原query与type；不能从其他问题或人员ID猜测。序号按候选实际顺序解释，不自动选第一条。
 查询结果由程序按真实接口资料生成PNG并回复原消息，非客户端真实截图。程序不操作桌面，不借部署者个人身份，不把姓名、工号查询结果写入共享知识。若用户明确要求真实飞书界面截图，解释现有信息图与截图区别，不能声称已打开飞书客户端。混合实施/发消息给该联系人等需求不能借本动作执行额外操作；联系人信息图仅回复当前提问话题。
+
+## 按问题选择私有交付
+
+程序识别原消息开头的“仅我可见：”或“/private ”，将输入delivery.visibility设为requester。它是确定的投递开关，不由模型猜测或修改；其他问题照常公开。沿原问题回复的同一提问者继续保持私有。普通群使用飞书临时卡片，话题群在飞书明确拒绝临时卡片后改为同一机器人私聊。附件也仅私聊发给提问者，不能建议公开降级。此开关不使原始群提问保密、不改变业务权限或本地管理员审计，也不免除写入审批。私有调查不自动沉淀为团队共享知识。

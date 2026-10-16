@@ -1,3 +1,4 @@
+import {privateRecipient} from './private-cards.js';
 import {reportEligible} from '../shared/report-acceptance.js';
 import {createHash} from 'node:crypto';
 import {reportFile} from '../shared/report-files.js';
@@ -24,7 +25,7 @@ export class ReportDelivery {
     for(const [oldKey,entry] of Object.entries(state.reportDeliveries))if(oldKey!==key&&!entry.messageId&&entry.questionId===job.questionId&&entry.questionGeneration===q?.generation)entry.superseded=true;
     if(state.reportDeliveries[key])continue;
     const messageId=q?.messageId??job.originMessageId??job.replyToMessageId;if(!messageId)continue;
-    state.reportDeliveries[key]={sourceJobId:source.id,questionId:job.questionId,questionGeneration:q?.generation,item,destination:{messageId,profile:q?.profile??job.originProfile??job.agentProfile,replyInThread:q?.replyInThread??job.originReplyInThread??false},createdAt:new Date().toISOString()};
+    state.reportDeliveries[key]={sourceJobId:source.id,questionId:job.questionId,questionGeneration:q?.generation,item,destination:{messageId,privateRecipient:privateRecipient(state,current),profile:q?.profile??job.originProfile??job.agentProfile,replyInThread:q?.replyInThread??job.originReplyInThread??false},createdAt:new Date().toISOString()};
    }
   });
   await this.retry();
@@ -49,7 +50,8 @@ export class ReportDelivery {
    const {file}=await reportFile(this.context.config.dataDir,entry.sourceJobId,entry.item);
    const current=await this.context.store.read();
    if(!deliveryEligible(current,entry)||current.reportDeliveries[key]?.superseded||(entry.questionId&&current.questions?.[entry.questionId]?.generation!==entry.questionGeneration))return;
-   const result=await this.context.feishu.replyFile(entry.destination.messageId,file,{...entry.destination,idempotencyKey:'aos-report-'+createHash('sha256').update(key).digest('hex').slice(0,32)});
+   const recipient=privateRecipient(current,current.jobs.find(j=>j.id===entry.sourceJobId));if(entry.destination.privateRecipient&&entry.destination.privateRecipient!==recipient)throw new Error('Private recipient changed');
+   const result=await this.context.feishu.replyFile(entry.destination.messageId,file,{...entry.destination,privateRecipient:recipient,idempotencyKey:'aos-report-'+createHash('sha256').update(key).digest('hex').slice(0,32)});
    const id=messageIdOf(result);if(!id)throw new Error('没有文件消息编号');
    await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{messageId:id,deliveredAt:new Date().toISOString(),failures:0,retryAt:0}));
   }catch{

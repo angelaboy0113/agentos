@@ -72,3 +72,22 @@ test('a later review preserves the original file location when accepted report m
  const state={jobs:[source,reviewer],questions:{q:{generation:1,messageId:'root'}}};const service=new ReportDelivery({store:{read:async()=>structuredClone(state),transact:async f=>f(state)},config:{dataDir:'/unused'},feishu:{}});
  await service.enqueue(reviewer);assert.equal(Object.values(state.reportDeliveries)[0].sourceJobId,'origin');await service.close();
 });
+test('private report outbox preserves private recipient through retry and never sends a public attachment',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'agentos-delivery-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const d=new ReportDatasets({maxRows:10,directory:path.join(root,'exports','JOB-a')});
+ const data=await d.collect({sql:'x',columns:['id','amount'],params:[]},async()=>[[{id:'1',amount:'0.1'}]]);
+ const report=await d.compose({sources:[{name:'s1',datasetRef:data.datasetRef,keyColumn:'id'}],columns:[{label:'客户',value:{op:'key'}},{label:'金额',value:{op:'field',source:'s1',column:'amount'}}]});
+ const final=await d.finalize({datasetRef:report.datasetRef,requirement:'逐客户金额清单',expectedColumns:report.columns,scopeEvidence:'完整客户取数范围',populationRef:data.datasetRef,populationKey:'id',columnRules:report.columns.map(label=>({label,definition:'客户或金额字段',evidence:'字段业务说明'})),checks:[]});
+ const source={id:'JOB-a',questionId:'q',reportFiles:[{...final.exportFile,questionGeneration:1}]};
+ const job={id:'JOB-b',questionId:'q',status:'running',result:{outcome:'ready'}};
+ const state={jobs:[source,job],questions:{q:{messageId:'om-root',profile:'owner',generation:1,replyInThread:true,visibility:'requester',senderId:'ou_asker'}}};
+ const store={read:async()=>structuredClone(state),transact:async fn=>fn(state)};
+ let failed=true;const calls=[];const feishu={replyFile:async(message,file,options)=>{calls.push({message,file,options});if(failed)throw new Error('offline');return {data:{message_id:'om-report'}};}};
+ const context={store,feishu,config:{dataDir:root}},service=new ReportDelivery(context);
+ await service.enqueue(job);assert.equal(calls.length,0);
+ job.status='completed';job.result.outcome='partial';await service.enqueue(job);assert.equal(calls.length,0);
+ job.result.outcome='ready';await service.enqueue(job);assert.equal(calls.length,1);const [key]=Object.keys(state.reportDeliveries);assert.equal(state.reportDeliveries[key].failures,1);
+ assert.equal(calls[0].options.privateRecipient,'ou_asker');assert.equal(calls[0].message,'om-root');assert.equal(calls[0].options.profile,'owner');assert.equal(calls[0].options.replyInThread,true);
+ await service.close();state.reportDeliveries[key].retryAt=0;failed=false;state.questions.q.profile='changed';
+ const restarted=new ReportDelivery(context);await restarted.retry();assert.equal(calls.length,2);assert.equal(calls[1].options.privateRecipient,'ou_asker');assert.equal(calls[1].options.profile,'owner');assert.equal(calls[0].options.idempotencyKey,calls[1].options.idempotencyKey);await restarted.retry();assert.equal(calls.length,2);assert.equal(state.reportDeliveries[key].messageId,'om-report');await restarted.close();
+});

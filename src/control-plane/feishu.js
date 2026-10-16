@@ -54,7 +54,7 @@ export class FeishuClient {
     const form=new FormData();form.set('image_type','message');form.set('image',new Blob([await readFile(file)],{type:'image/png'}),path.basename(file));
     const response=await fetch(`${OPEN_API}/im/v1/images`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});
     const uploaded=await response.json();if(!response.ok||uploaded.code!==0||!uploaded.data?.image_key)throw new Error('Image upload failed');
-    const sent=await fetch(`${OPEN_API}/im/v1/messages/${encodeURIComponent(messageId)}/reply`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`,'content-type':'application/json'},body:JSON.stringify({msg_type:'image',content:JSON.stringify({image_key:uploaded.data.image_key}),uuid:options.idempotencyKey,...(options.replyInThread?{reply_in_thread:true}:{})}),signal:AbortSignal.timeout(30000)});
+    const sent=await fetch((options.privateRecipient?`${OPEN_API}/im/v1/messages?receive_id_type=open_id`:`${OPEN_API}/im/v1/messages/${encodeURIComponent(messageId)}/reply`),{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`,'content-type':'application/json'},body:JSON.stringify({...(options.privateRecipient?{receive_id:options.privateRecipient}:{}),msg_type:'image',content:JSON.stringify({image_key:uploaded.data.image_key}),uuid:options.idempotencyKey,...(!options.privateRecipient&&options.replyInThread?{reply_in_thread:true}:{})}),signal:AbortSignal.timeout(30000)});
     const result=await sent.json();if(!sent.ok||result.code!==0)throw new Error('Image reply failed');return result;
   }
 
@@ -62,9 +62,16 @@ export class FeishuClient {
     const form=new FormData();form.set('file_type','stream');form.set('file_name',path.basename(file));form.set('file',new Blob([await readFile(file)],{type:'text/csv'}),path.basename(file));
     const response=await fetch(`${OPEN_API}/im/v1/files`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});
     const result=await response.json();if(!response.ok||result.code!==0||!result.data?.file_key)throw new Error('Feishu report upload failed');
-    return this.cardRequest('POST',`/im/v1/messages/${encodeURIComponent(messageId)}/reply`,{msg_type:'file',content:JSON.stringify({file_key:result.data.file_key}),uuid:options.idempotencyKey,...(options.replyInThread?{reply_in_thread:true}:{})});
+    return this.cardRequest('POST',options.privateRecipient?'/im/v1/messages?receive_id_type=open_id':`/im/v1/messages/${encodeURIComponent(messageId)}/reply`,{...(options.privateRecipient?{receive_id:options.privateRecipient}:{}),msg_type:'file',content:JSON.stringify({file_key:result.data.file_key}),uuid:options.idempotencyKey,...(!options.privateRecipient&&options.replyInThread?{reply_in_thread:true}:{})});
   }
 
+  async sendPrivateCard(chatId, openId, card) {
+    if(!chatId||!/^ou_[A-Za-z0-9]+$/.test(openId??''))throw new Error('Private card recipient missing');
+    try{return await this.cardRequest('POST','/ephemeral/v1/send',{chat_id:chatId,open_id:openId,msg_type:'interactive',card});}
+    catch(error){if(error.feishuCode!==18053||!/chat can not be thread/.test(error.feishuMessage??''))throw error;
+      const result=await this.cardRequest('POST','/im/v1/messages?receive_id_type=open_id',{receive_id:openId,msg_type:'interactive',content:JSON.stringify(card)});return {...result,private_delivery_kind:'dm'};}
+  }
+  async deletePrivateCard(messageId){try{return await this.cardRequest('POST','/ephemeral/v1/delete',{message_id:messageId});}catch(e){if(!/18051/.test(e.message))throw e;}}
   async replyCard(messageId, card, options = {}) {
     return this.cardRequest('POST', `/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
       { msg_type: 'interactive', content: JSON.stringify(card), uuid: options.idempotencyKey, ...(options.replyInThread ? { reply_in_thread: true } : {}) });
@@ -82,7 +89,7 @@ export class FeishuClient {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
     const result = await response.json();
-    if (!response.ok || result.code !== 0) throw new Error(`Feishu card failed: ${result.code ?? response.status}`);
+    if (!response.ok || result.code !== 0) {const error=new Error(`Feishu card failed: ${result.code ?? response.status}`);error.feishuCode=result.code;error.feishuMessage=result.msg;throw error;}
     return result;
   }
 

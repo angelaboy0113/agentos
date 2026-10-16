@@ -43,7 +43,7 @@ export function terms(text) {
 
 // Filter BEFORE ranking. No implicit cross-person/profile/group/project sharing, including administrators.
 export function memorySources(state, turn, projectId, suppressed = new Set()) {
-  const conversations = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.status === 'sent'
+  const conversations = (state.conversations ?? []).filter((item) => item.visibility!=='requester' && item.id !== turn.id && item.status === 'sent'
     && item.chatId === turn.chatId && (item.profile ?? null) === (turn.profile ?? null)
     && item.senderId === turn.senderId && memoryProject(item) === projectId && !suppressed.has(`conversation:${item.id}`));
   const ids = new Set(conversations.flatMap((item) => [item.id, item.messageId]).filter(Boolean));
@@ -52,7 +52,7 @@ export function memorySources(state, turn, projectId, suppressed = new Set()) {
     receiptOnly: Boolean(item.outcome?.jobId || item.outcome?.nextJobId),
     evidence: { applicability: 'historical_conversation_not_current_fact', requiresRecheckForCurrentSource: true } }));
   for (const job of state.jobs ?? []) {
-    if (job.environmentAccess || job.chatId !== turn.chatId || job.projectId !== projectId || (job.originProfile ?? null) !== (turn.profile ?? null)
+    if (job.visibility==='requester' || job.environmentAccess || job.chatId !== turn.chatId || job.projectId !== projectId || (job.originProfile ?? null) !== (turn.profile ?? null)
       || !(ids.has(job.originMessageId) || ids.has(job.sourceMessageId))
       || !['completed', 'cancelled', 'failed', 'blocked'].includes(job.status)) continue;
     sources.push({ ref: `job:${job.id}`, recordedAt: job.updatedAt ?? job.createdAt,

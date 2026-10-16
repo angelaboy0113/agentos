@@ -77,7 +77,7 @@ export class ContactDirectory{
   const checkedAt=new Date().toISOString();await this.render(target,{...fields,department,leader,checkedAt,directoryCheckedAt:new Date(users.indexAsOf).toISOString()});const body=await readFile(target);
   if(!body.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw new Error('联系人图片生成失败，未发送。');
   const contactImage={relative,sha256:digest(body),bytes:body.length,binding:digest(bound(turn)),policyHash:digest(policy),personId:user.open_id,fieldsHash:digest(fields),checkedAt,indexAsOf:users.indexAsOf,indexHit:users.indexHit};
-  await writeFile(target+'.json',JSON.stringify(contactImage),{mode:0o600});return {notice:'已生成联系人信息图，将回复在本话题。资料来自机器人当前获准的通讯录，不是飞书界面截图；未返回的字段标为未提供。',contactImage};
+  await writeFile(target+'.json',JSON.stringify(contactImage),{mode:0o600});return {notice:(turn.visibility==='requester'?'已生成联系人信息图，将通过机器人私聊发给你。':'已生成联系人信息图，将回复在本话题。')+'资料来自机器人当前获准的通讯录，不是飞书界面截图；未返回的字段标为未提供。',contactImage};
  }
  async departments(turn,ids){const names=[];for(const id of ids){try{const d=await this.request('/open-apis/contact/v3/departments/'+encodeURIComponent(id),{},turn);if(d.department?.name)names.push(clean(d.department.name));}catch{}}return names.join(' / ');}
  async validateImage(turn,item){const policy=await this.policy(turn);if(item.binding!==digest(bound(turn))||item.policyHash!==digest(policy))throw new Error('联系人图片所属范围已变化，未投递。');

@@ -1,3 +1,4 @@
+import {cardActionChat} from './private-cards.js';
 import { loadEnvironments, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { publishQuestion, questionJob } from './questions.js';
 import { jobActionVersion, jobCard } from './message-cards.js';
@@ -58,10 +59,13 @@ async function applyCardAction(context, event) {
     && item.messageId === event.message_id && item.destination.profile === profile);
   if (!entry) return { ignored: true, reason: '没有可验证的原始任务卡片' };
   const [key, savedCard] = entry;
+  if(savedCard.destination.visibility==='requester'&&savedCard.destination.openId!==event.operator_id)return {ignored:true,reason:'private_recipient_mismatch'};
+  let effectiveChatId;try{effectiveChatId=cardActionChat(savedCard,event);}catch{return {ignored:true,reason:'private_scope_mismatch'};}
+  if(projects.retiredChatIds?.includes(effectiveChatId)&&!['refresh','result_page'].includes(parsedValue.action))return {ignored:true,reason:'retired_group'};
   const questionId = key.startsWith('question:') ? key.slice('question:'.length) : null;
   const jobId = questionId ? questionJob(state, questionId)?.id : key.split(':')[1];
   const job = state.jobs.find((item) => item.id === jobId);
-  if (!job || job.chatId !== event.chat_id || (questionId ? state.questions?.[questionId]?.profile : job.agentProfile) !== profile) return { ignored: true, reason:'card_job_scope_mismatch' };
+  if (!job || job.chatId !== effectiveChatId || (questionId ? state.questions?.[questionId]?.profile : job.agentProfile) !== profile) return { ignored: true, reason:'card_job_scope_mismatch' };
   const effectKey = `card-action:${profile}:${event.event_id}`;
   const admin = isAdministrator(projects, { profile, senderId: event.operator_id });
   const creator = isTaskCreator(projects, job, { profile, senderId: event.operator_id });
@@ -77,7 +81,7 @@ async function applyCardAction(context, event) {
     const guard = (freshState, current) => {
       const freshCard = freshState.cardMessages?.[key];
       if (freshCard?.messageId !== event.message_id || freshCard.destination.profile !== profile
-        || current.chatId !== event.chat_id || (questionId ? freshState.questions?.[questionId]?.profile : current.agentProfile) !== profile
+        || current.chatId !== cardActionChat(freshCard,event) || (questionId ? freshState.questions?.[questionId]?.profile : current.agentProfile) !== profile
         || (questionId && questionJob(freshState, questionId)?.id !== current.id)
         || jobActionVersion(current) !== version || !hasAction(freshCard.card, action, version)) {
         throw new Error('这张卡片已过期，请操作最新任务卡片。');
@@ -128,7 +132,7 @@ async function applyCardAction(context, event) {
     const noticeKey = `${effectKey}:notice`;
     const accepted = await store.transactEffect(noticeKey, () => ({ message: known }));
     const delivered = (await store.read()).cardActionNotices?.[noticeKey];
-    if (!delivered) {
+    if (!delivered && savedCard.destination.visibility!=='requester') {
       await context.feishu.reply(event.message_id, accepted.message, { profile, replyInThread: savedCard.destination.replyInThread, idempotencyKey: noticeKey });
       await store.transact((fresh) => { fresh.cardActionNotices ??= {}; fresh.cardActionNotices[noticeKey] = true; });
     }
