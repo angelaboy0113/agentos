@@ -91,4 +91,4 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 
 ## 联系人信息图
 
-`data/contact-images/`保存个人资料PNG和校验回执，`data/lark-cli/images/`为CLI上传副本；对话outcome登记原提问范围与投递状态。文件含人员资料，使用本机受限权限，不进入Git或团队知识；停稳后备份，没有自动清理服务。配置和验收见[联系人信息图](contact-images.md)。
+`data/contact-index/directory.sqlite`保存受范围/权限指纹限制的最小目录候选，不含手机号或邮箱；与团队知识SQLite分开。`data/contact-images/`保存个人资料PNG和校验回执，`data/lark-cli/images/`为CLI上传副本；对话outcome登记原提问范围与投递状态。文件含人员资料，使用本机受限权限，不进入Git或团队知识；停稳后备份，没有自动清理服务。配置和验收见[联系人信息图](contact-images.md)。

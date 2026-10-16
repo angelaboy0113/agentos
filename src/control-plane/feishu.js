@@ -46,7 +46,7 @@ export class FeishuClient {
   }
 
   async contactRequest(route,params){
-    if(!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
+    if(route!=='/open-apis/application/v6/scopes'&&!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
     const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(30000)});
     const result=await response.json();if(!response.ok||result.code!==0)throw new Error('Contact API failed');return result.data??{};
   }

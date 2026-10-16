@@ -10,5 +10,6 @@
         "your-owner-profile"
       ]
     }
-  ]
+  ],
+  "indexFreshnessMs": 900000
 }

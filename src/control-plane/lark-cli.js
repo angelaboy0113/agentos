@@ -98,7 +98,7 @@ export class LarkCliFeishuClient {
 
   async contactRequest(route,params,options={}){
     await mkdir(this.cwd,{recursive:true,mode:0o700});
-    if(!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
+    if(route!=='/open-apis/application/v6/scopes'&&!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
     const result=await runLarkCli(['api','GET',route,'--as','bot','--params',JSON.stringify(params),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
     if(!result.data||typeof result.data!=='object')throw new Error('Invalid contact response');
     return result.data;
