@@ -25,6 +25,7 @@
 
 - 项目、群和profile必须对应真实项目绑定；不因机器人在群里就自动启用。可选 `senderIds` 为该profile下获准提问者的open_id数组；省略表示配置群内的成员可发起。私聊当前不开放。
 - 默认配置文件是 `config/contacts.local.json`，可用 `AGENTOS_CONTACTS_FILE` 指定。每次请求及发送前重读配置；新增程序/提示词需要在任务和对话空闲时受控重启。
+- 可选 `workEmailDomains` 为该共享范围允许展示的工作邮箱域名，例如 `["company.example"]`。API的`enterprise_email`是飞书邮箱服务字段，需另有受雇信息等权限且企业启用飞书邮箱；本功能不额外申请这些宽权限。普通`email`仅在域名精确匹配时作为工作邮箱展示，未配置则不回退，个人邮箱不展示。
 - 查询和投递始终用提问所@的同一个机器人profile；不切换其他机器人或个人账号补权限。不同profile的open_id不能互换。
 
 ## 飞书应用权限需要真人批准
@@ -38,7 +39,7 @@
 | `contact:user.employee_number:read` | 精确核对工号，保留前导零 |
 | `contact:user.department:readonly` | 组织归属；部门名称接口也须有相应读取能力 |
 | `contact:department.base:readonly` | 按授权部门遍历和取得部门名称；具体是否需要以后台对应接口要求为准 |
-| `contact:user.email:readonly` | 企业邮箱（程序只显示enterprise_email，不显示个人邮箱） |
+| `contact:user.email:readonly` | 邮箱字段；只有匹配配置中workEmailDomains的公司域名才作为工作邮箱展示 |
 | `im:resource` 与机器人回复消息权限 | 上传PNG、回复原消息；已有消息权限不代表新应用也有 |
 
 同时配置**通讯录数据权限范围**，包含确实需要查询的人员或部门；接口权限和数据范围是两件事。不擅自选择全公司，不改变应用可用范围。创建版本并提交企业管理员审核/发布，再只读核实字段返回。官方权限申请API只能申请应用已经配置、待授权的权限，不能代替开发者后台新增字段或指定数据范围；没有待审字段时不能声称申请已提交。

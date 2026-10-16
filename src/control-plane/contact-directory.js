@@ -6,12 +6,13 @@ const clean=v=>typeof v==='string'?v.replace(/[\u0000-\u001f]/g,' ').trim().slic
 export function contactSettings(value={}){
  if(value.enabled!==undefined&&typeof value.enabled!=='boolean')throw new Error('联系人enabled配置无效');
  const scopes=value.scopes??[];
- if(!Array.isArray(scopes)||scopes.some(s=>!s.projectId||!['chatIds','profiles'].every(k=>Array.isArray(s[k])&&s[k].length&&s[k].every(x=>typeof x==='string'&&x.trim()))||s.senderIds!==undefined&&(!Array.isArray(s.senderIds)||!s.senderIds.every(x=>typeof x==='string'&&x))))throw new Error('联系人共享范围配置无效');
+ if(!Array.isArray(scopes)||scopes.some(s=>!s.projectId||!['chatIds','profiles'].every(k=>Array.isArray(s[k])&&s[k].length&&s[k].every(x=>typeof x==='string'&&x.trim()))||s.senderIds!==undefined&&(!Array.isArray(s.senderIds)||!s.senderIds.every(x=>typeof x==='string'&&x))||s.workEmailDomains!==undefined&&(!Array.isArray(s.workEmailDomains)||s.workEmailDomains.some(d=>typeof d!=='string'||!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/i.test(d)))))throw new Error('联系人共享范围配置无效');
  return {enabled:value.enabled===true,scopes};
 }
-export function contactFields(u){
+export function contactFields(u,workEmailDomains=[]){
  const mobile=clean(u.mobile).replace(/\D/g,'');
- return {name:clean(u.name),employeeNo:clean(u.employee_no),jobTitle:clean(u.job_title),enterpriseEmail:clean(u.enterprise_email),
+ const email=clean(u.email),parts=email.split('@'),approvedWorkEmail=parts.length===2&&parts[0]&&workEmailDomains.some(d=>d.toLowerCase()===parts[1].toLowerCase())?email:'';
+ return {name:clean(u.name),employeeNo:clean(u.employee_no),jobTitle:clean(u.job_title),enterpriseEmail:clean(u.enterprise_email)||approvedWorkEmail,
   mobile:mobile.length>=7?mobile.slice(0,3)+'****'+mobile.slice(-4):'',departmentIds:Array.isArray(u.department_ids)?u.department_ids.filter(x=>typeof x==='string'):[],
   leaderId:clean(u.leader_user_id),joinTime:typeof u.join_time==='number'||typeof u.join_time==='string'?String(u.join_time):''};
 }
@@ -45,7 +46,7 @@ export class ContactDirectory{
   const fresh=(await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(user.open_id),{},turn)).user;
   if(!fresh?.open_id||fresh.open_id!==user.open_id||fresh.status?.is_resigned)throw new Error('该人员当前资料无法核实，请重新查询。');
   if(q.type==='employee_no'&&clean(fresh.employee_no)!==q.query.trim()||q.type==='name'&&!clean(fresh.name).normalize('NFKC').toLowerCase().includes(query))throw new Error('候选资料已变化，请重新查询确认。');
-  const fields=contactFields(fresh),department=await this.departments(turn,fields.departmentIds);let leader='';
+  const fields=contactFields(fresh,policy.workEmailDomains),department=await this.departments(turn,fields.departmentIds);let leader='';
   if(fields.leaderId){try{leader=clean((await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(fields.leaderId),{},turn)).user?.name);}catch{}}
   const relative=path.join('contact-images',digest(bound(turn)).slice(0,32)+'.png'),target=path.join(this.context.config.dataDir,relative);await mkdir(path.dirname(target),{recursive:true,mode:0o700});
   const directoryInfo=await lstat(path.dirname(target)),directory=await realpath(path.dirname(target));
@@ -62,6 +63,6 @@ export class ContactDirectory{
   const root=await realpath(path.join(this.context.config.dataDir,'contact-images')),file=path.join(this.context.config.dataDir,item.relative),info=await lstat(file),actual=await realpath(file);
   if((await lstat(path.join(this.context.config.dataDir,'contact-images'))).isSymbolicLink()||path.dirname(root)!==await realpath(this.context.config.dataDir))throw new Error('联系人图片目录无效。');
   if(info.isSymbolicLink()||!info.isFile()||path.dirname(actual)!==root)throw new Error('联系人图片路径无效。');const body=await readFile(actual);if(body.length!==item.bytes||digest(body)!==item.sha256)throw new Error('联系人图片校验失败。');
-  const user=(await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(item.personId),{},turn)).user;if(!user||user.status?.is_resigned||digest(contactFields(user))!==item.fieldsHash)throw new Error('联系人资料或可见字段已变化，请重新查询后生成信息图。');return actual;
+  const user=(await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(item.personId),{},turn)).user;if(!user||user.status?.is_resigned||digest(contactFields(user,policy.workEmailDomains))!==item.fieldsHash)throw new Error('联系人资料或可见字段已变化，请重新查询后生成信息图。');return actual;
  }
 }
