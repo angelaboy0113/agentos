@@ -32,7 +32,7 @@ export class ContactDirectory{
  async request(route,params,turn){for(let attempt=0;;attempt++){try{if(typeof this.context.feishu.contactRequest!=='function')throw new Error();return await this.context.feishu.contactRequest(route,{user_id_type:'open_id',department_id_type:'open_department_id',...params},{profile:turn.profile});}catch(error){
    const raw=String(error?.message??'');let detail;try{detail=JSON.parse(raw.slice(raw.indexOf('{')))?.error;}catch{}
    const code=String(error?.code??detail?.code??detail?.type??'unclassified').replace(/[^A-Za-z0-9_-]/g,'').slice(0,80);
-   const stage=route.endsWith('/scopes')?'scope':route.includes('/children')?'departments':route.includes('find_by_department')?'members':'person';
+   const stage=route.endsWith('/scopes')?'scope':route.includes('/departments/')?'departments':route.includes('find_by_department')?'members':'person';
    const transient=['EAGAIN','ECONNRESET','ETIMEDOUT','EPIPE','ENETUNREACH'].includes(code)||/HTTP\s*(?:429|50[0234])|rate.limit|too many requests/i.test(raw);
    if(transient&&attempt<2)continue;
    console.error('[contacts] request unavailable',JSON.stringify({stage,code}));throw new Error(`CONTACT_ACCESS：通讯录读取失败（${stage}/${code}），请管理员核对该机器人接口权限、数据范围或连接；未切换个人账号，也未发送资料图。`);
@@ -68,24 +68,46 @@ export class ContactDirectory{
   const fresh=(await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(user.open_id),{},turn)).user;
   if(!fresh?.open_id||fresh.open_id!==user.open_id||fresh.status?.is_resigned)throw new Error('该人员当前资料无法核实，请重新查询。');
   if(q.type==='employee_no'&&clean(fresh.employee_no).normalize('NFKC')!==q.query.trim().normalize('NFKC')||q.type==='name'&&!clean(fresh.name).normalize('NFKC').toLowerCase().includes(query))throw new Error('候选资料已变化，请重新查询确认。');
-  const fields=contactFields(fresh,policy.workEmailDomains),department=await this.departments(turn,fields.departmentIds);let leader='';
-  if(fields.leaderId){try{leader=clean((await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(fields.leaderId),{},turn)).user?.name);}catch{}}
+  const fields=contactFields(fresh,policy.workEmailDomains),presentation=await this.presentation(turn,fields);
   const relative=path.join('contact-images',digest(bound(turn)).slice(0,32)+'.png'),target=path.join(this.context.config.dataDir,relative);await mkdir(path.dirname(target),{recursive:true,mode:0o700});
   const directoryInfo=await lstat(path.dirname(target)),directory=await realpath(path.dirname(target));
   if(directoryInfo.isSymbolicLink()||path.dirname(directory)!==await realpath(this.context.config.dataDir))throw new Error('联系人图片目录无效。');
   for(const output of [target,target+'.json']){try{const info=await lstat(output);if(info.isSymbolicLink()||!info.isFile())throw new Error('联系人图片路径无效。');}catch(error){if(error.code!=='ENOENT')throw error;}}
-  const checkedAt=new Date().toISOString();await this.render(target,{...fields,department,leader,checkedAt,directoryCheckedAt:new Date(users.indexAsOf).toISOString()});const body=await readFile(target);
+  const checkedAt=new Date().toISOString();await this.render(target,{...fields,...presentation,checkedAt,directoryCheckedAt:new Date(users.indexAsOf).toISOString()});const body=await readFile(target);
   if(!body.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw new Error('联系人图片生成失败，未发送。');
-  const contactImage={relative,sha256:digest(body),bytes:body.length,binding:digest(bound(turn)),policyHash:digest(policy),personId:user.open_id,fieldsHash:digest(fields),checkedAt,indexAsOf:users.indexAsOf,indexHit:users.indexHit};
+  const contactImage={relative,sha256:digest(body),bytes:body.length,binding:digest(bound(turn)),policyHash:digest(policy),personId:user.open_id,fieldsHash:digest(fields),presentationHash:digest(presentation),checkedAt,indexAsOf:users.indexAsOf,indexHit:users.indexHit};
   await writeFile(target+'.json',JSON.stringify(contactImage),{mode:0o600});return {notice:(turn.visibility==='requester'?'已生成联系人信息图，将通过机器人私聊发给你。':'已生成联系人信息图，将回复在本话题。')+'资料来自机器人当前获准的通讯录，不是飞书界面截图；未返回的字段标为未提供。',contactImage};
  }
- async departments(turn,ids){const names=[];for(const id of ids){try{const d=await this.request('/open-apis/contact/v3/departments/'+encodeURIComponent(id),{},turn);if(d.department?.name)names.push(clean(d.department.name));}catch{}}return names.join(' / ');}
+ async departmentInfo(turn,ids){
+  const paths=[],cache=new Map();
+  for(const id of [...new Set(ids)]){
+   const seen=new Set(),names=[];let current=id,complete=false;
+   while(current){
+    if(seen.has(current))break;seen.add(current);
+    let department;
+    try{if(!cache.has(current))cache.set(current,(await this.request('/open-apis/contact/v3/departments/'+encodeURIComponent(current),{},turn)).department);department=cache.get(current);}catch{break;}
+    if(!department)break;
+    const name=clean(department.name);if(current!=='0'&&!name)break;if(name)names.unshift(name);
+    if(current==='0'){complete=true;break;}
+    if(typeof department.parent_department_id!=='string'||!department.parent_department_id)break;
+    current=department.parent_department_id;
+   }
+   if(names.length)paths.push(names.join(' → ')+(complete?'':'（上级路径未核实）'));
+  }
+  return [...new Set(paths)].join('\n');
+ }
+ async departments(turn,ids){return this.departmentInfo(turn,ids);}
+ async presentation(turn,fields){const department=await this.departmentInfo(turn,fields.departmentIds);let leader='';
+  if(fields.leaderId){try{leader=clean((await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(fields.leaderId),{},turn)).user?.name);}catch{}}
+  return {department,leader};
+ }
  async validateImage(turn,item){const policy=await this.policy(turn);if(item.binding!==digest(bound(turn))||item.policyHash!==digest(policy))throw new Error('联系人图片所属范围已变化，未投递。');
   const expected=path.join('contact-images',digest(bound(turn)).slice(0,32)+'.png');if(item.relative!==expected)throw new Error('联系人图片路径无效。');
   const root=await realpath(path.join(this.context.config.dataDir,'contact-images')),file=path.join(this.context.config.dataDir,item.relative),info=await lstat(file),actual=await realpath(file);
   if((await lstat(path.join(this.context.config.dataDir,'contact-images'))).isSymbolicLink()||path.dirname(root)!==await realpath(this.context.config.dataDir))throw new Error('联系人图片目录无效。');
   if(info.isSymbolicLink()||!info.isFile()||path.dirname(actual)!==root)throw new Error('联系人图片路径无效。');const body=await readFile(actual);if(body.length!==item.bytes||digest(body)!==item.sha256)throw new Error('联系人图片校验失败。');
-  const user=(await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(item.personId),{},turn)).user;if(!user||user.status?.is_resigned||digest(contactFields(user,policy.workEmailDomains))!==item.fieldsHash)throw new Error('联系人资料或可见字段已变化，请重新查询后生成信息图。');return actual;
+  const user=(await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(item.personId),{},turn)).user;if(!user||user.status?.is_resigned||digest(contactFields(user,policy.workEmailDomains))!==item.fieldsHash)throw new Error('联系人资料或可见字段已变化，请重新查询后生成信息图。');
+  if(item.presentationHash&&digest(await this.presentation(turn,contactFields(user,policy.workEmailDomains)))!==item.presentationHash)throw new Error('部门路径、上级或读取权限已变化，请重新生成联系人信息图。');return actual;
  }
 }
 async function parallel(items,visit){let index=0,failure;await Promise.allSettled(Array.from({length:Math.min(4,items.length)},async()=>{while(index<items.length&&!failure){const item=items[index++];try{await visit(item);}catch(error){failure=error;throw error;}}}));if(failure)throw failure;}
