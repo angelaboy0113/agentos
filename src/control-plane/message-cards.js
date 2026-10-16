@@ -65,7 +65,7 @@ export function conversationCard(turn, now = Date.now()) {
     : turn.connectionWillRetry ? '连接重试中' : '正在处理';
   const color = failed ? 'red' : turn.setupPending ? 'orange' : final ? 'green' : 'blue';
   const content = final ? '' : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
-    : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : 'Codex 正在理解你的消息，完成后会更新在这里。';
+    : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? '正在查询获准的通讯录并准备联系人信息图；较大范围首次查询可能需要一些时间。' : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));

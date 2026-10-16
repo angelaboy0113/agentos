@@ -150,7 +150,7 @@ export class ConversationService {
   }
 
   scheduleFeedback(turn) {
-    if (this.feedback.has(turn.id) || (!this.context.cards?.enabled && turn.feedbackState) || !['queued', 'thinking'].includes(turn.status)) return;
+    if (this.feedback.has(turn.id) || (!this.context.cards?.enabled && turn.feedbackState) || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
     const entry = {};
     entry.timer = setTimeout(() => {
       entry.running = this.sendFeedback(turn.id).catch(() => {});
@@ -169,16 +169,16 @@ export class ConversationService {
     if (this.stopped) return;
     const turn = (await this.context.store.read()).conversations.find((item) => item.id === id);
     if (this.context.cards?.enabled) {
-      if (!turn || !['queued', 'thinking'].includes(turn.status)) return;
+      if (!turn || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
       const messageId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
         { replyTo: turn.messageId, profile: turn.profile, ...(turn.replyInThread ? { replyInThread: true } : {}) }, { immediate: true });
       if (messageId) await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: messageId });
       return;
     }
-    if (!turn || !['queued', 'thinking'].includes(turn.status) || turn.feedbackState) return;
+    if (!turn || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact') || turn.feedbackState) return;
     // Best-effort factual receipt, not a semantic/template answer. Persist before send.
     await this.update(id, { feedbackState: 'sending' });
-    const text = turn.status === 'queued' ? '已收到，正在排队；前面的对话处理完后会继续。'
+    const text = turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? '正在查询获准的通讯录并准备联系人信息图；较大范围首次查询可能需要一些时间。' : turn.status === 'queued' ? '已收到，正在排队；前面的对话处理完后会继续。'
       : '已收到，Codex 正在理解这条消息，结果会回复在这里。';
     try {
       const result = await this.context.feishu.reply(turn.messageId, text, { profile: turn.profile, replyInThread: turn.replyInThread, timeoutMs: 8000 });

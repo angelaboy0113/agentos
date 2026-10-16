@@ -29,11 +29,16 @@ export class ContactDirectory{
   &&(turn.questionId?t.questionId===turn.questionId:t.questionId==null)&&t.outcome?.contactCandidates?.length).slice(-1).map(t=>({query:t.outcome.contactQuery,candidates:t.outcome.contactCandidates}));}
  async request(route,params,turn){try{if(typeof this.context.feishu.contactRequest!=='function')throw new Error();return await this.context.feishu.contactRequest(route,{user_id_type:'open_id',department_id_type:'open_department_id',...params},{profile:turn.profile});}catch{throw new Error('CONTACT_ACCESS：通讯录读取失败，请管理员核对该机器人接口权限、数据范围或连接；未切换个人账号，也未发送资料图。');}}
  async pages(route,params,turn,visit){let token='';const seen=new Set();do{const d=await this.request(route,{...params,page_size:50,...(token?{page_token:token}:{})},turn);await visit(d);if(!d.has_more)break;if(typeof d.page_token!=='string'||!d.page_token||seen.has(d.page_token))throw new Error('CONTACT_PAGINATION：通讯录分页不完整，不能确认唯一人员。');token=d.page_token;seen.add(token);}while(true);}
- async users(turn){const ids=new Set(),departments=new Set(),users=new Map();
-  await this.pages('/open-apis/contact/v3/scopes',{},turn,async d=>{for(const id of d.user_ids??[])ids.add(id);for(const id of d.department_ids??[])departments.add(id);if(d.group_ids?.length)throw new Error('当前通讯录范围包含用户组，尚不能完整核对该范围，请管理员改为明确人员或部门后重试。');});
+ async users(turn){const ids=new Set(),departments=new Set(),users=new Map();let groups=false;
+  await this.pages('/open-apis/contact/v3/scopes',{},turn,async d=>{for(const id of d.user_ids??[])ids.add(id);for(const id of d.department_ids??[])departments.add(id);groups ||= Boolean(d.group_ids?.length);});
+  // A full-company scope also lists user groups. Root access is checked by Feishu;
+  // root + all descendants covers employees without requesting extra group privileges.
+  if(groups){let root;try{root=(await this.request('/open-apis/contact/v3/departments/0',{},turn)).department;}catch{}
+   if(String(root?.open_department_id??root?.department_id)!=='0')throw new Error('当前范围仅含用户组且无法核实全员根部门，暂不能确认完整人员；请管理员配置明确人员/部门或全员范围。');
+   departments.clear();departments.add('0');}
   const roots=[...departments];for(const id of roots)await this.pages('/open-apis/contact/v3/departments/'+encodeURIComponent(id)+'/children',{fetch_child:true},turn,async d=>{for(const v of d.items??[])if(v.open_department_id)departments.add(v.open_department_id);});
-  for(const department_id of departments)await this.pages('/open-apis/contact/v3/users/find_by_department',{department_id},turn,async d=>{for(const u of d.items??[])if(u.open_id)users.set(u.open_id,u);});
-  for(const id of ids)if(!users.has(id)){const d=await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(id),{},turn);if(d.user?.open_id)users.set(d.user.open_id,d.user);}
+  await parallel([...departments],async department_id=>this.pages('/open-apis/contact/v3/users/find_by_department',{department_id},turn,async d=>{for(const u of d.items??[])if(u.open_id)users.set(u.open_id,u);}));
+  await parallel([...ids].filter(id=>!users.has(id)),async id=>{const d=await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(id),{},turn);if(d.user?.open_id)users.set(d.user.open_id,d.user);});
   return [...users.values()].filter(u=>!u.status?.is_resigned);
  }
  async lookup(turn,q){const policy=await this.policy(turn);if(!q||!['name','employee_no'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.query.length>100||typeof q.candidateId!=='string')throw new Error('联系人查询参数无效。');
@@ -66,3 +71,4 @@ export class ContactDirectory{
   const user=(await this.request('/open-apis/contact/v3/users/'+encodeURIComponent(item.personId),{},turn)).user;if(!user||user.status?.is_resigned||digest(contactFields(user,policy.workEmailDomains))!==item.fieldsHash)throw new Error('联系人资料或可见字段已变化，请重新查询后生成信息图。');return actual;
  }
 }
+async function parallel(items,visit){let index=0;await Promise.all(Array.from({length:Math.min(4,items.length)},async()=>{while(index<items.length){const item=items[index++];await visit(item);}}));}
