@@ -1,3 +1,4 @@
+import {ContactDirectory} from './contact-directory.js';
 import {ReportDelivery} from './report-delivery.js';
 import {validateReportFiles} from '../shared/report-files.js';
 import { TeamKnowledgeService } from './team-knowledge.js';
@@ -51,6 +52,7 @@ export async function createControlPlane(overrides = {}) {
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
     websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
+  context.contacts = overrides.contactService ?? new ContactDirectory(context, { file: config.contactsFile });
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
   const cards = new LiveCards(store, feishu);

@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "scopes": [
+    {
+      "projectId": "your-project",
+      "chatIds": [
+        "oc_YOUR_GROUP"
+      ],
+      "profiles": [
+        "your-owner-profile"
+      ]
+    }
+  ]
+}

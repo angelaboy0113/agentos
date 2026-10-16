@@ -339,3 +339,11 @@ test('late mention edit accepts previously ignored message exactly once', async 
  await send(message('edited-source','another edit',{edited_mention:true}));
  assert.equal(inputs.length,1);assert.equal((await app.store.read()).jobs.length,1);
 });
+
+test('contact intent generates one image and retries delivery without repeating lookup or AI',async t=>{
+ let lookups=0,images=0;const contacts={catalog:async()=>({enabled:true,pending:[]}),lookup:async()=>{lookups++;return {notice:'已生成联系人信息图',contactImage:{sha256:'a'.repeat(64)}};},validateImage:async()=>'/synthetic/person.png'};
+ const out=[];const feishu={reply:async()=>({data:{message_id:'text-result'}}),send:async()=>{},replyImage:async(id,file,options)=>{images++;out.push({id,file,options});if(images===1)throw new Error('temporary');return {data:{message_id:'image-result'}};}};
+ const {send,app,inputs}=await setup(t,()=>decision({action:'lookup_contact',contactLookup:{type:'employee_no',query:'00110036',candidateId:''}}),{contactService:contacts,feishuClient:feishu});
+ await send(message('contact-message','工号00110036是谁，发张资料图'));let turn=(await app.store.read()).conversations[0];assert.equal(turn.status,'ready');assert.equal(lookups,1);assert.equal(inputs.length,1);
+ await app.store.transact(s=>{s.conversations[0].retryAt=new Date(0).toISOString();});await app.conversations.idle();turn=(await app.store.read()).conversations[0];assert.equal(turn.status,'sent');assert.equal(turn.contactImageMessageId,'image-result');assert.equal(lookups,1);assert.equal(inputs.length,1);assert.equal(out[0].id,'contact-message');assert.equal(out[0].options.profile,'owner');assert.equal(out[0].options.idempotencyKey,out[1].options.idempotencyKey);assert.equal((await app.store.read()).jobs.length,0);
+});

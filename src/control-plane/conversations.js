@@ -220,7 +220,7 @@ export class ConversationService {
       if (turn.status === 'decided') {
         try {
           const outcome = await this.apply(turn);
-          await this.update(turn.id, { status: 'ready', outcome, response: [turn.decision.reply, outcome.notice].filter(Boolean).join('\n\n') });
+          await this.update(turn.id, { status: 'ready', outcome, response: [turn.decision.action==='lookup_contact'?'':turn.decision.reply, outcome.notice].filter(Boolean).join('\n\n') });
         } catch (error) {
           await this.update(turn.id, { status: 'ready', response: `本次操作未执行：${error.message}`, actionError: error.message });
         }
@@ -251,6 +251,15 @@ export class ConversationService {
           const id = responseMessageId(result);
           if (id) responseIds.push(id);
           await this.update(turn.id, { sentParts: i + 1, responseIds });
+        }
+        if(turn.outcome?.contactImage&&!turn.contactImageMessageId){
+          let file;
+          try{file=await this.context.contacts.validateImage(turn,turn.outcome.contactImage);}
+          catch{await this.update(turn.id,{outcome:{...turn.outcome,contactImage:null},response:'联系人资料、授权或图片检查未通过，本次没有发送图片，请重新查询。',sentParts:0,contactImageError:'资料、授权或图片检查未通过，未发送；请重新查询。'});continue;}
+          if(typeof this.context.feishu.replyImage!=='function')throw new Error('Image transport unavailable');
+          const result=await this.context.feishu.replyImage(turn.messageId,file,{profile:turn.profile,replyInThread:turn.replyInThread,idempotencyKey:'aos-contact-'+turn.id+'-'+turn.outcome.contactImage.sha256.slice(0,32)});
+          const imageId=responseMessageId(result);if(!imageId)throw new Error('Image delivery has no message ID');
+          responseIds.push(imageId);await this.update(turn.id,{contactImageMessageId:imageId,responseIds});
         }
         const timing = { ...turn.timing, queueMs: turn.queueMs, deliveryMs: Date.now() - deliveryStarted, totalMs: Date.now() - Date.parse(turn.createdAt) };
         await this.update(turn.id, { status: 'sent', completedAt: new Date().toISOString(), responseIds, timing });
@@ -306,6 +315,7 @@ export class ConversationService {
     }));
     delete memory.suppressedRefs;
     return fitContext({
+      contactDirectory: this.context.contacts ? await this.context.contacts.catalog(turn) : {enabled:false,pending:[]},
       teamKnowledge: this.context.knowledge ? await this.context.knowledge.candidates(turn, projectId) : { enabled: false, candidates: [] },
       memory, nativeSession: scoped, contextIsolation: { policy: 'question-v2', questionIds: [...questionIds], rule: '只回答当前问题；关联问题历史不是其他任务的授权。不得引入无关话题。' }, requestId: turn.id, questionId: turn.questionId ?? null,
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
@@ -374,6 +384,10 @@ export class ConversationService {
       if (decision.action === 'request_environment_setup') return requestEnrollment(this.context, turn);
     }
     if (['approve_environment_setup','approve_environment_without_tls'].includes(decision.action)) return approveEnrollment(this.context, turn);
+    if (decision.action === 'lookup_contact') {
+      if(!this.context.contacts)throw new Error('联系人功能尚未配置。');
+      return this.context.contacts.lookup(turn,decision.contactLookup);
+    }
     if (decision.action === 'reply') return {};
     if (decision.action === 'bind_project') {
       if (!isAdministrator(projects, turn)) throw new Error('只有真人管理员可以绑定项目，项目负责人机器人不是管理员。');

@@ -96,6 +96,21 @@ export class LarkCliFeishuClient {
       {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000});
   }
 
+  async contactRequest(route,params,options={}){
+    await mkdir(this.cwd,{recursive:true,mode:0o700});
+    if(!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
+    const result=await runLarkCli(['api','GET',route,'--as','bot','--params',JSON.stringify(params),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
+    if(!result.data||typeof result.data!=='object')throw new Error('Invalid contact response');
+    return result.data;
+  }
+  async replyImage(messageId,file,options={}){
+    await mkdir(path.join(this.cwd,'images'),{recursive:true,mode:0o700});
+    const relative=path.join('images',path.basename(file));await copyFile(file,path.join(this.cwd,relative));
+    return runLarkCli(['im','+messages-reply','--as','bot','--message-id',messageId,'--image',relative,
+      ...(options.replyInThread?['--reply-in-thread']:[]),'--idempotency-key',larkIdempotencyKey(options.idempotencyKey),'--json'],
+      {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
+  }
+
   async replyCard(messageId, card, options = {}) {
     await mkdir(this.cwd, { recursive: true });
     return runLarkCli(['im', '+messages-reply', '--as', 'bot', '--message-id', messageId,

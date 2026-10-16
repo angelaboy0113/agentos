@@ -13,7 +13,8 @@
     "environmentQuery",
     "environmentSetup",
     "sourceEnvironment",
-    "knowledgeMatch"
+    "knowledgeMatch",
+    "contactLookup"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -35,7 +36,8 @@
         "approve_environment",
         "request_environment_setup",
         "approve_environment_setup",
-        "approve_environment_without_tls"
+        "approve_environment_without_tls",
+        "lookup_contact"
       ]
     },
     "intent": {
@@ -204,6 +206,37 @@
                   }
                 }
               ]
+            }
+          }
+        }
+      ]
+    },
+    "contactLookup": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "query",
+            "candidateId"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "name",
+                "employee_no"
+              ]
+            },
+            "query": {
+              "type": "string"
+            },
+            "candidateId": {
+              "type": "string"
             }
           }
         }

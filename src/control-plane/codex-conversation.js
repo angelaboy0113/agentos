@@ -182,7 +182,7 @@ export function validateDecision(value) {
   catch (error) { throw new DecisionProtocolError(error.message); }
 }
 function validateDecisionValue(value) {
-  const actions = ['reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];
+  const actions = ['lookup_contact', 'reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];
   const intents = ['none', 'implementation', 'planning', 'analysis', 'verification', 'audit'];
   if (!value || !actions.includes(value.action) || !intents.includes(value.intent)) throw new Error('Unknown action or intent');
   for (const key of ['reply', 'instruction', 'jobId', 'projectId']) {
@@ -192,6 +192,11 @@ function validateDecisionValue(value) {
   if (!Array.isArray(value.attachmentIds) || value.attachmentIds.some((id) => typeof id !== 'string')) throw new Error('Invalid attachments');
   if (value.sourceEnvironment !== undefined && (typeof value.sourceEnvironment !== 'string' || value.sourceEnvironment.length > 100)) throw new Error('Invalid source environment');
   if (value.requiresSourceInspection !== undefined && typeof value.requiresSourceInspection !== 'boolean') throw new Error('Invalid source inspection decision');
+  if(value.action==='lookup_contact'){
+    const q=value.contactLookup;
+    if(!q||!['name','employee_no'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.query.length>100||typeof q.candidateId!=='string'||q.candidateId.length>200
+      ||value.intent!=='none'||value.jobId||value.environmentQuery||value.environmentSetup||value.knowledgeMatch||value.requiresSourceInspection||value.attachmentIds.length)throw new Error('Invalid contact lookup');
+  }else if(value.contactLookup!=null)throw new Error('Unexpected contact lookup');
   if (value.knowledgeMatch != null) {
     const m = value.knowledgeMatch;
     if (!m || typeof m.id !== 'string' || m.id.length > 100 || typeof m.environment !== 'string' || m.environment.length > 100

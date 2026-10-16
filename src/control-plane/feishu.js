@@ -45,6 +45,19 @@ export class FeishuClient {
     return result;
   }
 
+  async contactRequest(route,params){
+    if(!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
+    const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(30000)});
+    const result=await response.json();if(!response.ok||result.code!==0)throw new Error('Contact API failed');return result.data??{};
+  }
+  async replyImage(messageId,file,options={}){
+    const form=new FormData();form.set('image_type','message');form.set('image',new Blob([await readFile(file)],{type:'image/png'}),path.basename(file));
+    const response=await fetch(`${OPEN_API}/im/v1/images`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});
+    const uploaded=await response.json();if(!response.ok||uploaded.code!==0||!uploaded.data?.image_key)throw new Error('Image upload failed');
+    const sent=await fetch(`${OPEN_API}/im/v1/messages/${encodeURIComponent(messageId)}/reply`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`,'content-type':'application/json'},body:JSON.stringify({msg_type:'image',content:JSON.stringify({image_key:uploaded.data.image_key}),uuid:options.idempotencyKey,...(options.replyInThread?{reply_in_thread:true}:{})}),signal:AbortSignal.timeout(30000)});
+    const result=await sent.json();if(!sent.ok||result.code!==0)throw new Error('Image reply failed');return result;
+  }
+
   async replyFile(messageId,file,options={}){
     const form=new FormData();form.set('file_type','stream');form.set('file_name',path.basename(file));form.set('file',new Blob([await readFile(file)],{type:'text/csv'}),path.basename(file));
     const response=await fetch(`${OPEN_API}/im/v1/files`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});

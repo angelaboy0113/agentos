@@ -9,6 +9,7 @@ export function controlConfig(overrides = {}) {
     port: Number(overrides.port ?? process.env.AGENTOS_PORT ?? 8787),
     dataDir,
     conversationFile: overrides.conversationFile ?? process.env.AGENTOS_CONVERSATION_FILE ?? './config/conversation.local.json',
+    contactsFile: overrides.contactsFile ?? process.env.AGENTOS_CONTACTS_FILE ?? './config/contacts.local.json',
     knowledgeFile: overrides.knowledgeFile ?? process.env.AGENTOS_KNOWLEDGE_FILE ?? './config/knowledge.local.json',
     memoryFile: overrides.memoryFile ?? process.env.AGENTOS_MEMORY_FILE ?? './config/memory.local.json',
     codexRuntimeFile: overrides.codexRuntimeFile ?? process.env.AGENTOS_CODEX_RUNTIME_FILE ?? './config/codex-runtime.local.json',
