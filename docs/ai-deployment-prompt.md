@@ -20,7 +20,8 @@ AI 可以完成大部分技术步骤，但不能代替真人完成账号登录�
 2. AgentOS GitHub 仓库：
    https://github.com/angelaboy0113/agentos
 3. 克隆仓库后必须阅读：AGENTS.md、README.md、docs/getting-started.md、
-   docs/ai-deployment-prompt.md、docs/architecture.md、docs/storage-and-data.md、SECURITY.md、
+   docs/ai-deployment-prompt.md、docs/architecture.md、docs/storage-and-data.md、
+   docs/team-knowledge.md、SECURITY.md、
    package.json、config/*.example.json、scripts/ 和相关测试。
 
 首次部署以当前 main 的代码、配置示例和上述现行文档为准，不读取
@@ -47,6 +48,8 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
 - 真人管理员：<姓名仅作说明；各应用 open_id 必须从可信事件取得，不能按姓名猜>
 - 普通成员范围：<哪些人可以聊天与只读排查>
 - 环境工具：<不启用，或 UAT/PRD 的 Nacos、MySQL、业务网站及只读范围>
+- 团队知识：<启用 / 暂不启用；共享项目、群、机器人 profile 与可读取成员范围>
+- 知识有效期：<默认 24 小时；有无由发布流程维护的真实部署版本清单；未知则先核实>
 - 并发数：<默认 3，或 1..8>
 - Codex 模型与推理强度：<继承默认，或模型/强度；必须先验证当前账号可用>
 - 自启动：<需要 macOS / Windows 登录自启动，或暂不安装>
@@ -103,6 +106,19 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
 - 需要 UAT/PRD、Nacos、MySQL 或网站排查时，使用专用只读账号、允许范围、环境负责人、
   Keychain 和审批流程；未配置的能力保持关闭并记录。
 
+- 需要团队知识时，先读取 docs/team-knowledge.md，再从 config/knowledge.example.json 建立
+  缺失的 config/knowledge.local.json。仅在本团队明确要求启用时设置 enabled=true；未确认
+  共享范围时保持关闭。projectId、chatIds、profiles 必须对应现有项目绑定和可信事件；
+  membersByProfile 按各 profile 的 open_id 限定成员，不能按姓名猜测或照搬其他应用 ID。
+- enabledFrom 使用实际启用时间，不主动把其他人的私人历史批量回填；freshnessMs 和
+  methodFreshnessMs 默认 86400000。有效期是旧知识可复用的期限，不是任务执行时限。
+- SQLite 随兼容 Node 提供，不安装 Redis 或向量服务；知识保存到
+  <AGENTOS_DATA_DIR>/knowledge/knowledge.sqlite。不要上传或复制其他团队的知识数据库。
+- revisionFiles 仅指向发布流程维护的真实部署及相关配置版本清单。没有可靠来源就留空，
+  明确只能复用近期历史参考，不用 Git 提交号、占位文件或延长有效期冒充线上核验。
+- 不为接入知识功能改写 config/conversation.md 的语义判断、截图核对、实时数据、纠错和
+  权限规则；项目业务规则应留在项目配置与知识中，不把某种问法或业务字段写死在 OS。
+
 第五阶段：自动检查与本机启动
 - 运行 doctor 和 npm run check；修复由本次配置或兼容性引起的问题，保留真实输出摘要。
 - 在没有重复实例和在途任务冲突时手工启动 npm run start:local。
@@ -120,10 +136,19 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
 - 如果启用了 UAT/PRD 或网页登录，再验证审批范围、登录接续、只读查询和凭据不泄露。
 - 不要替真人伪造群消息，也不要把模拟事件说成真实群验收。
 
+- 如启用团队知识，先完成一个可共享、有源码依据的通用问题，再由另一位获准成员换种
+  说法提问。核对同知识 ID/版本、规范事实一致、直接命中不新建调查及实际响应耗时；
+  带定位截图也要实际查看。再测试实时金额/状态只复用方法并补查，过期/改环境/部署变更
+  不套用旧结论，纠错停用，不在共享范围的成员无法读取。区分“没有条目”和“未命中”。
+- 在 /admin 的“团队知识”核对条目、版本、有效性和计数；检查 Node SQLite 可用性与
+  数据目录权限。Windows ACL、重启恢复与真实群行为必须在目标 Windows 实机验收。
+
 第七阶段：自启动、备份与交付
 - 只有手工启动和真实群验收成功后，才按平台安装登录自启动；验证重启/重新登录后的
   health、消费者和 Codex 登录状态。没有图形登录的服务器不宣称支持交互式网页登录。
 - 记录 local 配置与 data 的备份方法、日志位置、升级步骤、回滚提交号和停止/卸载方式。
+- 启用知识时停稳服务后连同 knowledge 目录一起备份；迁移后核对项目路径、成员范围和
+  revisionFiles 新机路径，重新验证有效性。不删除数据库来掩盖冲突或停用记录。
 - 如果本次改变 AgentOS 代码、架构、配置字段、工作流或使用方式，同步仓库文档和团队
   飞书实施手册；仅部署团队私有值不得写入公共仓库或公共文档。
 
@@ -135,7 +160,8 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
 5. 权限与安全：管理员、普通成员、UAT/PRD、凭据存储和未开放能力。
 6. 运行方式：手工启动、自启动、日志、备份、升级、回滚和卸载。
 7. 真人待办：每一项的具体页面、操作、预期结果；已完成则写无。
-8. 限制：未在目标平台、真实群或真实环境验证的内容，以及后续建议。
+8. 团队知识：启用范围、SQLite 位置、有效期、部署版本信号、命中/补查/纠错验收及备份。
+9. 限制：未在目标平台、真实群或真实环境验证的内容，以及后续建议。
 
 现在先执行只读体检。不要先让我重复回答能够从本机、仓库或文档确认的问题；发现必须
 由我提供的非敏感信息时，一次列出最少必要项。发现登录、密钥或权限节点时单独暂停，
