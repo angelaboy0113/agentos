@@ -135,6 +135,8 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
   指定实际真人群主；从contact-channels.example.json建立contact-channels.local.json，
   同时绑定projects与contacts范围。该群仅允许lookup_contact/reply，不开放业务任务。
   结果图嵌入私有卡片，分别给提问者和实时群主；同人去重，不公开或私聊降级。
+  专用群结果成功送达后，公开@原发起人一句完成提醒，不能带人员资料或查询文本；
+  候选待选择不报完成，提醒失败只重试提醒，其他私有问题不公开提醒。
   原提问仍公开；scope以机器人获批企业范围为准。岗位和父链两项权限需管理员批准，
   不因程序能渲染图片就宣称该企业已读到字段；使用两名真人验证实际可见性。
 

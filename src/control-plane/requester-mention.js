@@ -48,3 +48,11 @@ function mention(replyTo, profile, userId, message) {
   const text = requesterMentionText(userId, message);
   return replyTo && text ? { replyTo, profile: profile ?? null, text } : null;
 }
+
+// A deliberately public acknowledgement: never include lookup text or personnel fields.
+export function directoryTerminalMention(turn) {
+  if (!turn.directoryChannel || turn.setupPending || turn.outcome?.contactCandidates?.length) return null;
+  const result = mention(turn.messageId, turn.profile, turn.senderId, turn.outcome?.contactImage
+    ? '查询已完成，请查看私有结果。' : '本次回复已结束，请查看私有结果。');
+  return result ? { ...result, kind: 'directory_completion' } : null;
+}

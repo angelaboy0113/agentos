@@ -69,7 +69,7 @@ export function questionView(state, questionId, projects = {}) {
   const adminIds = (projects.ownerOpenIdsByProfile?.[q.profile] ?? []).filter(id => /^ou_[A-Za-z0-9]+$/.test(id));
   const mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；登录仅在运行AgentOS的电脑完成。') } : null) : terminal ? (useJob
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
-    : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
+    : turn.directoryChannel ? (state.cardMessages?.['question:'+q.id]?.publicCompletionMention && state.cardMessages['question:'+q.id].deliveryToken===turn.id+':directory-result' ? state.cardMessages['question:'+q.id].terminalMention : null) : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
   if (mention && q.replyInThread) mention.replyInThread = true;
   const currentResult=useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '';
   const priorJobs=state.jobs.filter(j=>j.questionId===q.id && j.id!== (useJob?job.id:null) && j.result?.finalMessage);
@@ -111,7 +111,7 @@ export function publishQuestion(context, id) {
       generation = q.cardGeneration;
     });
     return context.cards.upsert(key, view.card, view.destination, { terminal: view.terminal, immediate: true,
-      resultText: view.resultText, terminalMention: view.mention, generation,
+      resultText: view.resultText, terminalMention: view.mention, publicCompletionMention: view.mention?.kind==='directory_completion', generation,
       guard: (state) => { if (sourceVersion(state, id) !== version) throw new Error('Question changed during presentation; retry'); } });
   });
   queue.set(id, work); work.finally(() => { if (queue.get(id) === work) queue.delete(id); }).catch(() => {});

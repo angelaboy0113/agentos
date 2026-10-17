@@ -1,4 +1,5 @@
 import {readFile} from 'node:fs/promises';
+import {directoryTerminalMention} from './requester-mention.js';
 import {conversationCard} from './message-cards.js';
 import {cardDestination} from './private-cards.js';
 const human=id=>typeof id==='string'&&/^ou_[A-Za-z0-9]+$/.test(id);
@@ -38,9 +39,10 @@ export class ContactChannels{
   const card=conversationCard({...turn,response:turn.response});
   if(imageKey)card.body.elements.unshift({tag:'img',img_key:imageKey,alt:{tag:'plain_text',content:'联系人资料：姓名、岗位和完整部门路径'},scale_type:'fit_horizontal',preview:true});
   const key=question?'question:'+question.id:'chat:'+turn.id;
+  const completion=directoryTerminalMention({...turn,senderId:question?.senderId??turn.senderId,messageId:question?.messageId??turn.messageId});
   const ids=[...new Set([turn.senderId,current.ownerId])],results=[];let primaryError;
   for(const id of ids){const destination={...base,openId:id,sourceKey:key,...(id!==turn.senderId?{sourceTurnId:turn.id}:{})};const target=id===turn.senderId?key:'directory-owner:'+turn.id;
-   try{results.push(await this.context.cards.upsert(target,card,destination,{terminal:true,immediate:true,resultText:turn.response??'',guard:s=>{if(question&&(s.questions?.[question.id]?.latestTurnId!==turn.id||s.questions[question.id].generation!==question.generation))throw new Error('查人问题已有新补充，跳过旧结果');},...(question&&id===turn.senderId?{generation:question.generation}:{} )}));}
+   try{results.push(await this.context.cards.upsert(target,card,destination,{terminal:true,immediate:true,deliveryToken:turn.id+':directory-result',resultText:turn.response??'',...(id===turn.senderId&&completion?{terminalMention:completion,publicCompletionMention:true}:{}),guard:s=>{if(question&&(s.questions?.[question.id]?.latestTurnId!==turn.id||s.questions[question.id].generation!==question.generation))throw new Error('查人问题已有新补充，跳过旧结果');},...(question&&id===turn.senderId?{generation:question.generation}:{} )}));}
    catch(error){if(id===turn.senderId)primaryError=error;} // Every failed audience copy remains in the delivery outbox.
   }
   if(primaryError)throw primaryError;
