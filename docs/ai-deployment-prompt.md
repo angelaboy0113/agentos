@@ -131,6 +131,12 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
   邮箱仅展示API原生企业邮箱或匹配管理员确认workEmailDomains的工作邮箱，不展示个人邮箱。
   联系人目录索引默认15分钟复用，位于data/contact-index/directory.sqlite，与团队知识分开；
   权限和人员资料仍实时复核。记录首次建索引与重复查询耗时，不把索引有效期当任务时限。
+- 需要查人专用群时，先读取docs/contact-images.md对应章节，创建普通group/chat群并
+  指定实际真人群主；从contact-channels.example.json建立contact-channels.local.json，
+  同时绑定projects与contacts范围。该群仅允许lookup_contact/reply，不开放业务任务。
+  结果图嵌入私有卡片，分别给提问者和实时群主；同人去重，不公开或私聊降级。
+  原提问仍公开；scope以机器人获批企业范围为准。岗位和父链两项权限需管理员批准，
+  不因程序能渲染图片就宣称该企业已读到字段；使用两名真人验证实际可见性。
 
 第五阶段：自动检查与本机启动
 - 运行 doctor 和 npm run check；修复由本次配置或兼容性引起的问题，保留真实输出摘要。

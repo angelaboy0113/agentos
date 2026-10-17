@@ -16,19 +16,20 @@ export async function handleResultPage(context, event) {
       if (!found) throw new Error('unknown card');
       const [key, entry] = found;
       if(entry.destination.visibility==='requester'&&entry.destination.openId!==event.operator_id)throw new Error('private recipient mismatch');
-      const view = key.startsWith('question:') ? questionView(state, key.slice(9), context.projects) : null;
-      const record = view ? view.question : key.startsWith('job:') ? state.jobs.find((job) => job.id === key.split(':')[1])
-        : state.conversations?.find((turn) => `chat:${turn.id}` === key);
+      const sourceKey=entry.destination.sourceKey??key;
+      const view = sourceKey.startsWith('question:') ? questionView(state, sourceKey.slice(9), context.projects) : null;
+      const record = view ? view.question : sourceKey.startsWith('job:') ? state.jobs.find((job) => job.id === sourceKey.split(':')[1])
+        : state.conversations?.find((turn) => `chat:${turn.id}` === sourceKey);
       if (!record || record.chatId !== cardActionChat(entry,event) || !entry.terminal) throw new Error('wrong scope');
       const admin = isAdministrator(context.projects, { profile: event.agent_profile, senderId: event.operator_id });
       const creator = isTaskCreator(context.projects, record, { profile: event.agent_profile, senderId: event.operator_id });
-      if (!admin && !creator) throw new Error('not authorized');
+      if (!admin && !creator && !(entry.destination.visibility==='requester'&&entry.destination.openId===event.operator_id)) throw new Error('not authorized');
       const pages = entry.detailPages ?? [];
       if (!Number.isInteger(value.page) || value.page < 0 || value.page >= pages.length
         || value.version !== detailVersion(pages) || !containsPageAction(entry.card, value)) throw new Error('stale page');
       // Validate the button against the published version first. Then rebuild only
       // presentation from the original evidence, including cards saved by older versions.
-      const source = view ? view.resultText : key.startsWith('job:') ? record.result?.finalMessage : record.response;
+      const source = view ? view.resultText : sourceKey.startsWith('job:') ? record.result?.finalMessage : record.response;
       const formatted = typeof source === 'string' && source.trim() ? resultPages(source) : pages;
       entry.detailPages = formatted;
       entry.card = withResultPage(entry.card, formatted, Math.min(value.page, formatted.length - 1), true);

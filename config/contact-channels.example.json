@@ -1,0 +1,10 @@
+{
+  "channels": [
+    {
+      "chatId": "oc_YOUR_DIRECTORY_GROUP",
+      "profile": "your-owner-profile",
+      "projectId": "your-project",
+      "audience": "requester_and_owner"
+    }
+  ]
+}

@@ -13,7 +13,7 @@ export const activeQuestionJob = (job) => ['queued', 'running', 'cancelling', 'a
 export function attachQuestion(state, turn, event, projects) {
   state.questions ??= {};
   const candidates = Object.values(state.questions).reverse().filter(item => item.chatId === turn.chatId && item.profile === turn.profile
-    && item.projectId === turn.projectId && (item.visibility??'public')===(turn.visibility??'public') && (item.visibility!=='requester'||item.senderId===turn.senderId) && (isTaskCreator(projects, item, turn) || isAdministrator(projects, turn)));
+    && item.projectId === turn.projectId && (item.directoryChannel?.ownerId??null)===(turn.directoryChannel?.ownerId??null) && (item.visibility??'public')===(turn.visibility??'public') && (item.visibility!=='requester'||item.senderId===turn.senderId) && (isTaskCreator(projects, item, turn) || isAdministrator(projects, turn)));
   const direct = (item, id) => Boolean(id && (item.messageId === id || state.cardMessages?.[`question:${item.id}`]?.messageId === id
     || state.conversations.some(other => other.questionId === item.id && other.messageId === id)));
   const explicit = candidates.find(item => direct(item, event.reply_to));
@@ -26,9 +26,9 @@ export function attachQuestion(state, turn, event, projects) {
   const related = broadTopicRoot ? (threadLatest ?? explicit) : (explicit ?? threadLatest);
   const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status));
   const relatedTurn = related && state.conversations.find(t => t.id === related.latestTurnId);
-  const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && (pending(relatedTurn)||relatedTurn.setupPending))) ? related : null;
+  const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && (pending(relatedTurn)||relatedTurn.setupPending||relatedTurn.outcome?.contactCandidates?.length))) ? related : null;
   const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
-    ...(turn.visibility?{visibility:turn.visibility}:{}), threadRootId: event.root_id ?? turn.messageId, projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
+    ...(turn.directoryChannel?{directoryChannel:structuredClone(turn.directoryChannel)}:{}), ...(turn.visibility?{visibility:turn.visibility}:{}), threadRootId: event.root_id ?? turn.messageId, projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
     ...(turn.replyInThread ? { replyInThread: true } : {}),
     ...(related ? { parentQuestionId: related.id } : {}),
     title: questionTitle(turn.content), generation: 1 };

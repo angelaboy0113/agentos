@@ -111,10 +111,12 @@ export class LarkCliFeishuClient {
       {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
   }
 
+  async chatInfo(chatId,options={}){await mkdir(this.cwd,{recursive:true});const r=await runLarkCli(['api','GET','/open-apis/im/v1/chats/'+encodeURIComponent(chatId),'--as','bot','--params',JSON.stringify({user_id_type:'open_id'}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});if(!r.data)throw new Error('Chat information unavailable');return r.data;}
+  async uploadImage(file,options={}){await mkdir(path.join(this.cwd,'images'),{recursive:true,mode:0o700});const relative=path.join('images',path.basename(file));await copyFile(file,path.join(this.cwd,relative));return runLarkCli(['im','images','create','--as','bot','--data',JSON.stringify({image_type:'message'}),'--file',relative,'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000});}
   async sendPrivateCard(chatId,openId,card,options={}){
     if(!chatId||!/^ou_[A-Za-z0-9]+$/.test(openId??''))throw new Error('Private card recipient missing');
     try{return await this.cardRequest('POST','/open-apis/ephemeral/v1/send',{chat_id:chatId,open_id:openId,msg_type:'interactive',card},options);}
-    catch(error){if(!/18053/.test(error.message)||!/chat can not be thread/.test(error.message))throw error;
+    catch(error){if(options.strictGroup||!/18053/.test(error.message)||!/chat can not be thread/.test(error.message))throw error;
       const result=await this.cardRequest('POST','/open-apis/im/v1/messages',{receive_id:openId,msg_type:'interactive',content:JSON.stringify(card)},{...options,params:{receive_id_type:'open_id'}});return {...result,private_delivery_kind:'dm'};}
   }
   async deletePrivateCard(messageId,options={}){try{return await this.cardRequest('POST','/open-apis/ephemeral/v1/delete',{message_id:messageId},options);}catch(e){if(!/18051/.test(e.message))throw e;}}

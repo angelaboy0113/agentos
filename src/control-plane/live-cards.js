@@ -14,7 +14,8 @@ export function messageIdOf(value) {
 
 // Durable delivery outbox: a failed update NEVER reruns Codex or creates another task.
 export class LiveCards {
-  constructor(store, feishu, { intervalMs = 3000 } = {}) {
+  constructor(store, feishu, { intervalMs = 3000, authorizeDestination } = {}) {
+    this.authorizeDestination=authorizeDestination;
     this.store = store; this.feishu = feishu; this.intervalMs = intervalMs;
     this.workers = new Map(); this.closed = false;
     this.enabled = typeof feishu.replyCard === 'function' && typeof feishu.updateCard === 'function' && feishu.enabled !== false;
@@ -28,7 +29,7 @@ export class LiveCards {
     if(destination.visibility==='requester'&&(!destination.chatId||!/^ou_[A-Za-z0-9]+$/.test(destination.openId??'')))throw new Error('Private card destination invalid');
     if(destination.visibility==='requester'&&card.body?.elements){
       card=structuredClone(card);
-      card.body.elements.push({tag:'markdown',text_size:'notation',content:'私有交付：普通群仅你可见；话题群转机器人私聊。附件若有将通过私聊发送。你发在群里的原提问仍是群消息。'});
+      card.body.elements.push({tag:'markdown',text_size:'notation',content:destination.contactChannel?'查人专用群：结果仅提问者和当前群主可见，群内原提问仍可见。':'私有交付：普通群仅你可见；话题群转机器人私聊。附件若有将通过私聊发送。你发在群里的原提问仍是群消息。'});
       const rewrite=node=>{if(!node||typeof node!=='object')return;for(const [k,v] of Object.entries(node)){if(typeof v==='string')node[k]=v.replace('结果将在本群卡片显示','结果仅向提问者交付');else rewrite(v);}};rewrite(card);
     }
     if (Buffer.byteLength(JSON.stringify(card)) > 28_000) throw new Error('Card exceeds safe message limit');
@@ -96,7 +97,8 @@ export class LiveCards {
     }
     if (!force && (Date.now() < (entry.retryAt ?? 0) || (!entry.terminal && Date.now() - (entry.sentAt ?? 0) < this.intervalMs))) return;
     try {
-      const options = { replyInThread: entry.destination.replyInThread, profile: entry.destination.profile, idempotencyKey: `aos-card-${createHash('sha256').update(key).digest('hex').slice(0, 32)}` };
+      await this.authorizeDestination?.(entry.destination);
+      const options = { strictGroup:entry.destination.strictGroup, replyInThread: entry.destination.replyInThread, profile: entry.destination.profile, idempotencyKey: `aos-card-${createHash('sha256').update(key).digest('hex').slice(0, 32)}` };
       let messageId = entry.messageId;
       const privateCard=entry.destination.visibility==='requester';
       let privateDeliveryKind=entry.privateDeliveryKind,privateDeliveryChatId=entry.privateDeliveryChatId;

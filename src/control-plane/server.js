@@ -1,3 +1,4 @@
+import {ContactChannels} from './contact-channels.js';
 import {isPrivate,cardDestination} from './private-cards.js';
 import {ContactDirectory} from './contact-directory.js';
 import {ReportDelivery} from './report-delivery.js';
@@ -56,7 +57,8 @@ export async function createControlPlane(overrides = {}) {
   context.contacts = overrides.contactService ?? new ContactDirectory(context, { file: config.contactsFile });
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
-  const cards = new LiveCards(store, feishu);
+  context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
+  const cards = new LiveCards(store, feishu, {authorizeDestination:d=>context.contactChannels.verifyDestination(d)});
   context.cards = cards;
   context.reports=new ReportDelivery(context);cards.afterRetry=state=>context.reports.retry(state);
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);

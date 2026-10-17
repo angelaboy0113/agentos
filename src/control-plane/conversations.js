@@ -71,6 +71,7 @@ export class ConversationService {
   async enqueue(event) {
     if (!event.message_id || !event.chat_id || !event.sender_id) throw new Error('Missing message identity');
     const profile = event.agent_profile ?? null;
+    const directoryChannel=await this.context.contactChannels?.resolve(event.chat_id,profile,event.sender_id);
     const accepted = await this.context.store.transact((state) => {
       state.conversations ??= [];
       const existing = state.conversations.find((turn) => turn.messageId === event.message_id && turn.profile === profile);
@@ -78,6 +79,7 @@ export class ConversationService {
       const privateReply=event.chat_type==='p2p'&&Object.values(state.cardMessages??{}).find(c=>c.destination.visibility==='requester'&&c.privateDeliveryKind==='dm'&&c.privateDeliveryChatId===event.chat_id&&c.destination.openId===event.sender_id&&c.destination.profile===profile&&c.messageId===event.reply_to);
       const routedChatId=privateReply?.destination?.chatId??event.chat_id;
       const turn = {
+        ...(directoryChannel?{directoryChannel,visibility:'requester'}:{}),
         ...(privateReply?{sourceChatId:event.chat_id}:{}),
         id: createId('CHAT'), messageId: event.message_id, chatId: routedChatId,
         senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake', chatType: privateReply?'group':event.chat_type ?? null,
@@ -227,7 +229,7 @@ export class ConversationService {
       if (turn.status === 'decided') {
         try {
           const outcome = await this.apply(turn);
-          await this.update(turn.id, { status: 'ready', outcome, response: [turn.decision.action==='lookup_contact'?'':turn.decision.reply, outcome.notice].filter(Boolean).join('\n\n') });
+          await this.update(turn.id, { status: 'ready', outcome, response: [turn.decision.action==='lookup_contact'||turn.directoryChannel?'':turn.decision.reply, outcome.notice].filter(Boolean).join('\n\n') });
         } catch (error) {
           await this.update(turn.id, { status: 'ready', response: `本次操作未执行：${error.message}`, actionError: error.message });
         }
@@ -240,6 +242,7 @@ export class ConversationService {
         await feedback?.running;
         this.feedback.delete(turn.id);
         const deliveryStarted = Date.now();
+        if(turn.directoryChannel){const responseIds=await this.context.contactChannels.deliver(turn);await this.update(turn.id,{status:'sent',completedAt:new Date().toISOString(),responseIds,contactImageMessageId:turn.outcome?.contactImage?responseIds[0]:null});continue;}
         const responseIds = [...(turn.responseIds ?? [])];
         let parts;
         if (this.context.cards?.enabled) {
@@ -307,6 +310,7 @@ export class ConversationService {
       .map((item) => [item.id, item])).values()].slice(-20);
     const relatedMessages = new Set(preceding.flatMap(item => [item.id,item.messageId]).filter(Boolean));
     relatedMessages.add(turn.id); relatedMessages.add(turn.messageId);
+    if(turn.directoryChannel)return {requestId:turn.id,questionId:turn.questionId,role:turn.role,nativeSession:true,currentActor:{senderId:turn.senderId,profile:turn.profile},project:{id:projectId},message:turn.content,history:history.map(t=>({user:t.content,assistant:t.response})),attachments:[],currentAttachmentIds:[],contactDirectory:await this.context.contacts.catalog(turn),delivery:{visibility:'requester_and_owner'},channel:{kind:'contacts_only',allowedActions:['lookup_contact','reply'],rule:'只根据姓名或完整工号调用lookup_contact查询；联系人事实必须来自工具结果。需要补充姓名/工号时用reply，不得编造资料，不得创建开发、数据库或环境任务。结果在群内私有卡片中展示，仅提问者和群主可见。'}};
     const explicitJob = job => !scoped && isAdministrator(projects,turn) && String(turn.content).split(/[^A-Za-z0-9_-]+/).includes(job.id);
     const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId && (!isPrivate(state,job)||turn.visibility==='requester'&&job.senderId===turn.senderId)
       && (explicitJob(job) || (job.originProfile ?? job.agentProfile ?? null) === (turn.profile ?? null))
@@ -322,7 +326,7 @@ export class ConversationService {
       canApprove: isAdministrator(projects, turn) && job.status === 'awaiting_approval',
     }));
     delete memory.suppressedRefs;
-    return fitContext({
+    const input=fitContext({
       delivery:{visibility:turn.visibility??'public',rule:turn.visibility==='requester'?'只向提问者投递临时卡片；附件通过同一机器人私聊，不得公开。':'普通公开回复'},
       contactDirectory: this.context.contacts ? await this.context.contacts.catalog(turn) : {enabled:false,pending:[]},
       teamKnowledge: this.context.knowledge ? await this.context.knowledge.candidates(turn, projectId) : { enabled: false, candidates: [] },
@@ -347,12 +351,15 @@ export class ConversationService {
         evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
       jobs, attachments, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
     }, this.memory.settings);
+    return input;
   }
 
   async apply(turn) {
+    if(turn.directoryChannel&&!['lookup_contact','reply'].includes(turn.decision.action))throw new Error('本群仅支持按姓名或工号查人，不执行开发、环境或数据库任务');
     const { store, projects } = this.context;
     let decision = turn.decision;
     const projectId = projects.chatProjectMap[turn.chatId];
+    if(turn.directoryChannel){if(decision.action==='lookup_contact'){const result=await this.context.contacts.lookup(turn,decision.contactLookup);return result.contactImage?{...result,notice:'已核实联系人资料，图片结果仅本次提问者和群主可见。'}:result;}return {notice:'本群专用于查人，请提供同事姓名或完整工号；不执行开发、数据库或环境排查。'};}
     if (decision.knowledgeReceipt && this.context.knowledge) {
       const teamKnowledge = await this.context.knowledge.candidates(turn, projectId);
       decision = await this.context.knowledge.reuse(turn, projectId, decision, {teamKnowledge,jobs:[]});
