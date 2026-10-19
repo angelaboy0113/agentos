@@ -160,12 +160,14 @@ export class ConversationService {
   scheduleFeedback(turn) {
     if (this.feedback.has(turn.id) || (!this.context.cards?.enabled && turn.feedbackState) || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
     const entry = {};
+    const publish=()=>{
+      if(entry.busy)return;entry.busy=true;
+      entry.running=this.sendFeedback(turn.id).catch(()=>{}).finally(()=>{entry.busy=false;});
+    };
     entry.timer = setTimeout(() => {
-      entry.running = this.sendFeedback(turn.id).catch(() => {});
+      publish();
       if (this.context.cards?.enabled) {
-        entry.pulse = setInterval(() => {
-          entry.running = this.sendFeedback(turn.id).catch(() => {});
-        }, 10_000);
+        entry.pulse = setInterval(publish, 10_000);
         entry.pulse.unref();
       }
     }, Math.max(0, this.feedbackMs - (Date.now() - Date.parse(turn.createdAt))));
@@ -178,7 +180,7 @@ export class ConversationService {
     const turn = (await this.context.store.read()).conversations.find((item) => item.id === id);
     if (this.context.cards?.enabled) {
       if (!turn || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
-      const messageId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
+      const messageId = turn.directoryChannel ? await this.context.contactChannels.progress(turn) : turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
         cardDestination(turn), { immediate: true });
       if (messageId) await this.update(id, { feedbackState: 'sent', feedbackAt: new Date().toISOString(), feedbackMessageId: messageId });
       return;

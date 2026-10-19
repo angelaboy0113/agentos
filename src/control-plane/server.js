@@ -58,7 +58,7 @@ export async function createControlPlane(overrides = {}) {
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
-  const cards = new LiveCards(store, feishu, {authorizeDestination:d=>context.contactChannels.verifyDestination(d)});
+  const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
   context.cards = cards;
   context.reports=new ReportDelivery(context);cards.afterRetry=state=>context.reports.retry(state);
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);

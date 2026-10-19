@@ -101,7 +101,7 @@ export class LiveCards {
     }
     if (!force && (Date.now() < (entry.retryAt ?? 0) || (!entry.terminal && Date.now() - (entry.sentAt ?? 0) < this.intervalMs))) return;
     try {
-      await this.authorizeDestination?.(entry.destination);
+      await this.authorizeDestination?.(entry.destination,entry);
       const options = { strictGroup:entry.destination.strictGroup, replyInThread: entry.destination.replyInThread, profile: entry.destination.profile, idempotencyKey: `aos-card-${createHash('sha256').update(key).digest('hex').slice(0, 32)}` };
       let messageId = entry.messageId;
       const privateCard=entry.destination.visibility==='requester';
@@ -136,7 +136,7 @@ export class LiveCards {
         && !fresh.conversations.some((t) => t.questionId === question.id && ['queued', 'thinking', 'decided'].includes(t.status))
         && !fresh.jobs.some((j) => j.questionId === question.id && ['queued', 'running', 'cancelling', 'awaiting_approval', ...(entry.terminalMention?.kind==='browser_login'?[]:['awaiting_clarification']), ...(entry.terminalMention?.kind === 'environment_approval' ? [] : ['awaiting_environment_approval'])].includes(j.status)));
       if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
-        if(entry.publicCompletionMention)await this.authorizeDestination?.(entry.destination);
+        if(entry.publicCompletionMention)await this.authorizeDestination?.(entry.destination,entry);
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile, replyInThread: entry.terminalMention.replyInThread ?? entry.destination.replyInThread,
           idempotencyKey: `aos-mention-${createHash('sha256').update(entry.generation ? `${key}:${entry.generation}` : key).digest('hex').slice(0, 32)}`,
