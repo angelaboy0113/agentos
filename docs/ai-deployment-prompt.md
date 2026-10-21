@@ -142,6 +142,12 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
   原提问仍公开；scope以机器人获批企业范围为准。岗位和父链两项权限需管理员批准，
   不因程序能渲染图片就宣称该企业已读到字段；使用两名真人验证实际可见性。
 
+- 升级关键控制请求恢复时读取docs/control-recovery.md；空闲停稳后将agentos.json与
+  control-receipts目录成套备份，重启Control Plane与Runner，核对health中的
+  controlRequestProtocol=durable-control-v1和stateReadPolicy=stat-cache-detached-v1。
+  单次HTTP10秒等待不等于整任务时限；保留同号回执、租约、取消和未知状态拒绝盲重试。
+  不通过清空回执、修改旧红卡或自动重跑历史PRD来验收修复。
+
 第五阶段：自动检查与本机启动
 - 运行 doctor 和 npm run check；修复由本次配置或兼容性引起的问题，保留真实输出摘要。
 - 在没有重复实例和在途任务冲突时手工启动 npm run start:local。

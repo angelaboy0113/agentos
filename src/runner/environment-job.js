@@ -1,3 +1,4 @@
+import {controlPost} from './control-client.js';
 import {buildSourceQueryContext} from './source-query-context.js';
 import { connectionEndpoints } from '../shared/connection-endpoints.js';
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
@@ -18,15 +19,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   startHeartbeat();
   let phase='environment_claim';
   try {
-  const response = await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/environment-claim`, {
-    method: 'POST', signal: AbortSignal.timeout(10000), headers: { authorization: `Bearer ${config.runnerToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ leaseId: job.lease.id, runnerId: job.lease.runnerId }) });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
-    // Only the fixed classifier output reaches the result, never the raw HTTP body.
-    throw new Error(failureDiagnostic(detail.error ?? '环境接口未成功响应'));
-  }
-  const { plan } = await response.json();phase='environment_read';
+  const {plan}=await controlPost(config,`/api/v1/jobs/${encodeURIComponent(job.id)}/environment-claim`,{leaseId:job.lease.id,runnerId:job.lease.runnerId});phase='environment_read';
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
   let result, environment;
   const sourceResult=(job.context??[]).filter(x=>x.kind==='analysis_turn').at(-1)?.result;
@@ -64,7 +57,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, explanation ? `业务解释\n${explanation}` : '', result.toolInputErrors?.length?`工具修正记录（按具体提示修正，不代表授权不足）\n${JSON.stringify(result.toolInputErrors)}`:'', result.summary ? `排查记录\n${result.summary}` : '', result.runtimeDiscoveries?.length ? `调度入口证据（待网页核验）\n${JSON.stringify(result.runtimeDiscoveries)}` : '', presented.details, result.fileInspections?.length?`已绑定文件的审阅证据\n${JSON.stringify(result.fileInspections)}`:'', result.datasetCatalog?.length?`任务内可接续的数据集\n${JSON.stringify(result.datasetCatalog)}`:'', result.exportFiles?.length?`完整报表文件\n${JSON.stringify(result.exportFiles)}\n文件由受控工具生成，最终结论通过后回复至原提问；尚需核对原问题的所有字段及业务口径。`:'', (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
     websiteMismatch: result.websiteMismatch === true, runtimeDiscoveries: result.runtimeDiscoveries ?? [], connectionEndpoints: connectionEndpoints(result.rows), environmentEvidence: result.evidence,
     fileInspections:result.fileInspections??[],environmentFailure:result.failure??null,toolInputErrors:result.toolInputErrors??[],exportFiles:result.exportFiles??[], evidenceRecords: presented.records, memorySafeSummary: safeSummary, verification: [] };
-  } catch(error){const local=phase==='environment_claim';const reason=local?'领取环境查询时本机状态接口未及时响应；不能判断请求是否已受理，未自动重试。':'环境步骤等待或结果整理中断；未据此确认业务故障。';return {outcome:'blocked',summary:reason,finalMessage:reason+'\n'+failureDiagnostic(error),investigationStopped:{code:local?'LOCAL_CONTROL_TIMEOUT':'ENVIRONMENT_INTERRUPTED',reason},verification:[]};} finally { clearInterval(heartbeat); }
+  } catch(error){const local=phase==='environment_claim';const reason=local?(error.statusCode?'本机环境领取请求被拒绝或回执不可用，未执行本轮环境查询。':'本机控制请求回执无法核实，已保留任务；未盲目重复执行环境查询。'):'环境步骤等待或结果整理中断；未据此确认业务故障。';return {outcome:'blocked',summary:reason,finalMessage:reason+'\n'+failureDiagnostic(error),investigationStopped:{code:local?(error.code??'CONTROL_REQUEST_REJECTED'):'ENVIRONMENT_INTERRUPTED',reason},verification:[]};} finally { clearInterval(heartbeat); }
 }
 
 function websiteTools(job,config){

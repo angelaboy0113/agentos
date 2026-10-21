@@ -1,3 +1,4 @@
+import {controlPost} from './control-client.js';
 import {recordReportFiles,recordReportReview} from '../shared/report-acceptance.js';
 import {interruptedInvestigation} from '../shared/investigation-budget.js';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +49,7 @@ export class AgentRunner {
 
   async run(job) {
     const identity = { runnerId: this.config.runnerId, leaseId: job.lease.id };
-    const emit = (event) => this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/events`, { ...event, ...identity });
+    const emit = async(event) => {try{return await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/events`, { ...event, ...identity });}catch(error){if(['progress','heartbeat'].includes(event.type)&&error.code==='LOCAL_CONTROL_TIMEOUT'){console.warn('[runner] 进度回执暂缓，业务执行继续');return {};}throw error;}};
     const controller = new AbortController();
     let checking = false;
     let lostLease = false;
@@ -131,7 +132,7 @@ export class AgentRunner {
       if(environmentResult.exportFiles?.length)recordReportFiles(current,environmentResult.exportFiles,current.reportFiles?.at(-1)?.questionGeneration);
       save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}]});
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
-        { ...identity, result: environmentResult })).job;
+        { ...identity, result: environmentResult },{signal})).job;
     }
     for (;;) {
       save(current);signal.throwIfAborted();
@@ -140,14 +141,14 @@ export class AgentRunner {
       save({...current,context:[...(current.context??[]),{kind:'analysis_turn',result}]});
       if (result?.outcome === 'partial' && result.investigation?.status === 'continue' && !result.investigation?.blocker) {
         const continued = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-analysis-continue`,
-          { ...identity, result });
+          { ...identity, result },{signal});
         if (!continued.continued) return continued.terminalResult ?? result;
         current = continued.job;
         continue;
       }
       if (result?.outcome !== 'needs_clarification' || (!result.environmentQuery && !result.websiteQuery)) return result;
       const prepared = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment`,
-        { ...identity, result });
+        { ...identity, result },{signal});
       current = prepared.job;
       if (prepared.terminalResult) return prepared.terminalResult;
       if (!prepared.planned) continue;
@@ -159,24 +160,12 @@ export class AgentRunner {
       if(environmentResult.exportFiles?.length)recordReportFiles(current,environmentResult.exportFiles,current.reportFiles?.at(-1)?.questionGeneration);
       save({...current,context:[...(current.context??[]),{kind:'environment_result',result:environmentResult}]});
       current = (await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-environment-result`,
-        { ...identity, result: environmentResult })).job;
+        { ...identity, result: environmentResult },{signal})).job;
     }
   }
 
-  async post(path, body) {
-    let response;try{response = await fetch(`${this.config.serverUrl}${path}`, {
-      signal: AbortSignal.timeout(10_000),
-      method: 'POST',
-      headers: { authorization: `Bearer ${this.config.runnerToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });}catch(error){if(error.name==='TimeoutError'||/timeout/i.test(error.message))throw Object.assign(new Error('本机任务状态接口等待超时；请求可能已被受理，未自动重复提交'),{code:'LOCAL_CONTROL_TIMEOUT'});throw error;}
-    const payload = await response.json().catch(()=>{throw Object.assign(new Error('本机任务状态响应未完整收到；未自动重复提交'),{code:'LOCAL_CONTROL_RESPONSE'});});
-    if (!response.ok) {
-      const error = new Error(`${path} failed (${response.status}): ${payload.error ?? 'unknown error'}`);
-      error.statusCode = response.status;
-      throw error;
-    }
-    return payload;
+  async post(path, body, options={}) {
+    return controlPost(this.config,path,body,{...options,onRecovery:()=>console.warn('[runner] 本机请求响应暂缓，正在核对持久回执并等待原步骤完成')});
   }
 }
 

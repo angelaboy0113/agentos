@@ -1,3 +1,4 @@
+import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
 import {ContactChannels} from './contact-channels.js';
 import {isPrivate,cardDestination} from './private-cards.js';
 import {ContactDirectory} from './contact-directory.js';
@@ -54,6 +55,7 @@ export async function createControlPlane(overrides = {}) {
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
     websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
+  context.controlReceipts=new ControlReceipts(store);
   context.contacts = overrides.contactService ?? new ContactDirectory(context, { file: config.contactsFile });
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
@@ -79,7 +81,7 @@ export async function createControlPlane(overrides = {}) {
   context.conversations = conversations;
   const server = http.createServer(async (request, response) => {
     try {
-      await route({ ...context, request, response });
+      if(!await durableControl(context,request,response))await route({ ...context, request, response });
     } catch (error) {
       console.error('[control-plane]', error);
       if (!response.headersSent) json(response, error.statusCode ?? 500, { ok: false, error: error.message });
@@ -181,6 +183,7 @@ async function route(context) {
       conversationScope: 'question-profile-project-v2',
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1',
+      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
@@ -228,8 +231,8 @@ async function route(context) {
   const environmentMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/environment-claim$/);
   if (request.method === 'POST' && environmentMatch) {
     requireBearer(request, config.runnerToken, 'runner');
-    const plan = await store.claimEnvironment(decodeURIComponent(environmentMatch[1]), await readJson(request));
-    return json(response, 200, { ok: true, plan });
+    const body=await readJson(request);const result=await commitControl(context,async()=>({ok:true,plan:await store.claimEnvironment(decodeURIComponent(environmentMatch[1]),body)}));
+    return json(response,200,result);
   }
 
   const controlMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/control$/);
@@ -253,8 +256,9 @@ async function route(context) {
   if (request.method === 'POST' && url.pathname === '/api/v1/jobs/lease') {
     requireBearer(request, config.runnerToken, 'runner');
     const body = await readJson(request);
-    const job = await store.leaseNext(body.runnerId, body.capabilities ?? []);
-    return json(response, 200, { ok: true, job });
+    if(!await store.leaseWork(body.capabilities??[]))return json(response,200,{ok:true,job:null});
+    const result=await commitControl(context,async()=>({ok:true,job:await store.leaseNext(body.runnerId,body.capabilities??[])}));
+    return json(response,200,result);
   }
 
   const continuousPlanMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-environment$/);
@@ -279,12 +283,13 @@ async function route(context) {
       const convergence = environmentContinuation(await store.read(), job, query, sourceResult);
       if (!convergence.continue) throw Object.assign(new Error(convergence.reason), { queryDiagnostic: { code: convergence.terminal?'CONVERGENCE_STALLED':'REPEATED_TARGET', reason: convergence.reason } });
       if(convergence.metadata)Object.assign(plan,convergence.metadata);
-      const updated = await store.beginContinuousEnvironment(id, identity, plan, sourceResult);
-      return json(response, 200, { ok: true, planned: true, plan, job: updated });
+      const result=await commitControl(context,async()=>({ok:true,planned:true,plan,job:await store.beginContinuousEnvironment(id,identity,plan,sourceResult)}));
+      return json(response,200,result);
     } catch (error) {
+      if(error.controlReceiptFailure)throw error;
       const diagnostic = queryRejection(error, job);
-      const rejected = await store.rejectContinuousEnvironment(id, identity, sourceResult, diagnostic);
-      return json(response, 200, { ok: true, planned: false, diagnostic, ...rejected });
+      const result=await commitControl(context,async()=>({ok:true,planned:false,diagnostic,...await store.rejectContinuousEnvironment(id,identity,sourceResult,diagnostic)}));
+      return json(response,200,result);
     }
   }
 
@@ -316,10 +321,10 @@ async function route(context) {
     const body = await readJson(request);
     const before = await store.getJob(id);
     if(body.result&&body.result.exportFiles!==undefined)body.result.exportFiles=await validateReportFiles(config.dataDir,id,body.result.exportFiles);
-    const updated = await store.completeContinuousEnvironment(id,
-      { leaseId: body.leaseId, runnerId: body.runnerId }, body.result);
+    const result=await commitControl(context,async()=>({ok:true,job:await store.completeContinuousEnvironment(id,
+      { leaseId: body.leaseId, runnerId: body.runnerId }, body.result)}));
     if (before?.environmentAccess?.kind === 'website') await context.websiteBrowser.release(id);
-    return json(response, 200, { ok: true, job: updated });
+    return json(response,200,result);
   }
 
   const continuousAnalysisMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-analysis-continue$/);
@@ -327,9 +332,9 @@ async function route(context) {
     requireBearer(request, config.runnerToken, 'runner');
     const id = decodeURIComponent(continuousAnalysisMatch[1]);
     const body = await readJson(request);
-    const result = await store.continueContinuousAnalysis(id,
-      { leaseId: body.leaseId, runnerId: body.runnerId }, body.result);
-    return json(response, 200, { ok: true, ...result });
+    const result=await commitControl(context,async()=>({ok:true,...await store.continueContinuousAnalysis(id,
+      { leaseId: body.leaseId, runnerId: body.runnerId }, body.result)}));
+    return json(response,200,result);
   }
 
   const websiteMatch=url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/website-tool$/);
@@ -417,10 +422,11 @@ async function route(context) {
       verifyCompletedPlan(await loadEnvironments(),job.environmentAccess??{},body.result.environmentEvidence);
       body.result.exportFiles=await validateReportFiles(config.dataDir,job.id,body.result.exportFiles);
     }
-    const result = await store.appendEvent(job.id, body, routing);
+    let committedEvent;
+    const result=await commitControl(context,async()=>{committedEvent=await store.appendEvent(job.id,body,routing);return {ok:true,job:committedEvent.job};});
     if(['completed','failed','cancelled'].includes(body.type)&&!body.result?.browserLoginRequired)await context.websiteBrowser.release(job.id);
     context.knowledge.capture(result.job);
-    setImmediate(() => notifyJobEvent(context, result).catch((error) => console.error('[notify]', error)));
+    if(committedEvent)setImmediate(() => notifyJobEvent(context, committedEvent).catch((error) => console.error('[notify]', error)));
     return json(response, 200, { ok: true, job: result.job });
   }
 
@@ -688,6 +694,7 @@ function requireBearer(request, expected, kind) {
 }
 
 async function readJson(request, limit = 5 * 1024 * 1024) {
+  if(request.controlBody!==undefined)return structuredClone(request.controlBody);
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -751,4 +758,38 @@ async function main() {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main().catch((error) => { console.error(error); process.exitCode = 1; });
+}
+
+
+async function commitControl(context,operation){return context.controlReceipts.commit(context.request.controlMeta,operation);}
+async function receiptAllowed(context,meta,body){
+ const saved=(await context.store.snapshot()).controlReceipts?.[meta.id];
+ if(!saved?.executable)return;
+ const id=saved.jobId??body.job?.id;if(!id)return;const current=await context.store.getJob(id),lease=saved.leaseId??body.job?.lease?.id;
+ if(current?.status!=='running'||current.lease?.id!==lease||current.lease?.runnerId!==meta.runnerId||!(Date.parse(current.lease?.expiresAt)>Date.now()))throw Object.assign(new Error('Recovered execution receipt has a stale or cancelled lease'),{statusCode:409});
+ if(saved.route.endsWith('/environment-claim')){if(current.environmentAccess?.scopeHash!==body.plan?.scopeHash||current.environmentAccess?.startedAt!==body.plan?.startedAt)throw Object.assign(new Error('Recovered grant is no longer the current environment step'),{statusCode:409});try{verifyApprovedPlan(await loadEnvironments(),body.plan);}catch{throw Object.assign(new Error('Recovered environment authorization is no longer valid'),{statusCode:403});}}
+}
+async function durableControl(context,request,response){
+ const pathname=new URL(request.url,'http://localhost').pathname,receipts=context.controlReceipts;
+ const statusMatch=pathname.match(/^\/api\/v1\/control-requests\/([a-f0-9-]{36})$/);
+ if(request.method==='GET'&&statusMatch){
+  requireBearer(request,context.config.runnerToken,'runner');const meta={id:statusMatch[1],runnerId:request.headers['x-agentos-runner'],digest:request.headers['x-agentos-request-digest']};
+  const pending=receipts.pending.get(meta.id);if(pending)receipts.check(pending,meta);
+  const saved=await receipts.committed(meta);if(saved){await receiptAllowed(context,meta,saved);json(response,200,{protocol:CONTROL_PROTOCOL,state:'committed',response:saved});}
+  else json(response,200,{protocol:CONTROL_PROTOCOL,state:pending?'pending':'unknown'});return true;
+ }
+ const id=request.headers['x-agentos-request-id'];if(!id)return false;
+ requireBearer(request,context.config.runnerToken,'runner');if(request.method!=='POST'||!validRequestId(id))throw Object.assign(new Error('Invalid control request ID'),{statusCode:400});
+ const body=await readJson(request);if(!criticalControl(pathname,body)||typeof body.runnerId!=='string')throw Object.assign(new Error('Unsupported durable control operation'),{statusCode:400});
+ const meta={id,runnerId:body.runnerId,leaseId:body.leaseId,jobId:pathname.match(/^\/api\/v1\/jobs\/([^/]+)\//)?.[1],route:pathname,digest:controlDigest(pathname,body),executable:pathname.endsWith('/environment-claim')||pathname==='/api/v1/jobs/lease'||pathname.endsWith('/events')&&body.type==='started'};
+ request.controlBody=body;request.controlMeta=meta;
+ let pending=receipts.pending.get(id);
+ if(pending)receipts.check(pending,meta);
+ else{
+  const promise=(async()=>{const saved=await receipts.committed(meta);if(saved){await receiptAllowed(context,meta,saved);return {status:200,body:saved};}
+   const capture={headersSent:false,writeHead(status){this.status=status;this.headersSent=true;},end(raw){this.body=JSON.parse(raw.toString());}};
+   await route({...context,request,response:capture});return {status:capture.status,body:capture.body};})();
+  pending={...meta,promise};receipts.pending.set(id,pending);promise.finally(()=>{if(receipts.pending.get(id)===pending)receipts.pending.delete(id);}).catch(()=>{});
+ }
+ const result=await pending.promise;if(result.status===200)await receiptAllowed(context,meta,result.body);json(response,result.status,result.body);return true;
 }

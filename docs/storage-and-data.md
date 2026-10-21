@@ -94,3 +94,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 `data/contact-index/directory.sqlite`保存受范围/权限指纹限制的最小目录候选，不含手机号或邮箱；与团队知识SQLite分开。`data/contact-images/`保存个人资料PNG和校验回执，`data/lark-cli/images/`为CLI上传副本；对话outcome登记原提问范围与投递状态。文件含人员资料，使用本机受限权限，不进入Git或团队知识；停稳后备份，没有自动清理服务。配置和验收见[联系人信息图](contact-images.md)。
 
 私有卡片的visibility、固定收件者、privateDeliveryKind及旧临时卡片清理队列随问题/任务和cardMessages存入原状态JSON；共享知识不自动接收私有调查。私有附件仍保存在原本地目录，私聊投递不代表本地管理员隔离。
+
+## 本机控制请求回执
+
+`data/agentos.json.controlReceipts`和`data/control-receipts/<请求编号>.json`共同保存关键状态提交的恢复依据；正文可能含任务证据，须私有保存、停机成套备份，不单独清空。详见[本机状态请求恢复](control-recovery.md)。

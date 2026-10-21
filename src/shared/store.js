@@ -2,7 +2,8 @@ import {recordReportFiles,recordReportReview} from './report-acceptance.js';
 import {interruptedInvestigation} from './investigation-budget.js';
 import { continuousReviewDecision, reviewDecision } from './investigation-review.js';
 import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint } from './environment-access.js';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import { mkdir, readFile, rename, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createId, nextStage } from './protocol.js';
 
@@ -34,13 +35,17 @@ export class JsonStore {
   constructor(file) {
     this.file = path.resolve(file);
     this.queue = Promise.resolve();
+    this.transactionContext=new AsyncLocalStorage();this.runnerHeartbeats=new Map();
   }
 
   transact(operation) {
+    const nested=this.transactionContext.getStore();if(nested?.active)return Promise.resolve().then(()=>operation(nested.state));
+    const queuedAt=Date.now();
     const run = this.queue.then(async () => {
-      const state = await this.read();
+      const started=Date.now();const state = await this.read();
       const result = await operation(state);
       await this.write(state);
+      this.lastTransaction={queueMs:started-queuedAt,transactionMs:Date.now()-started};
       return result;
     });
     this.queue = run.catch(() => undefined);
@@ -57,20 +62,23 @@ export class JsonStore {
     });
   }
 
-  async read() {
-    try {
-      return JSON.parse(await readFile(this.file, 'utf8'));
-    } catch (error) {
-      if (error.code === 'ENOENT') return emptyState();
-      throw error;
-    }
+  async snapshot() {
+    const nested=this.transactionContext.getStore();if(nested?.active)return nested.state;
+    const signature=s=>[s.dev,s.ino,s.size,s.mtimeMs,s.ctimeMs].join(':');
+    for(;;){try{const before=signature(await stat(this.file));if(this.cache?.signature===before)return this.cache.state;
+      const raw=await readFile(this.file,'utf8'),after=signature(await stat(this.file));if(before!==after)continue;
+      const state=JSON.parse(raw);this.cache={signature:after,state,raw};return state;
+    }catch(error){if(error.code==='ENOENT'){this.cache=null;return emptyState();}throw error;}}
   }
-
+  async read(){return structuredClone(await this.snapshot());}
   async write(state) {
+    const raw=JSON.stringify(state)+'\n';
+    // Only skip an unchanged transaction if the authoritative file still matches the cached revision.
+    if(this.cache?.raw===raw){await this.snapshot();if(this.cache?.raw===raw)return;}
     await mkdir(path.dirname(this.file), { recursive: true });
     const temporary = `${this.file}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(state)}\n`, 'utf8');
-    await rename(temporary, this.file);
+    await writeFile(temporary,raw,{encoding:'utf8',mode:0o600});await rename(temporary,this.file);
+    const info=await stat(this.file);this.cache={signature:[info.dev,info.ino,info.size,info.mtimeMs,info.ctimeMs].join(':'),state:JSON.parse(raw),raw};
   }
 
   async recordAdminAudit(entry) {
@@ -344,8 +352,8 @@ export class JsonStore {
   }
 
   async getJob(id) {
-    const state = await this.read();
-    return state.jobs.find((job) => job.id === id) ?? null;
+    const state = await this.snapshot();
+    return structuredClone(state.jobs.find((job) => job.id === id) ?? null);
   }
 
   async reconcileLegacyResults() {
@@ -395,13 +403,19 @@ export class JsonStore {
   }
 
   async heartbeat(runner) {
-    return this.transact((state) => {
+    const seen=this.runnerHeartbeats.get(runner.runnerId),signature=JSON.stringify(runner);
+    if(seen?.signature===signature&&Date.now()-seen.at<15000)return {...runner,lastSeenAt:new Date().toISOString()};
+    const result=await this.transact((state) => {
       state.runners[runner.runnerId] = { ...runner, lastSeenAt: new Date().toISOString() };
-      return state.runners[runner.runnerId];
+      return structuredClone(state.runners[runner.runnerId]);
     });
+    this.runnerHeartbeats.set(runner.runnerId,{signature,at:Date.now()});return result;
   }
 
+  async leaseWork(capabilities=[]){const snapshot=await this.snapshot(),now=Date.now();return snapshot.jobs.some(j=>j.status==='queued'&&(capabilities.length===0||capabilities.includes(j.stage)))||snapshot.jobs.some(j=>j.status==='running'&&j.lease&&Date.parse(j.lease.expiresAt)<=now);}
   async leaseNext(runnerId, capabilities = [], leaseSeconds = 120) {
+    if(!await this.leaseWork(capabilities))return null;
+
     return this.transact((state) => {
       const now = Date.now();
       for (const job of state.jobs) {
