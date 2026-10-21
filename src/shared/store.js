@@ -34,7 +34,7 @@ function questionEvidence(prior, supplied = []) {
 export class JsonStore {
   constructor(file) {
     this.file = path.resolve(file);
-    this.queue = Promise.resolve();
+    this.queue = Promise.resolve();this.readMetrics={full:0,selected:0,loads:0};
     this.transactionContext=new AsyncLocalStorage();this.runnerHeartbeats=new Map();
   }
 
@@ -64,13 +64,19 @@ export class JsonStore {
 
   async snapshot() {
     const nested=this.transactionContext.getStore();if(nested?.active)return nested.state;
+    if(this.loading)return this.loading;
+    this.loading=this.loadSnapshot();try{return await this.loading;}finally{this.loading=null;}
+  }
+  async loadSnapshot(){
+    this.readMetrics.loads++;
     const signature=s=>[s.dev,s.ino,s.size,s.mtimeMs,s.ctimeMs].join(':');
     for(;;){try{const before=signature(await stat(this.file));if(this.cache?.signature===before)return this.cache.state;
       const raw=await readFile(this.file,'utf8'),after=signature(await stat(this.file));if(before!==after)continue;
       const state=JSON.parse(raw);this.cache={signature:after,state,raw};return state;
     }catch(error){if(error.code==='ENOENT'){this.cache=null;return emptyState();}throw error;}}
   }
-  async read(){return structuredClone(await this.snapshot());}
+  async select(select){this.readMetrics.selected++;return structuredClone(select(await this.snapshot()));}
+  async read(){this.readMetrics.full++;return structuredClone(await this.snapshot());}
   async write(state) {
     const raw=JSON.stringify(state)+'\n';
     // Only skip an unchanged transaction if the authoritative file still matches the cached revision.

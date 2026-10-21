@@ -1,3 +1,4 @@
+import {stateView} from '../shared/state-view.js';
 import { canonicalWebsite } from '../shared/website-aliases.js';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
@@ -26,7 +27,7 @@ export function pollWebsiteLogins(context){
  const run=resumeWebsiteLogins(context).finally(()=>polling.delete(context));polling.set(context,run);return run;
 }
 async function resumeWebsiteLogins(context){
- const jobs=(await context.store.read()).jobs.filter(j=>j.status==='awaiting_clarification'&&j.result?.browserLoginRequired===true&&j.environmentAccess?.kind==='website');
+ const jobs=await stateView(context.store,s=>(s.jobs??[]).filter(j=>j.status==='awaiting_clarification'&&j.result?.browserLoginRequired===true&&j.environmentAccess?.kind==='website'));
  for(const job of jobs){
   try{
    const cfg=await loadEnvironments(),e=cfg.environments[job.environmentAccess.environmentId];if(!e)continue;

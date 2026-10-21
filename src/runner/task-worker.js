@@ -1,3 +1,5 @@
+import {fenceParentExit} from './parent-exit.js';
+const normalDisconnect=fenceParentExit();
 import { executeEnvironmentJob } from './environment-job.js';
 import { executeJob } from './codex-executor.js';
 
@@ -12,5 +14,5 @@ process.once('message', async ({ job, config }) => {
   } catch (error) {
     await send({ type: 'failure', message: error.message }).catch(() => undefined);
     process.exitCode = 1;
-  } finally { if (process.connected) process.disconnect(); }
+  } finally {normalDisconnect();if (process.connected) process.disconnect(); }
 });

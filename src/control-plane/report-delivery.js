@@ -1,3 +1,4 @@
+import {stateView} from '../shared/state-view.js';
 import {privateRecipient} from './private-cards.js';
 import {reportEligible} from '../shared/report-acceptance.js';
 import {createHash} from 'node:crypto';
@@ -36,7 +37,7 @@ export class ReportDelivery {
  }
  async retry(snapshot){
   if(this.closed||typeof this.context.feishu.replyFile!=='function')return;
-  const state=snapshot??await this.context.store.read();
+  const state=snapshot??await stateView(this.context.store,s=>{const entries=Object.entries(s.reportDeliveries??{}).filter(([,e])=>!e.messageId&&!e.superseded);const ids=new Set(entries.map(([,e])=>e.questionId));return {reportDeliveries:Object.fromEntries(entries),jobs:entries.length?(s.jobs??[]).filter(j=>ids.has(j.questionId)||entries.some(([,e])=>e.sourceJobId===j.id)):[],questions:s.questions};});
   for(const [key,entry] of Object.entries(state.reportDeliveries??{}))if(!entry.messageId&&!entry.superseded&&Date.now()>=(entry.retryAt??0)&&!this.workers.has(key)){
    if(!deliveryEligible(state,entry)){await this.context.store.transact(s=>{s.reportDeliveries[key].superseded=true;});continue;}
    if(entry.questionId&&state.questions?.[entry.questionId]?.generation!==entry.questionGeneration){await this.context.store.transact(s=>{s.reportDeliveries[key].superseded=true;});continue;}

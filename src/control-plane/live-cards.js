@@ -1,3 +1,4 @@
+import {stateView} from '../shared/state-view.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -61,12 +62,12 @@ export class LiveCards {
   }
   async retry() {
     if (this.closed) return;
-    const state = await this.store.read();
-    if(this.afterRetry)this.afterRetry(state).catch(()=>{});
-    for (const [key, value] of Object.entries(state.cardMessages ?? {})) {
-      if ((value.retiredMessageIds?.length || value.revision !== value.deliveredRevision || (value.terminalMention && !value.mentionDelivered))
-        && Date.now() >= (value.retryAt ?? 0)) this.flush(key).catch(() => {});
-    }
+    if(this.retrying)return this.retrying;
+    const work=(async()=>{
+      const keys=await stateView(this.store,s=>Object.entries(s.cardMessages??{}).filter(([,v])=>(v.retiredMessageIds?.length||v.revision!==v.deliveredRevision||(v.terminalMention&&!v.mentionDelivered))&&Date.now()>=(v.retryAt??0)).map(([key])=>key));
+      if(this.afterRetry)this.afterRetry().catch(()=>{});
+      for(const key of keys)this.flush(key).catch(()=>{});
+    })();this.retrying=work;try{await work;}finally{this.retrying=null;}
   }
   async flush(key, force = false) {
     if (this.closed) return;
@@ -79,7 +80,7 @@ export class LiveCards {
     try { return await worker; } finally { if (this.workers.get(key) === worker) this.workers.delete(key); }
   }
   async cleanupPrivate(key){
-    const entry=(await this.store.read()).cardMessages?.[key];
+    const entry=await stateView(this.store,s=>s.cardMessages?.[key]);
     if(entry?.destination.visibility!=='requester')return;
     for(const id of entry.retiredMessageIds??[]){
       try{await this.feishu.deletePrivateCard(id,{profile:entry.destination.profile});
@@ -89,7 +90,7 @@ export class LiveCards {
   }
   async deliver(key, force) {
     await this.cleanupPrivate(key);
-    const entry = (await this.store.read()).cardMessages?.[key];
+    const entry = await stateView(this.store,s=>s.cardMessages?.[key]);
     if (!entry || (entry.revision === entry.deliveredRevision && (!entry.terminalMention || entry.mentionDelivered))) return entry?.messageId;
     // A local maintenance hold prevents external edits while operator approval is pending.
     if (entry.messageId) {
@@ -130,11 +131,12 @@ export class LiveCards {
           sentAt: Date.now(), failures: 0, retryAt: 0 });
       });
       if(privateCard)await this.cleanupPrivate(key);
-      const fresh = await this.store.read(), latest = fresh.cardMessages[key];
-      const question = key.startsWith('question:') ? fresh.questions?.[key.slice(9)] : null;
-      const questionReady = !question || (question.generation <= entry.generation
-        && !fresh.conversations.some((t) => t.questionId === question.id && ['queued', 'thinking', 'decided'].includes(t.status))
-        && !fresh.jobs.some((j) => j.questionId === question.id && ['queued', 'running', 'cancelling', 'awaiting_approval', ...(entry.terminalMention?.kind==='browser_login'?[]:['awaiting_clarification']), ...(entry.terminalMention?.kind === 'environment_approval' ? [] : ['awaiting_environment_approval'])].includes(j.status)));
+      const {latest,questionReady}=await stateView(this.store,fresh=>{
+       const question=key.startsWith('question:')?fresh.questions?.[key.slice(9)]:null;
+       return {latest:fresh.cardMessages[key],questionReady:!question||(question.generation<=entry.generation
+        &&!fresh.conversations.some(t=>t.questionId===question.id&&['queued','thinking','decided'].includes(t.status))
+        &&!fresh.jobs.some(j=>j.questionId===question.id&&['queued','running','cancelling','awaiting_approval',...(entry.terminalMention?.kind==='browser_login'?[]:['awaiting_clarification']),...(entry.terminalMention?.kind==='environment_approval'?[]:['awaiting_environment_approval'])].includes(j.status)))};
+      });
       if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
         if(entry.publicCompletionMention)await this.authorizeDestination?.(entry.destination,entry);
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {

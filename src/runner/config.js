@@ -13,6 +13,7 @@ export async function runnerConfig(overrides = {}) {
   // Kept as disabled compatibility fields; legacy env/overrides cannot restore a task cutoff.
   const analysisTurnTimeoutMs = 0, analysisResumeTimeoutMs = 0;
   return {
+    ...(overrides.localExecutionRegistry?{localExecutionRegistry:overrides.localExecutionRegistry}:{}),
     dataDir:path.resolve(overrides.dataDir??process.env.AGENTOS_DATA_DIR??'./data'),
     serverUrl: String(overrides.serverUrl ?? process.env.AGENTOS_SERVER_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, ''),
     runnerId: overrides.runnerId ?? process.env.AGENTOS_RUNNER_ID ?? `runner-${process.platform}-${process.pid}`,

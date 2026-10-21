@@ -93,7 +93,7 @@ export class ReportDatasets {
   };
   let outputBytes=0;const rows=[...keys].sort().map(key=>{const row=args.columns.map(c=>evaluate(c.value,key));outputBytes+=Buffer.byteLength(row.map(csvCell).join(','))+2;if(outputBytes>9_990_000)throw new ReportInputError('报表文件超过10MB，未生成文件');return row;});
   const csv='\uFEFF'+[headers,...rows].map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';const bytes=Buffer.byteLength(csv);if(bytes>10_000_000)throw new ReportInputError('报表文件超过10MB，未生成文件');
-  const totals=Object.fromEntries(args.columns.flatMap((c,i)=>['add','subtract','min'].includes(c.value.op)||c.total===true?[[c.label,format(rows.reduce((n,row)=>n+decimal(row[i]),0n))]]:[]));
+  const totals=Object.fromEntries(args.columns.flatMap((c,i)=>['add','subtract','min'].includes(c.value.op)||c.total===true?[[c.label,c.value.op==='field'&&c.value.missing==='empty'&&!rows.some(row=>row[i]!=='')?null:format(rows.reduce((n,row)=>n+(c.value.op==='field'&&c.value.missing==='empty'&&row[i]===''?0n:decimal(row[i])),0n))]]:[]));
   const datasetRef=`dataset-${randomUUID()}`,composed={rows:rows.map(row=>Object.fromEntries(headers.map((h,i)=>[h,row[i]]))),columns:headers,complete:true,numericColumns:args.columns.filter(c=>c.total===true||['add','subtract','min'].includes(c.value.op)||(c.value.op==='field'&&sources.get(c.value.source).numericColumns?.includes(c.value.column))).map(c=>c.label)};
   const snapshotIds=[...new Set([...sources.values()].map(d=>d.snapshotId))].sort(),snapshotId=snapshotIds.length===1?snapshotIds[0]:createHash('sha256').update(JSON.stringify(snapshotIds)).digest('hex');
   const readAt=[...sources.values()].map(d=>d.readAt).filter(Boolean).sort()[0]??new Date().toISOString();
@@ -190,10 +190,19 @@ export class ReportDatasets {
    if(totals.some(x=>x.name===name))throw new ReportInputError('同一分量不能重复核验');
    const sourceKey=draft.sources.find(s=>s.name===c.source).keyColumn;
    const uses=[];const findUses=e=>{if(e.op==='field'&&e.source===c.source&&e.column===c.column)uses.push(e);for(const child of e.args??[])findUses(child);};draft.columns.forEach(col=>findUses(col.value));
-   const nullAsZero=uses.length>0&&uses.every(e=>e.missing==='zero');
-   const sum=(d,col,filter=()=>true,zero=false)=>d.rows.filter(filter).reduce((n,row)=>n+decimal(zero&&row[col]===null?'0':row[col]),0n),actualTotal=sum(source,c.column,row=>expected.has(row[sourceKey]),nullAsZero),expectedTotal=sum(ref,c.referenceColumn);
-   if(actualTotal!==expectedTotal)throw new ReportInputError(`分量合计不一致：${name}为${format(actualTotal)}，独立基准为${format(expectedTotal)}；不能交付，先核对期间、状态、费用范围及关联重复。`);
-   times.push(ref);totals.push({name,total:format(actualTotal),referenceRef:c.referenceRef,referenceColumn:c.referenceColumn,evidence:c.evidence});proofs.push({datasetRef:c.referenceRef,dataHash:hash(ref),queryHash:ref.queryHash});
+   const missingPolicy=uses.length&&uses.every(e=>e.missing==='zero')?'zero':uses.length&&uses.every(e=>e.missing==='empty')?'empty':'error';
+   const sum=(d,col,filter=()=>true,policy='error')=>{
+    let value=0n,known=0,missing=0;
+    for(const [i,row] of d.rows.entries())if(filter(row)){
+     if(row[col]===null){missing++;if(policy==='error')throw new ReportInputError(`分量${col}第${i+1}行为空；须明确保留空值或有业务依据补零，不能当作金额格式错误反复重查`);continue;}
+     try{value+=decimal(row[col]);known++;}catch{throw new ReportInputError(`分量${col}第${i+1}行不是受支持的精确金额；核对类型/精度，不输出原值，不通过改精度或补零绕过`);}
+    }
+    return {value,known,missing};
+   };
+   const actual=sum(source,c.column,row=>expected.has(row[sourceKey]),missingPolicy),reference=sum(ref,c.referenceColumn,()=>true,missingPolicy==='empty'?'empty':'error');
+   if(Boolean(actual.known)!==Boolean(reference.known))throw new ReportInputError('分量与独立基准的已知金额范围不一致；全为空不能当作已知零合计');
+   if(actual.value!==reference.value)throw new ReportInputError(`分量合计不一致：${name}为${format(actual.value)}，独立基准为${format(reference.value)}；不能交付，先核对期间、状态、费用范围及关联重复。`);
+   times.push(ref);totals.push({name,total:missingPolicy==='empty'&&!actual.known?null:format(actual.value),referenceRef:c.referenceRef,referenceColumn:c.referenceColumn,evidence:c.evidence,...(actual.missing||reference.missing?{knownCount:actual.known,missingCount:actual.missing,referenceMissingCount:reference.missing,missingPolicy,note:missingPolicy==='empty'?'仅核对已知金额合计，空值保留为空，不代表零或完整金额已知':'缺失按明确补零规则处理'}:{})});proofs.push({datasetRef:c.referenceRef,dataHash:hash(ref),queryHash:ref.queryHash});
   }
   if([...required].some(k=>!totals.some(c=>c.name===k)))throw new ReportInputError('计算或标记total的每个来源分量都必须通过独立合计核验；缺少基准：'+[...required].filter(k=>!totals.some(c=>c.name===k)).join('、')+'；补充这些分量的checks，不重复已核验取数');
   const timestamps=times.flatMap(d=>[Date.parse(d.readAt),Date.parse(d.readThroughAt??d.readAt)]);

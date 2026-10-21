@@ -1,3 +1,4 @@
+import {stateView} from '../shared/state-view.js';
 import {cardDestination} from './private-cards.js';
 import { resultPages, withResultPage } from './result-presentation.js';
 import { createHash } from 'node:crypto';
@@ -98,7 +99,7 @@ const locks = new WeakMap();
 export function publishQuestion(context, id) {
   let queue = locks.get(context.store); if (!queue) { queue = new Map(); locks.set(context.store, queue); }
   const work = (queue.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
-    const snapshot = await context.store.read();
+    const snapshot = await stateView(context.store,s=>({questions:{[id]:s.questions[id]},jobs:(s.jobs??[]).filter(j=>j.questionId===id),conversations:(s.conversations??[]).filter(t=>t.questionId===id||t.id===s.questions[id]?.rootTurnId||t.id===s.questions[id]?.latestTurnId),environmentEnrollments:Object.fromEntries(Object.entries(s.environmentEnrollments??{}).filter(([,e])=>e.questionId===id)),cardMessages:{['question:'+id]:s.cardMessages?.['question:'+id]}}));
     const version = sourceVersion(snapshot, id);
     const view = questionView(snapshot, id, context.projects);
     const key = `question:${id}`;

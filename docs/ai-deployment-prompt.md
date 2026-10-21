@@ -157,6 +157,15 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
   每问题每环境每类恢复凭证持久去重；不是放宽权限或取消重复无进展保护。
   用多月份、无明细、失效明细、日期边界和独立合计验证，不把合成回归当真实PRD验收。
 
+- 空值和本机异常退出恢复先读docs/local-executor-recovery.md。金额missing=empty保留
+  空白，核验已知金额并登记缺失数，全为空不是零；不能用补零/删除行绕过核验。
+  使用local启动器时data/local-executions登记实际fork身份；重启只对同主机/平台、
+  原父和整个进程组都不存在且租约匹配的任务收尾，不自动重跑或续用旧授权。
+  Windows、远程、旧无登记或身份不确定时须人工核实，不凭PID名字杀进程。
+  升级先确认无真实在途工作，成套备份状态、回执、exports和local-executions。
+  health核对stateProjectionPolicy、processMemory与stateReads；这些是诊断计数，
+  不是持续监控、任务时间上限或不会再内存耗尽的保证。压力验证使用隔离副本和模拟投递。
+
 第五阶段：自动检查与本机启动
 - 运行 doctor 和 npm run check；修复由本次配置或兼容性引起的问题，保留真实输出摘要。
 - 在没有重复实例和在途任务冲突时手工启动 npm run start:local。

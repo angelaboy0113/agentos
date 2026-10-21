@@ -95,7 +95,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   const relevant = events.filter((e) => Date.parse(e.at) >= Date.parse(attemptStart));
   const activity = relevant.filter((e) => e.phase === 'tool_activity').at(-1)?.activity;
   const phase = relevant.filter((e) => e.type === 'progress' && e.phase).at(-1)?.phase;
-  const operation = job.status === 'cancelling' ? (job.cancellationError ?? '已请求停止，等待执行器确认进程退出；已有文件修改将保留。')
+  const operation = job.status === 'cancelling' ? (job.cancellationError ?? (job.cancelReason?.includes('租约过期')?'执行器失联，任务已暂停；需确认原进程退出后收尾，未自动重跑。':null) ?? '已请求停止，等待执行器确认进程退出；已有文件修改将保留。')
     : phase === 'verification' ? '正在运行项目验证命令' : phase === 'connection_retry' ? '连接异常，Codex 正在重试'
       : phase === 'model_capacity_retry' ? '当前模型服务繁忙，正在同一调查会话中自动重试'
     : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')

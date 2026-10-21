@@ -1,3 +1,4 @@
+import {stateView} from '../shared/state-view.js';
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { automaticDatabaseEnrollment } from './automatic-database-enrollment.js';
 import { connectionCandidates } from '../shared/connection-endpoints.js';
@@ -172,6 +173,8 @@ export async function launchEnrollment(context, e) {
   });
 }
 export async function pollEnrollments(context, load = loadEnvironments) {
+  const needed=await stateView(context.store,s=>Object.values(s.environmentEnrollments??{}).some(e=>['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status))||(s.jobs??[]).some(j=>{if(j.status!=='completed'||!j.environmentAccess)return false;const t=s.conversations?.find(t=>t.id===j.sourceMessageId);return t?.decision?.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&t.decision.action==='create_task'&&(!j.connectionEnrollmentHandled||t.setupPending); }));
+  if(!needed)return;
   let state = await context.store.read();
   // Resume metadata discovery without borrowing another user's PRD authority.
   for (const job of state.jobs ?? []) {

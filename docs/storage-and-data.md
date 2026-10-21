@@ -100,3 +100,5 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 `data/agentos.json.controlReceipts`和`data/control-receipts/<请求编号>.json`共同保存关键状态提交的恢复依据；正文可能含任务证据，须私有保存、停机成套备份，不单独清空。详见[本机状态请求恢复](control-recovery.md)。
 
 报表可选组合行键由完整分组字段（含null区别）计算，属于任务数据集，不进入共享知识。`jobs[].investigationProgress.toolCorrections`保存定向修复类别的去重摘要，随状态备份；不手工清空以规避无进展保护。部署无需新权限、依赖或数据库迁移。见[报表粒度与修复接续](report-grain-recovery.md)。
+
+data/local-executions保存本机实际fork的父/工作进程和租约身份，随状态/回执/exports成套备份；不入Git或共享知识。进程存在、外机、旧无登记、Windows或无法证明整个进程组已退出时，不自动解除执行隔离。见[空值与本机异常退出恢复](local-executor-recovery.md)。

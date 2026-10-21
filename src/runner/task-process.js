@@ -1,3 +1,4 @@
+import {registerLocalExecution} from './local-executions.js';
 import { fork, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -41,7 +42,7 @@ export function executeTaskProcess(job, config, emit, signal, worker = workerFil
       if (failure || code !== 0 || !result) return reject(failure ?? new Error(`Task worker exited ${code} without result`));
       resolve(result);
     });
-    child.send({ job, config });
+    registerLocalExecution(config.localExecutionRegistry,job,child.pid).then(()=>{if(!signal.aborted&&child.connected)child.send({job,config});}).catch(error=>{failure=error;abort();});
     if (signal.aborted) abort();
   });
 }

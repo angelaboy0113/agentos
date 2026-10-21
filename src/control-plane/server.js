@@ -183,7 +183,7 @@ async function route(context) {
       conversationScope: 'question-profile-project-v2',
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1',
-      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
+      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',

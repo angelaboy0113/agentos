@@ -1,3 +1,4 @@
+import {stateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
 import { refreshExpiredApprovalCards } from './approval-expiry.js';
 import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/source-environments.js';
@@ -135,7 +136,7 @@ export class ConversationService {
       await pollEnrollments(this.context);
       void refreshExpiredApprovalCards(this.context).catch(()=>{});
       if(this.context.websiteBrowser)void pollWebsiteLogins(this.context).catch(()=>{});
-      const state = await this.context.store.read();
+      const state = await stateView(this.context.store,s=>({conversations:(s.conversations??[]).filter(t=>['queued','thinking','decided','ready'].includes(t.status))}));
       const heads = new Map();
       for (const turn of state.conversations ?? []) {
         if (!['queued', 'thinking', 'decided', 'ready'].includes(turn.status)) continue;
@@ -177,7 +178,7 @@ export class ConversationService {
 
   async sendFeedback(id) {
     if (this.stopped) return;
-    const turn = (await this.context.store.read()).conversations.find((item) => item.id === id);
+    const turn = await stateView(this.context.store,s=>s.conversations.find(item=>item.id===id));
     if (this.context.cards?.enabled) {
       if (!turn || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
       const messageId = turn.directoryChannel ? await this.context.contactChannels.progress(turn) : turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${id}`, conversationCard(turn),
