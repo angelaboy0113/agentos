@@ -261,7 +261,7 @@ export class JsonStore {
       requireActiveLease(job, identity);
       if (!job.continuousInvestigation || job.taskIntent !== 'analysis' || job.stage !== 'developer') throw new Error('当前任务不是连续只读调查');
       if (job.environmentAccess) throw new Error('当前调查已有正在执行的环境步骤');
-      const queryKey = fingerprint({ environmentId: plan.environmentId, queryId: plan.queryId, parameters: plan.parameters, ...(plan.sourcePreparationRecovery?{sourcePreparationKeys:[...plan.sourcePreparationKeys].sort()}: {}) });
+      const queryKey = fingerprint({ environmentId: plan.environmentId, queryId: plan.queryId, parameters: plan.parameters, ...(plan.toolCorrectionKeys?.length?{toolCorrectionKeys:[...plan.toolCorrectionKeys].sort()}:{}), ...(plan.sourcePreparationRecovery?{sourcePreparationKeys:[...plan.sourcePreparationKeys].sort()}: {}) });
       job.continuousQueryKeys ??= [];
       if (job.continuousQueryKeys.includes(queryKey)) throw Object.assign(new Error('重复环境查询，需要调整范围或补充新证据'), { code: 'DUPLICATE_QUERY' });
       job.continuousQueryKeys.push(queryKey);
@@ -272,6 +272,7 @@ export class JsonStore {
       const verified=(sourceResult.investigation?.goals??[]).filter(g=>g.required!==false&&g.status==='verified').map(g=>g.id);
       if(verified.some(id=>!(progress.verified??[]).includes(id)))progress.stagnant=0;
       if(plan.sourcePreparationRecovery&&plan.sourcePreparationKeys?.length){progress.stagnant=0;progress.preparationSeen=[...new Set([...(progress.preparationSeen??[]),...plan.sourcePreparationKeys])].slice(-64);progress.preparationRecoveries=(progress.preparationRecoveries??0)+1;}
+      if(plan.toolCorrectionKeys?.length){progress.stagnant=0;progress.toolCorrections=[...new Set([...(progress.toolCorrections??[]),...plan.toolCorrectionKeys])];}
       progress.verified=[...new Set([...(progress.verified??[]),...verified])].slice(0,64);job.investigationProgress=progress;
       job.environmentAccess = structuredClone(plan);
       job.updatedAt = new Date().toISOString();

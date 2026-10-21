@@ -15,7 +15,7 @@ export class ReportDatasets {
  async collect(statement,execute){
   await this.check();
   const queryHash=createHash('sha256').update(JSON.stringify([statement.sql,statement.params])).digest('hex');
-  const signature=hash([queryHash,statement.columns,statement.numericColumns??[]]);
+  const signature=hash([queryHash,statement.columns,statement.numericColumns??[],statement.rowKey??null]);
   const previous=this.reuseQueries?this.collected.get(signature):null;
   if(previous){const d=await this.restore(previous.datasetRef);if(d?.complete)return {...previous,reused:true,stage:'复用本轮同一只读事务中已完成的相同查询；保留原取数时间'};}
   const rows=[];const batch=500;let complete=false,bytes=0;
@@ -25,19 +25,20 @@ export class ReportDatasets {
    await this.check();if(!Array.isArray(page)||page.length>size)throw new ReportInputError('报表分页返回异常');
    for(const row of page){
     if(rows.length===this.maxRows)break;
-    const clean=Object.fromEntries(statement.columns.map(c=>{const v=row[c];if(v!==null&&!['string','number','bigint'].includes(typeof v))throw new ReportInputError('报表含不支持的字段值');if(typeof v==='number'&&!Number.isSafeInteger(v))throw new ReportInputError('报表数值未以精确字符串返回，停止导出');if(String(v??'').length>2000)throw new ReportInputError('报表字段过长');return [c,v===null?null:this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v))];}));
+    const clean=Object.fromEntries(statement.columns.map(c=>{const v=row[c];if(v!==null&&!['string','number','bigint'].includes(typeof v))throw new ReportInputError(`报表含不支持的字段值：列${c}，类型${v instanceof Date?'Date':Array.isArray(v)?'array':typeof v}；日期应由驱动dateStrings保留原值，结构化字段须先核实类型，不可猜值或删列`);if(typeof v==='number'&&!Number.isSafeInteger(v))throw new ReportInputError('报表数值未以精确字符串返回，停止导出');if(String(v??'').length>2000)throw new ReportInputError('报表字段过长');return [c,v===null?null:this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v))];}));
+    if(statement.rowKey)clean[statement.rowKey.column]=hash(statement.rowKey.fields.map(c=>clean[c]));
     bytes+=Buffer.byteLength(JSON.stringify(clean));if(bytes>16_000_000)throw new ReportInputError('完整数据集超过16MB限制；未生成文件');rows.push(clean);
    }
    if(page.length<size){complete=true;break;}
    if(page.length>this.maxRows-offset)break;
   }
   // A short final page proves completion; exactly-at-cap requires one look-ahead.
-  const ref=`dataset-${randomUUID()}`,data={rows,columns:statement.columns,complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
+  const ref=`dataset-${randomUUID()}`,data={rows,columns:[...statement.columns,...(statement.rowKey?[statement.rowKey.column]:[])],complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
   if(statement.recipe){const original=JSON.stringify(statement.recipe),safe=this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),original);data.recipe={...JSON.parse(safe),replayable:original===safe};}
   const dataHash=createHash('sha256').update(JSON.stringify(data)).digest('hex');
   let readAt=new Date().toISOString();if(complete&&this.storage){await this.check();const saved=await this.storage.save(ref,data,this.snapshotId);readAt=saved.readAt;await this.check();}
   this.remember(ref,{...data,snapshotId:this.snapshotId,readAt});
-  const result={datasetRef:ref,queryHash,dataHash,snapshotId:this.snapshotId,readAt,queryDefinition:queryPreview(data.queryDefinition),rowCount:rows.length,complete,truncated:!complete,partial:!complete,columns:statement.columns,preview:preview(rows,this.previewRows),stage:complete?'分组数据已完整读取':'达到报表行数上限；数据不完整，不能合成完整报表'};
+  const result={datasetRef:ref,queryHash,dataHash,snapshotId:this.snapshotId,readAt,queryDefinition:queryPreview(data.queryDefinition),rowCount:rows.length,complete,truncated:!complete,partial:!complete,columns:data.columns,preview:preview(rows,this.previewRows),stage:complete?'分组数据已完整读取':'达到报表行数上限；数据不完整，不能合成完整报表'};
   if(complete&&this.reuseQueries)this.collected.set(signature,result);return result;
  }
  async list({offset=0,limit=20}={}){await this.check();if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>20)throw new ReportInputError('数据集目录offset须为非负整数，limit为1至20');const all=this.storage?await this.storage.list():[];await this.check();const candidates=all.sort((a,b)=>b.readAt.localeCompare(a.readAt)||a.datasetRef.localeCompare(b.datasetRef)).slice(offset,offset+limit),datasets=[];let bytes=0;for(const item of candidates){const size=Buffer.byteLength(JSON.stringify(item));if(datasets.length&&bytes+size>16000)break;datasets.push(item);bytes+=size;}return {datasets,totalCount:all.length,nextOffset:offset+datasets.length<all.length?offset+datasets.length:null,note:'仅当前任务、相同环境配置且24小时内的完整数据集；目录分页，历史取数不是当前实时状态，多轮快照不是同一个事务。'};}
@@ -121,7 +122,7 @@ export class ReportDatasets {
    const outputs=lookup.fields.map(f=>f.as),status=lookup.name+'_status';
    if(lookup.fields.some(f=>!right.columns.includes(f.column)||typeof f.as!=='string'||!f.as.trim()||f.as.length>80||['__proto__','constructor','prototype'].includes(f.as))||outputs.includes(status)||columns.includes(status)||new Set(outputs).size!==outputs.length||outputs.some(c=>columns.includes(c)))throw new ReportInputError('lookup字段无效、重复或试图覆盖已有列');
    if(columns.length+outputs.length+1>32)throw new ReportInputError('组合数据集最多32列');
-   const index=new Map();for(const row of right.rows){const key=row[lookup.targetColumn];if(key===null||key==='')continue;if(index.has(key))throw new ReportInputError('lookup关联键重复，不能猜测选哪条记录或重复累计；先核对业务维度并消除歧义');index.set(key,row);}
+   const index=new Map();for(const row of right.rows){const key=row[lookup.targetColumn];if(key===null||key==='')continue;if(index.has(key))throw new ReportInputError('lookup关联键重复，不能猜测选哪条记录或重复累计；enrich_dataset只查唯一维度。一对多明细须用linked_group_dataset按明细粒度分组，保留无明细主对象用join.type=left；核实关联键及右表筛选，不可去重丢记录');index.set(key,row);}
    if(lookup.fallbackKey!==undefined&&(typeof lookup.fallbackKey!=='string'||!lookup.fallbackKey||lookup.fallbackKey.length>2000||!index.has(lookup.fallbackKey)))throw new ReportInputError('fallbackKey必须指向本次完整维度数据中实际存在且唯一的默认配置，不能猜测或填常量');
    let matchedCount=0,fallbackCount=0;const unmatched=[];
    for(const row of rows){const specific=index.get(row[lookup.sourceColumn]),fallback=!specific&&lookup.fallbackKey!==undefined?index.get(lookup.fallbackKey):null,found=specific??fallback;if(specific)matchedCount++;else if(fallback)fallbackCount++;else unmatched.push(row[args.keyColumn]);for(const f of lookup.fields){const value=found?.[f.column]??'';approxBytes+=Buffer.byteLength(JSON.stringify([f.as,value]))+8;if(approxBytes>16_000_000)throw new ReportInputError('组合数据集超过16MB内存限制');row[f.as]=value;}row[status]=specific?'已匹配':fallback?'沿用默认配置':'未匹配';}
@@ -188,7 +189,9 @@ export class ReportDatasets {
    if(!required.has(name)||!source?.columns.includes(c.column)||!ref?.complete||ref.reportDraft||!ref.queryHash||!ref.queryDefinition||ref.queryHash===source.queryHash||!ref.columns.includes(c.referenceColumn)||!text(c.evidence))throw new ReportInputError('分量合计需引用不同原始查询的完整基准集和实际数值列，不能用同一查询或草稿自证；须说明基准口径依据');
    if(totals.some(x=>x.name===name))throw new ReportInputError('同一分量不能重复核验');
    const sourceKey=draft.sources.find(s=>s.name===c.source).keyColumn;
-   const sum=(d,col,filter=()=>true)=>d.rows.filter(filter).reduce((n,row)=>n+decimal(row[col]),0n),actualTotal=sum(source,c.column,row=>expected.has(row[sourceKey])),expectedTotal=sum(ref,c.referenceColumn);
+   const uses=[];const findUses=e=>{if(e.op==='field'&&e.source===c.source&&e.column===c.column)uses.push(e);for(const child of e.args??[])findUses(child);};draft.columns.forEach(col=>findUses(col.value));
+   const nullAsZero=uses.length>0&&uses.every(e=>e.missing==='zero');
+   const sum=(d,col,filter=()=>true,zero=false)=>d.rows.filter(filter).reduce((n,row)=>n+decimal(zero&&row[col]===null?'0':row[col]),0n),actualTotal=sum(source,c.column,row=>expected.has(row[sourceKey]),nullAsZero),expectedTotal=sum(ref,c.referenceColumn);
    if(actualTotal!==expectedTotal)throw new ReportInputError(`分量合计不一致：${name}为${format(actualTotal)}，独立基准为${format(expectedTotal)}；不能交付，先核对期间、状态、费用范围及关联重复。`);
    times.push(ref);totals.push({name,total:format(actualTotal),referenceRef:c.referenceRef,referenceColumn:c.referenceColumn,evidence:c.evidence});proofs.push({datasetRef:c.referenceRef,dataHash:hash(ref),queryHash:ref.queryHash});
   }
@@ -214,7 +217,7 @@ function csvCell(v){let s=String(v??'');if(/^[\s\uFEFF]*[=+@-]/.test(s)&&!/^-[0-
 function preview(rows,limit){const out=[];let bytes=0;for(const row of rows.slice(0,limit)){bytes+=Buffer.byteLength(JSON.stringify(row));if(bytes>8000)break;out.push(row);}return out;}
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-function uniqueKeys(data,column){const keys=new Set();for(const row of data.rows){const key=row[column];if(typeof key!=='string'||!key||keys.has(key))throw new ReportInputError('覆盖核验主键必须为非空唯一字符串');keys.add(key);}return keys;}
+function uniqueKeys(data,column){const keys=new Set();for(const row of data.rows){const key=row[column];if(typeof key!=='string'||!key||keys.has(key))throw new ReportInputError('覆盖核验主键必须为非空唯一字符串；同一对象多月份/分类不是唯一维度，不要丢弃重复行；一对多请用linked_group_dataset按实际明细粒度分组，保留无明细主对象用join.type=left');keys.add(key);}return keys;}
 function queryPreview(definition){return definition?{sql:definition.sql.slice(0,200),params:definition.params.slice(0,3).map(v=>v.slice(0,80)),limited:definition.sql.length>200||definition.params.length>3||definition.params.some(v=>v.length>80)}:undefined;}
 
 function requiredChecks(data){const required=new Map();const walk=(e,numeric)=>{if(e.op==='field'&&numeric)required.set(e.source+':'+e.column,{source:e.source,column:e.column});for(const c of e.args??[])walk(c,true);};for(const c of data.reportDraft.columns)walk(c.value,data.numericColumns?.includes(c.label)||c.total===true);return [...required.values()];}

@@ -180,12 +180,31 @@ const continuationMetadata = (request,currentResult) => {
  return {ok:true,metadata:{continuationGoalIds:sorted,continuationEvidenceHash:evidenceHash,continuationKey}};
 };
 
+// Only concrete tool validation failures qualify, never planner prose or permission/runtime errors.
+// Each finite failure category can recover once per question and environment target.
+function toolCorrectionProgress(jobs,job,request,currentResult){
+ const targeted=continuationMetadata(request,currentResult);
+ if(!targeted.ok||!targeted.metadata)return null;
+ const latest=[...(job.context??[])].reverse().find(c=>c.kind==='environment_result')?.result;
+ if(!latest||latest.environmentFailure||targetKey(latest.environmentEvidence)!==targetKey(request))return null;
+ const categories=[
+  ['field-type',/报表含不支持的字段值/],
+  ['aggregate-shape',/aggregates必须包含/],
+  ['join-grain',/覆盖核验主键必须|lookup关联键重复|来源主键为空或重复/],
+ ];
+ const used=new Set([...jobs,job].flatMap(j=>j.investigationProgress?.toolCorrections??[]));
+ const keys=[...new Set((latest.toolInputErrors??[]).filter(e=>e.resolved===false&&['REPORT_INPUT','QUERY_INPUT'].includes(e.code)&&['group_dataset','linked_group_dataset','enrich_dataset','compose_report'].includes(e.tool)).flatMap(e=>categories.filter(([,pattern])=>pattern.test(e.message??'')).map(([category])=>createHash('sha256').update(JSON.stringify([targetKey(request),category])).digest('hex'))))].filter(k=>!used.has(k));
+ return keys.length?{...targeted.metadata,toolCorrectionKeys:keys}:null;
+}
+
 // One environment worker may perform many tool calls. Starting more workers for the
 // same target without closing another goal is a stalled orchestration loop.
 export function environmentContinuation(state,job,request,currentResult){
  const jobs=(state.jobs??[]).filter(item=>item.questionId===job.questionId&&item.taskIntent==='analysis');
  const limits=investigationLimits();
+ const correction=toolCorrectionProgress(jobs,job,request,currentResult);
  const preparation=sourcePreparationProgress({...job,investigationProgress:{...job.investigationProgress,preparationSeen:jobs.flatMap(j=>j.investigationProgress?.preparationSeen??[]),preparationRecoveries:jobs.reduce((n,j)=>n+(j.investigationProgress?.preparationRecoveries??0),0)}},currentResult,request);
+ if(correction)return {continue:true,metadata:correction};
  if((job.investigationProgress?.stagnant??0)>=limits.maxStagnant&&!preparation)return {continue:false,terminal:true,reason:'连续多轮没有新增业务数据或已核实目标；停止重复调查，保留已有成果。'};
  const contexts=jobs.flatMap(item=>item.context??[]).map(entry=>entry.result).filter(Boolean);
  const targeted=continuationMetadata(request,currentResult);

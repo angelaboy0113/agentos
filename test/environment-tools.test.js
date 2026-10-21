@@ -149,7 +149,7 @@ test('MySQL dynamic tools verify grants, use only base table metadata, bind valu
   }, rollback:async()=>calls.push('rollback'), destroy:()=>calls.push('destroy') };
   const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'localhost',port:3306,database:'demo'},query,credentials,{mysql:{createConnection:async options=>{connectionOptions=options;return c;}}});
   await tools.run('connection');const schema=await tools.run('schema');assert.deepEqual(schema.tables.orders,['id','status']);
-  assert.equal(connectionOptions.supportBigNumbers,true);assert.equal(connectionOptions.bigNumberStrings,true);
+  assert.equal(connectionOptions.dateStrings,true);assert.equal(connectionOptions.supportBigNumbers,true);assert.equal(connectionOptions.bigNumberStrings,true);
   const r=await tools.run('select',{table:'orders',columns:['status'],filters:[{column:'id',op:'=',value:"' OR 1=1"}]});
   assert.deepEqual(r.rows,[{status:'ok'}]);assert.ok(calls.includes('START TRANSACTION READ ONLY'));
   const metadata=calls.find(x=>x.sql?.includes('information_schema'));assert.match(metadata.sql,/BASE TABLE/);assert.match(metadata.sql,/GENERATED/);
@@ -448,4 +448,12 @@ test('a finalized report returns to semantic review immediately without optional
  tools:async()=>({spec:[{tool:'connection'},{tool:'finalize_report'}],run:async tool=>tool==='finalize_report'?{exportFile:{id:'report-proof',verificationHash:'a'.repeat(64)},stage:'program verified'}:{stage:'connected'},close:async()=>{}}),
  planner:async()=>({next:async()=>{calls++;assert.equal(calls,1);return {tool:'finalize_report',arguments:'{}'};},close:async()=>{}})});
  assert.equal(result.exportFiles.length,1);assert.match(result.summary,/按原问题审阅/);assert.equal(calls,1);
+});
+test('a finally verified alternative report clears abandoned input errors but ordinary source reads do not',async()=>{
+ const cfg={version:1,environments:{env:{...environment,kind:'mysql',host:'db',database:'demo'}}};delete cfg.environments.env.baseUrl;
+ const plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['repair report with corrected relation']},'demo',{profile:'owner',senderId:'ou_member'});let n=0;
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'enrich_dataset'},{tool:'linked_group_dataset'},{tool:'finalize_report'}],run:async tool=>{if(tool==='enrich_dataset')throw new QueryInputError('REPORT_INPUT','lookup关联键重复');if(tool==='finalize_report')return {exportFile:{id:'verified',rowCount:2}};return {stage:'corrected relation',dataHash:'stable'};},close:async()=>{}}),
+ planner:async()=>({next:async()=>[{tool:'enrich_dataset',arguments:'{}'},{tool:'linked_group_dataset',arguments:'{}'},{tool:'finalize_report',arguments:'{}'}][n++],close:async()=>{}})});
+ assert.equal(r.partial,false);assert.equal(r.toolInputErrors[0].resolved,true);assert.equal(r.exportFiles.length,1);
 });
