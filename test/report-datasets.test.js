@@ -56,8 +56,8 @@ test('grouped SQL has validated columns, bound values, stable order and alias co
  const l=groupedDatasetStatement({leftTable:'budget',rightTable:'dealer',join:{leftColumn:'dealer',rightColumn:'id'},groupColumns:[{table:'dealer',column:'id'}],aggregates:[{op:'sum',table:'budget',column:'amount',as:'total'}],filters:[{table:'budget',column:'deleted',op:'=',value:0}]},tables,types,q);assert.match(l.sql,/GROUP BY `r`.`id` ORDER BY `r`.`id`$/);
 });
 test('bulk export is explicit, bounded configuration, never a model override of sample maxRows',()=>{
- const e={kind:'mysql'},q={mode:'investigate',parameters:[{name:'purpose',type:'string'}],tables:['*']};assert.equal(validateToolQuery(e,{...q,exportMaxRows:10000,exportTimeoutMs:30000}),true);
- for(const extra of [{exportMaxRows:10001},{exportMaxRows:0},{exportMaxRows:10,exportTimeoutMs:999999}])assert.throws(()=>validateToolQuery(e,{...q,...extra}));
+ const e={kind:'mysql'},q={mode:'investigate',parameters:[{name:'purpose',type:'string'}],tables:['*']};assert.equal(validateToolQuery(e,{...q,exportMaxRows:10000,exportTimeoutMs:30000}),true);assert.equal(validateToolQuery(e,{...q,exportMaxRows:1000000}),true);assert.equal(validateToolQuery(e,{...q,exportMaxRows:'all'}),true);
+ for(const extra of [{exportMaxRows:Number.MAX_SAFE_INTEGER+1},{exportMaxRows:0},{exportMaxRows:10,exportTimeoutMs:999999}])assert.throws(()=>validateToolQuery(e,{...q,...extra}));
 });
 test('runtime tools page grouped datasets in an InnoDB readonly snapshot and propagate authorisation before every page',async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'agentos-report-runtime-'));t.after(()=>rm(root,{recursive:true,force:true}));

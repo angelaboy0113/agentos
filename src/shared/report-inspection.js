@@ -25,7 +25,7 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  let bound=null,storage;
  for(const name of names){
   if(!/^dataset-[a-f0-9-]{36}\.json$/.test(name))fail('核验记录数据集引用无效');
-  const file=path.join(datasetRoot,name),info=await lstat(file);if(!info.isFile()||info.isSymbolicLink()||info.size>16_000_000)continue;
+  const file=path.join(datasetRoot,name),info=await lstat(file);if(!info.isFile()||info.isSymbolicLink())continue;
   const candidate=JSON.parse(await readFile(file,'utf8'));if(candidate.data?.reportDraft?.file?.id!==item.id)continue;
   const store=new TaskDatasetStore(directory,candidate.scope),saved=await store.get(candidate.id),draft=saved.data.reportDraft;
   if(draft.file.sha256!==item.sha256||draft.file.rowCount!==item.rowCount||draft.file.bytes!==item.bytes)fail('文件与计算配方绑定不一致');

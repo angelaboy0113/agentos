@@ -1,3 +1,5 @@
+import { hashFile } from '../shared/file-digest.js';
+import { reportFile } from '../shared/report-files.js';
 import { investigationComplete, QUESTION_GOAL_ID } from '../shared/investigation-review.js';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -45,7 +47,7 @@ const owners = new Set(['none', 'owner', 'pm', 'developer', 'qa', 'auditor']);
 const nonempty = (s) => typeof s === 'string' && s.trim().length > 0;
 const inside = (root, candidate) => { const rel = path.relative(root, candidate); return rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
 
-export async function validateHandoff(job, result, workspace) {
+export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
   const issues = [], verifiedArtifacts = [];
   const h = result.handoff;
   if (!h || !Array.isArray(h.artifacts) || !Array.isArray(h.checks) || !Array.isArray(h.risks) || !owners.has(h.returnTo)) {
@@ -59,14 +61,24 @@ export async function validateHandoff(job, result, workspace) {
       if (!kinds.has(item.kind) || !nonempty(item.path) || path.isAbsolute(item.path) || /^[a-z]:/i.test(item.path) || item.path.includes(':')) throw new Error();
       const segments = item.path.replaceAll('\\', '/').split('/');
       if (segments.some((s) => ['..', '.git', 'node_modules'].includes(s) || /^(\.env(?:\..*)?|\.npmrc|settings\.xml|auth\.json|.*\.(?:pem|key|p12))$/i.test(s))) throw new Error();
+      const registered = item.kind === 'report' && job.reportFiles?.find(f => item.path === f.filename || item.path === f.id);
+      if (registered) {
+        if (!dataDir) throw new Error('REPORT_LOCATION');
+        if (job.questionGeneration !== undefined && registered.questionGeneration !== undefined && job.questionGeneration !== registered.questionGeneration) throw new Error('REPORT_GENERATION');
+        const sourceJobId = registered.sourceJobId ?? job.id;
+        await reportFile(dataDir, sourceJobId, registered, {includeContent:false});
+        verifiedArtifacts.push({kind:'report',path:registered.filename,namespace:'task-report',fileId:registered.id,sourceJobId,sha256:registered.sha256,bytes:registered.bytes,verificationHash:registered.verificationHash});
+        continue;
+      }
+      if (item.kind === 'report' && /^report-[a-f0-9-]{36}(?:\.csv)?$/.test(item.path)) throw new Error('REPORT_UNREGISTERED');
       const candidate = path.resolve(root, item.path);
       if (!inside(root, candidate)) throw new Error();
       const resolved = await realpath(candidate);
       if (!inside(root, resolved)) throw new Error();
       const info = await stat(resolved);
-      if (!info.isFile() || info.size > 5 * 1024 * 1024) throw new Error();
-      verifiedArtifacts.push({ kind: item.kind, path: path.relative(root, resolved).replaceAll('\\', '/'), sha256: digest(await readFile(resolved)), bytes: info.size });
-    } catch { issues.push('有工件不存在、超出工作区、属于禁止路径或超过5MiB；请核对工件清单'); }
+      if (!info.isFile()) throw new Error();
+      verifiedArtifacts.push({ kind: item.kind, path: path.relative(root, resolved).replaceAll('\\', '/'), sha256: await hashFile(resolved), bytes: info.size });
+    } catch (error) { issues.push(item?.kind === 'report' && /^report-/.test(item.path ?? '') ? '登记报表的任务归属、文件或核验摘要未通过；请核对任务导出记录，不重新查询数据库' : '源码或文档工件不存在、超出工作区或属于禁止路径；请核对工件清单'); }
   }
   const seen = new Set();
   for (const check of h.checks) {

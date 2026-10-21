@@ -63,7 +63,7 @@ export async function executeJob(job, config, emit) {
     try { await verifyAnalysisSources(project, sourceSync); }
     catch (error) { return { ...sourceBlocked(error), sourceSync }; }
   }
-  let codexResult = enforceHandoff(rawResult, await validateHandoff(job, rawResult, workspace));
+  let codexResult = enforceHandoff(rawResult, await validateHandoff(job, rawResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   const aiCompleted = Date.now();
   const verifyCommands = verificationCommands(job, project, codexResult.outcome);
   if (verifyCommands.length) {
@@ -72,7 +72,7 @@ export async function executeJob(job, config, emit) {
   const verification = await runVerification(verifyCommands, workspace,
     (text) => emit({ type: 'progress', message: text.slice(-500) }).catch(() => undefined));
   // Recheck final files after verification commands may have generated/changed artifacts.
-  if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace));
+  if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
   return { sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,

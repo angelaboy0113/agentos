@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, copyFile }  from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import {stat} from 'node:fs/promises';
 
 export function resolveLarkCliEntry(explicit = '', executable = process.execPath) {
   if (explicit) return path.resolve(explicit);
@@ -93,7 +94,7 @@ export class LarkCliFeishuClient {
     await copyFile(file,path.join(this.cwd,relative));
     return runLarkCli(['im',options.privateRecipient?'+messages-send':'+messages-reply','--as','bot',...(options.privateRecipient?['--user-id',options.privateRecipient]:['--message-id',messageId]),'--file',relative,
       ...(!options.privateRecipient&&options.replyInThread?['--reply-in-thread']:[]),'--idempotency-key',larkIdempotencyKey(options.idempotencyKey),'--json'],
-      {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000});
+      {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000+Math.ceil((await stat(file)).size/64000)*1000});
   }
 
   async contactRequest(route,params,options={}){

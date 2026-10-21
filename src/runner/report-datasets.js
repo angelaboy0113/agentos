@@ -7,9 +7,9 @@ export class ReportInputError extends Error {constructor(message){super(message)
 
 // Task-scoped evidence can resume under renewed authorization; never shared as knowledge.
 export class ReportDatasets {
- constructor({maxRows,previewRows=20,directory,authorize=async()=>{},active=()=>true,secrets=[],scope,originalQuestion='',cacheBytes=16_000_000,snapshotWindowMs=300000,dataBudgetBytes=32_000_000,reuseQueries=false}){
+ constructor({maxRows,previewRows=20,directory,authorize=async()=>{},active=()=>true,secrets=[],scope,originalQuestion='',cacheBytes=16_000_000,snapshotWindowMs=300000,dataBudgetBytes=Number.MAX_SAFE_INTEGER,reuseQueries=false}){
   this.reuseQueries=reuseQueries;this.cacheBytes=cacheBytes;this.snapshotWindowMs=snapshotWindowMs;this.originalQuestion=originalQuestion;this.snapshotId=randomUUID();this.storage=directory&&scope?new TaskDatasetStore(directory,scope,{maxBytes:dataBudgetBytes}):null;
-  this.secrets=secrets.filter(Boolean);this.maxRows=maxRows;this.previewRows=Math.min(previewRows,20);this.directory=directory;this.authorize=authorize;this.active=active;this.collected=new Map();this.datasets=new Map();this.bytes=0;this.files=0;
+  this.secrets=secrets.filter(Boolean);this.maxRows=maxRows==='all'?Number.MAX_SAFE_INTEGER:maxRows;this.previewRows=Math.min(previewRows,20);this.directory=directory;this.authorize=authorize;this.active=active;this.collected=new Map();this.datasets=new Map();this.bytes=0;this.files=0;
  }
  async check(){if(!this.active())throw new ReportInputError('报表查询已结束');await this.authorize();if(!this.active())throw new ReportInputError('报表查询已结束');}
  async collect(statement,execute){
@@ -18,7 +18,7 @@ export class ReportDatasets {
   const signature=hash([queryHash,statement.columns,statement.numericColumns??[],statement.rowKey??null]);
   const previous=this.reuseQueries?this.collected.get(signature):null;
   if(previous){const d=await this.restore(previous.datasetRef);if(d?.complete)return {...previous,reused:true,stage:'复用本轮同一只读事务中已完成的相同查询；保留原取数时间'};}
-  const rows=[];const batch=500;let complete=false,bytes=0;
+  const rows=[];const batch=500;let complete=false;
   for(let offset=0;offset<=this.maxRows;offset+=batch){
    await this.check();const size=Math.min(batch,this.maxRows-offset+1);
    const [page]=await execute({sql:`${statement.sql} LIMIT ${size} OFFSET ${offset}`},statement.params);
@@ -27,7 +27,7 @@ export class ReportDatasets {
     if(rows.length===this.maxRows)break;
     const clean=Object.fromEntries(statement.columns.map(c=>{const v=row[c];if(v!==null&&!['string','number','bigint'].includes(typeof v))throw new ReportInputError(`报表含不支持的字段值：列${c}，类型${v instanceof Date?'Date':Array.isArray(v)?'array':typeof v}；日期应由驱动dateStrings保留原值，结构化字段须先核实类型，不可猜值或删列`);if(typeof v==='number'&&!Number.isSafeInteger(v))throw new ReportInputError('报表数值未以精确字符串返回，停止导出');if(String(v??'').length>2000)throw new ReportInputError('报表字段过长');return [c,v===null?null:this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v))];}));
     if(statement.rowKey)clean[statement.rowKey.column]=hash(statement.rowKey.fields.map(c=>clean[c]));
-    bytes+=Buffer.byteLength(JSON.stringify(clean));if(bytes>16_000_000)throw new ReportInputError('完整数据集超过16MB限制；未生成文件');rows.push(clean);
+    rows.push(clean);
    }
    if(page.length<size){complete=true;break;}
    if(page.length>this.maxRows-offset)break;
@@ -91,8 +91,8 @@ export class ReportDatasets {
    if(e.op==='field'){const row=sources.get(e.source).map.get(key);const v=row?.[e.column];if(v===undefined||v===null){if(e.missing==='zero')return '0';if(e.missing==='empty')return '';throw new ReportInputError('报表有缺失值；必须明确缺失值的业务处理规则');}return v;}
    const values=e.args.map(x=>decimal(evaluate(x,key)));let v=values[0];for(const n of values.slice(1))v=e.op==='add'?v+n:e.op==='subtract'?v-n:v<n?v:n;return format(v);
   };
-  let outputBytes=0;const rows=[...keys].sort().map(key=>{const row=args.columns.map(c=>evaluate(c.value,key));outputBytes+=Buffer.byteLength(row.map(csvCell).join(','))+2;if(outputBytes>9_990_000)throw new ReportInputError('报表文件超过10MB，未生成文件');return row;});
-  const csv='\uFEFF'+[headers,...rows].map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';const bytes=Buffer.byteLength(csv);if(bytes>10_000_000)throw new ReportInputError('报表文件超过10MB，未生成文件');
+  const rows=[...keys].sort().map(key=>args.columns.map(c=>evaluate(c.value,key)));
+  const csv='\uFEFF'+[headers,...rows].map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';const bytes=Buffer.byteLength(csv);
   const totals=Object.fromEntries(args.columns.flatMap((c,i)=>['add','subtract','min'].includes(c.value.op)||c.total===true?[[c.label,c.value.op==='field'&&c.value.missing==='empty'&&!rows.some(row=>row[i]!=='')?null:format(rows.reduce((n,row)=>n+(c.value.op==='field'&&c.value.missing==='empty'&&row[i]===''?0n:decimal(row[i])),0n))]]:[]));
   const datasetRef=`dataset-${randomUUID()}`,composed={rows:rows.map(row=>Object.fromEntries(headers.map((h,i)=>[h,row[i]]))),columns:headers,complete:true,numericColumns:args.columns.filter(c=>c.total===true||['add','subtract','min'].includes(c.value.op)||(c.value.op==='field'&&sources.get(c.value.source).numericColumns?.includes(c.value.column))).map(c=>c.label)};
   const snapshotIds=[...new Set([...sources.values()].map(d=>d.snapshotId))].sort(),snapshotId=snapshotIds.length===1?snapshotIds[0]:createHash('sha256').update(JSON.stringify(snapshotIds)).digest('hex');
@@ -115,7 +115,7 @@ export class ReportDatasets {
   await this.check();const base=await this.restore(args.datasetRef);
   if(!base?.complete||!base.columns.includes(args.keyColumn)||!Array.isArray(args.lookups)||!args.lookups.length||args.lookups.length>4)throw new ReportInputError('enrich_dataset需要完整主数据集、实际主键和1至4个lookups');
   uniqueKeys(base,args.keyColumn);
-  const rows=base.rows.map(row=>({...row})),columns=[...base.columns],lookupChecks=[],inputs=[base],numericColumns=[...(base.numericColumns??[])];let approxBytes=Buffer.byteLength(JSON.stringify(base.rows));
+  const rows=base.rows.map(row=>({...row})),columns=[...base.columns],lookupChecks=[],inputs=[base],numericColumns=[...(base.numericColumns??[])];
   for(const lookup of args.lookups){
    await this.check();if(!lookup||typeof lookup!=='object'||Array.isArray(lookup))throw new ReportInputError('lookup必须为对象');const right=await this.restore(lookup.datasetRef);
    if(!/^[a-z][a-z0-9_]{0,19}$/.test(lookup.name??'')||!right?.complete||!columns.includes(lookup.sourceColumn)||!right.columns.includes(lookup.targetColumn)||!['empty','error'].includes(lookup.missing)||!Array.isArray(lookup.fields)||!lookup.fields.length||lookup.fields.length>4||lookup.fields.some(f=>!f||typeof f!=='object'||Array.isArray(f)))throw new ReportInputError('lookup需要唯一名称、实际关联列、1至4个字段以及明确missing=empty或error');
@@ -125,13 +125,12 @@ export class ReportDatasets {
    const index=new Map();for(const row of right.rows){const key=row[lookup.targetColumn];if(key===null||key==='')continue;if(index.has(key))throw new ReportInputError('lookup关联键重复，不能猜测选哪条记录或重复累计；enrich_dataset只查唯一维度。一对多明细须用linked_group_dataset按明细粒度分组，保留无明细主对象用join.type=left；核实关联键及右表筛选，不可去重丢记录');index.set(key,row);}
    if(lookup.fallbackKey!==undefined&&(typeof lookup.fallbackKey!=='string'||!lookup.fallbackKey||lookup.fallbackKey.length>2000||!index.has(lookup.fallbackKey)))throw new ReportInputError('fallbackKey必须指向本次完整维度数据中实际存在且唯一的默认配置，不能猜测或填常量');
    let matchedCount=0,fallbackCount=0;const unmatched=[];
-   for(const row of rows){const specific=index.get(row[lookup.sourceColumn]),fallback=!specific&&lookup.fallbackKey!==undefined?index.get(lookup.fallbackKey):null,found=specific??fallback;if(specific)matchedCount++;else if(fallback)fallbackCount++;else unmatched.push(row[args.keyColumn]);for(const f of lookup.fields){const value=found?.[f.column]??'';approxBytes+=Buffer.byteLength(JSON.stringify([f.as,value]))+8;if(approxBytes>16_000_000)throw new ReportInputError('组合数据集超过16MB内存限制');row[f.as]=value;}row[status]=specific?'已匹配':fallback?'沿用默认配置':'未匹配';}
+   for(const row of rows){const specific=index.get(row[lookup.sourceColumn]),fallback=!specific&&lookup.fallbackKey!==undefined?index.get(lookup.fallbackKey):null,found=specific??fallback;if(specific)matchedCount++;else if(fallback)fallbackCount++;else unmatched.push(row[args.keyColumn]);for(const f of lookup.fields){const value=found?.[f.column]??'';row[f.as]=value;}row[status]=specific?'已匹配':fallback?'沿用默认配置':'未匹配';}
    if(unmatched.length&&lookup.missing==='error')throw new ReportInputError(`lookup ${lookup.name}有${unmatched.length}个对象未匹配；核对关联键或明确允许保留空值`);
    columns.push(...outputs,status);numericColumns.push(...lookup.fields.filter(f=>right.numericColumns?.includes(f.column)).map(f=>f.as));lookupChecks.push({name:lookup.name,matchedCount,...(lookup.fallbackKey!==undefined?{fallbackCount,fallbackKey:lookup.fallbackKey}:{}),unmatchedCount:unmatched.length,unmatchedKeys:unmatched.slice(0,this.previewRows),previewLimited:unmatched.length>this.previewRows});inputs.push(right);
   }
   const data={rows,columns,numericColumns,complete:true,readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),derivation:{kind:'left_lookup',datasetRef:args.datasetRef,keyColumn:args.keyColumn,lookups:args.lookups,lookupChecks}};
   const readAt=inputs.map(d=>d.readAt).sort()[0],snapshotIds=[...new Set(inputs.map(d=>d.snapshotId))].sort(),snapshotId=snapshotIds.length===1?snapshotIds[0]:hash(snapshotIds),ref='dataset-'+randomUUID();
-  const bytes=Buffer.byteLength(JSON.stringify(data));if(bytes>16_000_000)throw new ReportInputError('单个组合数据集超过16MB；减少非必要字段');
   await this.check();if(this.storage)await this.storage.save(ref,data,snapshotId,readAt);await this.check();this.remember(ref,{...data,readAt,snapshotId});
   return {datasetRef:ref,dataHash:hash({rows,columns,numericColumns}),readAt,snapshotId,complete:true,rowCount:rows.length,columns,lookupChecks,preview:preview(rows,this.previewRows),stage:'主对象完整保留，维度字段已组合；未匹配和多时点不代表业务数据已验收'};
  }

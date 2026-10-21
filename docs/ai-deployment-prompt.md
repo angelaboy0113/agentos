@@ -216,6 +216,8 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
 现在先执行只读体检。不要先让我重复回答能够从本机、仓库或文档确认的问题；发现必须
 由我提供的非敏感信息时，一次列出最少必要项。发现登录、密钥或权限节点时单独暂停，
 不要让我把秘密粘贴到聊天中。
+- 文件交付按docs/report-exports.md执行：源码工件仅在源码目录验证，登记报表以kind=report和原filename/ID按sourceJobId定位exports并核对SHA-256及verificationHash。不因超过5MiB、10MB或数据集16MB拒绝；exportMaxRows可为all，未配置exportDataBudgetBytes时不加隐式32MB预算。保留已有显式管理员预算、权限/表范围和业务核验，不声称物理资源无限。飞书单文件30MB容量由29000000字节分卷适配，CSV按完整记录保留表头和所有行；超宽记录用可还原二进制分卷及说明。按分卷持久回执和幂等续发，每卷复查原轮次/私有接收人，失败不重新查库。Windows/macOS及真实大文件飞书发送需分别验收。
+
 ```
 
 ## 真人必须参与的节点

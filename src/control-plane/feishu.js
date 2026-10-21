@@ -1,3 +1,5 @@
+import {openAsBlob} from 'node:fs';
+import {stat} from 'node:fs/promises';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createId } from '../shared/protocol.js';
@@ -59,8 +61,8 @@ export class FeishuClient {
   }
 
   async replyFile(messageId,file,options={}){
-    const form=new FormData();form.set('file_type','stream');form.set('file_name',path.basename(file));form.set('file',new Blob([await readFile(file)],{type:'text/csv'}),path.basename(file));
-    const response=await fetch(`${OPEN_API}/im/v1/files`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});
+    const form=new FormData();form.set('file_type','stream');form.set('file_name',path.basename(file));form.set('file',await openAsBlob(file),path.basename(file));
+    const response=await fetch(`${OPEN_API}/im/v1/files`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000+Math.ceil((await stat(file)).size/64000)*1000)});
     const result=await response.json();if(!response.ok||result.code!==0||!result.data?.file_key)throw new Error('Feishu report upload failed');
     return this.cardRequest('POST',options.privateRecipient?'/im/v1/messages?receive_id_type=open_id':`/im/v1/messages/${encodeURIComponent(messageId)}/reply`,{...(options.privateRecipient?{receive_id:options.privateRecipient}:{}),msg_type:'file',content:JSON.stringify({file_key:result.data.file_key}),uuid:options.idempotencyKey,...(!options.privateRecipient&&options.replyInThread?{reply_in_thread:true}:{})});
   }

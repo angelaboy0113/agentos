@@ -29,7 +29,7 @@ test('specific unresolved correction details survive round boundaries',()=>{
 test('trusted report snapshot window configuration is validated',()=>{
  const e={kind:'mysql'},q={mode:'investigate',parameters:[{name:'purpose',type:'string'}],tables:['*'],exportMaxRows:100};
  assert.equal(validateToolQuery(e,{...q,exportSnapshotWindowMs:1200000,exportDataBudgetBytes:64000000}),true);
- for(const v of [0,256000001,'64000000'])assert.throws(()=>validateToolQuery(e,{...q,exportDataBudgetBytes:v}));
+ for(const v of [0,Number.MAX_SAFE_INTEGER+1,'64000000'])assert.throws(()=>validateToolQuery(e,{...q,exportDataBudgetBytes:v}));
  for(const v of [0,3600001,'1200000'])assert.throws(()=>validateToolQuery(e,{...q,exportSnapshotWindowMs:v}));
 });
 test('identical complete query reuses one transaction result without extra SQL or saved artifacts',async t=>{
