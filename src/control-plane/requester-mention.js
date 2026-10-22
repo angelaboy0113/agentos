@@ -8,7 +8,7 @@ export function requesterMentionText(userId, message) {
 export function conversationTerminalMention(turn) {
   if (turn.setupPending) return null;
   if (turn?.chatType !== 'group' || turn.outcome?.jobId || turn.outcome?.nextJobId) return null;
-  return mention(turn.messageId, turn.profile, turn.senderId, '本次回复已完成，请查看上方结果。');
+  return mention(turn.messageId, turn.profile, turn.senderId, turn.aiFailed ? '本次请求处理失败，尚未创建或推进任务，请查看上方原因。' : turn.actionError ? '本次操作未执行，请查看上方原因。' : '本次回复已完成，请查看上方结果。');
 }
 
 export function jobTerminalMention(job, projects = {}) {

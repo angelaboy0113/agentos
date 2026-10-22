@@ -42,6 +42,17 @@ export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId && (e.kind !== 'website' || canonicalWebsite(config, projectId, e.tier, e.baseUrl) === websiteUrl(e.baseUrl))).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
     queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据'] } : {}), ...(q.exportMaxRows?{exportMaxRows:q.exportMaxRows,exportTimeoutMs:q.exportTimeoutMs??30000,exportSnapshotWindowMs:q.exportSnapshotWindowMs??300000,exportDataBudgetBytes:q.exportDataBudgetBytes??null}:{}), parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin,entryUrl:e.baseUrl} : e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
+// Repeated capability contracts are shared, while every authorized endpoint stays visible.
+export function compactCatalog(entries) {
+ const profiles={},indices=new Map();
+ const environments=entries.map(e=>({...e,queries:e.queries.map(q=>{
+  const {queryId,description,...contract}=q,key=JSON.stringify(contract);
+  let profileId=indices.get(key);
+  if(!profileId){profileId='query_'+indices.size;indices.set(key,profileId);profiles[profileId]=contract;}
+  return {queryId,profileId,description};
+ })}));
+ return {environments,queryProfiles:profiles,rule:'每个queries项用profileId引用queryProfiles中的完整参数、范围及导出能力；environmentId和queryId保持原值，不能跨环境借用。'};
+}
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const original = config.environments[request?.environmentId];
   if(original?.projectId===projectId && original.kind==='website'){

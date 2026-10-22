@@ -72,3 +72,8 @@ test('website login wait names the exact site and allows a natural reply on the 
   assert.match(mention.text,/直接回复本任务卡“账号 \/ 密码”/);
   assert.doesNotMatch(mention.text,/私聊/);
 });
+
+test('intake failures never announce a completed reply',()=>{
+ const turn={chatType:'group',messageId:'m',profile:'owner',senderId:'ou_requester'};
+ for(const extra of [{aiFailed:true},{actionError:'rejected'}]){const text=conversationTerminalMention({...turn,...extra}).text;assert.doesNotMatch(text,/回复已完成/);assert.match(text,/失败|未执行/);}
+});

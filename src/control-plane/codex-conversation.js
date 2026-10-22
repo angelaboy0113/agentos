@@ -173,6 +173,7 @@ export async function decisionTurn(app, params, options) {
   }
 }
 export function conversationFailure(error) {
+  if (/required context exceed configured input budget/.test(String(error?.message))) return '问题尚未执行：本机上下文容量检查未通过，尚未调用AI或创建任务。请维护者处理上下文组织问题；数据库连接未因此失败，不需要重新提供账号密码。';
   if (error?.code === 'DECISION_PROTOCOL') return 'AI返回的任务安排有冲突，自动修正后仍未通过校验。本次没有创建或推进任务；这不是网络或登录错误，请维护者检查决策协议。';
   if (/timeout|timed out|超时/i.test(String(error?.message))) return '等待AI响应超时，本次没有创建或推进任务，请稍后重新 @ 发起。';
   return 'AI 调用失败，本次没有创建或推进任务。请维护者检查本机诊断记录，确认具体原因后重试；尚不能判断是网络还是登录问题。';
