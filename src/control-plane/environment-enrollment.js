@@ -59,13 +59,21 @@ export async function requestEnrollment(context, turn) {
       (e) => e.turnId === turn.id,
     );
     if (old) return { notice: "等待管理员确认本机接入", enrollmentId: old.id };
+    const replaced = Object.values(state.environmentEnrollments).filter(e =>
+      e.status === "requested" && e.questionId === turn.questionId && e.chatId === turn.chatId
+      && e.projectId === projectId && e.profile === turn.profile && e.kind === target.kind && e.tier === target.tier);
     if (
       Object.values(state.environmentEnrollments).filter((e) =>
         ["requested", "opening", "login_required", "awaiting_tls_confirmation"].includes(e.status),
-      ).length >= 5
+      ).length - replaced.length >= 5
     )
       throw new Error("待接入请求过多，请先完成已有请求");
     const id = createId("ENR");
+    for (const previous of replaced) {
+      previous.status = "superseded";
+      previous.supersededBy = id;
+      previous.supersededAt = new Date().toISOString();
+    }
     state.environmentEnrollments[id] = {
       id,
       ...target,
@@ -90,7 +98,7 @@ export async function approveEnrollment(
   turn,
   launch = launchEnrollment,
 ) {
-  const awaiting=(Object.values((await context.store.read()).environmentEnrollments ?? {})).filter(e=>e.questionId===turn.questionId && e.chatId===turn.chatId && e.projectId===resolveProjectId(context.projects, turn.chatId, turn.profile) && ['requested','awaiting_tls_confirmation'].includes(e.status));
+  const awaiting=(Object.values((await context.store.read()).environmentEnrollments ?? {})).filter(e=>e.questionId===turn.questionId && e.chatId===turn.chatId && e.profile===turn.profile && e.projectId===resolveProjectId(context.projects, turn.chatId, turn.profile) && ['requested','awaiting_tls_confirmation'].includes(e.status));
   if(awaiting.length!==1) throw new Error('待审批事项不唯一或不存在，请回复具体待审批卡片');
   const withoutTls = awaiting[0].status==='awaiting_tls_confirmation';
   const confirmation=String(turn.content ?? '').replace(/<at\b[^>]*>.*?<\/at>/g,'').replace(/\s+/g,'').replace(/[。！!]$/,'').toUpperCase();
@@ -98,11 +106,10 @@ export async function approveEnrollment(
   if (!isAdministrator(context.projects, turn))
     throw new Error("只有本群管理员可以确认新环境接入");
   const e = await context.store.transact((state) => {
-    const e = Object.values(state.environmentEnrollments ?? {}).find(
-      (x) => x.questionId === turn.questionId && x.status === (withoutTls ? "awaiting_tls_confirmation" : "requested"),
-    );
+    const e = state.environmentEnrollments?.[awaiting[0].id];
     if (
-      !e ||
+      !e || e.status !== (withoutTls ? "awaiting_tls_confirmation" : "requested")
+      || e.profile !== turn.profile || e.questionId !== turn.questionId ||
       e.chatId !== turn.chatId ||
       e.projectId !== resolveProjectId(context.projects, turn.chatId, turn.profile)
     )

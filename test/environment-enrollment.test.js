@@ -200,3 +200,34 @@ test('unsupported TLS produces pending scoped confirmation, never automatic down
  assert.equal(e.tlsException.url,e.url);assert.equal(e.tlsException.approverId,admin.senderId);
  await assert.rejects(approveEnrollment(context,{...admin,content:'同意本目标使用非TLS',decision:{action:'approve_environment_without_tls'}},async()=>{calls++;}));assert.equal(calls,0);
 });
+
+test('correcting an unapproved endpoint supersedes only the same question, profile, kind and tier', async t => {
+  const {context,state,turn,admin}=await fixture(t);
+  const old=await requestEnrollment(context,turn);
+  state.environmentEnrollments.foreign={...state.environmentEnrollments[old.enrollmentId],id:'foreign',profile:'other'};
+  state.environmentEnrollments.test={...state.environmentEnrollments[old.enrollmentId],id:'test',tier:'uat'};
+  const corrected={...turn,id:'corrected',decision:{...turn.decision,environmentSetup:{...turn.decision.environmentSetup,url:'http://production.test:8848/nacos'}}};
+  const latest=await requestEnrollment(context,corrected);
+  assert.equal(state.environmentEnrollments[old.enrollmentId].status,'superseded');
+  assert.equal(state.environmentEnrollments[old.enrollmentId].supersededBy,latest.enrollmentId);
+  assert.equal(state.environmentEnrollments.foreign.status,'requested');
+  assert.equal(state.environmentEnrollments.test.status,'requested');
+  // Different environment requests still need explicit selection; do not approve them together.
+  delete state.environmentEnrollments.test;
+  let launched;await approveEnrollment(context,admin,async(_context,e)=>{launched=e;});
+  assert.equal(launched.id,latest.enrollmentId);
+  assert.equal(launched.url,'http://production.test:8848/nacos');
+});
+test('approval cannot switch targets when an endpoint is corrected between read and transaction', async t => {
+  const {context,state,turn,admin}=await fixture(t);
+  const first=await requestEnrollment(context,turn);
+  const transact=context.store.transact;
+  context.store.transact=async fn=>{
+    state.environmentEnrollments[first.enrollmentId].status='superseded';
+    state.environmentEnrollments.replacement={...state.environmentEnrollments[first.enrollmentId],id:'replacement',status:'requested',url:'http://other.test:8848/nacos'};
+    return transact(fn);
+  };
+  let launches=0;
+  await assert.rejects(approveEnrollment(context,admin,async()=>{launches++;}),/待确认|已变更/);
+  assert.equal(launches,0);
+});
