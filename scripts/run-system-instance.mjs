@@ -22,6 +22,7 @@ for (const name of ['runtime', 'systems']) {
 const configDir = path.join(program, 'config');
 const projects = await loadProjects(path.join(configDir, 'projects.local.json'));
 const { agents } = await loadAgents(path.join(configDir, 'agents.local.json'));
+if (!Object.keys(agents).length) throw new Error('没有已发布并完成接入的系统助手，拒绝启动');
 const pending = [];
 for (const [key, agent] of Object.entries(agents)) {
   if (!agent.systemAssistant || !agent.profile || !agent.allowedChatIds?.length) throw new Error(`无效系统助手配置：${key}`);

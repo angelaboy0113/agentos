@@ -37,7 +37,7 @@ test('every execution stage retains its original system bot; old role routing st
   assert.equal(routeAgent({ developer: { profile: 'legacy-dev' } }, 'developer').agentProfile, 'legacy-dev');
   const plans = larkEventSourcePlans({}, agents);
   assert.equal(plans.length, 4);
-  assert.ok(plans.every(p => p.role === 'developer' && p.allowedChatIds[0] === 'shared'));
+  assert.ok(plans.every(p => p.role === 'developer' && p.allowedChatIds[0] === 'shared' && p.groupOnly === true));
 });
 
 async function fixture(t, decide) {
@@ -73,6 +73,7 @@ test('same group keeps system rules, history, source environment, and execution 
 test('wrong group and forged role are rejected before conversation or credentials', async t => {
   const { app, input, send, event } = await fixture(t, () => ({}));
   assert.equal((await send(event('a', 'outside', { chat_id: 'old-group' }))).reason, 'outside_assistant_group');
+  assert.equal((await send(event('a', 'private', { chat_type: 'p2p', chat_id: 'private' }))).reason, 'assistant_group_only');
   await assert.rejects(send(event('a', 'forged', { agent_role: 'owner_intake' })), /mismatch/);
   assert.equal(input.length, 0); assert.equal((await app.store.read()).jobs.length, 0);
 });

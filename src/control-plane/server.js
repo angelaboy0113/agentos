@@ -499,6 +499,7 @@ export async function handleLarkCliEvent(context, event) {
   const role = event.agent_role ?? 'owner_intake';
   const sourceProfile = event.agent_profile ?? null;
   const agent = Object.values(context.agents.agents ?? {}).find((item) => (item.profile || null) === sourceProfile);
+  if (agent?.systemAssistant && event.chat_type === 'p2p') return { ignored: true, reason: 'assistant_group_only' };
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
   if (agent?.systemAssistant && (agent.role ?? 'developer') !== role) throw new Error('System assistant role/profile mismatch');
   const credentialResult = await context.websiteCredentials?.handle(event);
