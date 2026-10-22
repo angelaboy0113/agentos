@@ -167,7 +167,7 @@ export function linkedAggregateStatement(args,tables,types,q,valueSets=new Map()
 }
 
 // Grouped datasets have a deterministic key order inside one repeatable-read snapshot.
-export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map()){
+export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map(),primaryKeys=new Map()){
  const linked=args.leftTable!==undefined;
  const groups=args.groupColumns;
  if(!Array.isArray(groups)||!groups.length||groups.length>128)throw new QueryInputError('QUERY_INPUT','groupColumns必须包含1至128个分组字段。');
@@ -181,12 +181,28 @@ export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map())
  const base=linked?linkedAggregateStatement(args,tables,types,q,valueSets):aggregateStatement(args,tables,types,q,valueSets);
  if(base.columns.some(c=>groupNames.includes(c))||new Set(base.columns).size!==base.columns.length)throw new QueryInputError('QUERY_INPUT','分组字段与指标别名不能重复');
  if(args.rowKey!==undefined&&(!ident(args.rowKey)||['__proto__','constructor','prototype'].includes(args.rowKey)||secretName.test(args.rowKey)||[...groupNames,...base.columns].includes(args.rowKey)))throw new QueryInputError('QUERY_INPUT','rowKey必须是不与输出列重名的非敏感普通字段名。');
- return {...base,...(groupNames.length>12?{batchSize:Math.max(5,Math.floor(1000/(groupNames.length+base.columns.length)))}:{}),sql:base.sql.replace(/^SELECT /,`SELECT ${quoted.join(', ')}, `)+` GROUP BY ${quoted.join(', ')} ORDER BY ${quoted.join(', ')}`,columns:[...groupNames,...base.columns],...(args.rowKey?{rowKey:{column:args.rowKey,fields:groupNames}}:{}),numericColumns:args.aggregates.filter(a=>['sum','avg','count','count_distinct'].includes(a.op)||numericTypes.has(types.get(a.table??args.table)?.get(a.column))).map(a=>a.as)};
+ let cursor;
+ const owner=linked?groups[0]?.table:args.table,pk=primaryKeys.get(owner);
+ if(pk?.length===1&&groupNames.includes(pk[0])&&(!linked||groups.every(g=>g.table===owner))){
+  const alias=linked?(owner===args.leftTable?'`l`.':'`r`.'):'';
+  let keys=[pk[0]];
+  if(linked&&owner===args.rightTable){
+   const leftPk=primaryKeys.get(args.leftTable);
+   if((args.join?.type??'inner')==='inner'&&leftPk?.length===1&&leftPk[0]===args.join.leftColumn&&groupNames.includes(args.join.rightColumn))keys=[args.join.rightColumn,...keys.filter(k=>k!==args.join.rightColumn)];
+   else if((args.join?.type??'inner')==='left')keys=[];
+  }
+  if(keys.length)cursor={columns:keys,expressions:keys.map(k=>alias+'`'+k+'`')};
+ }
+ const singleton=cursor&&(!linked||(owner===args.rightTable&&(args.join?.type??'inner')==='inner'&&primaryKeys.get(args.leftTable)?.length===1&&primaryKeys.get(args.leftTable)[0]===args.join.leftColumn));
+ const rawProjection=singleton&&args.aggregates.every(a=>a.op==='count'&&(a.column==null||a.column===pk[0]&&(!linked||a.table===owner)));
+ const projected=rawProjection?base.sql.replace(/^SELECT .*? FROM /,`SELECT ${quoted.join(', ')}, ${base.columns.map(name=>'1 AS `'+name+'`').join(', ')} FROM `):null;
+ const order=cursor?[...cursor.expressions,...quoted.filter(q=>!cursor.expressions.includes(q))]:quoted;
+ return {...base,...(cursor?{cursor,batchSize:50}:groupNames.length>12?{batchSize:Math.max(5,Math.floor(1000/(groupNames.length+base.columns.length)))}:{}),sql:projected?projected+` ORDER BY ${order.join(', ')}`:base.sql.replace(/^SELECT /,`SELECT ${quoted.join(', ')}, `)+` GROUP BY ${quoted.join(', ')} ORDER BY ${order.join(', ')}`,columns:[...groupNames,...base.columns],...(args.rowKey?{rowKey:{column:args.rowKey,fields:groupNames}}:{}),numericColumns:args.aggregates.filter(a=>['sum','avg','count','count_distinct'].includes(a.op)||numericTypes.has(types.get(a.table??args.table)?.get(a.column))).map(a=>a.as)};
 }
 
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
-  const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), valueSets = new Map();
+  const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), primaryKeys=new Map(), valueSets = new Map();
   const datasets=new ReportDatasets({reuseQueries:true,dataBudgetBytes:q.exportDataBudgetBytes??Number.MAX_SAFE_INTEGER,snapshotWindowMs:q.exportSnapshotWindowMs??300000,originalQuestion:adapters.originalQuestion,scope:createHash('sha256').update(JSON.stringify(e)).digest('hex'),secrets,maxRows:q.exportMaxRows,previewRows:q.maxRows,directory:adapters.exportDirectory,authorize:adapters.authorize,active:()=>active});
   const request = adapters.fetch ?? boundedFetch;
   const readCache = new Map(); let readCacheBytes = 0;
@@ -243,7 +259,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   ];
   if(e.kind==='mysql'&&q.exportMaxRows){
     spec.push({tool:'enrich_dataset',args:{datasetRef:'完整主对象数据集',keyColumn:'主对象唯一编码列',lookups:[{name:'area',datasetRef:'完整维度数据集',sourceColumn:'主对象已有列或上一步输出列',targetColumn:'维度唯一键',fields:[{column:'维度列',as:'新的输出列名'}],missing:'empty或error，必须明确',fallbackKey:'可选，源码已证实的默认配置关联键，须在同一完整维度数据中实际存在'}]},description:'同一任务内按实际关联键左连接维度，最多4步、每步4字段；可以沿显式parent键多级查名称。不执行SQL，不接受路径/表达式，不丢主对象。专属配置缺失且源码明确规定沿用通用配置时，可传fallbackKey（实际存在的默认行键），把生效值写入每行并标记沿用默认配置；不能猜默认键或常量。重复维度键拒绝猜选；missing=empty保留未匹配并写入name_status，返回未匹配数量。保留原取数时间，仍需最终核验。'}, {tool:'inspect_dataset',args:{datasetRef:'任务内数据集引用'},description:'查看已有数据集实际SQL、筛选参数、取数时间，或草稿列公式和来源；列表预览截断时使用。结果limited仍为true时不能猜测未展示条件。'}, {tool:'finalize_report',args:{datasetRef:'compose_report草稿引用',requirement:'原问题的交付要求，不缩减范围',expectedColumns:['按用户要求的完整列标题，顺序一致'],scopeEvidence:'完整对象范围的源码/文档依据及期间条件',populationRef:'独立原始范围数据集',populationKey:'业务主键',columnRules:[{label:'逐列标题',definition:'业务定义和公式',evidence:'源码或文档位置及实际规则'}],checks:[{source:'s1',column:'amount',referenceRef:'不同原始查询的完整分量合计基准集',referenceColumn:'amount',evidence:'与该分量同期间/状态/费用范围的独立汇总依据'}]},description:'草稿最终核验：missing=empty的原始金额保留为空，仅核对已知金额并登记缺失数；不能当0或参与加减。列顺序完全一致、完整业务对象集合相等、计算/total的所有来源分量与不同原始查询的基准集精确合计一致、取数窗口按管理员的exportSnapshotWindowMs配置（默认5分钟），返回实际起止时间；不等于同一事务。不能以草稿或同一查询自证；业务依据仍须源码核实。只有此工具返回exportFile，compose_report只产出draftFile。'}, {tool:'compare_datasets',args:{leftRef:'左数据集引用',rightRef:'右数据集引用',leftKey:'左主键列',rightKey:'右主键列'},description:'在任务内精确比较两个完整数据集的业务主键；返回各自数量、匹配数、左右缺失数量和有限缺失行预览，不重新查询数据库。不接受任意文件路径。'}, {tool:'list_datasets',args:{offset:'可选非负整数，默认0',limit:'可选1至20，默认20；按nextOffset继续'},description:'列出当前任务在本环境已完整读取并持久保存的数据集、字段、取数时间和摘要。新一轮先查看已有成果，compose_report可直接引用这些datasetRef，不要重复查询已取得的金额。跨轮引用需核对取数时点；不能把旧数据当实时状态。'}, {tool:'group_dataset',args:{table:'已读取结构的表',groupColumns:['经销商主键等分组字段'],rowKey:'可选，生成分组组合行键的输出列名，如row_key',aggregates:[{op:'sum',column:'数值字段',as:'amount'}],filters:'与aggregate相同'},description:`按实际分组字段汇总并由程序连续分页取完，${q.exportMaxRows==='all'?'不预设总行数，直到实际分页结束':'最多'+q.exportMaxRows+'组'}；返回datasetRef、完整性和少量预览。不是前${q.maxRows}行样本；可用于完整经销商报表。`},
-    {tool:'linked_group_dataset',args:{leftTable:'左表',rightTable:'右表',join:{leftColumn:'字段',rightColumn:'字段',type:'可选inner或left，默认inner'},groupColumns:[{table:'左表或右表',column:'经销商主键'}],rowKey:'可选，如row_key，为所有分组字段生成稳定组合行键',aggregates:'与linked_aggregate相同',filters:'与linked_aggregate相同'},description:'两表受控等值关联后分组汇总并完整分页；一对多按实际明细粒度分组，须保留没有明细的主对象时指定join.type=left。left模式必须有左表筛选，右表filters在ON中筛选匹配明细，未匹配右字段为null，不能当0。需要导出一对象多行时指定rowKey，compose_report用返回的组合行键，独立范围查询也按相同分组生成rowKey核对；该键不是业务编号。不能重复累计左侧金额；enrich_dataset仅用于唯一维度查找，不能用于展开一对多。'},
+    {tool:'linked_group_dataset',args:{leftTable:'左表',rightTable:'右表',join:{leftColumn:'字段',rightColumn:'字段',type:'可选inner或left，默认inner'},groupColumns:[{table:'左表或右表',column:'经销商主键'}],rowKey:'可选，如row_key，为所有分组字段生成稳定组合行键',aggregates:'与linked_aggregate相同',filters:'与linked_aggregate相同'},description:'两表受控等值关联后分组汇总并完整分页；schema核验唯一主键后，同一表原始字段记录自动用游标读取；每明细只关联一个主对象且仅计数时自动等价消除多余分组，不需要手工按天切片或改成样本；一对多按实际明细粒度分组，须保留没有明细的主对象时指定join.type=left。left模式必须有左表筛选，右表filters在ON中筛选匹配明细，未匹配右字段为null，不能当0。需要导出一对象多行时指定rowKey，compose_report用返回的组合行键，独立范围查询也按相同分组生成rowKey核对；该键不是业务编号。不能重复累计左侧金额；enrich_dataset仅用于唯一维度查找，不能用于展开一对多。'},
     {tool:'compose_report',args:{sources:[{name:'s1',datasetRef:'本轮完整datasetRef',keyColumn:'经销商主键'}],columns:[{label:'dealer_id',displayName:'经销商编号',value:{op:'key'}},{label:'余额',total:true,value:{op:'subtract',args:[{op:'field',source:'s1',column:'amount',missing:'zero'},{op:'field',source:'s2',column:'used',missing:'zero'}]}}]},description:'按业务主键全外连接本任务完整数据集（可选population:{datasetRef,keyColumn}限定完整主对象集合），生成CSV草稿并返回行数、校验和、列合计与预览；最多128列；完整原始记录可按实际唯一主键及所有要导出字段分组，不因预览select的12字段限制删列。sources[].name必须使用不重复的s1、s2等（s加1至2位数字）；field.source引用同名来源，不能改为业务名称。固定计算key/field/add/subtract/min，后3项使用args数组；field指定source、column及可选missing=zero或empty，缺失默认报错。数字精确十进制计算。数值列应标记total:true。中文业务导出默认中文（英文字段）双语表头：label保留原字段，displayName填已核实中文名称，工具生成双语标题；也接受完整中文label。中文含义依据源码注解/字段说明并在finalize columnRules登记，未知含义先核实，不猜译。除用户明确要求原始或英文表头，不接受纯英文字段名；改表头复用已有数据集，不重新取数。只返回draftFile；之后finalize_report通过才可交付。必须先核实各来源口径、关联基数及覆盖范围，不得用样本或不完整数据集导出完整报表。'});
   }
   let browser;
@@ -294,7 +310,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
          reload:async recipe=>{for(const table of [recipe.args.table,recipe.args.leftTable,recipe.args.rightTable].filter(Boolean)){let cursor;do{const page=await run('schema',{table,...(cursor!==undefined?{cursor}:{})});cursor=page.nextCursor;}while(cursor!==null&&cursor!==undefined);}return run(recipe.tool,structuredClone(recipe.args));}
         });
         const c = await mysql();
-        if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect({...statement,recipe:{tool,args:structuredClone(args)}},(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
+        if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets,primaryKeys);return datasets.collect({...statement,recipe:{tool,args:structuredClone(args)}},(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
         if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };
         if(tool==='database_clock'){
           if(Object.keys(args).length)throw new QueryInputError('QUERY_INPUT','database_clock不接受参数或SQL');
@@ -316,9 +332,10 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const offset = args.cursor === undefined ? 0 : Number(args.cursor);
           if(!Number.isInteger(offset) || offset<0 || offset>100000) throw new Error('结构分页参数无效');
           const columnClause = requestedColumns ? ` AND c.COLUMN_NAME IN (${requestedColumns.map(() => '?').join(', ')})` : '';
-          const [rows] = await read(c,{ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name,c.DATA_TYPE AS data_type,t.ENGINE AS engine FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
+          const [rows] = await read(c,{ sql: "SELECT c.TABLE_NAME AS table_name,c.COLUMN_NAME AS column_name,c.DATA_TYPE AS data_type,t.ENGINE AS engine,c.COLUMN_KEY AS column_key,(SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE k WHERE k.TABLE_SCHEMA=c.TABLE_SCHEMA AND k.TABLE_NAME=c.TABLE_NAME AND k.CONSTRAINT_NAME='PRIMARY') AS primary_key_count FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=? AND t.TABLE_TYPE='BASE TABLE' AND c.EXTRA NOT LIKE '%GENERATED%'" + (args.table ? " AND c.TABLE_NAME=?" : "") + columnClause + ` ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION LIMIT 101 OFFSET ${requestedColumns ? 0 : offset}`, timeout: q.timeoutMs }, [e.database, ...(args.table ? [args.table] : []), ...(requestedColumns ?? [])]);
           const visible = new Map();
           for (const r of rows.slice(0,100)) if (ident(r.table_name) && ident(r.column_name) && !secretName.test(r.column_name) && (q.tables.includes('*') || q.tables.includes(r.table_name))) {
+            if(r.column_key==='PRI'&&Number(r.primary_key_count)===1)primaryKeys.set(r.table_name,[r.column_name]);
             if(typeof r.engine==='string')tableEngines.set(r.table_name,r.engine.toLowerCase());
             visible.set(r.table_name,[...(visible.get(r.table_name)??[]),r.column_name]);
             tables.set(r.table_name,[...new Set([...(tables.get(r.table_name)??[]),r.column_name])]);

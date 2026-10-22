@@ -19,10 +19,15 @@ export class ReportDatasets {
   const signature=hash([queryHash,statement.columns,statement.numericColumns??[],statement.rowKey??null]);
   const previous=this.reuseQueries?this.collected.get(signature):null;
   if(previous){const d=await this.restore(previous.datasetRef);if(d?.complete)return {...previous,reused:true,stage:'复用本轮同一只读事务中已完成的相同查询；保留原取数时间'};}
-  const rows=[];let batch=Number.isInteger(statement.batchSize)&&statement.batchSize>=1&&statement.batchSize<=500?statement.batchSize:500;let complete=false;
+  const rows=[];let batch=Number.isInteger(statement.batchSize)&&statement.batchSize>=1&&statement.batchSize<=5000?statement.batchSize:500;let complete=false;
+  let cursor=null;
   for(let offset=0;offset<=this.maxRows;){
    await this.check();const size=Math.min(batch,this.maxRows-offset+1);
-   let page;try{[page]=await execute({sql:`${statement.sql} LIMIT ${size} OFFSET ${offset}`},statement.params);}catch(error){if(error.code==='REMOTE_PAGE_TOO_LARGE'&&batch>1){batch=Math.max(1,Math.floor(batch/2));continue;}throw error;}
+   const keyset=statement.cursor,cursorParams=[];
+   const after=keyset&&cursor?keyset.expressions.map((expression,i)=>'('+[...keyset.expressions.slice(0,i).map((previous,j)=>{cursorParams.push(cursor[j]);return previous+' = ?';}),(()=>{cursorParams.push(cursor[i]);return expression+' > ?';})()].join(' AND ')+')').join(' OR '):null;
+   const marker=statement.sql.includes(' GROUP BY ')?' GROUP BY ':' ORDER BY ';
+   const sql=after?statement.sql.replace(marker,` AND (${after})${marker}`):statement.sql;
+   let page;try{[page]=await execute({sql:`${sql} LIMIT ${size}${keyset?'':` OFFSET ${offset}`}`},[...statement.params,...cursorParams]);}catch(error){if(error.code==='REMOTE_PAGE_TOO_LARGE'&&batch>1){batch=Math.max(1,Math.floor(batch/2));continue;}throw error;}
    await this.check();if(!Array.isArray(page)||page.length>size)throw new ReportInputError('报表分页返回异常');
    for(const row of page){
     if(rows.length===this.maxRows)break;
@@ -33,7 +38,8 @@ export class ReportDatasets {
    if(page.length<size){complete=true;break;}
    if(page.length>this.maxRows-offset)break;
    offset+=page.length;
-   if(statement.batchSize&&page.length){const average=Buffer.byteLength(JSON.stringify(page))/page.length;batch=Math.max(1,Math.min(500,Math.floor(2000000/Math.max(1,average*1.5))));}
+   if(keyset&&page.length){const next=keyset.columns.map(k=>page.at(-1)[k]);if(next.some(v=>v===null||v===undefined)||JSON.stringify(next)===JSON.stringify(cursor))throw new ReportInputError('游标主键为空或没有前进；保留已有证据，不能跳行或改用抽样');cursor=next;}
+   if(statement.batchSize&&page.length){const average=Buffer.byteLength(JSON.stringify(page))/page.length;batch=Math.max(1,Math.min(statement.cursor?5000:500,Math.floor(2000000/Math.max(1,average*1.5))));}
   }
   // A short final page proves completion; exactly-at-cap requires one look-ahead.
   const ref=`dataset-${randomUUID()}`,data={rows,columns:[...statement.columns,...(statement.rowKey?[statement.rowKey.column]:[])],complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
