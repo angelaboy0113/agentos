@@ -1,3 +1,4 @@
+import { validateSshTransport } from './ssh-transport-policy.js';
 import { canonicalWebsite, validateWebsiteAliases } from './website-aliases.js';
 import { websiteUrl } from './website-policy.js';
 import { validateAccountPolicy } from './database-account-policy.js';
@@ -16,9 +17,10 @@ export async function loadEnvironments(file = environmentFile()) {
   if (v.version !== 1 || !v.environments || typeof v.environments !== 'object' || Array.isArray(v.environments)) throw new Error('环境配置版本错误');
   validateWebsiteAliases(v);
   for (const [key, e] of Object.entries(v.environments)) {
-    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos', 'website'].includes(e.kind)
+    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization','transport'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos', 'website'].includes(e.kind)
       || !id(e.credentialRef) || typeof e.membersRead !== 'boolean' || !e.ownerOpenIdsByProfile || !e.queries) throw new Error('环境配置字段无效');
     validateAccountPolicy(e);
+    if(e.transport){if(e.kind!=='mysql')throw new Error('SSH传输仅支持MySQL');validateSshTransport(e.transport);}
     if(e.kind==='website')websiteUrl(e.baseUrl);
     if (Object.values(e.ownerOpenIdsByProfile).some((ids) => !Array.isArray(ids) || ids.some((x) => !/^ou_[A-Za-z0-9]+$/.test(x)))) throw new Error('环境审批人配置无效');
     if (e.kind === 'mysql' && (!/^[a-zA-Z0-9.:-]+$/.test(e.host) || !Number.isInteger(e.port) || e.port < 1 || e.port > 65535 || !id(e.database))) throw new Error('数据库目标配置无效');
@@ -52,6 +54,19 @@ export function compactCatalog(entries) {
   return {queryId,profileId,description};
  })}));
  return {environments,queryProfiles:profiles,rule:'每个queries项用profileId引用queryProfiles中的完整参数、范围及导出能力；environmentId和queryId保持原值，不能跨环境借用。'};
+}
+export function routingCatalog(entries){
+ const profiles={},sets={},contracts=new Map(),bindings=new Map();
+ const environments=entries.map(e=>{
+  const queries=e.queries.map(q=>{
+   const contract={parameters:q.parameters,mode:q.mode??'template',...(q.mode==='investigate'?{purpose:'目标环境内受控只读调查',...(q.exportMaxRows?{completeExport:true}:{})}:{description:q.description})},key=JSON.stringify(contract);
+   let profileId=contracts.get(key);if(!profileId){profileId='route_'+contracts.size;contracts.set(key,profileId);profiles[profileId]=contract;}
+   return {queryId:q.queryId,profileId};
+  });
+  const key=JSON.stringify(queries);let querySetId=bindings.get(key);if(!querySetId){querySetId='set_'+bindings.size;bindings.set(key,querySetId);sets[querySetId]=queries;}
+  return {environmentId:e.environmentId,tier:e.tier,kind:e.kind,querySetId};
+ });
+ return {environments,querySets:sets,queryProfiles:profiles,phase:'routing',rule:'environment.querySetId引用querySets的queryId/profileId列表；profileId引用参数模板。这里仅用于选择环境与参数；详细查询能力和完整范围在执行阶段按选中环境重新读取，授权不由目录决定。环境ID全部保留，禁止跨环境借用。'};
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const original = config.environments[request?.environmentId];

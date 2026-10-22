@@ -1,3 +1,4 @@
+import {sshMysqlConnection} from './ssh-mysql.js';
 import {inspectReport,ReportInspectionError} from '../shared/report-inspection.js';
 import {DatasetCapacityError} from './task-dataset-store.js';
 import { ReportDatasets, ReportInputError } from './report-datasets.js';
@@ -213,7 +214,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   async function mysql() {
     if (!conn) {
       const driver = adapters.mysql ?? await import('mysql2/promise');
-      conn = await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
+      conn = e.transport ? await sshMysqlConnection(e,q,cred,adapters) : await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
         // Business IDs frequently exceed Number.MAX_SAFE_INTEGER. Keep BIGINT/DECIMAL values lossless so a value returned by one read can be used by the next read unchanged.
         supportBigNumbers: true, bigNumberStrings: true, dateStrings: true,
         ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });

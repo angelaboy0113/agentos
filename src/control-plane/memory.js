@@ -164,7 +164,7 @@ export function fitContext(input, settings = MEMORY_DEFAULTS) {
     else if (input.memory?.matches?.length) input.memory.matches.pop();
     else if (input.teamKnowledge?.candidates?.length) input.teamKnowledge.candidates.pop();
     else if (input.history.length) input.history.shift();
-    else throw new Error('Current message and required context exceed configured input budget');
+    else {const error=new Error('Current message and required context exceed configured input budget');error.contextBudget={limit:budget,estimated:estimateTokens(input),sections:Object.fromEntries(Object.entries(input).map(([key,value])=>[key,estimateTokens(value)]))};throw error;}
     trimmed = true;
   }
   if (input.memory) input.memory.budget = { estimator: 'utf8-bytes-conservative-v1', trimmed,

@@ -6,7 +6,7 @@ import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/sou
 import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { pollWebsiteLogins } from './website-query.js';
 import { enrollmentTarget, requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
-import { loadEnvironments, catalog, compactCatalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
+import { loadEnvironments, catalog, routingCatalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
 import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
 import { CodexConversationEngine, validateDecision, conversationFailure } from './codex-conversation.js';
@@ -225,7 +225,7 @@ export class ConversationService {
           if (this.stopped) { await this.update(turn.id, { status: 'queued' }); return; }
           console.error(`[conversation:${turn.id}] AI failed:`, error.message);
           await this.update(turn.id, { status: 'ready', error: error.message.slice(0, 4000),
-            response: conversationFailure(error),
+            response: conversationFailure(error), ...(error.contextBudget?{contextBudget:error.contextBudget}:{}),
             timing: error.timing ?? { aiMs: Date.now() - aiStarted }, aiFailed: true });
         }
         continue;
@@ -344,7 +344,7 @@ export class ConversationService {
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       questionOriginalRequest: turn.questionId ? questionRequest(state, turn.questionId) : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
-      environmentCatalog: compactCatalog(catalog(await loadEnvironments(), projectId)),
+      environmentCatalog: routingCatalog(catalog(await loadEnvironments(), projectId)),
       role: turn.role, administrator: isAdministrator(projects, turn),
       sourcePolicy: { version: 'folder-evidence-v1', checkedNow: false,
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },

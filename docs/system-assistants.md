@@ -1,6 +1,6 @@
 # 多系统知识助手部署与迁移
 
-程序版本 1.36.0，更新日期 2026-10-22；Node 22.13–22.x，依赖以 package-lock.json 为准。新实例须使用自己的专用分支和独立检出目录。本文不改变旧部署的配置或运维手册。
+程序版本 1.37.0，更新日期 2026-10-22；Node 22.13–22.x，依赖以 package-lock.json 为准。新实例须使用自己的专用分支和独立检出目录。本文不改变旧部署的配置或运维手册。
 
 ## 布局与启动
 
@@ -99,3 +99,21 @@ MySQL调查工具`database_clock`使用固定只读SQL返回当前库名、数�
 中文业务问题默认导出中文（英文字段）双语表头；在compose_report.columns提供原始label和经源码注解、字段说明或业务定义核实的displayName，程序合成标题。完整中文label同样允许。列含义与依据登记在finalize_report.columnRules，expectedColumns按实际生成标题填写。纯英文字段表头在合成及定稿时拒绝并给出修正提示；用户明确要求原始/英文表头时保留。普通成员与群主相同，无需新增配置或权限，升级后重启新实例生效。
 
 改表头复用当前任务的有效完整数据集，重新合成并核验，不更改既有已签核文件、不因翻译重新取数。验证新文件列名、行数、逐格数据与原核验记录，最终通过后由原话题投递。数值枚举不会按英文猜译，需要项目字典或源码依据；CSV列宽由查看软件决定，日期显示井号可加宽列。源码中文注解只作为含义依据，程序不会证明业务翻译正确。
+
+## SSH远程MySQL只读通道
+
+当数据库只能从跳板机访问时，在该MySQL环境配置transport，mode为ssh-remote-execution，host/port为已批准跳板机，credentialRef为跳板机独立钥匙串引用，knownHostsFile为已核验主机密钥文件绝对路径。数据库host/port/database/credentialRef仍描述远端数据库。示例：
+
+```json
+"transport": {"mode":"ssh-remote-execution","host":"jump.example.internal","port":22,"credentialRef":"jump_read_access","knownHostsFile":"/your/private/known_hosts"}
+```
+
+先核验跳板机主机密钥和远端Node/Python运行时，录入独立SSH及数据库凭据，再运行受控connection_check、database_clock检查。额外账号权限采用原business-readonly显式管理员确认；这不改变数据库账号授权，也不提供存储过程执行。数据库TLS设置依照已批准目标配置；非TLS例外必须单独确认，不能将SSH加密说成跳板机到数据库也已加密。修改私有环境配置后在无活动任务时重启对应实例。
+
+程序只启动固定SSH远程执行命令：禁用SSH用户配置、转发及代理会话，严格核验已固定主机密钥。已锁定mysql2依赖通过stdin放到远端临时目录，远端缺少驱动不回退本机/隧道、不全局安装。凭据仅通过钥匙串及SSH stdin传入，不放argv、环境变量、源码或聊天上下文。连接保持同一个远端只读事务，现有表结构白名单、固定SQL、项目环境授权、精确数值、完整分页、CSV核验及投递流程继续生效；远端额外拒绝写入、CALL、多语句和SQL文件访问。关闭时回滚、断开、清理临时应用；SSH失败只报告该通道失败。
+
+本地已在macOS/OpenSSH/Python3验证，远端Ubuntu/Python3/Node18验证。当前SSH二进制与钥匙串路径为macOS/Linux方案，Windows部署未验证，不能直接声称可迁移运行。成功连接不等于业务报表已完成；以原问题文件核验、真实投递回执和提问人提醒验收。
+
+## 入口上下文预算
+
+聊天入口只展示所有环境ID、tier、kind及共享querySets/queryProfiles参数目录，用于选择目标和填写参数。详细工具能力、全量表范围与授权配置在执行阶段按目标重新读取；不截掉环境、不跨环境借用、不扩大授权。预算错误记录各部分大小供本机诊断，不记录原始上下文或凭据。团队知识、助手规则及目录都要纳入真实请求复现，不能只以空模拟上下文验证容量。

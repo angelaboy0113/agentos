@@ -26,3 +26,16 @@ test('resumed analysis refreshes current capability contracts instead of remembe
  const prompt=await buildPrompt(job,{}, {instruction:'unused',metadata:{}},{workspace:'/snapshot'},[],'/snapshot');
  assert.match(prompt,/latest_source/);assert.match(prompt,/database_clock/);assert.doesNotMatch(prompt,/never-print/);
 });
+
+test('routing phase keeps every target and parameter contract while execution scopes remain in the full catalog',async()=>{
+ const {routingCatalog}=await import('../src/shared/environment-access.js');const config={environments:{}};
+ for(let i=0;i<80;i++)config.environments['db_'+i]={projectId:'p',tier:i%2?'uat':'prd',kind:'mysql',queries:{investigate:{mode:'investigate',description:'业务库只读调查与完整导出',parameters:[{name:'purpose',type:'string',maxLength:200}],maxRows:20,exportMaxRows:'all',tables:['table_'+i]}}};
+ const full=catalog(config,'p'),thin=routingCatalog(full);assert.equal(thin.environments.length,80);assert.equal(Object.keys(thin.queryProfiles).length,1);
+ for(const [i,e] of thin.environments.entries()){assert.equal(e.environmentId,full[i].environmentId);assert.deepEqual(thin.queryProfiles[thin.querySets[e.querySetId][0].profileId].parameters,full[i].queries[0].parameters);assert.deepEqual(full[i].queries[0].scope.tables,['table_'+i]);}
+ assert.ok(estimateTokens(thin)<estimateTokens(compactCatalog(full))*0.8);
+});
+
+test('budget diagnostics contain only numeric section sizes, not request contents',()=>{
+ const message='PRIVATE_SENTINEL'.repeat(3000);
+ assert.throws(()=>fitContext({message,history:[],jobs:[],memory:{}}),error=>{assert.ok(error.contextBudget.estimated>error.contextBudget.limit);assert.equal(error.contextBudget.sections.message,Buffer.byteLength(message));assert.doesNotMatch(JSON.stringify(error.contextBudget),/PRIVATE_SENTINEL/);return true;});
+});

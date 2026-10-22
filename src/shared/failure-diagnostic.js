@@ -12,6 +12,8 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+ ['SSH_EXECUTION', /SSH_(?:EXECUTION|STDIN|PROTOCOL|RESPONSE)/, 'SSH远程数据库通道', '跳板机远程执行通道未能完成，未回退本机数据库连接或转发。', '维护者核对跳板机网络、固定主机密钥、钥匙串凭据及远端运行时；不要重复提供数据库密码或建立隧道。'],
+ ['SSH_REMOTE_POLICY', /REMOTE_READONLY_SQL/, '远端只读SQL校验', '远端拒绝了非固定只读语句，未执行写入或存储过程。', '仅使用已提供的受控基础表查询与报表工具，不提交任意SQL。'],
  ['REPORT_INSPECTION', /REPORT_INSPECTION/, '文件审阅证据', '当前文件的登记、摘要或计算来源读取未通过；不代表业务公式已证实错误。', '按已登记fileId读取同一任务的核验资料，不索要本机已有CSV、不重复查库或生成文件。'],
   ['DATASET_CAPACITY', /DATASET_CAPACITY/, '任务数据存储', '本任务中间数据达到实际空间预算，已有成果仍保留；不是数据库故障。', '先复用已有完整数据并修正草稿；确需增加空间时由维护者评估，不重复查询或删除被引用证据。'],
   ['REPORT_INPUT', /\[REPORT_INPUT\]/, '数据集与报表参数校验', '数据集引用、关联列或报表核验参数不符合要求；不是数据库连接故障。', '依据本轮工具返回的具体校验提示修正；使用list_datasets及实际字段，不重复取数或扩大权限。'],

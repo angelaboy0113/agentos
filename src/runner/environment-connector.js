@@ -1,3 +1,4 @@
+import {sshMysqlConnection} from './ssh-mysql.js';
 import { accountMode } from '../shared/database-account-policy.js';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { databaseEndpoints } from './config-endpoints.js';
@@ -34,7 +35,7 @@ export async function mysqlRead(e, q, parameters, cred, adapters = {}) {
   let connection, timedOut = false;
   const timer = setTimeout(() => { timedOut = true; connection?.destroy(); }, q.timeoutMs);
   try {
-    connection = await mysql.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password,
+    connection = e.transport ? await sshMysqlConnection(e,q,cred,adapters) : await mysql.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password,
       connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
       supportBigNumbers: true, bigNumberStrings: true,
       ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
