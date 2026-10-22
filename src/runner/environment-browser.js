@@ -270,8 +270,25 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
         await password.first().waitFor({ state: "visible" });
         if (manual) {
           await adapters.onLoginReady?.();
-          let timer;
+          let timer, credentialTimer, checking = false, attempted = null;
+          const submitProvided = async () => {
+            if (!adapters.readCredentials || checking || loggedIn || !active) return;
+            checking = true;
+            try {
+              const supplied = await adapters.readCredentials();
+              if (!supplied?.username || !supplied?.password || supplied.username.length > 1000 || supplied.password.length > 8000) return;
+              const signature = JSON.stringify([supplied.username, supplied.password]);
+              if (signature === attempted || loggedIn || !active) return;
+              attempted = signature;
+              await page.locator('input[type="text"],input:not([type])').first().fill(supplied.username);
+              await password.first().fill(supplied.password);
+              await page.locator("button").filter({ hasText: /登录|提交|Log in|Sign in|Submit/i }).first().click();
+            } catch { /* Missing Keychain entry or verification step: keep the manual login window. */ }
+            finally { checking = false; }
+          };
           try {
+            credentialTimer = setInterval(() => { void submitProvided(); }, 1500);
+            void submitProvided();
             await Promise.race([
               loginReady,
               new Promise((_, reject) => {
@@ -283,6 +300,7 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
             ]);
           } finally {
             clearTimeout(timer);
+            clearInterval(credentialTimer);
           }
         } else {
           const username = page
@@ -405,7 +423,7 @@ export async function loginNacosLocally(baseUrl, options = {}) {
     { baseUrl },
     { namespaces: [], maxCalls: 1, maxRows: 1, timeoutMs: 10000 },
     cred,
-    { manualLogin: true, onLoginReady: options.onLoginReady },
+    { manualLogin: true, onLoginReady: options.onLoginReady, readCredentials: options.readCredentials },
   );
   try {
     await b.run("browser_open");

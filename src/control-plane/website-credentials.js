@@ -3,7 +3,7 @@ import { isEnvironmentOwner, loadEnvironments } from '../shared/environment-acce
 import { saveKeychainCredential } from '../shared/keychain-credential.js';
 
 const command = /(?:网站登录|登录网站|网页登录)/i;
-const marker = /(?:网址|地址|url|账号|用户名|user(?:name)?|密码|password|passwd)\s*[:：=]?\s*/ig;
+const marker = /(?:网址|地址|账号|用户名|密码|(?<![A-Za-z0-9_-])(?:url|user(?:name)?|password|passwd))\s*[:：=]?\s*/ig;
 
 const cleanValue = (value) => String(value ?? '').trim().replace(/^[`'"“”‘’,，;；]+|[`'"“”‘’,，;；]+$/g, '').trim();
 

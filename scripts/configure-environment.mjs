@@ -239,13 +239,14 @@ try {
   let saved;
   if (kind === "nacos" && e.queries.investigate?.browser) {
     console.log(
-      "正在打开独立浏览器。请在窗口出现后登录；认证成功后会自动返回，不要在群里发送密码。",
+      "正在打开独立浏览器。请在窗口出现后登录；可在对应接入话题提供账号密码，由助手自动填写登录；也可在窗口手动登录。认证成功后会自动返回。",
     );
     const { loginNacosLocally } = await import(
       "../src/runner/environment-browser.js"
     );
     const localCredential = await loginNacosLocally(e.baseUrl, {
       onLoginReady: () => enrollmentStatus("login_required"),
+      ...(seed ? { readCredentials: () => credential(credentialRef) } : {}),
     });
     saved = spawnSync(
       "python3",

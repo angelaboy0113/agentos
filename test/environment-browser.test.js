@@ -246,3 +246,15 @@ test('reopening authenticated browser reuses current page and refreshes controls
   await page.evaluate(()=>{document.body.innerHTML='<input type="password">';});
   await assert.rejects(tools.run('browser_open'),error=>error.diagnosticStage==='browser.reuse-session' && /AUTH_REQUIRED/.test(error.message));
 });
+
+test('local enrollment browser automatically consumes late Keychain credentials and submits only login',async t=>{
+ const f=await fixture(t);const cred={};let ready=false;
+ const tools=await createNacosBrowser({baseUrl:f.baseUrl},{...q,namespaces:[]},cred,{
+  manualLogin:true,chromium:{launch:async options=>(await import('playwright')).chromium.launch({...options,headless:true})},
+  onLoginReady:()=>{ready=true;},readCredentials:async()=>ready?{username:'provided-user',password:'provided-secret'}:null,
+ });
+ t.after(()=>tools.close());
+ const result=await tools.run('browser_open');assert.match(result.stage,/已验证/);
+ assert.deepEqual(cred,{username:'provided-user',password:'provided-secret'});
+ assert.doesNotMatch(JSON.stringify(result),/provided-user|provided-secret/);assert.equal(f.writes(),0);
+});

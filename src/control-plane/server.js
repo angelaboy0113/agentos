@@ -11,6 +11,7 @@ import { enrollmentTarget } from './environment-enrollment.js';
 import { SharedChromeBrowser } from './shared-chrome-browser.js';
 import { WebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
+import { EnrollmentCredentialService } from './enrollment-credentials.js';
 import { WebsiteCredentialService } from './website-credentials.js';
 import { loadEnvironments, planQuery, verifyApprovedPlan, verifyCompletedPlan } from '../shared/environment-access.js';
 import { publishQuestion, questionJob, questionView } from './questions.js';
@@ -59,6 +60,7 @@ export async function createControlPlane(overrides = {}) {
   context.controlReceipts=new ControlReceipts(store);
   context.contacts = overrides.contactService ?? new ContactDirectory(context, { file: config.contactsFile });
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
+  context.enrollmentCredentials = overrides.enrollmentCredentials ?? new EnrollmentCredentialService(context);
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
@@ -502,6 +504,8 @@ export async function handleLarkCliEvent(context, event) {
   if (agent?.systemAssistant && event.chat_type === 'p2p') return { ignored: true, reason: 'assistant_group_only' };
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
   if (agent?.systemAssistant && (agent.role ?? 'developer') !== role) throw new Error('System assistant role/profile mismatch');
+  const enrollmentCredentialResult = await context.enrollmentCredentials?.handle(event);
+  if (enrollmentCredentialResult) return enrollmentCredentialResult;
   const credentialResult = await context.websiteCredentials?.handle(event);
   if (credentialResult) return credentialResult;
   if (event.agent_role && context.agents.agents?.[role]?.profile
