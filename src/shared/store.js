@@ -316,7 +316,7 @@ export class JsonStore {
       if (endpoints.length) job.completedEnvironmentReads = [...(job.completedEnvironmentReads ?? []), {
         plan: { tier: plan.tier, environmentId: plan.environmentId, queryId: plan.queryId,
           configHash: plan.configHash, scopeHash: plan.scopeHash, startedAt: plan.startedAt },
-        result: { outcome: result.outcome, environmentEvidence: structuredClone(evidence), connectionEndpoints: endpoints },
+        result: { outcome: result.outcome, environmentEvidence: { scopeHash:evidence.scopeHash, readAt:evidence.readAt, environmentId:evidence.environmentId, queryId:evidence.queryId, resultHash:evidence.resultHash, rowCount:evidence.rowCount }, connectionEndpoints: endpoints },
       }].slice(-20);
       delete job.environmentAccess;
       delete job.browserCheckpoint;

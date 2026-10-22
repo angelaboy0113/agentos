@@ -295,3 +295,13 @@ test('stopped partial investigation mentions the original asker despite a dangli
  assert.match(mentions[0].text,/ou_asker/);assert.match(mentions[0].text,/尚未完成/);
  assert.doesNotMatch(mentions[0].text,/已结束|已完成/);
 });
+
+test('pending enrollment delivers an actionable owner reminder without declaring completion, once',async t=>{
+ const {app,context,send,calls}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'read'}));
+ await send('needs-approval');const state=await app.store.read(),qid=state.jobs[0].questionId;
+ await app.store.transact(s=>{s.jobs[0].status='completed';s.jobs[0].result={outcome:'partial',finalMessage:'等待接入'};s.questions[qid].generation++;
+  s.environmentEnrollments={pending:{id:'pending',questionId:qid,projectId:'demo',chatId:'group',profile:'owner',kind:'mysql',tier:'prd',url:'mysql://fixture.test/db',status:'requested',createdAt:new Date().toISOString()}};});
+ await publishQuestion(context,qid);await publishQuestion(context,qid);
+ const mentions=calls.filter(c=>c.type==='mention');assert.equal(mentions.length,1);assert.match(mentions[0].text,/ou_admin/);assert.match(mentions[0].text,/请确认/);
+ assert.equal((await app.store.read()).cardMessages['question:'+qid].terminal,false);
+});

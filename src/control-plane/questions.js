@@ -74,7 +74,7 @@ export function questionView(state, questionId, projects = {}) {
   const root = state.conversations.find((item) => item.id === q.rootTurnId);
 
   const adminIds = (projects.ownerOpenIdsByProfile?.[q.profile] ?? []).filter(id => /^ou_[A-Za-z0-9]+$/.test(id));
-  const mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；可在本话题提供凭据，由本机独立窗口自动登录。') } : null) : terminal ? (useJob
+  const mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { kind:'environment_approval',profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；可在本话题提供凭据，由本机独立窗口自动登录。') } : null) : terminal ? (useJob
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
     : turn.directoryChannel ? (state.cardMessages?.['question:'+q.id]?.publicCompletionMention && state.cardMessages['question:'+q.id].deliveryToken===turn.id+':directory-result' ? state.cardMessages['question:'+q.id].terminalMention : null) : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
   if (mention && q.replyInThread) mention.replyInThread = true;

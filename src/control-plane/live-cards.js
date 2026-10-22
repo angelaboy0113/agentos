@@ -53,7 +53,7 @@ export class LiveCards {
         deliveryToken: deliveryToken ?? (!reopening ? existing?.deliveryToken : undefined),
         mentionDelivered: reopening || replacingWaitingMention ? false : existing?.mentionDelivered,
         publicCompletionMention: publicCompletionMention || (!reopening && existing?.publicCompletionMention) || false,
-        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal ? terminalMention : null),
+        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval'].includes(terminalMention?.kind) ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });
