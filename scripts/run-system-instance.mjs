@@ -46,6 +46,7 @@ Object.assign(process.env, {
   AGENTOS_DATA_DIR: path.join(runtime, 'data'), AGENTOS_RUNNER_WORKTREE_ROOT: path.join(runtime, 'data', 'worktrees'),
   AGENTOS_BROWSER_MODE: 'isolated', AGENTOS_RUNNER_CONCURRENCY: String(instance.concurrency ?? 3),
   LARKSUITE_CLI_CONFIG_DIR: path.dirname(authFile), AGENTOS_LARK_CONFIG_FILE: authFile,
+  AGENTOS_EVENT_CONFIG_ROOT: path.join(runtime, 'cli'),
 });
 for (const [key, filename] of Object.entries({ PROJECTS: 'projects', AGENTS: 'agents', ENVIRONMENTS: 'environments', CONVERSATION: 'conversation', MEMORY: 'memory', KNOWLEDGE: 'knowledge', CONTACTS: 'contacts', CONTACT_CHANNELS: 'contact-channels', CODEX_RUNTIME: 'codex-runtime' })) process.env[`AGENTOS_${key}_FILE`] = path.join(configDir, `${filename}.local.json`);
 await mkdir(process.env.AGENTOS_DATA_DIR, { recursive: true, mode: 0o700 });

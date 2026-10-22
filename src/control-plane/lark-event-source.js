@@ -180,7 +180,8 @@ export class LarkEventSource {
 
 export async function startLarkEventSource(config) {
   const cwd = path.resolve(config.dataDir ?? './data', 'lark-cli-events', sanitizeSegment(config.profile ?? 'default'));
-  const configDir = path.resolve(config.dataDir ?? './data', 'lark-cli-config', sanitizeSegment(config.profile ?? 'default'));
+  const configDir = path.resolve(config.eventConfigRoot ?? path.resolve(config.dataDir ?? './data', 'lark-cli-config'), sanitizeSegment(config.profile ?? 'default'));
+  if (process.platform !== 'win32' && Buffer.byteLength(path.join(configDir, 'events', 'cli_0000000000000000', 'bus.sock')) >= 104) throw new Error('飞书事件总线路径过长，请配置较短的独立 eventConfigRoot');
   await mkdir(cwd, { recursive: true });
   if (!config.reuseIsolatedConfig) await prepareIsolatedConfig(configDir, config.larkConfigFile);
   const source = new LarkEventSource({ ...config, cwd, configDir });

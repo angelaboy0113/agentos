@@ -10,7 +10,7 @@
 
 `agents.local.json` 为各系统设置独立 profile、`systemAssistant=true`、`role=developer`、`projectId`、`allowedChatIds`。这是执行器内部角色，群里只展示各系统助手。系统助手只接受指定群内的 @ 消息，私聊及其它群消息在下载附件或进入对话前拒绝；私密导出投递不因此关闭。系统规范 MD 同时用于聊天和源码调查；写权限由程序管理员门禁核验。
 
-先执行 `sh scripts/run-system-instance.sh --check`。只有机器人和本应用内群主身份、独立认证文件、源码目录全部就绪，才允许 `--start`。默认端口在私有 `runtime/instance.local.json` 配置，受保护端口禁止占用。启动器清除继承的 AgentOS/飞书实例变量，再显式设置独立 data、worktree、配置和 CLI 路径。新实例使用独立浏览器会话，不复用旧实例 Chrome 标签。
+先执行 `sh scripts/run-system-instance.sh --check`。只有机器人和本应用内群主身份、独立认证文件、源码目录全部就绪，才允许 `--start`。默认端口在私有 `runtime/instance.local.json` 配置，受保护端口禁止占用。启动器清除继承的 AgentOS/飞书实例变量，再显式设置独立 data、worktree、配置和 CLI 路径。Unix socket 对路径长度有限制，新实例的事件认证副本使用较短的 `runtime/cli/<profile>`；启动时检查过长路径并给出错误。macOS LaunchAgent 应使用文稿目录外的独立实例目录，避免受保护目录访问失败。新实例使用独立浏览器会话，不复用旧实例 Chrome 标签。
 
 ## 飞书接入
 
