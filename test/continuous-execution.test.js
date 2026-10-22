@@ -155,11 +155,14 @@ test('continuous environment evidence stays on the same job and final completion
   const evidence = { environmentId: 'uat', queryId: 'investigate', scopeHash: claimed.scopeHash,
     readAt: new Date(Date.now() + 1).toISOString(), rowCount: 1, resultHash: 'a'.repeat(64) };
   const resumed = await store.completeContinuousEnvironment(job.id, identity,
-    { outcome: 'ready', finalMessage: '已读取订单', environmentEvidence: evidence });
+    { outcome: 'ready', finalMessage: '已读取订单', environmentEvidence: evidence, connectionEndpoints: [{host:'other.test',port:3306,database:'other',connectionSource:{namespace:'uat',group:'g',dataId:'db.yaml',contentHash:'b'.repeat(64)},password:'never-store'}] });
   assert.equal(resumed.id, job.id);
   assert.equal(resumed.status, 'running');
   assert.equal(resumed.environmentAccess, undefined);
   assert.equal(resumed.context.length, 2);
+  assert.equal(resumed.completedEnvironmentReads[0].plan.configHash,claimed.configHash);
+  assert.equal(resumed.completedEnvironmentReads[0].result.connectionEndpoints[0].database,'other');
+  assert.doesNotMatch(JSON.stringify(resumed.completedEnvironmentReads),/password|never-store/);
   const done = await store.appendEvent(job.id, { type: 'completed', ...identity,
     result: { outcome: 'ready', finalMessage: '最终结论' } });
   assert.equal(done.job.status, 'completed');

@@ -198,13 +198,13 @@ export async function resumeAvailableSetupSources(context, load = loadEnvironmen
 }
 export async function pollEnrollments(context, load = loadEnvironments) {
   await resumeAvailableSetupSources(context,load);
-  const needed=await stateView(context.store,s=>Object.values(s.environmentEnrollments??{}).some(e=>isPendingEnrollment(e))||(s.jobs??[]).some(j=>{if(j.status!=='completed'||!j.environmentAccess)return false;const t=s.conversations?.find(t=>t.id===j.sourceMessageId);return t?.decision?.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&t.decision.action==='create_task'&&(!j.connectionEnrollmentHandled||t.setupPending); }));
+  const needed=await stateView(context.store,s=>Object.values(s.environmentEnrollments??{}).some(e=>isPendingEnrollment(e))||(s.jobs??[]).some(j=>{if(j.status!=='completed'||(!j.environmentAccess&&!j.completedEnvironmentReads?.length))return false;const t=s.conversations?.find(t=>t.id===j.sourceMessageId);return t?.decision?.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&t.decision.action==='create_task'&&(!j.connectionEnrollmentHandled||t.setupPending); }));
   if(!needed)return;
   let state = await context.store.read();
   // Resume metadata discovery without borrowing another user's PRD authority.
   for (const job of state.jobs ?? []) {
     const turn = (state.conversations ?? []).find(t=>t.id===job.sourceMessageId);
-    if (!turn || job.status!=='completed' || !job.environmentAccess
+    if (!turn || job.status!=='completed' || (!job.environmentAccess&&!job.completedEnvironmentReads?.length)
       || turn.decision?.environmentSetup?.kind!=='mysql' || turn.decision.environmentSetup.url
       || turn.decision.action!=='create_task') continue;
     const candidates=connectionCandidates(state,turn,job.projectId).filter(e=>e.tier===turn.decision.environmentSetup.tier && e.connectionSource && (!turn.setupTargetUrl||e.url===turn.setupTargetUrl));

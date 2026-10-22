@@ -281,3 +281,17 @@ test('enrollment wait retains question metrics and exposes scoped refresh/cancel
  await stat(path.join(directory,'environment-enrollments/enr/cancelled.json'));
  assert.match(JSON.stringify(questionView(s,qid).card),/已停止接入/);
 });
+
+test('stopped partial investigation mentions the original asker despite a dangling setup flag, once',async t=>{
+ const {app,context,send,calls}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'read'}));
+ await send('stopped');
+ const state=await app.store.read(),j=state.jobs[0],qid=j.questionId;
+ await app.store.transact(s=>{
+  s.jobs[0].status='completed';s.jobs[0].result={outcome:'partial',finalMessage:'仍需接入数据库',investigation:{status:'wait'}};
+  s.conversations.find(x=>x.id===s.questions[qid].latestTurnId).setupPending=true;
+ });
+ await publishQuestion(context,qid);await publishQuestion(context,qid);
+ const mentions=calls.filter(c=>c.type==='mention');assert.equal(mentions.length,1);
+ assert.match(mentions[0].text,/ou_asker/);assert.match(mentions[0].text,/尚未完成/);
+ assert.doesNotMatch(mentions[0].text,/已结束|已完成/);
+});

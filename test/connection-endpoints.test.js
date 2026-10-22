@@ -60,6 +60,7 @@ test('discovery polling proceeds to one approval after a bare endpoint is enrich
  const dir=await mkdtemp(path.join(os.tmpdir(),'endpoint-enrichment-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new JsonStore(path.join(dir,'state.json'));
  const bare=job();bare.id='bare';delete bare.result.connectionEndpoints[0].connectionSource;
  const proven=job();proven.id='proven';proven.sourceMessageId='turn';proven.connectionEnrollmentPending=true;
+ proven.completedEnvironmentReads=[{plan:proven.environmentAccess,result:proven.result}];delete proven.environmentAccess;proven.result={outcome:'partial',investigation:{status:'wait'}};
  const turn={id:'turn',questionId:'parent',chatId:'c',profile:'o',senderId:'member',setupPending:true,setupTargetUrl:'mysql://db.test:3306/demo',decision:{action:'create_task',environmentSetup:{kind:'mysql',tier:'prd',url:''}}};
  await store.transact(s=>{s.jobs=[bare,proven];s.conversations=[turn];s.questions={parent:{id:'parent',latestTurnId:'turn',generation:1}};});
  const context={store,config:{dataDir:dir},projects:{chatProjectMap:{c:'p'},projects:{p:{}}}};
@@ -68,4 +69,16 @@ test('discovery polling proceeds to one approval after a bare endpoint is enrich
  await pollEnrollments(context);await pollEnrollments(context);
  const s=await store.read(),requests=Object.values(s.environmentEnrollments);assert.equal(requests.length,1);assert.equal(requests[0].status,'requested');assert.equal(requests[0].databaseSource.sourceJobId,'proven');assert.equal(requests[0].senderId,'member');
  assert.match(s.conversations[0].response,/同意/);assert.doesNotMatch(s.conversations[0].response,/补充目标配置|尚未取得/);assert.equal(s.jobs[1].connectionEnrollmentHandled,true);
+});
+
+test('continuous discovery survives final model result and cannot borrow inherited context evidence',()=>{
+ const j=job(), plan=structuredClone(j.environmentAccess), result=structuredClone(j.result);
+ j.completedEnvironmentReads=[{plan,result}];delete j.environmentAccess;
+ j.result={outcome:'needs_clarification',environmentSetup:{kind:'mysql',tier:'prd',url:''}};
+ const state={questions:{parent:{id:'parent'}},jobs:[j]},turn={questionId:'parent',chatId:'c',profile:'o'};
+ assert.equal(connectionCandidates(state,turn,'p').length,1);
+ j.completedEnvironmentReads[0].result.environmentEvidence.scopeHash='wrong';
+ assert.equal(connectionCandidates(state,turn,'p').length,0);
+ delete j.completedEnvironmentReads;j.context=[{kind:'environment_result',result}];
+ assert.equal(connectionCandidates(state,turn,'p').length,0);
 });

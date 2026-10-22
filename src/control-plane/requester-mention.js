@@ -13,7 +13,7 @@ export function conversationTerminalMention(turn) {
 
 export function jobTerminalMention(job, projects = {}) {
   if(job.setupTurnId)return null;
-  if(job.connectionEnrollmentPending && !job.connectionEnrollmentHandled && job.status === 'completed') return null;
+  if(job.connectionEnrollmentPending && !job.connectionEnrollmentHandled && job.status === 'completed' && job.result?.investigation?.status !== 'wait') return null;
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
   if(job.status==='awaiting_clarification'&&job.result?.browserLoginRequired){
     const ids=(job.environmentAccess?.approvalOwnerIds??[]).filter(id=>OPEN_ID.test(id));

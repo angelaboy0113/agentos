@@ -1,3 +1,4 @@
+import { connectionEndpoints } from './connection-endpoints.js';
 import {recordReportFiles,recordReportReview} from './report-acceptance.js';
 import {interruptedInvestigation} from './investigation-budget.js';
 import { continuousReviewDecision, reviewDecision } from './investigation-review.js';
@@ -309,6 +310,14 @@ export class JsonStore {
       if(newData)ledger.seen=[...ledger.seen,useful].slice(-64);
       job.investigationProgress=ledger;
       if(result.exportFiles?.length)recordReportFiles(job,result.exportFiles,state.questions?.[job.questionId]?.generation);
+      // Persist only validated connection provenance outside compacted model context.
+      // The active grant is intentionally removed before the next analysis step.
+      const endpoints = connectionEndpoints(result.connectionEndpoints);
+      if (endpoints.length) job.completedEnvironmentReads = [...(job.completedEnvironmentReads ?? []), {
+        plan: { tier: plan.tier, environmentId: plan.environmentId, queryId: plan.queryId,
+          configHash: plan.configHash, scopeHash: plan.scopeHash, startedAt: plan.startedAt },
+        result: { outcome: result.outcome, environmentEvidence: structuredClone(evidence), connectionEndpoints: endpoints },
+      }].slice(-20);
       delete job.environmentAccess;
       delete job.browserCheckpoint;
       delete job.browserResumeClaim;
