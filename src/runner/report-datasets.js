@@ -19,7 +19,7 @@ export class ReportDatasets {
   const signature=hash([queryHash,statement.columns,statement.numericColumns??[],statement.rowKey??null]);
   const previous=this.reuseQueries?this.collected.get(signature):null;
   if(previous){const d=await this.restore(previous.datasetRef);if(d?.complete)return {...previous,reused:true,stage:'复用本轮同一只读事务中已完成的相同查询；保留原取数时间'};}
-  const rows=[];const batch=500;let complete=false;
+  const rows=[];const batch=Number.isInteger(statement.batchSize)&&statement.batchSize>=1&&statement.batchSize<=500?statement.batchSize:500;let complete=false;
   for(let offset=0;offset<=this.maxRows;offset+=batch){
    await this.check();const size=Math.min(batch,this.maxRows-offset+1);
    const [page]=await execute({sql:`${statement.sql} LIMIT ${size} OFFSET ${offset}`},statement.params);
@@ -70,7 +70,7 @@ export class ReportDatasets {
  }
  async compose(args){
   await this.check();if(this.files>=4)throw new ReportInputError('单次调查最多生成4个报表文件');if(!this.directory)throw new ReportInputError('本次执行未配置报表输出目录');
-  if(!Array.isArray(args.sources)||!args.sources.length||args.sources.length>12||!Array.isArray(args.columns)||!args.columns.length||args.columns.length>12)throw new ReportInputError('报表需要1至12个来源及1至12列');
+  if(!Array.isArray(args.sources)||!args.sources.length||args.sources.length>12||!Array.isArray(args.columns)||!args.columns.length||args.columns.length>128)throw new ReportInputError('报表需要1至12个来源及1至128列');
   try{args={...args,columns:reportColumns(args.columns,this.originalQuestion)};}catch(error){throw new ReportInputError(error.message);}
   const sources=new Map();let keys=new Set();
   for(const s of args.sources){
@@ -87,7 +87,7 @@ export class ReportDatasets {
    if(e.op==='key')return;
    if(e.op==='field'){const s=sources.get(e.source);if(!s?.columns.includes(e.column)||e.missing!==undefined&&!['zero','empty'].includes(e.missing))throw new ReportInputError('报表字段引用无效');return;}
    if(!['add','subtract','min'].includes(e.op)||!Array.isArray(e.args)||e.args.length<2||e.args.length>6)throw new ReportInputError('仅支持key、field、add、subtract、min固定计算，不接受表达式');e.args.forEach(x=>validate(x,depth+1));};
-  args.columns.forEach(c=>validate(c.value));
+  args.columns.forEach(c=>{nodes=0;validate(c.value);});
   const evaluate=(e,key)=>{
    if(e.op==='key')return key;
    if(e.op==='field'){const row=sources.get(e.source).map.get(key);const v=row?.[e.column];if(v===undefined||v===null){if(e.missing==='zero')return '0';if(e.missing==='empty')return '';throw new ReportInputError('报表有缺失值；必须明确缺失值的业务处理规则');}return v;}
