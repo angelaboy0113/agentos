@@ -2,6 +2,7 @@ import {TaskDatasetStore} from './task-dataset-store.js';
 import {randomUUID,createHash} from 'node:crypto';
 import {mkdir,writeFile,rename,rm,readFile,lstat} from 'node:fs/promises';
 import path from 'node:path';
+import {reportColumns,validateReportHeaders} from '../shared/report-headers.js';
 
 export class ReportInputError extends Error {constructor(message){super(message);this.code='REPORT_INPUT';}}
 
@@ -70,6 +71,7 @@ export class ReportDatasets {
  async compose(args){
   await this.check();if(this.files>=4)throw new ReportInputError('单次调查最多生成4个报表文件');if(!this.directory)throw new ReportInputError('本次执行未配置报表输出目录');
   if(!Array.isArray(args.sources)||!args.sources.length||args.sources.length>12||!Array.isArray(args.columns)||!args.columns.length||args.columns.length>12)throw new ReportInputError('报表需要1至12个来源及1至12列');
+  try{args={...args,columns:reportColumns(args.columns,this.originalQuestion)};}catch(error){throw new ReportInputError(error.message);}
   const sources=new Map();let keys=new Set();
   for(const s of args.sources){
    if(!s||!/^s[0-9]{1,2}$/.test(s.name)||sources.has(s.name))throw new ReportInputError('来源name必须为不重复的s1、s2等');
@@ -170,6 +172,7 @@ export class ReportDatasets {
   const text=(v)=>typeof v==='string'&&v.trim().length>=3&&v.length<=1200;
   if(!text(args.requirement)||!text(args.scopeEvidence)||!Array.isArray(args.expectedColumns)||JSON.stringify(args.expectedColumns)!==JSON.stringify(data.columns))throw new ReportInputError('须按原问题登记requirement、scopeEvidence及完全一致的expectedColumns，缺列、额外列或顺序不同应重做草稿');
   if(!Array.isArray(args.columnRules)||args.columnRules.length!==data.columns.length||args.columnRules.some((c,i)=>c?.label!==data.columns[i]||!text(c.definition)||!text(c.evidence)))throw new ReportInputError('每一列都要登记业务定义/公式与源码或文档依据，不得用项目名称包含某词替代已核实业务条件');
+  try{validateReportHeaders(data.columns,this.originalQuestion);}catch(error){throw new ReportInputError(error.message);}
   const population=await this.restore(args.populationRef);
   if(!population?.complete||population.reportDraft||!population.queryHash||!population.queryDefinition||!population.columns.includes(args.populationKey))throw new ReportInputError('完整对象范围必须来自独立原始查询数据集，不能拿草稿自身当覆盖证明');
   const expected=uniqueKeys(population,args.populationKey);
