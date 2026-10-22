@@ -41,3 +41,9 @@ test('fresh owner credential message retries the same previously approved failed
  assert.equal(launched.retryOf,f.e.id);assert.equal(f.saved[0].ref,launched.id.toLowerCase());
  assert.doesNotMatch(JSON.stringify(f.state),/test-secret|test-user/);
 });
+
+test('an unrelated pending Nacos enrollment does not steal credentials from an existing website login card',async()=>{
+ const f=fixture();f.state.questions.web={messageId:'website-root'};
+ f.state.jobs=[{status:'awaiting_clarification',chatId:'group',questionId:'web',result:{browserLoginRequired:true},environmentAccess:{kind:'website'}}];
+ assert.equal(await f.service.handle({...f.event,root_id:'website-root'}),null);assert.equal(f.saved.length,0);
+});

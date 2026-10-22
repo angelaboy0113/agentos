@@ -24,6 +24,12 @@ export class EnrollmentCredentialService {
       const card = state.cardMessages?.[`question:${e.questionId}`];
       return [q?.messageId, q?.threadRootId, card?.messageId].some(id => id && ids.includes(id));
     });
+    const websiteReply = (state.jobs ?? []).some(job => job.status === 'awaiting_clarification'
+      && job.result?.browserLoginRequired && job.environmentAccess?.kind === 'website'
+      && job.chatId === event.chat_id && [state.questions?.[job.questionId]?.messageId,
+        state.questions?.[job.questionId]?.threadRootId,
+        state.cardMessages?.[`question:${job.questionId}`]?.messageId].some(id => id && ids.includes(id)));
+    if (!related.length && websiteReply) return null;
     const parsed = explicit ?? (related.length === 1 ? parseWebsiteCredentialMessage(text, { allowLoose: true }) : null);
     if (!parsed || !pending.length) return null;
     const reply = async notice => {
