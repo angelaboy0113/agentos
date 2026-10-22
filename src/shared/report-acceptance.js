@@ -17,6 +17,9 @@ export function assessReportDelivery(job,result){
  result=normalizeReportFormatReview(job,result);
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.reportReviews||!job.reportFiles?.length||result?.sourceSyncBlocked)return result;
  const reviewed=assessment(job,result);
+ const requested=result?.reportAssessment?.deliverables;
+ if(requested && !validDeliverables(job,requested,result.reportAssessment.fileId))return {...result,outcome:'partial',reportReviewRequired:true,environmentQuery:null,websiteQuery:null,
+  investigation:{...result.investigation,status:'continue',blocker:null,nextStep:'共同交付必须显式列出每份文件及分工，包含主文件，且每份文件均已完成实际CSV及公式核验；不能以补充文件替代未交付主表。'}};
  if(reviewed&&job.reportEvidence&&(job.reportEvidence.status!=='verified'||job.reportEvidence.binding?.fileId!==reviewed.file.id||job.reportEvidence.binding?.verificationHash!==reviewed.file.verificationHash||job.reportEvidence.calculationAudit?.status!=='passed'))return {...result,reportReviewRequired:true,outcome:'partial',environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,goals:(result.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),status:'continue',blocker:null,nextStep:'先读取与当前文件绑定的inspect_report资料，不能仅凭元数据接受文件。'}};
  const scope=job.reportEvidence?.populationAudit,scopeReview=reviewed?.a.scopeReview;
  const differences=scope?.comparisons?.filter(c=>c.onlyReferenceCount||c.onlyFileCount)??[];
@@ -39,11 +42,25 @@ export function recordReportReview(job,result){
  if(blocking.length){job.reportReviews[file.id]={status:'revision_required',verificationHash:file.verificationHash,issues:structuredClone(blocking),at:new Date().toISOString()};return;}
  if(a.decision==='deliver'&&a.coverage==='complete'&&result.outcome==='ready'&&result.investigation?.status==='complete'&&result.investigation.goals?.some(g=>g.id==='original-question'&&g.required===true&&g.status==='verified'&&g.evidence?.trim())){
   job.reportReviews[file.id]={status:'accepted',verificationHash:file.verificationHash,issues:structuredClone(a.issues),at:new Date().toISOString(),result:structuredClone(result)};
+  if(Array.isArray(a.deliverables)&&a.deliverables.length){
+   const files=a.deliverables.map(x=>job.reportFiles.find(f=>f.id===x.fileId));
+   const inspections=result.reportInspections??[];
+   if(files.some(f=>!proof(f)||!inspections.some(e=>e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&e.calculationAudit?.status==='passed'))){job.reportReviews[file.id]={status:'awaiting_review',verificationHash:file.verificationHash};return;}
+   job.reportDeliverySet={files:files.map(f=>({fileId:f.id,verificationHash:f.verificationHash})),at:new Date().toISOString()};
+   for(const component of files)job.reportReviews[component.id]={status:'accepted',verificationHash:component.verificationHash,issues:[],at:new Date().toISOString(),result:structuredClone(result)};
+  }else delete job.reportDeliverySet;
+
  }else if(!previous)job.reportReviews[file.id]={status:'awaiting_review',verificationHash:file.verificationHash};
 }
-export function reportEligible(job,file){return proof(file)&&(!job.reportReviews||(job.reportReviews[file.id]?.status==='accepted'&&job.reportReviews[file.id]?.verificationHash===file.verificationHash));}
+export function reportEligible(job,file){if(job.reportDeliverySet?.files?.some(f=>f.fileId===file?.id)&&job.reportDeliverySet.files.some(f=>job.reportReviews?.[f.fileId]?.status!=='accepted'||job.reportReviews[f.fileId].verificationHash!==f.verificationHash))return false;return proof(file)&&(!job.reportReviews||(job.reportReviews[file.id]?.status==='accepted'&&job.reportReviews[file.id]?.verificationHash===file.verificationHash));}
 export function acceptedReportResult(job){
  const f=[...(job.reportFiles??[])].reverse().find(f=>job.reportReviews?.[f.id]?.status==='accepted'&&reportEligible(job,f));
  if(!f)return null;const r=job.reportReviews[f.id].result;
  return r?.outcome==='ready'?{...structuredClone(r),environmentQuery:null,websiteQuery:null,environmentSetup:null}:null;
+}
+
+function validDeliverables(job,requested,primary){
+ if(!Array.isArray(requested)||!requested.length||requested.length>20||!requested.some(x=>x.fileId===primary)||new Set(requested.map(x=>x.fileId)).size!==requested.length)return false;
+ const evidence=[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])];
+ return requested.every(x=>typeof x.evidence==='string'&&x.evidence.trim()&&job.reportFiles?.some(f=>f.id===x.fileId&&proof(f)&&evidence.some(e=>e?.status==='verified'&&e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&e.calculationAudit?.status==='passed')));
 }

@@ -66,5 +66,13 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
 }
 export async function reportReviewEvidence(dataDir,job){
  const item=job.reportFiles?.filter(f=>f.verificationHash).at(-1);if(!item)return null;
- try{return await inspectReport(dataDir,job,{fileId:item.id});}catch{return {status:'unavailable',binding:{fileId:item.id},note:'本机文件审阅校验失败；这是读取/绑定缺口，不是已证实的计算公式错误。请用inspect_report核对该文件，不能要求用户提供本机已有CSV或重复取数。'};}
+ try{
+  const primary=await inspectReport(dataDir,job,{fileId:item.id});
+  primary.relatedReports=[];
+  for(const file of (job.reportFiles??[]).filter(f=>f.verificationHash&&f.id!==item.id).slice(-19)){
+   try{const r=await inspectReport(dataDir,job,{fileId:file.id});primary.relatedReports.push({status:r.status,binding:r.binding,headers:r.headers,calculationAudit:r.calculationAudit,populationAudit:r.populationAudit});}
+   catch{primary.relatedReports.push({status:'unavailable',binding:{fileId:file.id}});}
+  }
+  return primary;
+ }catch{return {status:'unavailable',binding:{fileId:item.id},note:'本机文件审阅校验失败；这是读取/绑定缺口，不是已证实的计算公式错误。请用inspect_report核对该文件，不能要求用户提供本机已有CSV或重复取数。'};}
 }

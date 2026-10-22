@@ -91,3 +91,11 @@ test('private report outbox preserves private recipient through retry and never 
  await service.close();state.reportDeliveries[key].retryAt=0;failed=false;state.questions.q.profile='changed';
  const restarted=new ReportDelivery(context);await restarted.retry();assert.equal(calls.length,2);assert.equal(calls[1].options.privateRecipient,'ou_asker');assert.equal(calls[1].options.profile,'owner');assert.equal(calls[0].options.idempotencyKey,calls[1].options.idempotencyKey);await restarted.retry();assert.equal(calls.length,2);assert.equal(state.reportDeliveries[key].messageId,'om-report');await restarted.close();
 });
+
+test('explicit accepted report set queues every component without superseding the main file',async()=>{
+ const files=['main','supplement'].map((id,i)=>({id,verificationHash:String(i+1).repeat(64),questionGeneration:1}));
+ const job={id:'j',questionId:'q',status:'completed',result:{outcome:'ready'},reportFiles:files,reportReviews:Object.fromEntries(files.map(f=>[f.id,{status:'accepted',verificationHash:f.verificationHash}])),reportDeliverySet:{files:files.map(f=>({fileId:f.id,verificationHash:f.verificationHash}))}};
+ const state={jobs:[job],questions:{q:{generation:1,messageId:'root'}}};const svc=new ReportDelivery({store:{read:async()=>structuredClone(state),transact:async f=>f(state)},config:{dataDir:'/unused'},feishu:{}});
+ await svc.enqueue(job);await svc.enqueue(job);assert.equal(Object.keys(state.reportDeliveries).length,2);assert.ok(Object.values(state.reportDeliveries).every(e=>!e.superseded));
+ await svc.close();
+});

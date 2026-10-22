@@ -305,3 +305,10 @@ test('pending enrollment delivers an actionable owner reminder without declaring
  const mentions=calls.filter(c=>c.type==='mention');assert.equal(mentions.length,1);assert.match(mentions[0].text,/ou_admin/);assert.match(mentions[0].text,/请确认/);
  assert.equal((await app.store.read()).cardMessages['question:'+qid].terminal,false);
 });
+
+test('a final job produced after a supplementary acknowledgement replaces its stale running text',async t=>{
+ const {app,context,send}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'export'}));await send('export-root');
+ const s=await app.store.read(),qid=s.jobs[0].questionId;
+ await app.store.transact(s=>{const q=s.questions[qid],prior=s.conversations[0];s.conversations.push({...prior,id:'ack',createdAt:'2026-01-01T00:00:00Z',status:'sent',response:'file not generated',outcome:{}});q.latestTurnId='ack';q.generation++;Object.assign(s.jobs[0],{status:'completed',updatedAt:'2026-01-01T00:01:00Z',result:{outcome:'ready',finalMessage:'verified export complete'}});});
+ const v=questionView(await app.store.read(),qid,app.projects);assert.ok(v.job);assert.match(JSON.stringify(v.card),/verified export complete/);assert.match(v.mention.text,/任务已结束/);
+});

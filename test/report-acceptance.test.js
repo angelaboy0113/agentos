@@ -53,3 +53,15 @@ test('a narrower population cannot pass without reviewing the bound scope differ
  r.reportAssessment.scopeReview={populationRef:'population',evidence:'用户明确只要有交易的客户',comparisons:[{datasetRef:'all-customers',keyColumn:'id',decision:'covered',evidence:'all'}]};assert.equal(assessReportDelivery(job,r).outcome,'partial');
  r.reportAssessment.scopeReview.comparisons[0]={datasetRef:'all-customers',keyColumn:'id',decision:'out_of_scope',evidence:'原问题限定有交易客户，另3户无交易，按已核实业务规则排除'};assert.equal(assessReportDelivery(job,r).outcome,'ready');
 });
+
+test('explicit report set accepts both verified components and invalidation blocks the entire set',()=>{
+ const j=fixture(),extra={id:'report-b',verificationHash:'b'.repeat(64)};recordReportFiles(j,[extra],1);
+ const ev=f=>({status:'verified',binding:{fileId:f.id,verificationHash:f.verificationHash},calculationAudit:{status:'passed'}});
+ j.reportEvidence={...ev(file),relatedReports:[ev(extra)]};
+ const r=review();r.reportAssessment.deliverables=[{fileId:file.id,evidence:'main population'},{fileId:extra.id,evidence:'supplemental population'}];
+ r.reportInspections=[ev(file),ev(extra)];
+ const final=assessReportDelivery(j,r);assert.equal(final.outcome,'ready');recordReportReview(j,final);
+ assert.deepEqual(j.reportDeliverySet.files.map(f=>f.fileId),['report-a','report-b']);assert.ok(reportEligible(j,extra));
+ const bad=structuredClone(j);bad.reportReviews[file.id].status='revision_required';assert.equal(reportEligible(bad,extra),false);
+ for(const mutate of [r=>r.reportAssessment.deliverables.push({fileId:'foreign',evidence:'unknown'}),r=>r.reportAssessment.deliverables=[{fileId:extra.id,evidence:'only supplement'}],r=>r.reportAssessment.deliverables[1].evidence='']){const copy=structuredClone(r);mutate(copy);assert.equal(assessReportDelivery(j,copy).outcome,'partial');}
+});

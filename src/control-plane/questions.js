@@ -51,7 +51,7 @@ export function questionView(state, questionId, projects = {}) {
   const enrollment = Object.values(state.environmentEnrollments ?? {}).find(e => e.questionId === q.id && isPendingEnrollment(e));
   const job = questionJob(state, q.id);
   const outstanding = state.conversations.some((item) => item.questionId === q.id && pending(item));
-  const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId);
+  const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId || Date.parse(job.updatedAt)>=Date.parse(turn.createdAt));
   const notice=enrollmentNotice(enrollment);
   const displayTurn={...turn,setupStatus:enrollment?.status,setupLoginIssue:enrollment?.loginIssue,setupHasCredentials:Boolean(enrollment?.credentialReceivedAt),setupPending:Boolean(enrollment)||turn.setupPending,...(notice?{response:notice}: {})};
   const shown = useJob ? job : displayTurn;

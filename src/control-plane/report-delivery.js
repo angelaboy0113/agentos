@@ -19,13 +19,17 @@ export class ReportDelivery {
    if(q&&state.jobs.filter(j=>j.questionId===job.questionId).at(-1)?.id!==job.id)return;
    const jobs=job.questionId?state.jobs.filter(j=>j.questionId===job.questionId):[current];
    state.reportDeliveries??={};
-   // Only the latest finalized file is the deliverable. Earlier versions stay local.
+   // Default to the latest accepted file; an explicitly reviewed set delivers every component.
    const candidates=jobs.flatMap(source=>(source.reportFiles??[]).filter(item=>reportEligible(current.reportReviews?current:source,item)).map(item=>({source:state.jobs.find(j=>j.id===item.sourceJobId)??source,item})));
-   const selected=candidates.filter(({item})=>!q||item.questionGeneration===q.generation).slice(-1);
+   const eligible=candidates.filter(({item})=>!q||item.questionGeneration===q.generation);
+   const manifest=current.reportDeliverySet?.files;
+   const selected=manifest?.length ? manifest.map(m=>eligible.find(({item})=>item.id===m.fileId&&item.verificationHash===m.verificationHash)).filter(Boolean) : eligible.slice(-1);
+   if(manifest?.length && selected.length!==manifest.length)return;
+   const selectedKeys=new Set(selected.map(({source,item})=>source.id+':'+item.id));
    for(const {source,item} of selected){
     if(q&&item.questionGeneration!==q.generation)continue;
     const key=source.id+':'+item.id;
-    for(const [oldKey,entry] of Object.entries(state.reportDeliveries))if(oldKey!==key&&!entry.messageId&&entry.questionId===job.questionId&&entry.questionGeneration===q?.generation)entry.superseded=true;
+    for(const [oldKey,entry] of Object.entries(state.reportDeliveries))if(!selectedKeys.has(oldKey)&&!entry.messageId&&entry.questionId===job.questionId&&entry.questionGeneration===q?.generation)entry.superseded=true;
     if(state.reportDeliveries[key])continue;
     const messageId=q?.messageId??job.originMessageId??job.replyToMessageId;if(!messageId)continue;
     state.reportDeliveries[key]={sourceJobId:source.id,questionId:job.questionId,questionGeneration:q?.generation,item,destination:{messageId,privateRecipient:privateRecipient(state,current),profile:q?.profile??job.originProfile??job.agentProfile,replyInThread:q?.replyInThread??job.originReplyInThread??false},createdAt:new Date().toISOString()};

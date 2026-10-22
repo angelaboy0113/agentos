@@ -434,7 +434,8 @@
             "coverage",
             "decision",
             "issues",
-            "scopeReview"
+            "scopeReview",
+            "deliverables"
           ],
           "properties": {
             "fileId": {
@@ -542,6 +543,36 @@
                             "maxLength": 1200
                           }
                         }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "deliverables": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "fileId",
+                      "evidence"
+                    ],
+                    "properties": {
+                      "fileId": {
+                        "type": "string"
+                      },
+                      "evidence": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1200
                       }
                     }
                   }
