@@ -16,3 +16,13 @@ test('many database contracts compact losslessly without removing a target or ch
  const input={message:'export recent orders',history:[],jobs:[],environmentCatalog:compact,memory:{summary:{items:[]},matches:[]}};
  assert.equal(fitContext(input).environmentCatalog.environments.length,40);
 });
+
+test('resumed analysis refreshes current capability contracts instead of remembering an obsolete tool gap',async t=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const path=await import('node:path'),os=await import('node:os');const {buildPrompt}=await import('../src/runner/codex-executor.js');
+ const dir=await mkdtemp(path.join(os.tmpdir(),'catalog-resume-')),prev=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(dir,'env.json');
+ t.after(async()=>{if(prev===undefined)delete process.env.AGENTOS_ENVIRONMENTS_FILE;else process.env.AGENTOS_ENVIRONMENTS_FILE=prev;await rm(dir,{recursive:true,force:true});});
+ await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify({version:1,environments:{latest_source:{kind:'mysql',projectId:'p',tier:'uat',host:'db.test',port:3306,database:'demo',credentialRef:'never-print',membersRead:true,ownerOpenIdsByProfile:{owner:['ou_owner']},queries:{investigate:{reviewed:true,description:'read',mode:'investigate',tables:['*'],parameters:[{name:'purpose',type:'string',maxLength:200}],maxRows:20,timeoutMs:1000}}}}}));
+ const job={taskIntent:'analysis',stage:'developer',questionId:'q',projectId:'p',context:[{stage:'developer',result:{threadId:'thread',workspace:'/snapshot'}}]};
+ const prompt=await buildPrompt(job,{}, {instruction:'unused',metadata:{}},{workspace:'/snapshot'},[],'/snapshot');
+ assert.match(prompt,/latest_source/);assert.match(prompt,/database_clock/);assert.doesNotMatch(prompt,/never-print/);
+});

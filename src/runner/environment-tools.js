@@ -226,6 +226,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     { tool: 'read_config', args: { ref: '从discover返回的ref' }, description: '读取一个已发现配置并解析同文件变量，仅返回数据库端点与解析状态' }
   ] : [
     { tool: 'connection', args: {}, description: '测试数据库连接、只读账号授权与只读事务' },
+    { tool: 'database_clock', args: {}, description: '读取固定SQL返回的数据库会话时间、UTC时间、UTC偏移与时区设置，核对过去一周等日期窗口；不接受SQL或参数，不读业务表。数据库会话时区不等于DATETIME字段业务时区，仍需结合字段类型及源码。' },
     { tool: 'tables', args: {cursor:'可选：nextCursor，默认0'}, description:'分页列出允许的基础表名称，先定位目标表再用schema读取列' },
     { tool: 'schema', args: { table: '可选：限定基础表名', columns: ['可选：要定向发现的准确字段名，最多20个；使用时必须提供table'], cursor: '可选：上次返回的nextCursor，默认0' }, description: '读取本数据库允许的基础表和普通字段；已知字段名时用table+columns定向发现，避免宽表分页遗漏；不读取业务数据' },
     { tool: 'count', args: { table: 'schema返回的表', distinctColumns: '可选：去重字段数组；空数组统计行数，非空按这些字段组合去重（不计含NULL的组合）', filters: '与select相同的明确筛选条件' }, description: '统计批准基础表筛选范围内的完整行数或指定字段组合去重数，不用样本行数代替总数，不支持任意SQL或联表' },
@@ -290,6 +291,12 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const c = await mysql();
         if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect({...statement,recipe:{tool,args:structuredClone(args)}},(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
         if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };
+        if(tool==='database_clock'){
+          if(Object.keys(args).length)throw new QueryInputError('QUERY_INPUT','database_clock不接受参数或SQL');
+          const [rows]=await c.execute({sql:"SELECT DATABASE() AS database_name, DATE_FORMAT(CURRENT_TIMESTAMP(6), '%Y-%m-%d %H:%i:%s.%f') AS database_time, DATE_FORMAT(UTC_TIMESTAMP(6), '%Y-%m-%d %H:%i:%s.%f') AS `utc_time`, TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), CURRENT_TIMESTAMP()) AS utc_offset_minutes, @@session.time_zone AS session_time_zone, @@system_time_zone AS system_time_zone",timeout:q.timeoutMs},[]);
+          const columns=['database_name','database_time','utc_time','utc_offset_minutes','session_time_zone','system_time_zone'];
+          return {clock:Object.fromEntries(columns.map(k=>[k,bounded(rows[0]?.[k],secrets)])),observedAtUtc:new Date().toISOString(),stage:'已读取当前数据库会话时间与时区；业务字段时区仍按源码和字段类型核对'};
+        }
         if (tool === 'tables') {
           const offset=args.cursor===undefined?0:Number(args.cursor);
           if(!Number.isInteger(offset)||offset<0||offset>100000)throw new Error('结构分页参数无效');

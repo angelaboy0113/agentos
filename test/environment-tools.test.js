@@ -457,3 +457,10 @@ test('a finally verified alternative report clears abandoned input errors but or
  planner:async()=>({next:async()=>[{tool:'enrich_dataset',arguments:'{}'},{tool:'linked_group_dataset',arguments:'{}'},{tool:'finalize_report',arguments:'{}'}][n++],close:async()=>{}})});
  assert.equal(r.partial,false);assert.equal(r.toolInputErrors[0].resolved,true);assert.equal(r.exportFiles.length,1);
 });
+
+test('database clock uses a fixed read-only statement, exposes no secrets and rejects model SQL',async()=>{
+ const statements=[];
+ const c={query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async(stmt,params)=>{statements.push({sql:stmt.sql,params});return [[{database_name:'demo',database_time:'2026-10-22 17:00:00.000000',utc_time:'2026-10-22 09:00:00.000000',utc_offset_minutes:480,session_time_zone:'SYSTEM',system_time_zone:'CST',password:'never-return'}]];},rollback:async()=>{},destroy:()=>{}};
+ const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'localhost',database:'demo'},query,credentials,{mysql:{createConnection:async()=>c}});
+ try{assert.ok(tools.spec.some(t=>t.tool==='database_clock'));const r=await tools.run('database_clock',{});assert.equal(r.clock.utc_offset_minutes,'480');assert.match(statements[0].sql,/UTC_TIMESTAMP/);assert.deepEqual(statements[0].params,[]);assert.doesNotMatch(JSON.stringify(r),/never-return|password/);await tools.run('database_clock',{});assert.equal(statements.length,2);await assert.rejects(tools.run('database_clock',{sql:'SELECT anything'}),QueryInputError);}finally{await tools.close();}
+});
