@@ -464,3 +464,12 @@ test('database clock uses a fixed read-only statement, exposes no secrets and re
  const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'localhost',database:'demo'},query,credentials,{mysql:{createConnection:async()=>c}});
  try{assert.ok(tools.spec.some(t=>t.tool==='database_clock'));const r=await tools.run('database_clock',{});assert.equal(r.clock.utc_offset_minutes,'480');assert.match(statements[0].sql,/UTC_TIMESTAMP/);assert.deepEqual(statements[0].params,[]);assert.doesNotMatch(JSON.stringify(r),/never-return|password/);await tools.run('database_clock',{});assert.equal(statements.length,2);await assert.rejects(tools.run('database_clock',{sql:'SELECT anything'}),QueryInputError);}finally{await tools.close();}
 });
+
+test('null predicates use validated fields and fixed SQL without interpolating a value',()=>{
+ const tables=new Map([['orders',['id','submitted_at']]]),q={...query,tables:['orders']};
+ for(const [op,sql] of [['is_null','IS NULL'],['is_not_null','IS NOT NULL']]){
+  const s=selectStatement({table:'orders',columns:['id'],filters:[{column:'submitted_at',op,value:null}]},tables,q);assert.ok(s.sql.includes('`submitted_at` '+sql));assert.deepEqual(s.params,[]);
+  assert.throws(()=>selectStatement({table:'orders',columns:['id'],filters:[{column:'submitted_at',op,value:'OR 1=1'}]},tables,q),QueryInputError);
+ }
+ assert.throws(()=>selectStatement({table:'orders',columns:['id'],filters:[{column:'unknown',op:'is_null'}]},tables,q),QueryInputError);
+});
