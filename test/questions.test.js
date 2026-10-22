@@ -312,3 +312,12 @@ test('a final job produced after a supplementary acknowledgement replaces its st
  await app.store.transact(s=>{const q=s.questions[qid],prior=s.conversations[0];s.conversations.push({...prior,id:'ack',createdAt:'2026-01-01T00:00:00Z',status:'sent',response:'file not generated',outcome:{}});q.latestTurnId='ack';q.generation++;Object.assign(s.jobs[0],{status:'completed',updatedAt:'2026-01-01T00:01:00Z',result:{outcome:'ready',finalMessage:'verified export complete'}});});
  const v=questionView(await app.store.read(),qid,app.projects);assert.ok(v.job);assert.match(JSON.stringify(v.card),/verified export complete/);assert.match(v.mention.text,/任务已结束/);
 });
+
+test('setup blocked before enrollment shows actionable wait and mentions asker and owner once',async t=>{
+ const {app,context,send,calls}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'export'}));await send('missing-source');
+ const s=await app.store.read(),qid=s.jobs[0].questionId;
+ await app.store.transact(s=>{const prior=s.conversations[0],q=s.questions[qid];s.conversations.push({...prior,id:'setup-turn',status:'sent',createdAt:'2026-01-01T00:01:00Z',setupPending:true,decision:decision({action:'request_environment_setup',environmentSetup:{kind:'mysql',tier:'prd',url:''}}),response:'PRD source missing; no file generated',outcome:{}});q.latestTurnId='setup-turn';q.generation++;Object.assign(s.jobs[0],{status:'completed',updatedAt:'2026-01-01T00:01:00Z',setupTurnId:'setup-turn',result:{outcome:'needs_clarification',finalMessage:'analysis finished; requires database'}});});
+ await publishQuestion(context,qid);await publishQuestion(context,qid);
+ const v=questionView(await app.store.read(),qid,app.projects);assert.equal(v.job,null);assert.equal(v.terminal,false);assert.match(JSON.stringify(v.card),/PRD source missing/);assert.doesNotMatch(JSON.stringify(v.card),/当前阶段已完成/);
+ const reminders=calls.filter(c=>c.type==='mention');assert.equal(reminders.length,1);assert.match(reminders[0].text,/ou_asker/);assert.match(reminders[0].text,/ou_admin/);assert.match(reminders[0].text,/尚未完成/);
+});

@@ -394,7 +394,9 @@ export class ConversationService {
         else if (candidates.length > 1) return { notice: '发现多个数据库入口，请选择目标库名：' + candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') + '。无需提供密码。' };
         else {
           const sources = catalog(await loadEnvironments(), projectId).filter(e=>e.kind==='nacos' && e.tier===decision.environmentSetup.tier && e.queries.some(q=>q.queryId==='investigate'));
-          if (sources.length !== 1) return { notice: '需要先确定用于发现数据库地址的 Nacos 入口；请指出环境或目标配置，不需要手动复制数据库地址。' };
+          if (sources.length !== 1) return { notice: sources.length===0
+            ? `${projects.projects[projectId]?.displayName??projectId} 的 ${decision.environmentSetup.tier.toUpperCase()} 数据源尚未接入，尚未查询数据或生成文件。请群主提供该环境的配置中心登录网址，或说明数据库接入方式；环境已明确，无需重复需求，也不要发送密码。若配置中心不是Nacos，请说明平台类型，不能用其它系统或环境的入口代替。`
+            : '当前环境存在多个配置来源，请选择本次使用的入口：'+sources.map(e=>e.environmentId).join('、')+'。尚未查询数据库，原需求与证据保留。' };
           decision.action = 'create_task'; decision.intent = 'analysis';
           decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:[`使用discover和read_config获取${turn.setupTargetUrl??'公共数据库'}配置的地址及来源，用于管理员确认后本机接续凭据；不连接数据库、不返回账号密码。`.slice(0,200)]};
         }

@@ -45,7 +45,7 @@ export class LiveCards {
       const reopening = generation > (existing?.generation ?? 0);
       if (deliveryToken && existing?.deliveryToken === deliveryToken && existing.terminal && terminal && !reopening) return;
       if (existing?.terminal && !terminal && !reopening) return; // Late progress cannot overwrite a conclusion.
-      const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval'].includes(existing?.terminalMention?.kind)
+      const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval', 'environment_setup_missing'].includes(existing?.terminalMention?.kind)
         && terminalMention && !terminalMention.kind;
       if (!reopening && !replacingWaitingMention && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
@@ -53,7 +53,7 @@ export class LiveCards {
         deliveryToken: deliveryToken ?? (!reopening ? existing?.deliveryToken : undefined),
         mentionDelivered: reopening || replacingWaitingMention ? false : existing?.mentionDelivered,
         publicCompletionMention: publicCompletionMention || (!reopening && existing?.publicCompletionMention) || false,
-        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval'].includes(terminalMention?.kind) ? terminalMention : null),
+        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval','environment_setup_missing'].includes(terminalMention?.kind) ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });

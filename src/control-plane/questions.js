@@ -51,7 +51,8 @@ export function questionView(state, questionId, projects = {}) {
   const enrollment = Object.values(state.environmentEnrollments ?? {}).find(e => e.questionId === q.id && isPendingEnrollment(e));
   const job = questionJob(state, q.id);
   const outstanding = state.conversations.some((item) => item.questionId === q.id && pending(item));
-  const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId || Date.parse(job.updatedAt)>=Date.parse(turn.createdAt));
+  const missingSetup = Boolean(turn.setupPending && (turn.decision?.action==='request_environment_setup'||turn.decision?.environmentSetup) && !enrollment && !activeQuestionJob(job));
+  const useJob = !missingSetup && job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId || Date.parse(job.updatedAt)>=Date.parse(turn.createdAt));
   const notice=enrollmentNotice(enrollment);
   const displayTurn={...turn,setupStatus:enrollment?.status,setupLoginIssue:enrollment?.loginIssue,setupHasCredentials:Boolean(enrollment?.credentialReceivedAt),setupPending:Boolean(enrollment)||turn.setupPending,...(notice?{response:notice}: {})};
   const shown = useJob ? job : displayTurn;
@@ -74,9 +75,14 @@ export function questionView(state, questionId, projects = {}) {
   const root = state.conversations.find((item) => item.id === q.rootTurnId);
 
   const adminIds = (projects.ownerOpenIdsByProfile?.[q.profile] ?? []).filter(id => /^ou_[A-Za-z0-9]+$/.test(id));
-  const mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { kind:'environment_approval',profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；可在本话题提供凭据，由本机独立窗口自动登录。') } : null) : terminal ? (useJob
+  let mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { kind:'environment_approval',profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；可在本话题提供凭据，由本机独立窗口自动登录。') } : null) : terminal ? (useJob
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
     : turn.directoryChannel ? (state.cardMessages?.['question:'+q.id]?.publicCompletionMention && state.cardMessages['question:'+q.id].deliveryToken===turn.id+':directory-result' ? state.cardMessages['question:'+q.id].terminalMention : null) : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
+  if (missingSetup && !outstanding) {
+    const ids=[...new Set([q.senderId,...adminIds])].filter(id=>/^ou_[A-Za-z0-9]+$/.test(id));
+    if(ids.length) mention={kind:'environment_setup_missing',profile:q.profile,replyTo:q.messageId,
+      text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+' 排查尚未完成：需要补充本话题对应环境的接入信息或选择数据源。请查看卡片中的具体缺口；原需求和已有证据已保留。'};
+  }
   if (mention && q.replyInThread) mention.replyInThread = true;
   const currentResult=useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '';
   const priorJobs=state.jobs.filter(j=>j.questionId===q.id && j.id!== (useJob?job.id:null) && j.result?.finalMessage);
