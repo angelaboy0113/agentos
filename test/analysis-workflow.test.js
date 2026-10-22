@@ -184,5 +184,5 @@ test('ready environment substep returns to original investigation through HTTP a
 test('file review prompt carries the exact bound formulas and audit into a resumed source turn',async()=>{
  const evidence={status:'verified',binding:{fileId:'report-current',sha256:'a'.repeat(64),verificationHash:'b'.repeat(64)},columns:[{label:'余额',value:{op:'subtract',args:[{op:'field',source:'s1',column:'earned'},{op:'field',source:'s2',column:'used'}]}}],calculationAudit:{status:'passed',checkedRows:25}};
  const prompt=await buildPrompt({...input,reportFiles:[{id:'report-current',verificationHash:'b'.repeat(64)}],reportEvidence:evidence,context:[{stage:'developer',result:{threadId:'thread-current',workspace:'/snapshot/current'}}]}, {},{instruction:'unused',metadata:{}},{workspace:'/snapshot/current'},[], '/snapshot/current');
- assert.ok(prompt.includes(JSON.stringify(evidence)));assert.match(prompt,/inspect_report/);assert.match(prompt,/review_access/);
+ assert.ok(prompt.includes(JSON.stringify(evidence)));assert.match(prompt,/requiresModelDownloadUrl/);assert.match(prompt,/不需要也不能编造下载链接/);assert.match(prompt,/inspect_report/);assert.match(prompt,/review_access/);
 });
