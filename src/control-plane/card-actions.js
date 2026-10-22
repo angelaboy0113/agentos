@@ -1,3 +1,4 @@
+import { handleEnrollmentCard } from './enrollment-cards.js';
 import { routeAgent } from '../shared/project-scope.js';
 import {cardActionChat} from './private-cards.js';
 import { loadEnvironments, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
@@ -64,6 +65,10 @@ async function applyCardAction(context, event) {
   let effectiveChatId;try{effectiveChatId=cardActionChat(savedCard,event);}catch{return {ignored:true,reason:'private_scope_mismatch'};}
   if(projects.retiredChatIds?.includes(effectiveChatId)&&!['refresh','result_page'].includes(parsedValue.action))return {ignored:true,reason:'retired_group'};
   const questionId = key.startsWith('question:') ? key.slice('question:'.length) : null;
+  if (questionId && ['enrollment_refresh','enrollment_cancel'].includes(parsedValue.action)) {
+    try { return await handleEnrollmentCard(context,event,key,savedCard,parsedValue,effectiveChatId); }
+    catch { return {ok:false,message:'接入操作未完成，请核对身份并刷新最新卡片后重试。'}; }
+  }
   const jobId = questionId ? questionJob(state, questionId)?.id : key.split(':')[1];
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job || job.chatId !== effectiveChatId || (questionId ? state.questions?.[questionId]?.profile : job.agentProfile) !== profile) return { ignored: true, reason:'card_job_scope_mismatch' };

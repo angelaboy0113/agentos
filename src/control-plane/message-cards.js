@@ -62,7 +62,7 @@ export function resultParts(text) {
 export function conversationCard(turn, now = Date.now()) {
   const final = ['ready', 'sent'].includes(turn.status);
   const failed = turn.aiFailed || turn.actionError;
-  const state = final ? (failed ? '未执行' : turn.setupPending ? '等待补齐接入' : '已回复') : turn.status === 'queued' ? '排队中'
+  const state = final ? (failed ? '未执行' : turn.setupCancelled ? '已停止接入' : turn.setupPending ? ({requested:'等待确认接入',opening:'正在启动登录',login_required:turn.setupLoginIssue?'登录尚未通过认证':turn.setupHasCredentials?'自动登录中 · 尚未确认成功':'等待提供登录凭据',awaiting_tls_confirmation:'等待确认连接保护'}[turn.setupStatus] ?? '等待补齐接入') : '已回复') : turn.status === 'queued' ? '排队中'
     : turn.connectionWillRetry ? '连接重试中' : '正在处理';
   const color = failed ? 'red' : turn.setupPending ? 'orange' : final ? 'green' : 'blue';
   const content = final ? '' : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'

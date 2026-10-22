@@ -65,12 +65,16 @@ export class EnrollmentCredentialService {
       const current = s.environmentEnrollments[e.id];
       current.credentialReceiptMessageId = event.message_id;
       current.credentialReceivedAt = new Date().toISOString();
+      if (s.questions?.[current.questionId]) s.questions[current.questionId].generation++;
       return true;
     });
     if (!accepted) return reply('该接入申请已发生变化，未启动其他目标的登录。请回复当前有效接入卡片。');
     if (retry) {
       try { await this.launch(this.context, e); }
       catch { await this.context.store.transact(s => { s.environmentEnrollments[e.id].status = 'failed'; }); return reply('凭据已在本机保存，但独立登录窗口启动失败，请检查运行电脑的桌面会话后重试。'); }
+    }
+    if (this.context.cards) {
+      try { const {publishQuestion}=await import('./questions.js'); await publishQuestion(this.context,e.questionId); } catch {}
     }
     return reply(e.status === 'requested' ? '凭据已保存到本机钥匙串；接入仍需群主确认，确认后自动填写并登录。'
       : '凭据已保存到本机钥匙串，助手会在本次 Nacos 独立窗口自动填写并登录。此消息不代表登录成功；验证码或扫码需要本人完成，后续还需确认命名空间范围。');

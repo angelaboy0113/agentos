@@ -229,7 +229,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
       !expired &&
       (!event ||
         !["login_required", "complete", "failed"].includes(event.status) ||
-        event.status === e.status)
+        event.status === e.status && (event.loginIssue??null)===(e.loginIssue??null))
     )
       continue;
     if (event?.status === "complete" && !expired) {
@@ -261,6 +261,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
       )
         return;
       current.status = expired ? "expired" : event.status;
+      current.loginIssue = event?.loginIssue ?? null;
       if (current.status === "complete") {
         // Resume original requester, never borrow the administrator's query authority.
         original.decision = {
@@ -289,7 +290,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
           current.status === "login_required"
             ? e.kind === "mysql"
               ? "已在运行AgentOS的电脑上打开本机终端凭据输入。默认使用专用只读账号；如只能使用业务账号，请在本机向导明确确认受控模式。不要在群里发送密码。"
-              : "已在运行AgentOS的电脑上打开登录界面。请在本机登录，然后选择允许读取的范围；不要在群里发送密码。"
+              : current.loginIssue ? "登录尚未通过认证，请核对账号密码，或在本机完成验证码；可在本话题重新提供凭据。" : current.credentialReceivedAt ? "已收到凭据，正在通过本机独立窗口尝试登录，尚未确认认证成功；成功后仍需选择允许读取的命名空间。" : "正在等待 Nacos 登录。请在本话题 @助手 提供账号密码，由独立窗口自动填写；也可在本机手动登录。验证码和读取范围选择仍需本人完成。"
             : "本次接入未完成或已超时，请重新发起；未自动继续查询。";
       }
       q.latestTurnId = original.id;

@@ -17,9 +17,9 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
     observations = [],
     tokens = [];
   const manual = adapters.manualLogin === true;
-  let loginResolve;
-  const loginReady = new Promise((resolve) => {
-    loginResolve = resolve;
+  let loginResolve, loginReject;
+  const loginReady = new Promise((resolve, reject) => {
+    loginResolve = resolve; loginReject = reject;
   });
   let blocked = 0,
     calls = 0,
@@ -144,6 +144,7 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
           if (loggedIn) tokens.push(value.accessToken);
           await route.fulfill({ response });
           if (loggedIn) loginResolve();
+          else if (manual) await adapters.onLoginRejected?.();
           return;
         }
         if (!response.ok()) throw new Error("Read failed");
@@ -276,6 +277,7 @@ export async function createNacosBrowser(e, q, cred, adapters = {}) {
             checking = true;
             try {
               const supplied = await adapters.readCredentials();
+              if (supplied?.cancelled) { loginReject(new Error("接入已取消")); await close(); return; }
               if (!supplied?.username || !supplied?.password || supplied.username.length > 1000 || supplied.password.length > 8000) return;
               const signature = JSON.stringify([supplied.username, supplied.password]);
               if (signature === attempted || loggedIn || !active) return;
@@ -423,7 +425,7 @@ export async function loginNacosLocally(baseUrl, options = {}) {
     { baseUrl },
     { namespaces: [], maxCalls: 1, maxRows: 1, timeoutMs: 10000 },
     cred,
-    { manualLogin: true, onLoginReady: options.onLoginReady, readCredentials: options.readCredentials },
+    { manualLogin: true, onLoginReady: options.onLoginReady, readCredentials: options.readCredentials, onLoginRejected: options.onLoginRejected },
   );
   try {
     await b.run("browser_open");

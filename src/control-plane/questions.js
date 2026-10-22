@@ -1,3 +1,4 @@
+import { addQuestionProgress, enrollmentNotice } from './enrollment-cards.js';
 import {stateView} from '../shared/state-view.js';
 import {cardDestination} from './private-cards.js';
 import { resultPages, withResultPage } from './result-presentation.js';
@@ -50,8 +51,11 @@ export function questionView(state, questionId, projects = {}) {
   const job = questionJob(state, q.id);
   const outstanding = state.conversations.some((item) => item.questionId === q.id && pending(item));
   const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId);
-  const shown = useJob ? job : turn;
-  let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard({...turn,setupPending:Boolean(enrollment)||turn.setupPending});
+  const notice=enrollmentNotice(enrollment);
+  const displayTurn={...turn,setupStatus:enrollment?.status,setupLoginIssue:enrollment?.loginIssue,setupHasCredentials:Boolean(enrollment?.credentialReceivedAt),setupPending:Boolean(enrollment)||turn.setupPending,...(notice?{response:notice}: {})};
+  const shown = useJob ? job : displayTurn;
+  let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard(displayTurn);
+  if (!useJob) card = addQuestionProgress(card, state, q, enrollment);
   const terminal = !enrollment && !turn.setupPending && !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
   const label = card.header.title.content;
   card.header.title.content = questionTitle(q.title);
@@ -68,7 +72,7 @@ export function questionView(state, questionId, projects = {}) {
   const root = state.conversations.find((item) => item.id === q.rootTurnId);
 
   const adminIds = (projects.ownerOpenIdsByProfile?.[q.profile] ?? []).filter(id => /^ou_[A-Za-z0-9]+$/.test(id));
-  const mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；登录仅在运行AgentOS的电脑完成。') } : null) : terminal ? (useJob
+  const mention = enrollment ? (['requested','awaiting_tls_confirmation'].includes(enrollment.status) && adminIds.length ? { profile:q.profile,replyTo:q.messageId,text:adminIds.map(id => `<at user_id="${id}"></at>`).join(' ')+(enrollment.status === 'awaiting_tls_confirmation' ? ' 请核对本卡的单目标非TLS例外；明确同意后才继续连接。' : ' 请确认本话题的新环境接入；可在本话题提供凭据，由本机独立窗口自动登录。') } : null) : terminal ? (useJob
     ? jobTerminalMention({ ...job, senderId: q.senderId, originMessageId: q.messageId, originProfile: q.profile }, projects)
     : turn.directoryChannel ? (state.cardMessages?.['question:'+q.id]?.publicCompletionMention && state.cardMessages['question:'+q.id].deliveryToken===turn.id+':directory-result' ? state.cardMessages['question:'+q.id].terminalMention : null) : conversationTerminalMention({ ...turn, senderId: q.senderId, messageId: q.messageId, profile: q.profile, chatType: root.chatType })) : null;
   if (mention && q.replyInThread) mention.replyInThread = true;
@@ -93,7 +97,8 @@ function sourceVersion(state, id) {
   const q = state.questions[id];
   return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId,
     state.jobs.filter((j) => j.questionId === id).map((j) => [j.id, j.status, j.updatedAt, j.events.length, j.nextJobId, j.result]),
-    state.conversations.filter((t) => t.questionId === id).map((t) => [t.id, t.status, t.response, t.outcome])])).digest('hex');
+    state.conversations.filter((t) => t.questionId === id).map((t) => [t.id, t.status, t.response, t.outcome]),
+    Object.values(state.environmentEnrollments??{}).filter(e=>e.questionId===id).map(e=>[e.id,e.status,e.credentialReceivedAt,e.loginIssue])])).digest('hex');
 }
 const locks = new WeakMap();
 export function publishQuestion(context, id) {

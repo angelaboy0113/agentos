@@ -114,7 +114,7 @@ test("successful local setup resumes original member once with automatic read-on
     JSON.stringify({ status: "login_required" }),
   );
   await pollEnrollments(context);
-  assert.match(turn.response, /已在运行AgentOS/);
+  assert.match(turn.response, /独立窗口自动填写/);
   turn.status = "sent";
   const cfg = {
     environments: {

@@ -258,3 +258,10 @@ test('local enrollment browser automatically consumes late Keychain credentials 
  assert.deepEqual(cred,{username:'provided-user',password:'provided-secret'});
  assert.doesNotMatch(JSON.stringify(result),/provided-user|provided-secret/);assert.equal(f.writes(),0);
 });
+
+test('local enrollment cancellation closes waiting browser without logging in',async t=>{
+ const f=await fixture(t);let loginPage;
+ const tools=await createNacosBrowser({baseUrl:f.baseUrl},{...q,namespaces:[]},{},{manualLogin:true,
+  chromium:{launch:async options=>(await import('playwright')).chromium.launch({...options,headless:true})},onPage:p=>{loginPage=p;},readCredentials:async()=>({cancelled:true})});
+ t.after(()=>tools.close());await assert.rejects(tools.run('browser_open'));assert.equal(loginPage.isClosed(),true);assert.equal(f.writes(),0);
+});

@@ -42,7 +42,8 @@ test('five senders have five durable question cards, isolated intake context, cu
   assert.equal(Object.keys(state.cardMessages).length, 5);
   assert.equal(calls.filter((c) => c.type === 'send').length, 5);
   assert.equal(new Set(calls.filter((c) => c.type === 'send').map((c) => c.id)).size, 5);
-  assert.equal(inputs[0].administrator, true); assert.equal(inputs[1].administrator, false);
+  assert.equal(inputs.find(input=>input.currentActor.senderId==='ou_admin').administrator, true);
+  assert.ok(inputs.filter(input=>input.currentActor.senderId!=='ou_admin').every(input=>input.administrator===false));
   assert.equal(inputs[4].history.length, 0); assert.equal(inputs[4].nativeSession, true);
   assert.equal(new Set(state.conversations.map((c) => app.conversations.key(c))).size, 5);
 });
@@ -262,4 +263,21 @@ test('supplement on running question reuses its own session and excludes unrelat
  await send('supplement','ou_asker',{reply_to:card.messageId,content:'补充'});
  state=await app.store.read();assert.equal(app.conversations.key(first),app.conversations.key(state.conversations.at(-1)));
  assert.equal(inputs.at(-1).jobs.length,1);assert.equal(inputs.at(-1).jobs[0].instruction,'问题A');assert.doesNotMatch(JSON.stringify(inputs.at(-1)),/问题B/);
+});
+
+test('enrollment wait retains question metrics and exposes scoped refresh/cancel; stranger and stale callbacks cannot stop it',async t=>{
+ const {app,context,send,directory}=await setup(t);
+ await send('enrollment-root');const before=await app.store.read(),qid=Object.keys(before.questions)[0];
+ await app.store.transact(s=>{s.environmentEnrollments={enr:{id:'enr',questionId:qid,projectId:'demo',chatId:'group',profile:'owner',kind:'nacos',tier:'prd',url:'http://fixture.test/nacos',status:'login_required',createdAt:new Date().toISOString()}};});
+ await publishQuestion(context,qid);let s=await app.store.read();let card=s.cardMessages[`question:${qid}`];
+ assert.match(JSON.stringify(card.card),/问题已持续|累计实际工具调用/);assert.match(JSON.stringify(card.card),/enrollment_cancel/);assert.doesNotMatch(JSON.stringify(card.card),/不要在群里发送密码/);
+ const {enrollmentVersion}=await import('../src/control-plane/enrollment-cards.js');const value={action:'enrollment_cancel',enrollmentId:'enr',version:enrollmentVersion(s.environmentEnrollments.enr)};
+ const event={type:'card.action.trigger',event_id:'enrollment-stop',operator_id:'ou_asker',agent_profile:'owner',chat_id:'group',message_id:card.messageId,action_value:value};
+ assert.equal((await handleCardAction(context,{...event,event_id:'stranger',operator_id:'stranger'})).ok,false);
+ assert.equal((await handleCardAction(context,{...event,event_id:'stale',action_value:{...value,version:'old'}})).ok,false);
+ assert.equal((await handleCardAction(context,event)).ok,true);
+ assert.equal((await handleCardAction(context,event)).ok,true);
+ s=await app.store.read();assert.equal(s.environmentEnrollments.enr.status,'cancelled');
+ await stat(path.join(directory,'environment-enrollments/enr/cancelled.json'));
+ assert.match(JSON.stringify(questionView(s,qid).card),/已停止接入/);
 });

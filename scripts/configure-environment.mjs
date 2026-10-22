@@ -7,7 +7,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import {
   credential,
-  boundedFetch,
+  boundedFetch as sharedBoundedFetch,
 } from "../src/runner/environment-connector.js";
 import { createEnvironmentTools } from "../src/runner/environment-tools.js";
 import { loadEnvironments } from "../src/shared/environment-access.js";
@@ -17,11 +17,17 @@ if (!stdin.isTTY || process.platform !== "darwin")
   throw new Error("Run this setup in a local macOS terminal");
 const seedPath = process.argv[2] === "--enrollment" ? process.argv[3] : null;
 const seed = seedPath ? JSON.parse(await readFile(seedPath, "utf8")) : null;
-async function enrollmentStatus(status) {
+async function assertEnrollmentActive() {
+ if (!seedPath) return;
+ try { await readFile(path.join(path.dirname(seedPath), "cancelled.json")); } catch (e) { if (e.code === "ENOENT") return; throw e; }
+ throw new Error("接入已取消，未保存环境配置");
+}
+async function boundedFetch(...args) { await assertEnrollmentActive(); return sharedBoundedFetch(...args); }
+async function enrollmentStatus(status, details = {}) {
   if (!seedPath) return;
   const target = path.join(path.dirname(seedPath), "status.json"),
     temp = target + ".tmp";
-  await writeFile(temp, JSON.stringify({ status }), { mode: 0o600 });
+  await writeFile(temp, JSON.stringify({ status, ...details }), { mode: 0o600 });
   await rename(temp, target);
 }
 let rl = createInterface({ input: stdin, output: stdout });
@@ -246,7 +252,11 @@ try {
     );
     const localCredential = await loginNacosLocally(e.baseUrl, {
       onLoginReady: () => enrollmentStatus("login_required"),
-      ...(seed ? { readCredentials: () => credential(credentialRef) } : {}),
+      onLoginRejected: () => enrollmentStatus("login_required", { loginIssue: "authentication_unconfirmed" }),
+      ...(seed ? { readCredentials: async () => {
+        try { await readFile(path.join(path.dirname(seedPath), "cancelled.json")); return { cancelled: true }; } catch {}
+        return credential(credentialRef);
+      } } : {}),
     });
     saved = spawnSync(
       "python3",
@@ -275,6 +285,7 @@ try {
       "Credential setup did not complete; configuration unchanged",
     );
   }
+  await assertEnrollmentActive();
   const cred = await credential(credentialRef);
   if (kind === "nacos") {
     const base = e.baseUrl.replace(/\/$/, "");
@@ -366,6 +377,7 @@ try {
   if ((original && !current?.equals(original)) || (!original && current))
     throw new Error("Configuration changed during setup; retry");
   await chmod(temporary, 0o600);
+  await assertEnrollmentActive();
   await rename(temporary, file);
   await enrollmentStatus("complete");
   console.log(
