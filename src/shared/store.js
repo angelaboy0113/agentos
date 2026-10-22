@@ -120,6 +120,7 @@ export class JsonStore {
         id: createId('JOB'),
         ...(input.visibility==='requester'?{visibility:'requester'}:{}),
         ...(input.questionId ? { questionId: input.questionId } : {}),
+        ...(input.connectionSourceDiscovery ? {connectionSourceDiscovery:structuredClone(input.connectionSourceDiscovery)} : {}),
         ...(input.connectionEnrollmentPending ? {connectionEnrollmentPending:true} : {}),
         ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
         ...(input.continuousInvestigation ? { continuousInvestigation: true } : {}),

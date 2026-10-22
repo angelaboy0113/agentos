@@ -394,11 +394,23 @@ export class ConversationService {
         else if (candidates.length > 1) return { notice: '发现多个数据库入口，请选择目标库名：' + candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') + '。无需提供密码。' };
         else {
           const sources = catalog(await loadEnvironments(), projectId).filter(e=>e.kind==='nacos' && e.tier===decision.environmentSetup.tier && e.queries.some(q=>q.queryId==='investigate'));
-          if (sources.length !== 1) return { notice: sources.length===0
-            ? `${projects.projects[projectId]?.displayName??projectId} 的 ${decision.environmentSetup.tier.toUpperCase()} 数据源尚未接入，尚未查询数据或生成文件。请群主提供该环境的配置中心登录网址，或说明数据库接入方式；环境已明确，无需重复需求，也不要发送密码。若配置中心不是Nacos，请说明平台类型，不能用其它系统或环境的入口代替。`
+          const predecessor=(await store.read()).jobs?.find(j=>j.id===turn.setupSourceJobId && j.questionId===turn.questionId && j.projectId===projectId && j.chatId===turn.chatId && j.originProfile===turn.profile);
+          const tier=decision.environmentSetup.tier;
+          const sourceId=decision.sourceEnvironment || tier;
+          const canInspect=projects.projects[projectId]?.analysisSourceMode==='isolated' && Object.hasOwn(projects.projects[projectId]?.analysisEnvironments??{},sourceId);
+          if(sources.length===0 && canInspect && predecessor?.connectionSourceDiscovery?.tier!==tier){
+            turn.connectionSourceDiscovery={tier,sourceEnvironment:sourceId};
+            decision.action='create_task';decision.intent='analysis';decision.requiresSourceInspection=true;
+            decision.sourceEnvironment=sourceId;decision.environmentSetup=null;decision.environmentQuery=null;
+            decision.reply='先自动核查对应环境源码、部署脚本和配置注入链，寻找数据源与登录入口；不需要用户先找地址。';
+            decision.instruction+='\n\n接入来源自主发现：当前系统本环境尚无登记数据源。请在指定环境分支检查相关微服务的bootstrap/application、构建profile、部署脚本、配置注入/环境变量和规范文档，追溯实际配置平台及订单等所需业务对象的数据源。不能默认是Nacos；区分配置中心、注册中心、网关和数据库。输出脱敏候选、来源仓库/文件/行/提交号、是否注释或占位，以及还需什么运行态证据；注释地址或其它服务配置只能作为线索，不能当作当前运行事实。不输出用户名密码令牌，不从源码用shell联网查库。若能确认受支持的配置中心入口，按受控接入流程申请；需要平台登录或范围确认时明确说明具体入口、平台与用途。仅在本次查找确实无法补齐时说明已查范围和剩余缺口，不重复让用户猜数据库地址，不放弃原查询和导出目标。';
+          }else if (sources.length !== 1) return { notice: sources.length===0
+            ? `${projects.projects[projectId]?.displayName??projectId} 的 ${tier.toUpperCase()} 数据源尚未接入，尚未查询数据或生成文件。`+(predecessor?.connectionSourceDiscovery?.tier===tier?'已自动检查对应环境源码与部署配置，具体发现和未核实线索见此前调查结果；还需对应平台登录或运行态配置才能验证，不能把历史注释当成有效连接。':'请确认该项目的源码环境配置，以便助手自行查找接入来源。')
             : '当前环境存在多个配置来源，请选择本次使用的入口：'+sources.map(e=>e.environmentId).join('、')+'。尚未查询数据库，原需求与证据保留。' };
-          decision.action = 'create_task'; decision.intent = 'analysis';
-          decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:[`使用discover和read_config获取${turn.setupTargetUrl??'公共数据库'}配置的地址及来源，用于管理员确认后本机接续凭据；不连接数据库、不返回账号密码。`.slice(0,200)]};
+          else {
+            decision.action = 'create_task'; decision.intent = 'analysis';
+            decision.environmentQuery = {environmentId:sources[0].environmentId,queryId:'investigate',parameters:[`使用discover和read_config获取${turn.setupTargetUrl??'公共数据库'}配置的地址及来源，用于管理员确认后本机接续凭据；不连接数据库、不返回账号密码。`.slice(0,200)]};
+          }
         }
       }
       if(decision.action==='request_environment_setup'&&decision.environmentSetup?.url){
@@ -463,6 +475,7 @@ export class ConversationService {
         ...(turn.setupSourceJobId?{context:turn.investigationContext??[],missionId:turn.resumeMissionId}:{}),
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
         originChatType: turn.chatType, visibility:turn.visibility, questionId: turn.questionId, environmentAccess, sourceEnvironment,
+        connectionSourceDiscovery:turn.connectionSourceDiscovery,
         connectionEnrollmentPending: decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url,
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
