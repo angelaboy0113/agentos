@@ -24,8 +24,9 @@ async function main() {
     adminToken: config.adminToken,
     dataDir: config.dataDir,
     editedMentions: (await loadConversationSettings(config.conversationFile)).editedMentions,
-    watchedChatIds: Object.keys(projects.chatProjectMap ?? {}).filter(id=>!projects.retiredChatIds?.includes(id)),
+    watchedChatIds: [...new Set([...Object.keys(projects.chatProjectMap ?? {}), ...Object.keys(projects.chatProfileProjectMap ?? {})])].filter(id=>!projects.retiredChatIds?.includes(id)),
     cliEntry: config.feishu.cliEntry,
+    larkConfigFile: process.env.AGENTOS_LARK_CONFIG_FILE,
   }, agents.agents);
   const localRunnerConfig = await runnerConfig({
     serverUrl: `http://${config.host}:${config.port}`,

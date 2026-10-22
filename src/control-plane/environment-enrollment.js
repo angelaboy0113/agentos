@@ -1,3 +1,4 @@
+import { resolveProjectId } from '../shared/project-scope.js';
 import {stateView} from '../shared/state-view.js';
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { automaticDatabaseEnrollment } from './automatic-database-enrollment.js';
@@ -47,9 +48,9 @@ export function enrollmentTarget(input) {
 export async function requestEnrollment(context, turn) {
   if (!turn.questionId) throw new Error("请在已绑定项目群的话题中申请接入");
   const target = enrollmentTarget(turn.decision.environmentSetup);
-  const candidates=connectionCandidates(await context.store.read(),turn,context.projects.chatProjectMap[turn.chatId]);
+  const candidates=connectionCandidates(await context.store.read(),turn,resolveProjectId(context.projects, turn.chatId, turn.profile));
   const source=target.kind==='mysql' ? candidates.find(c=>c.url===target.url && c.tier===target.tier && c.connectionSource) : null;
-  const projectId = context.projects.chatProjectMap[turn.chatId];
+  const projectId = resolveProjectId(context.projects, turn.chatId, turn.profile);
   if (!projectId || !context.projects.projects[projectId])
     throw new Error("项目尚未绑定");
   return context.store.transact((state) => {
@@ -89,7 +90,7 @@ export async function approveEnrollment(
   turn,
   launch = launchEnrollment,
 ) {
-  const awaiting=(Object.values((await context.store.read()).environmentEnrollments ?? {})).filter(e=>e.questionId===turn.questionId && e.chatId===turn.chatId && e.projectId===context.projects.chatProjectMap[turn.chatId] && ['requested','awaiting_tls_confirmation'].includes(e.status));
+  const awaiting=(Object.values((await context.store.read()).environmentEnrollments ?? {})).filter(e=>e.questionId===turn.questionId && e.chatId===turn.chatId && e.projectId===resolveProjectId(context.projects, turn.chatId, turn.profile) && ['requested','awaiting_tls_confirmation'].includes(e.status));
   if(awaiting.length!==1) throw new Error('待审批事项不唯一或不存在，请回复具体待审批卡片');
   const withoutTls = awaiting[0].status==='awaiting_tls_confirmation';
   const confirmation=String(turn.content ?? '').replace(/<at\b[^>]*>.*?<\/at>/g,'').replace(/\s+/g,'').replace(/[。！!]$/,'').toUpperCase();
@@ -103,7 +104,7 @@ export async function approveEnrollment(
     if (
       !e ||
       e.chatId !== turn.chatId ||
-      e.projectId !== context.projects.chatProjectMap[turn.chatId]
+      e.projectId !== resolveProjectId(context.projects, turn.chatId, turn.profile)
     )
       throw new Error("没有本话题待确认的接入申请");
     if (Date.now() - Date.parse(e.createdAt) > 1800000)

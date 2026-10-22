@@ -1,6 +1,7 @@
 export function sourceEnvironmentCatalog(project) {
   if (project?.analysisSourceMode !== 'isolated') return [];
-  return Object.entries(project.analysisEnvironments ?? {}).map(([id, value]) => ({ id, description: value.description ?? id, default: project.defaultSourceEnvironment === id }));
+  return Object.entries(project.analysisEnvironments ?? {}).map(([id, value]) => ({ id, description: value.description ?? id, default: project.defaultSourceEnvironment === id,
+    ...(value.unavailableRepositories?.length ? { unavailableRepositories: value.unavailableRepositories } : {}) }));
 }
 export function selectSourceEnvironment(project, selected) {
   if (project?.analysisSourceMode !== 'isolated') return undefined;

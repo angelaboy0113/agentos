@@ -1,3 +1,4 @@
+import { validateProjectScopes } from '../shared/project-scope.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateHumanIdentities } from './authorization.js';
@@ -47,6 +48,7 @@ export async function loadProjects(file) {
       ownerOpenIdsByProfile: parsed.ownerOpenIdsByProfile ?? {},
       humanIdentities: validateHumanIdentities(parsed.humanIdentities ?? {}),
       chatProjectMap: parsed.chatProjectMap ?? {},
+      chatProfileProjectMap: validateProjectScopes(parsed),
       ...chatDeliverySettings(parsed),
       projects: parsed.projects ?? {},
     };

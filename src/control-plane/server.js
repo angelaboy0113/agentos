@@ -1,3 +1,4 @@
+import { resolveProjectId, routeAgent } from '../shared/project-scope.js';
 import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
 import {ContactChannels} from './contact-channels.js';
 import {isPrivate,cardDestination} from './private-cards.js';
@@ -352,7 +353,7 @@ async function route(context) {
     if (!job?.lease?.id || body.leaseId !== job.lease.id || body.runnerId !== job.lease.runnerId) {
       return json(response, 409, { ok: false, error: 'Stale or foreign Runner lease' });
     }
-    let routing = agentRouting(context, nextStage(job.workflow, job.stage));
+    let routing = agentRouting(context, nextStage(job.workflow, job.stage), job.originProfile ?? job.agentProfile);
     if(body.type==='completed'&&body.result?.environmentSetup){
       if(job.taskIntent!=='analysis'||!job.questionId||job.environmentAccess||!['developer','owner_report'].includes(job.stage)
         ||body.result.outcome!=='needs_clarification'||body.result.environmentQuery||body.result.websiteQuery)throw new Error('当前阶段不能申请环境接入');
@@ -385,22 +386,22 @@ async function route(context) {
         const plan = planQuery(await loadEnvironments(), body.result.environmentQuery, job.projectId,
           { senderId: job.senderId, profile: job.originProfile });
         if(continuation.metadata)Object.assign(plan,continuation.metadata);
-        routing = { ...agentRouting(context, 'developer'), environmentPlan: plan };
+        routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), environmentPlan: plan };
         if (!routing.agentProfile) throw new Error('开发角色未配置');
       } catch (error) {
         const diagnostic=queryRejection(error,job);
         if(diagnostic.code==='CONVERGENCE_STALLED'){
           const message=`${diagnostic.reason} 已停止重复启动子任务，现交由项目负责人根据已有证据完成最终汇总。`;
           body.result={...body.result,outcome:'ready',environmentQuery:null,websiteQuery:null,queryRejection:diagnostic,summary:message,finalMessage:`${message}\n\n${diagnostic.correction}`};
-          routing={...agentRouting(context,'owner_report'),convergenceFinal:true};
+          routing={...agentRouting(context,'owner_report', job.originProfile ?? job.agentProfile),convergenceFinal:true};
         } else {
         const repairable=diagnostic.retry && job.taskIntent==='analysis' && job.questionId && !job.environmentAccess
-          && ['developer','owner_report'].includes(job.stage) && agentRouting(context,'developer').agentProfile;
+          && ['developer','owner_report'].includes(job.stage) && agentRouting(context,'developer', job.originProfile ?? job.agentProfile).agentProfile;
         diagnostic.retry=Boolean(repairable);
         const message=`${diagnostic.code==='REPEATED_TARGET'?'本次追加查询由 AgentOS 自动暂停':'本次追加查询尚未执行'}：${diagnostic.reason} ${diagnostic.pause??(repairable?'正在自动修正申请并继续原问题，不需要用户重新授权。':diagnostic.correction)} 已有排查证据保留。`;
         body.result = {...body.result,outcome:repairable?'needs_clarification':'blocked',environmentQuery:null,websiteQuery:null,
           queryRejection:diagnostic,summary:message,finalMessage:`${message}\n\n${diagnostic.correction}`};
-        routing=repairable?{...agentRouting(context,'developer'),repairQuery:true}:{};
+        routing=repairable?{...agentRouting(context,'developer', job.originProfile ?? job.agentProfile),repairQuery:true}:{};
         }
       }
     }
@@ -410,13 +411,13 @@ async function route(context) {
       const prior = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess && j.id !== job.id && j.result?.environmentEvidence);
       const hash = body.result.environmentEvidence?.resultHash;
       const stalled = hash && prior.length >= 2 && prior.slice(-2).every(j => j.result.environmentEvidence.resultHash === hash);
-      if (!stalled) routing = { ...agentRouting(context, 'developer'), resumeInvestigation: true };
+      if (!stalled) routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), resumeInvestigation: true };
       else body.result.summary = '连续三轮环境调查没有新增证据，已暂停。需要调整调查路径或补充缺失工具。' + (body.result.summary ?? '');
     }
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
       && !job.environmentAccess && job.stage === 'owner_report' && body.result?.outcome === 'partial' && !job.convergenceFinal
       && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
-      routing = { ...agentRouting(context, 'developer'), reviewInvestigation: true };
+      routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), reviewInvestigation: true };
     }
     if(body.type==='completed'&&body.result?.exportFiles!==undefined){
       verifyCompletedPlan(await loadEnvironments(),job.environmentAccess??{},body.result.environmentEvidence);
@@ -439,7 +440,7 @@ async function route(context) {
     const approved = await store.approve(
       decodeURIComponent(approveMatch[1]),
       body.approverId,
-      agentRouting(context, nextRole),
+      agentRouting(context, nextRole, job.originProfile ?? job.agentProfile),
     );
     return json(response, 201, { ok: true, ...approved });
   }
@@ -497,9 +498,11 @@ export async function handleLarkCliEvent(context, event) {
   const messageId = event.message_id ?? event.id;
   const role = event.agent_role ?? 'owner_intake';
   const sourceProfile = event.agent_profile ?? null;
+  const agent = Object.values(context.agents.agents ?? {}).find((item) => (item.profile || null) === sourceProfile);
+  if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
+  if (agent?.systemAssistant && (agent.role ?? 'developer') !== role) throw new Error('System assistant role/profile mismatch');
   const credentialResult = await context.websiteCredentials?.handle(event);
   if (credentialResult) return credentialResult;
-  const agent = Object.values(context.agents.agents ?? {}).find((item) => (item.profile || null) === sourceProfile);
   if (event.agent_role && context.agents.agents?.[role]?.profile
     && context.agents.agents[role].profile !== sourceProfile) throw new Error('Agent role/profile mismatch');
   const mentions = event.mentions ?? [];
@@ -534,14 +537,14 @@ function stripMentions(text, mentions = []) {
 
 async function createJobFromMessage(context, input) {
   const { projects, store, feishu } = context;
-  const projectId = input.projectId ?? projects.chatProjectMap[input.chatId];
+  const projectId = input.projectId ?? resolveProjectId(projects, input.chatId, input.agentProfile);
   if (!projectId || !projects.projects[projectId]) {
     throw new Error(`Chat ${input.chatId ?? '<unknown>'} is not bound to a project`);
   }
   const routed = input.agentRole
     ? routeInstructionForStage(input.text, input.agentRole)
     : routeInstruction(input.text);
-  const assigned = agentRouting(context, routed.stage);
+  const assigned = agentRouting(context, routed.stage, input.agentProfile);
   const requestedAgentRole = input.agentRole ?? routed.stage;
   const requestedAgentProfile = input.agentProfile ?? assigned.agentProfile;
   const delegation = routed.delegated ? {
@@ -654,10 +657,8 @@ export async function notifyJobEvent(context, { job, event }) {
   }
 }
 
-function agentRouting(context, role) {
-  const profileRole = role === 'owner_report' ? 'owner_intake' : role;
-  const agent = profileRole ? context.agents?.agents?.[profileRole] : null;
-  return { agentRole: role, agentProfile: agent?.profile ?? null };
+function agentRouting(context, role, profile) {
+  return routeAgent(context.agents?.agents, role, profile);
 }
 
 function nextAgentRole(job) {

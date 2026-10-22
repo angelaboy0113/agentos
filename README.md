@@ -1,6 +1,8 @@
 # Angel AgentOS
 
-**成品版本：v1.13.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.29.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+
+多系统知识助手专用分支的部署与迁移见 [多系统助手说明](docs/system-assistants.md)。
 
 第一次部署请按顺序阅读：
 

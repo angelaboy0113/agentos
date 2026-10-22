@@ -104,6 +104,7 @@ export class LarkEventSource {
     }
     if (event.type !== 'im.message.receive_v1' || event.sender_type === 'bot') return;
     if (!isForThisBot(event, this.config.botOpenId)) return;
+    if (this.config.allowedChatIds && event.chat_type !== 'p2p' && !this.config.allowedChatIds.includes(event.chat_id)) return;
     event.agent_profile = this.config.profile ?? null;
     event.agent_role = this.config.role ?? null;
     event.attachments = await this.downloadAttachments(event);
@@ -212,7 +213,8 @@ export function larkEventSourcePlans(config, agents = {}) {
   for (const [role, agent] of entries) {
     const scoped = {
       ...config,
-      role: agent.routeFromText ? null : role,
+      role: agent.routeFromText ? null : agent.role ?? role,
+      ...(agent.allowedChatIds ? { allowedChatIds: agent.allowedChatIds } : {}),
       profile: agent.profile || null,
       botOpenId: agent.openId,
     };

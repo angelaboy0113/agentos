@@ -1,3 +1,4 @@
+import { resolveProjectId } from '../shared/project-scope.js';
 import {readFile,mkdir,writeFile,realpath,lstat} from 'node:fs/promises';
 import path from 'node:path';import {createHash} from 'node:crypto';
 import {ContactIndex} from './contact-index.js';
@@ -23,7 +24,7 @@ export class ContactDirectory{
  constructor(context,options={}){this.context=context;this.options=options;this.file=options.file??path.resolve('./config/contacts.local.json');this.render=options.render??renderContactImage;this.index=new ContactIndex(context.config.dataDir);this.directoryFlights=new Map();this.progressTimes=new Map();}
  async settings(){if(this.options.settings)return contactSettings(this.options.settings);try{return contactSettings(JSON.parse(await readFile(this.file,'utf8')));}catch(e){if(e.code==='ENOENT')return contactSettings();throw e;}}
  async policy(turn){const c=await this.settings();if(!c.enabled)throw new Error('联系人信息图尚未启用，请管理员配置contacts.local.json。');
-  const project=this.context.projects.chatProjectMap[turn.chatId];
+  const project=resolveProjectId(this.context.projects, turn.chatId, turn.profile);
   const scope=c.scopes.find(s=>s.projectId===project&&project===turn.projectId&&s.chatIds.includes(turn.chatId)&&s.profiles.includes(turn.profile)&&(!s.senderIds||s.senderIds.includes(turn.senderId)));
   if(!scope||!turn.senderId||turn.chatType==='p2p')throw new Error('当前提问不在已配置的联系人查询范围内。');return scope;}
  async catalog(turn){try{await this.policy(turn);return {enabled:true,identity:'bot',pending:await this.pending(turn),rule:'只查询机器人获准的通讯录；工号是字符串，保留前导零。不能操控桌面或借用部署者个人账号。'};}catch{return {enabled:false,pending:[]};}}

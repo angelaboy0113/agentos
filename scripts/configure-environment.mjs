@@ -187,6 +187,17 @@ try {
     if (!tables.length) throw new Error("Select table scope");
     e.queries.investigate.tables = tables;
   }
+  // Export policy belongs to the deployment's project configuration. Preview
+  // rows remain bounded; complete exports keep the existing dataset verifier.
+  const exportRows = project[1].environmentExportMaxRows;
+  if (kind === "mysql" && e.queries.investigate && exportRows !== undefined) {
+    if (exportRows !== "all" && (!Number.isSafeInteger(exportRows) || exportRows < 1)) throw new Error("Invalid project export row policy");
+    Object.assign(e.queries.investigate, {
+      exportMaxRows: exportRows,
+      exportTimeoutMs: 30000,
+      description: "本库基础表结构及只读查询，预览最多20行，支持完整CSV导出；不允许写入",
+    });
+  }
   let config = { version: 1, environments: {} },
     original;
   try {

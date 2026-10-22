@@ -1,3 +1,4 @@
+import { routeAgent } from '../shared/project-scope.js';
 import {cardActionChat} from './private-cards.js';
 import { loadEnvironments, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
 import { publishQuestion, questionJob } from './questions.js';
@@ -103,7 +104,7 @@ async function applyCardAction(context, event) {
       result = { job: updated, message: '本次只读查询已批准并排队，不授予其他查询或修改权限。' };
     } else if (action === 'approve') {
       const role = nextStage(job.workflow, job.stage);
-      const routing = { agentRole: role, agentProfile: agents.agents?.[role === 'owner_report' ? 'owner_intake' : role]?.profile ?? null };
+      const routing = routeAgent(agents.agents, role, job.originProfile ?? job.agentProfile);
       const approved = await store.approve(job.id, event.operator_id, routing, effectKey, guard);
       result = { ...approved, message: '已确认，下一阶段已排队。' };
     } else {

@@ -1,3 +1,4 @@
+import { resolveProjectId, routeAgent, assistantInstructions } from '../shared/project-scope.js';
 import {stateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
 import { refreshExpiredApprovalCards } from './approval-expiry.js';
@@ -84,13 +85,13 @@ export class ConversationService {
         ...(privateReply?{sourceChatId:event.chat_id}:{}),
         id: createId('CHAT'), messageId: event.message_id, chatId: routedChatId,
         senderId: event.sender_id, profile, role: event.agent_role ?? 'owner_intake', chatType: privateReply?'group':event.chat_type ?? null,
-        projectId: this.context.projects.chatProjectMap[routedChatId] ?? null,
+        projectId: resolveProjectId(this.context.projects, routedChatId, profile),
         parentId: event.reply_to ?? event.root_id ?? null,
         ...(this.context.projects.topicChatIds?.includes(event.chat_id) || event.thread_id ? { replyInThread: true } : {}),
         content: event.content ?? '', attachments: event.attachments ?? [],
         status: 'queued', createdAt: new Date().toISOString(),
         sessionKey: JSON.stringify([routedChatId, event.sender_id, profile, event.agent_role ?? 'owner_intake',
-          this.context.projects.chatProjectMap[routedChatId] ?? null]),
+          resolveProjectId(this.context.projects, routedChatId, profile)]),
       };
       const privateParent=Object.values(state.questions??{}).find(q=>q.visibility==='requester'&&q.chatId===turn.chatId&&q.profile===turn.profile&&q.senderId===turn.senderId&&q.projectId===turn.projectId&&[event.reply_to,event.root_id].filter(Boolean).some(id=>id===q.messageId||id===state.cardMessages?.[`question:${q.id}`]?.messageId||state.conversations.some(t=>t.questionId===q.id&&t.messageId===id)));
       if(turn.chatType==='group'&&(requestsPrivateCard(turn.content)||privateParent))turn.visibility='requester';
@@ -126,7 +127,7 @@ export class ConversationService {
   key(turn) {
     // Versioned namespace never resumes the legacy group-wide native thread.
     return JSON.stringify(['question-v2', turn.chatId, turn.profile, turn.role,
-      this.context.projects.chatProjectMap[turn.chatId] ?? null,
+      resolveProjectId(this.context.projects, turn.chatId, turn.profile),
       turn.questionId ? ['question', turn.questionId] : ['sender', turn.senderId]]);
   }
 
@@ -291,7 +292,7 @@ export class ConversationService {
   async buildInput(turn) {
     const { projects, store } = this.context;
     const state = await store.read();
-    const projectId = projects.chatProjectMap[turn.chatId] ?? null;
+    const projectId = resolveProjectId(projects, turn.chatId, turn.profile);
     const scoped = Boolean(turn.questionId);
     const questionIds = new Set();
     let q = state.questions?.[turn.questionId];
@@ -330,6 +331,10 @@ export class ConversationService {
     }));
     delete memory.suppressedRefs;
     const input=fitContext({
+      ...(projects.projects[projectId]?.assistantInstructionsFile ? { assistantScope: {
+        instructions: await assistantInstructions(projects.projects[projectId]),
+        assistants: Object.values(this.context.agents?.agents ?? {}).filter(a => a.systemAssistant).map(a => ({ name: a.displayName, projectId: a.projectId })),
+        rule: '仅处理当前系统。明确属于其它系统时用 reply 提示重新 @ 对应助手发起新问题，不转交、不查其它系统。' } } : {}),
       delivery:{visibility:turn.visibility??'public',rule:turn.visibility==='requester'?'只向提问者投递临时卡片；附件通过同一机器人私聊，不得公开。':'普通公开回复'},
       contactDirectory: this.context.contacts ? await this.context.contacts.catalog(turn) : {enabled:false,pending:[]},
       teamKnowledge: this.context.knowledge ? await this.context.knowledge.candidates(turn, projectId) : { enabled: false, candidates: [] },
@@ -361,7 +366,7 @@ export class ConversationService {
     if(turn.directoryChannel&&!['lookup_contact','reply'].includes(turn.decision.action))throw new Error('本群仅支持按姓名或工号查人，不执行开发、环境或数据库任务');
     const { store, projects } = this.context;
     let decision = turn.decision;
-    const projectId = projects.chatProjectMap[turn.chatId];
+    const projectId = resolveProjectId(projects, turn.chatId, turn.profile);
     if(turn.directoryChannel){if(decision.action==='lookup_contact'){const result=await this.context.contacts.lookup(turn,decision.contactLookup);return result.contactImage?{...result,notice:'已核实联系人资料，图片结果仅本次提问者和群主可见。'}:result;}return {notice:'本群专用于查人，请提供同事姓名或完整工号；不执行开发、数据库或环境排查。'};}
     if (decision.knowledgeReceipt && this.context.knowledge) {
       const teamKnowledge = await this.context.knowledge.candidates(turn, projectId);
@@ -409,6 +414,7 @@ export class ConversationService {
     }
     if (decision.action === 'reply') return {};
     if (decision.action === 'bind_project') {
+      if (Object.hasOwn(projects.chatProfileProjectMap ?? {}, turn.chatId)) throw new Error('系统助手的项目绑定只能在本机配置中修改。');
       if (!isAdministrator(projects, turn)) throw new Error('只有真人管理员可以绑定项目，项目负责人机器人不是管理员。');
       if (!Object.hasOwn(projects.projects, decision.projectId)) throw new Error('项目不存在。');
       if (projectId && projectId !== decision.projectId) throw new Error('本群已绑定项目，变更绑定需在本地配置中确认。');
@@ -447,7 +453,7 @@ export class ConversationService {
       const route = decision.intent === 'analysis'
         ? { stage: 'developer', workflow: 'continuous_analysis' }
         : routeDecision(turn.role, decision.intent);
-      const routing = agentRouting(this.context, route.stage);
+      const routing = agentRouting(this.context, route.stage, turn.profile);
       if (route.workflow === 'continuous_analysis' && !routing.agentProfile) throw new Error('代码分析需要配置开发机器人 profile；本次未创建任务。');
       await store.transact(s => { const t = (s.conversations ?? []).find(x=>x.id===turn.id); if(t) t.decision=structuredClone(decision); });
       const created = await store.createJob({
@@ -481,7 +487,7 @@ export class ConversationService {
     const admin = isAdministrator(projects, turn);
     if (decision.action === 'approve') {
       if (!admin) throw new Error('只有真人管理员可以放行。请使用已配置管理员身份 @项目负责人 确认；机器人角色不等于管理员。');
-      const approved = await store.approve(job.id, turn.senderId, agentRouting(this.context, nextStage(job.workflow, job.stage)), turn.id);
+      const approved = await store.approve(job.id, turn.senderId, agentRouting(this.context, nextStage(job.workflow, job.stage), job.originProfile), turn.id);
       return { jobId: job.id, nextJobId: approved.nextJob.id, notice: `已放行 ${job.id}\n下一阶段：${stageLabel(approved.nextJob.stage)}（${approved.nextJob.id}）` };
     }
     if (!admin && !isTaskCreator(projects, job, turn)) throw new Error('只有任务发起人或真人管理员可以补充/取消该任务；转交后需配置跨应用真人身份映射。');
@@ -530,9 +536,8 @@ export function questionRequest(state, questionId) {
     .map((text, index) => index === 0 ? text : `后续补充：${text}`).join('\n\n') || null;
 }
 
-function agentRouting(context, role) {
-  const profileRole = role === 'owner_report' ? 'owner_intake' : role;
-  return { agentRole: role, agentProfile: context.agents.agents?.[profileRole]?.profile ?? null };
+function agentRouting(context, role, profile) {
+  return routeAgent(context.agents.agents, role, profile);
 }
 
 export function splitReply(text, size = 2500) {
