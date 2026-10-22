@@ -1,3 +1,4 @@
+import {isPendingEnrollment} from '../shared/enrollment-lifecycle.js';
 import { addQuestionProgress, enrollmentNotice } from './enrollment-cards.js';
 import {stateView} from '../shared/state-view.js';
 import {cardDestination} from './private-cards.js';
@@ -26,7 +27,7 @@ export function attachQuestion(state, turn, event, projects) {
   const broadTopicRoot = Boolean(explicit && event.root_id && event.reply_to === event.root_id
     && (explicit.messageId === event.root_id || explicit.threadRootId === event.root_id));
   const related = broadTopicRoot ? (threadLatest ?? explicit) : (explicit ?? threadLatest);
-  const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status));
+  const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && isPendingEnrollment(e));
   const relatedTurn = related && state.conversations.find(t => t.id === related.latestTurnId);
   const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && (pending(relatedTurn)||relatedTurn.setupPending||relatedTurn.outcome?.contactCandidates?.length))) ? related : null;
   const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
@@ -47,7 +48,7 @@ export function questionView(state, questionId, projects = {}) {
   const q = state.questions?.[questionId];
   if (!q) throw new Error('Question identity missing');
   const turn = state.conversations.find((item) => item.id === q.latestTurnId);
-  const enrollment = Object.values(state.environmentEnrollments ?? {}).find(e => e.questionId === q.id && ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status));
+  const enrollment = Object.values(state.environmentEnrollments ?? {}).find(e => e.questionId === q.id && isPendingEnrollment(e));
   const job = questionJob(state, q.id);
   const outstanding = state.conversations.some((item) => item.questionId === q.id && pending(item));
   const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId);

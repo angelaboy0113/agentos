@@ -47,3 +47,9 @@ test('an unrelated pending Nacos enrollment does not steal credentials from an e
  f.state.jobs=[{status:'awaiting_clarification',chatId:'group',questionId:'web',result:{browserLoginRequired:true},environmentAccess:{kind:'website'}}];
  assert.equal(await f.service.handle({...f.event,root_id:'website-root'}),null);assert.equal(f.saved.length,0);
 });
+
+test('a known new question cannot route a URL credential message into an older question enrollment',async()=>{
+ const f=fixture();f.state.questions.new={id:'new',messageId:'new-root',chatId:'group',profile:'tpm',projectId:'tpm'};
+ await f.service.handle({...f.event,root_id:'new-root',content:'http://prd.test:8848/nacos 账号：new-user 密码：new-secret'});
+ assert.equal(f.saved.length,0);assert.match(f.replies[0],/未把凭据交给其它话题/);
+});

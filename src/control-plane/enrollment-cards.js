@@ -1,13 +1,14 @@
+import {isPendingEnrollment} from '../shared/enrollment-lifecycle.js';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isAdministrator, isTaskCreator } from './authorization.js';
 import { elapsed, cumulativeToolCalls } from './message-cards.js';
-export const pendingEnrollment = e => ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e?.status);
+export const pendingEnrollment = isPendingEnrollment;
 export const enrollmentVersion = e => createHash('sha256').update(`${e.id}|${e.status}|${e.url}|${e.profile}`).digest('hex').slice(0,16);
 export function enrollmentNotice(e) {
- if (!e || !["opening","login_required"].includes(e.status)) return null;
- const message=e.status === "opening" ? "正在启动本机独立登录窗口，尚未确认登录成功。" : e.loginIssue ? "登录尚未通过认证，请核对账号密码或在本机完成验证码；可在本话题重新提供凭据。" : e.credentialReceivedAt ? "已收到凭据，正在尝试自动登录，尚未确认认证成功。成功后仍需选择允许读取的命名空间。" : "等待 Nacos 登录：可在本话题 @助手 提供账号密码，由独立窗口自动填写；也可在本机手动登录。验证码和读取范围选择仍需本人完成。";
+ if (!e || !["opening","login_required","scope_required"].includes(e.status)) return null;
+ const message=e.status === "scope_required" ? "Nacos 登录已成功，正在等待命名空间范围选择："+(e.namespaces??[]).map(n=>n.name||n.id||"public").join("、")+"。尚未查询数据库。" : e.status === "opening" ? "正在启动本机独立登录窗口，尚未确认登录成功。" : e.loginIssue ? "登录尚未通过认证，请核对账号密码或在本机完成验证码；可在本话题重新提供凭据。" : e.credentialReceivedAt ? "已收到凭据，正在尝试自动登录，尚未确认认证成功。成功后仍需选择允许读取的命名空间。" : "等待 Nacos 登录：可在本话题 @助手 提供账号密码，由独立窗口自动填写；也可在本机手动登录。验证码和读取范围选择仍需本人完成。";
  return message+`\n\n目标：${e.tier.toUpperCase()} · ${e.url}`;
 }
 export function addQuestionProgress(card, state, q, enrollment, now = Date.now()) {

@@ -1,3 +1,4 @@
+import { configuredNamespaceScope } from '../src/shared/enrollment-namespace-scope.js';
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { readFile, writeFile, mkdir, rename, chmod } from "node:fs/promises";
@@ -322,20 +323,20 @@ try {
           .slice(0, 100)}`,
       ),
     );
-    rl = createInterface({ input: stdin, output: stdout });
-    const chosen = (await rl.question("输入序号，多个用逗号分隔: "))
-      .split(",")
-      .map((x) => Number(x.trim()) - 1);
-    if (
-      !chosen.length ||
-      chosen.some((i) => !Number.isInteger(i) || !result.data[i])
-    )
-      throw new Error("Invalid selection");
-    e.queries.investigate.namespaces = [
-      ...new Set(chosen.map((i) => result.data[i].namespace)),
-    ];
+    const configuredNamespaces = seed ? project[1].nacosEnrollmentNamespaces?.[tier] : null;
+    await enrollmentStatus("scope_required", { namespaces: result.data.map(x => ({ id: String(x.namespace ?? ""), name: String(x.namespaceShowName ?? "").slice(0,100) })) });
+    if (configuredNamespaces) {
+      e.queries.investigate.namespaces = configuredNamespaceScope(configuredNamespaces, result.data);
+      console.log("已按本项目当前环境的本机授权范围选择命名空间。");
+    } else {
+      rl = createInterface({ input: stdin, output: stdout });
+      const chosen = (await rl.question("输入序号，多个用逗号分隔: ")).split(",").map(x => Number(x.trim()) - 1);
+      if (!chosen.length || chosen.some(i => !Number.isInteger(i) || !result.data[i])) throw new Error("Invalid selection");
+      e.queries.investigate.namespaces = [...new Set(chosen.map(i => result.data[i].namespace))];
+      rl.close();
+    }
     e.queries.investigate.description = `所选命名空间内自动发现配置与解析数据库地址（${e.queries.investigate.namespaces.length}个空间），不连接数据库`;
-    rl.close();
+    rl?.close();
   } else {
     const { mysqlRead } = await import(
       "../src/runner/environment-connector.js"

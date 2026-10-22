@@ -231,3 +231,14 @@ test('approval cannot switch targets when an endpoint is corrected between read 
   await assert.rejects(approveEnrollment(context,admin,async()=>{launches++;}),/待确认|已变更/);
   assert.equal(launches,0);
 });
+
+test('a newly connected unique same-project source resumes a waiting newer topic once without borrowing actor authority',async t=>{
+ const {context,state,turn}=await fixture(t);
+ turn.status='sent';turn.setupPending=true;turn.decision.environmentSetup={kind:'mysql',tier:'prd',url:''};
+ const {resumeAvailableSetupSources}=await import('../src/control-plane/environment-enrollment.js');
+ const config={environments:{n:{kind:'nacos',projectId:'other',tier:'prd',queries:{investigate:{mode:'investigate'}}}}};
+ await resumeAvailableSetupSources(context,async()=>config);assert.equal(turn.status,'sent');
+ config.environments.n.projectId='demo';await resumeAvailableSetupSources(context,async()=>config);
+ assert.equal(turn.status,'decided');assert.equal(turn.senderId,'ou_member');assert.equal(turn.profile,'owner');
+ const generation=state.questions.q.generation;await resumeAvailableSetupSources(context,async()=>config);assert.equal(state.questions.q.generation,generation);
+});

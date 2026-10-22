@@ -1,3 +1,4 @@
+import {isPendingEnrollment,isLiveEnrollment,sameEnrollmentScope} from '../shared/enrollment-lifecycle.js';
 import { resolveProjectId } from '../shared/project-scope.js';
 import {stateView} from '../shared/state-view.js';
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
@@ -60,11 +61,10 @@ export async function requestEnrollment(context, turn) {
     );
     if (old) return { notice: "等待管理员确认本机接入", enrollmentId: old.id };
     const replaced = Object.values(state.environmentEnrollments).filter(e =>
-      e.status === "requested" && e.questionId === turn.questionId && e.chatId === turn.chatId
-      && e.projectId === projectId && e.profile === turn.profile && e.kind === target.kind && e.tier === target.tier);
+      e.status === "requested" && sameEnrollmentScope(e,{...turn,projectId}) && e.kind === target.kind && e.tier === target.tier);
     if (
       Object.values(state.environmentEnrollments).filter((e) =>
-        ["requested", "opening", "login_required", "awaiting_tls_confirmation"].includes(e.status),
+        isPendingEnrollment(e),
       ).length - replaced.length >= 5
     )
       throw new Error("待接入请求过多，请先完成已有请求");
@@ -118,7 +118,7 @@ export async function approveEnrollment(
       throw new Error("接入申请已过期，请重新发起");
     if (
       Object.values(state.environmentEnrollments).some((x) =>
-        ["opening", "login_required"].includes(x.status),
+        isLiveEnrollment(x),
       )
     )
       throw new Error("本机已有接入窗口，请先完成");
@@ -180,8 +180,25 @@ export async function launchEnrollment(context, e) {
     );
   });
 }
+export async function resumeAvailableSetupSources(context, load = loadEnvironments) {
+ const state=await context.store.read();
+ const waiting=(state.conversations??[]).filter(t=>t.status==='sent'&&t.setupPending&&t.decision?.action==='request_environment_setup'&&t.decision.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&state.questions?.[t.questionId]?.latestTurnId===t.id);
+ if(!waiting.length)return;
+ const config=await load();
+ for(const turn of waiting){
+  const projectId=resolveProjectId(context.projects,turn.chatId,turn.profile);
+  const sources=Object.values(config.environments??{}).filter(e=>e.projectId===projectId&&e.tier===turn.decision.environmentSetup.tier&&e.kind==='nacos'&&e.queries?.investigate?.mode==='investigate');
+  if(sources.length!==1)continue;
+  await context.store.transact(s=>{
+   const t=s.conversations.find(x=>x.id===turn.id),q=s.questions?.[turn.questionId];
+   if(t?.status!=='sent'||!t.setupPending||q?.latestTurnId!==turn.id||(s.jobs??[]).some(j=>j.questionId===q.id&&['queued','running','cancelling'].includes(j.status))||Object.values(s.environmentEnrollments??{}).some(e=>e.questionId===q.id&&isPendingEnrollment(e)))return;
+   t.status='decided';t.setupPending=false;t.outcome=null;t.response=null;t.actionError=null;t.sourceConnectionRecoveredAt=new Date().toISOString();q.generation++;
+  });
+ }
+}
 export async function pollEnrollments(context, load = loadEnvironments) {
-  const needed=await stateView(context.store,s=>Object.values(s.environmentEnrollments??{}).some(e=>['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status))||(s.jobs??[]).some(j=>{if(j.status!=='completed'||!j.environmentAccess)return false;const t=s.conversations?.find(t=>t.id===j.sourceMessageId);return t?.decision?.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&t.decision.action==='create_task'&&(!j.connectionEnrollmentHandled||t.setupPending); }));
+  await resumeAvailableSetupSources(context,load);
+  const needed=await stateView(context.store,s=>Object.values(s.environmentEnrollments??{}).some(e=>isPendingEnrollment(e))||(s.jobs??[]).some(j=>{if(j.status!=='completed'||!j.environmentAccess)return false;const t=s.conversations?.find(t=>t.id===j.sourceMessageId);return t?.decision?.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&t.decision.action==='create_task'&&(!j.connectionEnrollmentHandled||t.setupPending); }));
   if(!needed)return;
   let state = await context.store.read();
   // Resume metadata discovery without borrowing another user's PRD authority.
@@ -208,7 +225,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
   }
   state = await context.store.read();
   for (const e of Object.values(state.environmentEnrollments ?? {})) {
-    if (!["requested", "opening", "login_required", "awaiting_tls_confirmation"].includes(e.status))
+    if (!isPendingEnrollment(e))
       continue;
     const expired = Date.now() - Date.parse(e.createdAt) > 1800000;
     let event;
@@ -228,7 +245,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
     if (
       !expired &&
       (!event ||
-        !["login_required", "complete", "failed"].includes(event.status) ||
+        !["login_required", "scope_required", "complete", "failed"].includes(event.status) ||
         event.status === e.status && (event.loginIssue??null)===(e.loginIssue??null))
     )
       continue;
@@ -249,7 +266,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
     }
     await context.store.transact((s) => {
       const current = s.environmentEnrollments[e.id];
-      if (!["requested", "opening", "login_required", "awaiting_tls_confirmation"].includes(current.status))
+      if (!isPendingEnrollment(current))
         return;
       const original = s.conversations.find((t) => t.id === e.turnId);
       const q = s.questions[e.questionId];
@@ -262,6 +279,7 @@ export async function pollEnrollments(context, load = loadEnvironments) {
         return;
       current.status = expired ? "expired" : event.status;
       current.loginIssue = event?.loginIssue ?? null;
+      current.namespaces = event?.namespaces ?? current.namespaces;
       if (current.status === "complete") {
         // Resume original requester, never borrow the administrator's query authority.
         original.decision = {
@@ -284,10 +302,10 @@ export async function pollEnrollments(context, load = loadEnvironments) {
         original.retryAt = null;
         original.actionError = null;
       } else {
-        original.setupPending = current.status === "login_required";
+        original.setupPending = ["login_required","scope_required"].includes(current.status);
         original.status = "ready";
         original.response =
-          current.status === "login_required"
+          current.status === "scope_required" ? "Nacos 登录已成功，正在等待选择命名空间范围；尚未取数。" : current.status === "login_required"
             ? e.kind === "mysql"
               ? "已在运行AgentOS的电脑上打开本机终端凭据输入。默认使用专用只读账号；如只能使用业务账号，请在本机向导明确确认受控模式。不要在群里发送密码。"
               : current.loginIssue ? "登录尚未通过认证，请核对账号密码，或在本机完成验证码；可在本话题重新提供凭据。" : current.credentialReceivedAt ? "已收到凭据，正在通过本机独立窗口尝试登录，尚未确认认证成功；成功后仍需选择允许读取的命名空间。" : "正在等待 Nacos 登录。请在本话题 @助手 提供账号密码，由独立窗口自动填写；也可在本机手动登录。验证码和读取范围选择仍需本人完成。"

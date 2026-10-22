@@ -1,3 +1,4 @@
+import {isPendingEnrollment,isLiveEnrollment} from '../shared/enrollment-lifecycle.js';
 import { parseWebsiteCredentialMessage, stripCredentialMentions } from './website-credentials.js';
 import { saveKeychainCredential } from '../shared/keychain-credential.js';
 import { resolveProjectId } from '../shared/project-scope.js';
@@ -16,7 +17,7 @@ export class EnrollmentCredentialService {
     const profile = event.agent_profile ?? null;
     const projectId = resolveProjectId(this.context.projects, event.chat_id, profile);
     const pending = Object.values(state.environmentEnrollments ?? {}).filter(e => e.kind === 'nacos'
-      && (['requested', 'opening', 'login_required'].includes(e.status) || e.status === 'failed' && !e.retriedBy && e.approver?.profile === profile) && e.profile === profile
+      && (isPendingEnrollment(e) || e.status === 'failed' && !e.retriedBy && e.approver?.profile === profile) && e.profile === profile
       && e.chatId === event.chat_id && e.projectId === projectId);
     const ids = [event.reply_to, event.root_id, event.thread_id].filter(Boolean);
     const related = pending.filter(e => {
@@ -41,13 +42,16 @@ export class EnrollmentCredentialService {
       try { const u = new URL(m[0]); if (u.username || u.password || u.search) return null; return u.origin + u.pathname.replace(/\/$/, ''); } catch { return null; }
     });
     if (urls.some(u => !u) || new Set(urls).size > 1) return reply('请一次提供一个待接入 Nacos 的凭据，并回复对应话题；本次未保存或登录。');
+    const boundQuestion = Object.values(state.questions ?? {}).find(q => q.chatId === event.chat_id && q.profile === profile && q.projectId === projectId && [q.messageId,q.threadRootId,state.cardMessages?.[`question:${q.id}`]?.messageId].some(id => id && ids.includes(id)));
+    if (boundQuestion && !related.length) return reply('当前话题没有匹配的 Nacos 接入申请，未把凭据交给其它话题。已登记的同环境连接可由当前问题继续使用，无需重复提供密码。');
     let candidates = related.length ? related : pending;
     if (urls.length) candidates = candidates.filter(e => e.url === urls[0]);
     if (!related.length && !urls.length || candidates.length !== 1) return reply('请直接回复对应 Nacos 接入卡片或话题，或带上唯一入口地址，避免登录错误环境。');
     if (parsed.invalid || !parsed.username || !parsed.password) return reply('请回复“账号：你的账号 密码：你的密码”，或“账号密码都是：相同值”。本次未保存不完整凭据。');
     const previous = candidates[0];
+    if (previous.status === 'scope_required') return reply('Nacos 已登录成功，当前等待命名空间范围确认；无需再次发送密码。');
     const retry = previous.status === 'failed';
-    if (retry && Object.values(state.environmentEnrollments ?? {}).some(e => ['opening','login_required'].includes(e.status))) return reply('本机已有接入窗口，请先完成当前接入；本次未保存或启动另一个窗口。');
+    if (retry && Object.values(state.environmentEnrollments ?? {}).some(e => isLiveEnrollment(e))) return reply('本机已有接入窗口，请先完成当前接入；本次未保存或启动另一个窗口。');
     const e = retry ? { ...previous, id: createId('ENR'), status: 'opening', createdAt: new Date().toISOString(),
       approver: { profile, senderId: event.sender_id }, retryOf: previous.id } : previous;
     if (previous.credentialReceiptMessageId === event.message_id) return { credentialMessage: true };
@@ -55,9 +59,9 @@ export class EnrollmentCredentialService {
     catch { return reply('本机钥匙串保存未完成，请解锁运行电脑的登录钥匙串后重试；未把凭据交给模型。'); }
     const accepted = await this.context.store.transact(s => {
       const source = s.environmentEnrollments?.[previous.id];
-      if (!source || !(retry ? source.status === 'failed' : ['requested','opening','login_required'].includes(source.status)) || source.url !== e.url || source.profile !== profile) return false;
+      if (!source || !(retry ? source.status === 'failed' : isPendingEnrollment(source)) || source.url !== e.url || source.profile !== profile) return false;
       if (retry) {
-        if (Object.values(s.environmentEnrollments).some(x => ['opening','login_required'].includes(x.status))) return false;
+        if (Object.values(s.environmentEnrollments).some(x => isLiveEnrollment(x))) return false;
         s.environmentEnrollments[e.id] = { ...e };
         delete s.environmentEnrollments[e.id].diagnostic;
         source.retriedBy = e.id;
