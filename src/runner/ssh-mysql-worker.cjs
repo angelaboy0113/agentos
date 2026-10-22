@@ -16,7 +16,7 @@ rl.on('line',line=>{queue=queue.then(async()=>{
  }
  if(!allowed(x.sql)||!Array.isArray(x.params))throw Object.assign(new Error(),{code:'REMOTE_READONLY_SQL'});
  const result=x.method==='execute'?await conn.execute({sql:x.sql,timeout:x.timeout},x.params):await conn.query({sql:x.sql,timeout:x.timeout},x.params);
- send({id:x.id,ok:true,rows:result[0]});
+ const reply={id:x.id,ok:true,rows:result[0]};if(Buffer.byteLength(JSON.stringify(reply))>24000000)send({id:x.id,ok:false,code:'REMOTE_PAGE_TOO_LARGE'});else send(reply);
  }catch(e){send({id:x?.id,ok:false,code:/^[A-Z0-9_]+$/.test(e.code??'')?e.code:'REMOTE_MYSQL_ERROR',errno:e.errno,sqlState:e.sqlState});}
  });});
 rl.on('close',()=>{queue.finally(async()=>{if(conn){try{await conn.rollback();}catch{}conn.destroy();}});});

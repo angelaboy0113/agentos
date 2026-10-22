@@ -19,10 +19,10 @@ export class ReportDatasets {
   const signature=hash([queryHash,statement.columns,statement.numericColumns??[],statement.rowKey??null]);
   const previous=this.reuseQueries?this.collected.get(signature):null;
   if(previous){const d=await this.restore(previous.datasetRef);if(d?.complete)return {...previous,reused:true,stage:'复用本轮同一只读事务中已完成的相同查询；保留原取数时间'};}
-  const rows=[];const batch=Number.isInteger(statement.batchSize)&&statement.batchSize>=1&&statement.batchSize<=500?statement.batchSize:500;let complete=false;
-  for(let offset=0;offset<=this.maxRows;offset+=batch){
+  const rows=[];let batch=Number.isInteger(statement.batchSize)&&statement.batchSize>=1&&statement.batchSize<=500?statement.batchSize:500;let complete=false;
+  for(let offset=0;offset<=this.maxRows;){
    await this.check();const size=Math.min(batch,this.maxRows-offset+1);
-   const [page]=await execute({sql:`${statement.sql} LIMIT ${size} OFFSET ${offset}`},statement.params);
+   let page;try{[page]=await execute({sql:`${statement.sql} LIMIT ${size} OFFSET ${offset}`},statement.params);}catch(error){if(error.code==='REMOTE_PAGE_TOO_LARGE'&&batch>1){batch=Math.max(1,Math.floor(batch/2));continue;}throw error;}
    await this.check();if(!Array.isArray(page)||page.length>size)throw new ReportInputError('报表分页返回异常');
    for(const row of page){
     if(rows.length===this.maxRows)break;
@@ -32,6 +32,8 @@ export class ReportDatasets {
    }
    if(page.length<size){complete=true;break;}
    if(page.length>this.maxRows-offset)break;
+   offset+=page.length;
+   if(statement.batchSize&&page.length){const average=Buffer.byteLength(JSON.stringify(page))/page.length;batch=Math.max(1,Math.min(500,Math.floor(2000000/Math.max(1,average*1.5))));}
   }
   // A short final page proves completion; exactly-at-cap requires one look-ahead.
   const ref=`dataset-${randomUUID()}`,data={rows,columns:[...statement.columns,...(statement.rowKey?[statement.rowKey.column]:[])],complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};

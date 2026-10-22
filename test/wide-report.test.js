@@ -18,3 +18,10 @@ test('wide raw-record exports preserve every field and row, with key coverage an
  const inspection=await inspectReport(root,{id:'JOB-test',reportFiles:[final.exportFile]},{fileId:final.exportFile.id});assert.equal(inspection.calculationAudit.checkedCells,17*width);assert.equal(inspection.calculationAudit.status,'passed');assert.match(await readFile(path.join(root,'exports','JOB-test',final.exportFile.filename),'utf8'),/精确值0000123/);
  }
 });
+
+test('wide paging adapts to response size and retries oversized pages without skipping or duplicating rows',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'adaptive-report-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const d=new ReportDatasets({maxRows:'all',directory:root,scope:'test'}),rows=Array.from({length:19},(_,i)=>({id:String(i)}));let retries=0;
+ const result=await d.collect({sql:'SELECT id FROM records ORDER BY id',params:[],columns:['id'],batchSize:2},async({sql})=>{const m=sql.match(/LIMIT (\d+) OFFSET (\d+)/),size=Number(m[1]),offset=Number(m[2]);if(size>5){retries++;throw Object.assign(new Error('packet size'),{code:'REMOTE_PAGE_TOO_LARGE'});}return [rows.slice(offset,offset+size)];});
+ assert.equal(result.complete,true);assert.equal(result.rowCount,19);assert.ok(retries>0);assert.deepEqual((await d.restore(result.datasetRef)).rows,rows);
+});
