@@ -144,6 +144,7 @@ export class TeamKnowledgeService {
     this.queue=this.queue.then(()=>this.ingest(job)).catch(()=>{try{this.store.db&&this.store.metric('extraction_failed');}catch{}console.error('[knowledge] extraction unavailable; original task preserved');}).finally(()=>this.inflight.delete(job.id));
   }
   async ingest(job){
+    if(this.context.config.retention?.enabled&&this.now()-Date.parse(job.updatedAt??job.createdAt)>this.context.config.retention.maxAgeMs)return;
     const settings=await this.settings(),actor={senderId:job.senderId,chatId:job.chatId,profile:job.originProfile??job.agentProfile};
     const team=this.team(settings,actor,job.projectId),result=job.result;
     const sourceGuidance=result?.outcome==='partial'&&isSourceBackedOperationGuidance(job,result);
@@ -152,7 +153,7 @@ export class TeamKnowledgeService {
       ||sourceGuidance&&!result.verifiedArtifacts.some(a=>a.kind==='code'))return;
     if(team.enabledFrom&&Date.parse(job.createdAt)<Date.parse(team.enabledFrom))return;
     await this.store.open();if(this.store.processed(job.id))return;
-    this.store.prune(this.now());
+    if(this.context.config.retention?.enabled)this.store.prune(this.now(),this.now()-this.context.config.retention.maxAgeMs);
     if(this.store.size()>=settings.maxEntries){this.store.metric('capacity_reached');return;}
     const source=result.sourceSync??[...(job.context??[])].reverse().find(x=>x.result?.sourceSync)?.result.sourceSync;
     if(!source?.repositories?.length)return;
@@ -270,5 +271,6 @@ export class TeamKnowledgeService {
     for(const row of result.entries){const entry=this.store.get(row.id),team=settings.teams.find(t=>t.id===entry.team);row.validity=team?await this.valid(entry,team):{reusable:false,reason:'scope_removed'};}
     return {enabled:true,...result};
   }
+  async prune(cutoff){const work=this.queue.then(async()=>{if(!this.store.db){try{await stat(path.join(this.store.directory,'knowledge.sqlite'));}catch(e){if(e.code==='ENOENT')return 0;throw e;}}await this.store.open();const n=this.store.prune(this.now(),cutoff);this.source.cache?.clear();return n;});this.queue=work.catch(()=>{});return work;}
   async close(){this.closed=true;await this.model.close();await this.queue;this.store.close();}
 }

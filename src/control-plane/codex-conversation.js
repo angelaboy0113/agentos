@@ -146,6 +146,10 @@ export class CodexConversationEngine {
     }
   }
 
+  async prune(cutoff,protectedRequests) {
+    for(const [key,session]of this.sessions)if(!session.active&&session.touched<cutoff)this.releaseSession(key,session);
+    return this.registry.prune(cutoff,protectedRequests);
+  }
   async close() {
     this.closed = true;
     this.sessions.clear();

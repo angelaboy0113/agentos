@@ -4,7 +4,7 @@ const pause=(ms,signal)=>new Promise((resolve,reject)=>{if(signal?.aborted)retur
 export async function controlPost(config,route,body,{signal,timeoutMs=10000,pollMs=500,fetcher=fetch,onRecovery}={}){
  const encoded=JSON.stringify(body);body=JSON.parse(encoded);
  const durable=criticalControl(route,body),id=randomUUID(),digest=controlDigest(route,body),headers={authorization:`Bearer ${config.runnerToken}`,'content-type':'application/json'};
- if(durable)headers['x-agentos-request-id']=id;
+ if(durable){headers['x-agentos-request-id']=id;headers['x-agentos-request-created-at']=new Date().toISOString();}
  const request=async(url,options)=>{const timeout=AbortSignal.timeout(timeoutMs),combined=signal?AbortSignal.any([signal,timeout]):timeout;const response=await fetcher(config.serverUrl+url,{...options,signal:combined});const payload=await response.json();if(!response.ok)throw Object.assign(new Error(`${route} failed (${response.status}): ${payload.error??'control request failed'}`),{statusCode:response.status});return payload;};
  let recovering=false,lastFailure;
  const post=()=>request(route,{method:'POST',headers,body:encoded});

@@ -1,3 +1,4 @@
+import {retentionSettings} from '../shared/retention.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateHumanIdentities } from './authorization.js';
@@ -8,6 +9,7 @@ export function controlConfig(overrides = {}) {
     host: overrides.host ?? process.env.AGENTOS_HOST ?? '127.0.0.1',
     port: Number(overrides.port ?? process.env.AGENTOS_PORT ?? 8787),
     dataDir,
+    retention:retentionSettings(overrides.retention??{enabled:process.env.AGENTOS_RETENTION_ENABLED!=='false',days:Number(process.env.AGENTOS_RETENTION_DAYS??30),intervalMs:Number(process.env.AGENTOS_RETENTION_INTERVAL_MS??3600000)}),
     conversationFile: overrides.conversationFile ?? process.env.AGENTOS_CONVERSATION_FILE ?? './config/conversation.local.json',
     contactChannelsFile: overrides.contactChannelsFile ?? process.env.AGENTOS_CONTACT_CHANNELS_FILE ?? './config/contact-channels.local.json',
     contactsFile: overrides.contactsFile ?? process.env.AGENTOS_CONTACTS_FILE ?? './config/contacts.local.json',

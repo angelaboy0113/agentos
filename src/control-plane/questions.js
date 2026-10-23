@@ -82,7 +82,7 @@ export function questionView(state, questionId, projects = {}) {
   const resultText=[currentResult,...history.length?['—— 最近结果与回复 ——',...history]:[],...(omitted?[`另有 ${omitted} 项历史执行记录保存在本机审计数据中。`]:[])].join('\n\n');
   if(allHistory.length) {
     card=withResultPage(card,resultPages(resultText));
-    card.body.elements.push({tag:'markdown',text_size:'notation',content:`此前 ${allHistory.length} 项历史执行记录均已保留在本机；卡片展示最近 ${history.length} 项有效结果。`});
+    card.body.elements.push({tag:'markdown',text_size:'notation',content:`此前 ${allHistory.length} 项历史执行记录当前保留在本机；卡片展示最近 ${history.length} 项有效结果。`});
   }
   return { question: q, job: useJob ? job : null, card, terminal, mention,
     resultText,

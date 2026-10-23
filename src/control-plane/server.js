@@ -1,3 +1,5 @@
+import {validateRetainedRequest,expiredMessage} from '../shared/retention.js';
+import {RetentionService} from './retention.js';
 import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
 import {ContactChannels} from './contact-channels.js';
 import {isPrivate,cardDestination} from './private-cards.js';
@@ -79,6 +81,9 @@ export async function createControlPlane(overrides = {}) {
   });
   const conversations = new ConversationService(context, { ...await loadConversationSettings(config.conversationFile), memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
+  context.retention=new RetentionService(context);
+  // Finish startup retention before recovering old card/report/knowledge outboxes.
+  await context.retention.run().catch(()=>{});
   const server = http.createServer(async (request, response) => {
     try {
       if(!await durableControl(context,request,response))await route({ ...context, request, response });
@@ -90,14 +95,15 @@ export async function createControlPlane(overrides = {}) {
   });
 
   server.once('listening', () => {
+    context.retention.start({initial:false});
     cards.start();
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
     context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
-  server.once('close', () => { conversations.stop(); cards.stop(); void context.reports.close(); void context.websiteBrowser.close(); void context.knowledge.close(); });
-  return { server, config, projects, agents, store, conversations, cards };
+  server.once('close', () => { cards.stop();void (async()=>{await context.retention.close();await Promise.allSettled([conversations.stop(),context.reports.close(),context.websiteBrowser.close(),context.knowledge.close()]);})(); });
+  return { server, config, projects, agents, store, conversations, cards, retention:context.retention };
 }
 
 export async function repairStaleTerminalQuestionCards(context) {
@@ -183,7 +189,7 @@ async function route(context) {
       conversationScope: 'question-profile-project-v2',
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1',
-      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
+      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',retention:context.retention.status(),stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
@@ -474,6 +480,7 @@ async function handleFeishuEvent(context, envelope) {
   const event = envelope.event ?? {};
   const message = event.message ?? {};
   if (['app', 'bot'].includes(event.sender?.sender_type)) return;
+  if(expiredMessage(message,context.config.retention))return {ignored:true,reason:'local_retention_expired'};
   const parsed = parseFeishuMessage(message);
   const attachments = [];
   for (const resource of parsed.resources) {
@@ -481,7 +488,7 @@ async function handleFeishuEvent(context, envelope) {
     if (item) attachments.push(item);
   }
   return handleLarkCliEvent(context, {
-    type: 'im.message.receive_v1', message_id: message.message_id,
+    type: 'im.message.receive_v1', message_id: message.message_id,create_time:message.create_time,
     chat_id: message.chat_id, chat_type: message.chat_type,
     sender_id: event.sender?.sender_id?.open_id, sender_type: 'user',
     content: parsed.text, mentions: message.mentions, attachments,
@@ -492,6 +499,7 @@ async function handleFeishuEvent(context, envelope) {
 }
 
 export async function handleLarkCliEvent(context, event) {
+  if(expiredMessage(event,context.config.retention))return {ignored:true,reason:'local_retention_expired'};
   if (event.type !== 'im.message.receive_v1' || ['bot', 'app'].includes(event.sender_type)) return null;
   if (context.projects.retiredChatIds?.includes(event.chat_id)) return { ignored: true, reason: 'retired_group' };
   const messageId = event.message_id ?? event.id;
@@ -780,6 +788,7 @@ async function durableControl(context,request,response){
  }
  const id=request.headers['x-agentos-request-id'];if(!id)return false;
  requireBearer(request,context.config.runnerToken,'runner');if(request.method!=='POST'||!validRequestId(id))throw Object.assign(new Error('Invalid control request ID'),{statusCode:400});
+ validateRetainedRequest(request.headers['x-agentos-request-created-at'],context.config.retention,receipts.pending.has(id)||Boolean((await context.store.snapshot()).controlReceipts?.[id]));
  const body=await readJson(request);if(!criticalControl(pathname,body)||typeof body.runnerId!=='string')throw Object.assign(new Error('Unsupported durable control operation'),{statusCode:400});
  const meta={id,runnerId:body.runnerId,leaseId:body.leaseId,jobId:pathname.match(/^\/api\/v1\/jobs\/([^/]+)\//)?.[1],route:pathname,digest:controlDigest(pathname,body),executable:pathname.endsWith('/environment-claim')||pathname==='/api/v1/jobs/lease'||pathname.endsWith('/events')&&body.type==='started'};
  request.controlBody=body;request.controlMeta=meta;

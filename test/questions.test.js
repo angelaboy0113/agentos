@@ -42,8 +42,9 @@ test('five senders have five durable question cards, isolated intake context, cu
   assert.equal(Object.keys(state.cardMessages).length, 5);
   assert.equal(calls.filter((c) => c.type === 'send').length, 5);
   assert.equal(new Set(calls.filter((c) => c.type === 'send').map((c) => c.id)).size, 5);
-  assert.equal(inputs[0].administrator, true); assert.equal(inputs[1].administrator, false);
-  assert.equal(inputs[4].history.length, 0); assert.equal(inputs[4].nativeSession, true);
+  assert.equal(inputs.find(input=>input.currentActor.senderId==='ou_admin').administrator,true);
+  assert.ok(inputs.filter(input=>input.currentActor.senderId!=='ou_admin').every(input=>input.administrator===false));
+  assert.ok(inputs.every(input=>input.history.length===0&&input.nativeSession===true));
   assert.equal(new Set(state.conversations.map((c) => app.conversations.key(c))).size, 5);
 });
 test('question card stays owned by intake bot across developer/report, mentions only final original asker', async (t) => {

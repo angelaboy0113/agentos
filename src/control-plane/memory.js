@@ -106,6 +106,13 @@ export class MemoryService {
     this.queue = pending.catch(() => {});
     return pending;
   }
+  async prune(cutoff, refs) {
+    return this.serial(async()=>{try{if((await (await import('node:fs/promises')).lstat(this.file)).isSymbolicLink())throw new Error('Invalid memory file');}catch(e){if(e.code!=='ENOENT')throw e;}const cache=await this.read(),before=JSON.stringify(cache);let removed=0;
+      for(const [key,scope] of Object.entries(cache.scopes))if(Date.parse(scope.updatedAt)<cutoff||scope.items?.some(item=>Date.parse(item.recordedAt)<cutoff&&!refs.has(item.ref))){delete cache.scopes[key];removed++;}
+      for(const [key,items]of Object.entries(cache.tombstones)){cache.tombstones[key]=items.filter(ref=>refs.has(ref));if(!cache.tombstones[key].length)delete cache.tombstones[key];}
+      if(JSON.stringify(cache)!==before)await this.write(cache);return removed;
+    });
+  }
   async retrieve(state, turn, projectId) {
     if (!this.settings.enabled) return { enabled: false };
     return this.serial(async () => {

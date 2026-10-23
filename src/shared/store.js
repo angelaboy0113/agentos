@@ -57,7 +57,7 @@ export class JsonStore {
       state.effects ??= {};
       if (key && state.effects[key]) return state.effects[key];
       const result = operation(state);
-      if (key) state.effects[key] = structuredClone(result);
+      if (key) {state.effects[key] = structuredClone(result);state.retention??={};state.retention.undated??={};state.retention.undated['effects:'+key]=Date.now();}
       return result;
     });
   }

@@ -218,6 +218,8 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
 不要让我把秘密粘贴到聊天中。
 - 文件交付按docs/report-exports.md执行：源码工件仅在源码目录验证，登记报表以kind=report和原filename/ID按sourceJobId定位exports并核对SHA-256及verificationHash。不因超过5MiB、10MB或数据集16MB拒绝；exportMaxRows可为all，未配置exportDataBudgetBytes时不加隐式32MB预算。保留已有显式管理员预算、权限/表范围和业务核验，不声称物理资源无限。飞书单文件30MB容量由29000000字节分卷适配，CSV按完整记录保留表头和所有行；超宽记录用可还原二进制分卷及说明。按分卷持久回执和幂等续发，每卷复查原轮次/私有接收人，失败不重新查库。Windows/macOS及真实大文件飞书发送需分别验收。
 
+- 本机数据保留按docs/retention.md执行：默认启用滚动30天，启动及每小时清理终态任务/问题/已发送对话及关联记录、无引用旧导出/附件/联系人图/副本、过期个人摘要/本机线程索引/SQLite知识和目录缓存；30天不是任务总时限。保护执行/待审批/待澄清任务及引用链、进行中的控制请求和投递。旧无时间戳效果记录从首次观察记30天，不猜测日期；坏时间记录保留待维护。配置/凭据、业务源码、Git工作树、待送达卡片回调、活动日志、人工备份及用户全局Codex会话不自动删除，飞书历史不在本机清理范围。以health.retention.last及scripts/retention-preview.mjs验证，维护前成套备份、核对无真实在途工作。自定义Runner的持久POST须带不可变x-agentos-request-created-at；未知且过期请求返回410，缺字段返回426，现存进行中回执仍可恢复，不能把删除回执变成再次执行。
+
 ```
 
 ## 真人必须参与的节点

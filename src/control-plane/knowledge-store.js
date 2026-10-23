@@ -1,4 +1,4 @@
-import { mkdir, chmod } from 'node:fs/promises';
+import { mkdir, chmod, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { terms } from './memory.js';
 
@@ -12,9 +12,11 @@ export class KnowledgeStore {
   }
   async initialize() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    if((await lstat(this.directory)).isSymbolicLink()||path.dirname(await realpath(this.directory))!==await realpath(path.dirname(this.directory)))throw new Error('Invalid knowledge directory');
     await chmod(this.directory, 0o700);
     const { DatabaseSync } = await import('node:sqlite');
     const file = path.join(this.directory, 'knowledge.sqlite');
+    try{if((await lstat(file)).isSymbolicLink())throw new Error('Invalid knowledge file');}catch(e){if(e.code!=='ENOENT')throw e;}
     const db = new DatabaseSync(file);
     try {
       db.exec(`PRAGMA journal_mode=DELETE; PRAGMA busy_timeout=3000;
@@ -31,11 +33,12 @@ export class KnowledgeStore {
   get(id) { const r = this.db.prepare('SELECT * FROM entries WHERE id=?').get(id); return r ? { ...JSON.parse(r.payload), status: r.status } : null; }
   latest(team, environment, topic) { const r = this.db.prepare('SELECT id FROM entries WHERE team=? AND environment=? AND topic=? ORDER BY version DESC LIMIT 1').get(team, environment, topic); return r ? this.get(r.id) : null; }
   size() { return this.db.prepare('SELECT COUNT(*) AS n FROM entries').get().n; }
-  prune(now) {
-    this.db.prepare("DELETE FROM entries WHERE status='superseded' AND verified_at<?").run(now-90*86400000);
+  prune(now,cutoff=now-30*86400000) {
+    this.db.exec('PRAGMA secure_delete=ON');
+    const removed=this.db.prepare('DELETE FROM entries WHERE verified_at<?').run(cutoff).changes;
     this.db.exec('DELETE FROM tokens WHERE entry_id NOT IN (SELECT id FROM entries)');
-    this.db.prepare('DELETE FROM captures WHERE updated_at<?').run(now-90*86400000);
-    this.hot.clear();
+    this.db.prepare('DELETE FROM captures WHERE updated_at<?').run(cutoff);this.hot.clear();
+    if(removed)this.db.exec('VACUUM');return removed;
   }
   put(entry, status = 'active') {
     this.hot.clear();

@@ -25,7 +25,7 @@
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送、幂等记录及最近 200 项本机设置审计 | 是 | 否 |
 | `data/exports/<JOB>/` | 完整分组报表 CSV，含实时业务金额；通过文件校验后回复原提问。见[报表导出](report-exports.md) | 是 | 否 |
 | `data/exports/<JOB>/report-*.verification.json` | 最终文件的列/覆盖/分量核验及业务依据，与CSV绑定；不等于人工业务验收 | 是 | 否 |
-| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；不完整集不保存，不进入团队知识。24小时后不再复用，但不自动删除文件 | 是 | 否 |
+| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；不完整集不保存，不进入团队知识。24小时后不再复用；过保留期且无引用时自动清理 | 是 | 否 |
 | `data/lark-cli/reports/` | CLI 文件回复副本，需与正式导出文件分别清理 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
 | `data/lark-cli/` | lark-cli 消息资源下载工作目录 | 是 | 否 |
@@ -40,7 +40,7 @@
 
 `data/agentos.json` 是默认唯一业务状态真源。它不是数据库，但包含真实消息和任务上下文；重启会继续读取它。对话会保存 `chatType`，任务会保存 `originProfile`、`originChatType`、原 `senderId` 和不可变的 `originMessageId`；卡片 outbox 还会保存终态提醒及 `mentionDelivered`，以便断网后只补发一次 `@`。不要上传到 GitHub、飞书文档或问题单。
 
-状态文件使用紧凑 JSON 和有界问题上下文。每个在途 Job 最多携带 8 项去重证据；已经交接的历史 Job 保留自身结果与事件，不再重复保存整条上下文。主卡只装载最近 6 项有效结果，避免长任务把卡片和每次状态事务拖慢。升级迁移只删除重复的上下文副本，不删除 Job 结果、事件或本机审计历史；迁移前仍应按下文要求停机备份。
+状态文件使用紧凑 JSON 和有界问题上下文。每个在途 Job 最多携带 8 项去重证据；已经交接的历史 Job 保留自身结果与事件，不再重复保存整条上下文。主卡只装载最近 6 项有效结果，避免长任务把卡片和每次状态事务拖慢。升级迁移只删除重复的上下文副本，不删除 Job 结果、事件或本机审计历史；迁移前仍应按下文要求停机备份。另有独立的滚动30天保留策略，会删除过期终态问题、任务及无引用文件，详见[自动清理](retention.md)。
 
 ## 项目目录外
 
@@ -91,7 +91,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 
 ## 联系人信息图
 
-`data/contact-index/directory.sqlite`保存受范围/权限指纹限制的最小目录候选，不含手机号或邮箱；与团队知识SQLite分开。`data/contact-images/`保存个人资料PNG和校验回执，`data/lark-cli/images/`为CLI上传副本；对话outcome登记原提问范围与投递状态。文件含人员资料，使用本机受限权限，不进入Git或团队知识；停稳后备份，没有自动清理服务。配置和验收见[联系人信息图](contact-images.md)。
+`data/contact-index/directory.sqlite`保存受范围/权限指纹限制的最小目录候选，不含手机号或邮箱；与团队知识SQLite分开。`data/contact-images/`保存个人资料PNG和校验回执，`data/lark-cli/images/`为CLI上传副本；对话outcome登记原提问范围与投递状态。文件含人员资料，使用本机受限权限，不进入Git或团队知识；停稳后备份，适用滚动30天本机保留策略。配置和验收见[联系人信息图](contact-images.md)。
 
 私有卡片的visibility、固定收件者、privateDeliveryKind及旧临时卡片清理队列随问题/任务和cardMessages存入原状态JSON；共享知识不自动接收私有调查。私有附件仍保存在原本地目录，私聊投递不代表本地管理员隔离。
 
