@@ -114,11 +114,14 @@ export class WebsiteCredentialService {
     return reply('账号密码已提交，但网页尚未返回明确的登录结果。AgentOS 会保留原任务并继续检测；如页面出现人工步骤，请只在本机 Chrome 完成。');
   }
 
-  async autoLogin(job, environment) {
-    if (typeof this.context.websiteBrowser.submitCredentials !== 'function') return false;
+  async autoLogin(job,environment){return Boolean((await this.recoverLogin(job,environment)).authenticated);}
+
+  async recoverLogin(job, environment) {
+    if(typeof this.context.websiteBrowser.submitCredentials!=='function')return {authenticated:false,credentialState:'unsupported'};
+    try{if((await this.context.websiteBrowser.loginStatusFor?.(job,environment))?.pageReady===true)return {authenticated:true,credentialState:'not_needed'};}catch{return {authenticated:false,credentialState:'access_unavailable'};}
     let saved;
-    try { saved = await this.read(environment.credentialRef); } catch { return false; }
-    try { return Boolean((await this.context.websiteBrowser.submitCredentials(job, environment, saved)).authenticated); }
-    catch { return false; }
+    try{saved=await this.read(environment.credentialRef);}catch{return {authenticated:false,credentialState:'unavailable'};}
+    try{return {authenticated:Boolean((await this.context.websiteBrowser.submitCredentials(job,environment,saved)).authenticated),credentialState:'available'};}
+    catch{return {authenticated:false,credentialState:'available'};}
   }
 }

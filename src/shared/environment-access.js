@@ -17,8 +17,9 @@ export async function loadEnvironments(file = environmentFile()) {
   if (v.version !== 1 || !v.environments || typeof v.environments !== 'object' || Array.isArray(v.environments)) throw new Error('环境配置版本错误');
   validateWebsiteAliases(v);
   for (const [key, e] of Object.entries(v.environments)) {
-    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization','transport'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos', 'website'].includes(e.kind)
+    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization','transport','applicationRoot'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos', 'website'].includes(e.kind)
       || !id(e.credentialRef) || typeof e.membersRead !== 'boolean' || !e.ownerOpenIdsByProfile || !e.queries) throw new Error('环境配置字段无效');
+    if(e.applicationRoot!==undefined&&(e.kind!=='website'||typeof e.applicationRoot!=='boolean'))throw new Error('applicationRoot仅能用于网站应用入口且必须为布尔值');
     validateAccountPolicy(e);
     if(e.transport){if(e.kind!=='mysql')throw new Error('SSH传输仅支持MySQL');validateSshTransport(e.transport);}
     if(e.kind==='website')websiteUrl(e.baseUrl);

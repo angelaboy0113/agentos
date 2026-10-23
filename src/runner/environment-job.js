@@ -37,8 +37,8 @@ export async function executeEnvironmentJob(job, config, emit) {
   if(result.loginRequired) {
     const loginUrl = environment?.kind === 'website' ? environment.baseUrl : '';
     return {outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:result.checkpoint,loginUrl,
-      summary:`正在等待登录：${loginUrl || '当前业务网站'}。可在运行AgentOS的电脑上手动登录，或直接回复本任务卡“账号 / 密码”；成功后自动继续原问题。`,
-      finalMessage:`当前需要登录的网站：${loginUrl || '入口尚未登记，请补充对应环境的网址'}。直接回复本任务卡即可，不要求固定格式；例如“admin / 123456”。凭据写入本机 Mac 钥匙串，不进入模型、任务结果或长期记忆。验证码、短信或扫码仍需在本机 Chrome 完成。`,verification:[]};
+      summary:`正在等待登录：${loginUrl || '当前业务网站'}。正在优先复用登录态和本机已存凭据；恢复后自动继续原问题，无需重复发送已有账号密码。`,
+      finalMessage:`当前需要登录的网站：${loginUrl || '入口尚未登记，请补充对应环境的网址'}。系统优先读取本机 Mac 钥匙串中的既有凭据自动重登；不把账号密码交给模型或长期记忆。首次未保存、凭据明确失效或需验证码/短信/扫码时才需要人工配合，后续卡片会显示具体原因。`,verification:[]};
   }
   let explanation = '';
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });

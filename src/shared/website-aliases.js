@@ -1,3 +1,4 @@
+import {websiteApplication} from './website-application.js';
 import {websiteUrl} from './website-policy.js';
 const normalize=url=>websiteUrl(url).replace(/\/$/,'');
 export function validateWebsiteAliases(config){
@@ -15,5 +16,6 @@ export function validateWebsiteAliases(config){
 export function canonicalWebsite(config,projectId,tier,url){
  validateWebsiteAliases(config);
  const found=(config.websiteAliases??[]).find(a=>a.projectId===projectId&&a.tier===tier&&normalize(a.from)===normalize(url));
- return found?websiteUrl(found.to):websiteUrl(url);
+ const corrected=found?websiteUrl(found.to):websiteUrl(url);
+ return websiteUrl(websiteApplication(config,projectId,tier,corrected)?.entry.baseUrl??corrected);
 }
