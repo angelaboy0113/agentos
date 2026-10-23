@@ -33,6 +33,7 @@ test('real browser navigates framework/ARIA menus, retains concrete refs and cap
  const browser=new WebsiteBrowser(dir,driver);t.after(async()=>{await browser.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
  const e={projectId:'other-system',tier:'uat',baseUrl:`http://fixture.test:${server.address().port}/`},job={id:'job-one'};
  let snapshot=await browser.run(job,e,'connection');const page=browser.pages.get(job.id).page;
+ await page.evaluate(()=>{const hidden=document.createElement('div');hidden.hidden=true;hidden.innerHTML='<button>查看隐藏项</button>'.repeat(400);document.body.prepend(hidden);});snapshot=await browser.run(job,e,'browser_snapshot');assert.ok(snapshot.controls.find(c=>c.label==='查询'));assert.ok(snapshot.controls.find(c=>c.label==='订单管理'));assert.equal(snapshot.controls.some(c=>c.label==='查看隐藏项'),false);
  assert.equal(snapshot.controls.filter(c=>c.label==='订单管理').length,1);assert.equal(snapshot.controls.some(c=>c.label==='保存'||c.label==='日期'),false);
  snapshot=await browser.run(job,e,'browser_click',{ref:snapshot.controls.find(c=>c.label==='订单管理').ref});
  snapshot=await browser.run(job,e,'browser_click',{ref:snapshot.controls.find(c=>c.label==='订单列表').ref});assert.match(snapshot.url,/#\/orders$/);assert.match(snapshot.pageText,/订单列表/);

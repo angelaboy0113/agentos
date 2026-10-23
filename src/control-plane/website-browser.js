@@ -119,16 +119,16 @@ export class WebsiteBrowser {
  async snapshot(s){
   await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;
   const text=await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
-  const handles=await s.page.locator('a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[aria-haspopup="menu"],.el-submenu__title,.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]').elementHandles();
+  const handles=await s.page.locator('a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[aria-haspopup="menu"],.el-submenu__title,.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]').filter({visible:true}).elementHandles();
   const controls=[];
   for(const [i,el]of handles.entries()){
-   const info=i<300?await el.evaluate(controlMetadata).catch(()=>null):null;
+   const info=controls.length<300?await el.evaluate(controlMetadata).catch(()=>null):null;
    if(!info?.type||writeAction.test(info.label)){await el.dispose();continue;}
    const label=cleanWebsiteText(info.label).slice(0,100),ref=`${s.refPrefix}-${s.generation}-${i}`;
    s.refs.set(ref,{el,type:info.type,rawLabel:info.label});controls.push({ref,type:info.type,label,...(info.options?{options:info.options}:{})});
   }
   const loading=await s.page.locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));
-  return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,url:websitePageLocation(s.page.url()),pageText:cleanWebsiteText(text),controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
+  return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,controlsLimited:controls.length>=300,url:websitePageLocation(s.page.url()),pageText:cleanWebsiteText(text),controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
  }
  async screenshot(s){
   if(!/^[A-Za-z0-9_-]+$/.test(s.job.id))throw new Error('Invalid evidence job');
