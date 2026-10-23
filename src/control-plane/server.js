@@ -1,3 +1,4 @@
+import {authorizeWebsiteRequest} from './website-authorization.js';
 import {assertSourceRuntimeTier,sourceEnvironmentForTier} from '../shared/source-environments.js';
 import {HistoryRetention} from './retention.js';
 import { resolveProjectId, routeAgent } from '../shared/project-scope.js';
@@ -54,7 +55,7 @@ export async function createControlPlane(overrides = {}) {
     ? new LarkCliFeishuClient({ ...config.feishu, dataDir: config.dataDir })
     : new FeishuClient({ ...config.feishu, dataDir: config.dataDir }));
 
-  const authorizeBrowser = async (initial,waiting,request)=>{const current=await store.getJob(initial.id);if(current?.status==='awaiting_clarification'&&current?.result?.browserLoginRequired){const type=request.resourceType();const tail=new URL(request.url()).pathname.split('/').at(-1);return type==='document'||['script','stylesheet','image','font'].includes(type)||/^(login|signin|authenticate|auth|captcha|verify)$/i.test(tail);}if(current?.status!=='running')return false;verifyApprovedPlan(await loadEnvironments(),current.environmentAccess);return true;};
+  const authorizeBrowser = (initial,waiting,request)=>authorizeWebsiteRequest({store,projects},initial,waiting,request);
   const browserMode = process.env.AGENTOS_BROWSER_MODE ?? (process.platform === 'darwin' ? 'shared-chrome' : 'isolated');
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),

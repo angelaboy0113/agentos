@@ -1,3 +1,4 @@
+import {renewWaitingWebsitePlan} from './website-authorization.js';
 import {assertSourceRuntimeTier} from '../shared/source-environments.js';
 import {stateView} from '../shared/state-view.js';
 import { canonicalWebsite } from '../shared/website-aliases.js';
@@ -32,10 +33,19 @@ export function pollWebsiteLogins(context){
 }
 async function resumeWebsiteLogins(context){
  const jobs=await stateView(context.store,s=>(s.jobs??[]).filter(j=>j.status==='awaiting_clarification'&&j.result?.browserLoginRequired===true&&j.environmentAccess?.kind==='website'));
- for(const job of jobs){
+ for(let job of jobs){
   try{
    const cfg=await loadEnvironments(),e=cfg.environments[job.environmentAccess.environmentId];if(!e)continue;
+   job=await renewWaitingWebsitePlan(context,job,cfg);
    await context.websiteCredentials?.autoLogin(job,e);
+   const login=await context.websiteBrowser.loginStatusFor?.(job,e);
+   if(login&&!login.pageReady){
+    const state=login.passwordChangeRequired?'password_change_required':login.verificationRequired?'verification_required':login.credentialRejected?'rejected':login.rateLimited?'rate_limited':login.serviceUnavailable?'service_error':login.requestFailed?'request_error':login.blockedRequests?.length?'request_blocked':login.loginState??'waiting';
+    const messages={service_error:'登录接口服务异常，不能认定账号密码错误；原任务保留，请维护者检查网站服务。',request_error:'登录请求未通过接口检查，不能认定账号密码错误；请维护者检查请求链路。',rate_limited:'登录接口限制了请求频率，不会反复自动提交凭据；原任务保留。',password_change_required:'网站要求修改或重置密码，请由本人在本机页面完成；AgentOS不会更改密码。',verification_required:'网站正在等待验证码、短信或扫码，请在本机页面完成。',rejected:'网站明确拒绝了本次登录；请核对账号状态和凭据后，在原任务卡重新提供。',request_blocked:'登录尚未完成，发现网页请求受到限制；请维护者核对允许范围，当前不能认定密码错误。',loading:'网页仍在加载或只有空白外壳，尚不能确认登录成功。',login_required:'仍停留在登录页，尚未确认认证成功；原任务保留。',waiting:'尚未确认登录成功，原任务保留。'};
+    const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserLoginState===state)return false;current.result.browserLoginState=state;current.result.summary=messages[state]??messages.waiting;current.result.finalMessage=current.result.summary+' 当前网站：'+e.baseUrl;current.updatedAt=new Date().toISOString();return true;});
+    if(changed&&context.cards&&job.questionId){const {publishQuestion}=await import('./questions.js');await publishQuestion(context,job.questionId);}
+    continue;
+   }
    if(!await context.websiteBrowser.loginReady(job,e))continue;
    await context.store.transact(state=>{
     const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired)return;
@@ -51,6 +61,9 @@ async function resumeWebsiteLogins(context){
     current.updatedAt=new Date().toISOString();current.events.push({type:'browser_login_resumed',at:current.updatedAt});
     const question=state.questions?.[current.questionId];if(question)question.generation++;
    });
-  }catch{ /* Leave pending and retry after browser/network recovery, never discard original goal. */ }
+  }catch{
+   const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserLoginState==='access_check_failed')return false;current.result.browserLoginState='access_check_failed';current.result.summary='网页登录检测或原访问范围核验未完成，不能认定密码错误；请维护者检查浏览器会话、配置和权限。';current.result.finalMessage=current.result.summary;return true;});
+   if(changed&&context.cards&&job.questionId){const {publishQuestion}=await import('./questions.js');await publishQuestion(context,job.questionId);}
+  }
  }
 }

@@ -104,6 +104,11 @@ export class WebsiteCredentialService {
     try { result = await this.context.websiteBrowser.submitCredentials(job, environment, { username: parsed.username, password: parsed.password }, { force: true }); }
     catch { return reply('凭据已安全保存到 Mac 钥匙串，但页面自动填写暂未完成。AgentOS 会保留原任务；请确认本机 Chrome 页面仍停留在该网站登录页。'); }
     if (result.authenticated) return reply('凭据已保存到 Mac 钥匙串，网页登录成功。AgentOS 将自动继续原问题，无需回复“继续”。');
+    if(result.passwordChangeRequired)return reply('网站要求修改或重置密码，任务已保留。请由本人在本机页面完成；AgentOS 不会代为更改密码。');
+    if(result.rateLimited)return reply('登录接口限制了请求频率，原任务已保留；不会反复自动提交凭据。');
+    if(result.serviceUnavailable||result.requestFailed)return reply('登录接口返回服务或请求错误，原任务保留；目前不能认定账号密码错误，请维护者检查网站服务与请求链路。');
+    if(result.blockedRequests?.length)return reply('登录流程中的接口请求受到访问规则限制，原任务保留；请维护者核对读取范围，当前不能认定密码错误。');
+    if(result.submissionUnconfirmed)return reply('凭据已填写，但尚未确认登录请求成功发出；任务保留，请维护者检查登录提交和网络拦截，当前不能认定账号密码错误。');
     if (result.credentialRejected) return reply('账号密码已提交，但页面仍停留在账号密码登录界面，可能是账号或密码未通过。请核对后直接回复本任务卡重新提交；AgentOS 不会在消息或日志中回显凭据。');
     if (result.verificationRequired) return reply('账号密码已提交，页面正在等待验证码、短信或扫码。请只在本机 Chrome 完成该步骤；完成后 AgentOS 会自动继续原问题。');
     return reply('账号密码已提交，但网页尚未返回明确的登录结果。AgentOS 会保留原任务并继续检测；如页面出现人工步骤，请只在本机 Chrome 完成。');

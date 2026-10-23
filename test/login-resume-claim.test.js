@@ -40,9 +40,9 @@ test('real store login continuation survives restart, accepts one new lease, rej
  const again=await restarted.leaseNext('runner');await restarted.claimEnvironment(f.id,{leaseId:again.lease.id,runnerId:'runner'});
 });
 test('expired read scope at login refreshes policy authorization; cancellation never resumes',async t=>{
- const f=await fixture(t);await f.store.transact(s=>{s.jobs[0].environmentAccess.expiresAt='2000-01-01T00:00:00Z';});
+ const f=await fixture(t);await f.store.transact(s=>{s.jobs[0].environmentAccess=planQuery(f.cfg,{environmentId:'web',queryId:'investigate',parameters:['查看任务记录']},'demo',{senderId:'ou_member',profile:'owner'},Date.now()-3600000);});
  const context={store:f.store,websiteBrowser:{loginReady:async()=>true}};await pollWebsiteLogins(context);
- const j=await f.store.getJob(f.id);assert.equal(j.status,'queued');assert.equal(j.environmentAccess.approvedBy,'policy:read-only');assert.equal(j.browserResumeClaim,undefined);assert.equal((await f.store.leaseNext('runner')).id,f.id);
+ const j=await f.store.getJob(f.id);assert.equal(j.status,'queued');assert.equal(j.environmentAccess.approvedBy,'policy:read-only');assert.equal(j.browserResumeClaim.scopeHash,j.environmentAccess.scopeHash);assert.equal((await f.store.leaseNext('runner')).id,f.id);
  await f.store.transact(s=>{s.jobs[0].status='cancelled';});await pollWebsiteLogins(context);assert.equal((await f.store.getJob(f.id)).status,'cancelled');
 });
 test('scope changes after login detection invalidate continuation before claim',async t=>{

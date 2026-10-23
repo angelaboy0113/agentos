@@ -1,3 +1,4 @@
+import {browserLoginState} from '../shared/browser-login-state.js';
 import {randomUUID} from 'node:crypto';
 import {chromeTransport} from './chrome-transport.js';
 import {chromePage} from './chrome-page.js';
@@ -18,9 +19,9 @@ export class SharedChromeBrowser{
  async snapshot(job,e,s,tool,args){
   await this.allowed(job,e,s.waiting);
   const request={baseUrl:s.baseUrl,token:s.token,tool,args};
-  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${chromePage.toString()})(${JSON.stringify(request)}))`});
+  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify({...(${chromePage.toString()})(${JSON.stringify(request)}),...(${browserLoginState.toString()})()})`});
   if(raw.error)throw new Error(raw.error);
-  s.waiting=raw.loginRequired===true;if(!s.waiting)s.credentialAttempted=false;
+  s.waiting=raw.loginRequired===true||raw.loginState==='loading';if(!s.waiting)s.credentialAttempted=false;
   if(raw.pageText)raw.pageText=cleanWebsiteText(raw.pageText);
   if(raw.controls)raw.controls=raw.controls.map(c=>({...c,label:cleanWebsiteText(c.label),...(c.options?{options:c.options.map(o=>({...o,label:cleanWebsiteText(o.label)}))}:{})}));
   return raw;
@@ -42,14 +43,12 @@ export class SharedChromeBrowser{
   const request={baseUrl:s.baseUrl,username:cred.username,password:cred.password};
   const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${chromeLoginPage.toString()})(${JSON.stringify(request)}))`});
   if(raw.error)throw new Error(raw.error);
-  if(!raw.submitted&&!raw.loginRequired){s.waiting=false;s.credentialAttempted=false;return {authenticated:true,attempted:false};}
   await new Promise(resolve=>setTimeout(resolve,1200));
   const status=await this.snapshot(job,e,s,'browser_snapshot',{});
-  return {authenticated:!status.loginRequired,attempted:true,
-   credentialRejected:status.loginRequired===true&&status.credentialFormVisible===true,
-   verificationRequired:status.loginRequired===true&&status.verificationRequired===true};
+  return {...status,authenticated:status.pageReady===true&&!status.loginRequired,attempted:raw.submitted===true,credentialRejected:status.credentialRejected===true,verificationRequired:status.verificationRequired===true};
  });}
- loginReady(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return !(await this.snapshot(job,e,s,'browser_snapshot',{})).loginRequired;});}
+ loginReady(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return (await this.snapshot(job,e,s,'browser_snapshot',{})).pageReady===true;});}
+ loginStatusFor(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return this.snapshot(job,e,s,'browser_snapshot',{});});}
  async release(id){this.pages.delete(id);}
  async close(){this.pages.clear();} // Never close or quit the user's browser.
 }

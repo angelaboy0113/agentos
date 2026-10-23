@@ -51,7 +51,7 @@ test('query-discovered websites produce scoped configs and PRD stays read-only w
  const running={id:'pending',projectId:'demo',originProfile:'owner',senderId:'ou_member',status:'awaiting_clarification',result:{browserLoginRequired:true},environmentAccess:{...plan,approvedBy:'ou_admin'},events:[]};const state={jobs:[running]};
  const polling={store:{read:async()=>structuredClone(state),transact:async fn=>fn(state)},websiteBrowser:{loginReady:async()=>true}};
  await pollWebsiteLogins(polling);assert.equal(running.status,'queued');assert.equal(running.result,null);assert.equal(running.senderId,'ou_member');
- running.status='awaiting_clarification';running.result={browserLoginRequired:true};running.environmentAccess.expiresAt='2000-01-01T00:00:00Z';await pollWebsiteLogins(polling);assert.equal(running.status,'queued');assert.equal(running.environmentAccess.approvedBy,'policy:read-only');
+ running.status='awaiting_clarification';running.result={browserLoginRequired:true};running.environmentAccess=planQuery(cfg,req,'demo',{profile:'owner',senderId:'ou_member'},Date.now()-3600000);await pollWebsiteLogins(polling);assert.equal(running.status,'queued');assert.equal(running.environmentAccess.approvedBy,'policy:read-only');
 });
 test('waiting login card explains local cooperation without demanding text clarification',()=>{
  const card=JSON.stringify(jobCard({id:'job',status:'awaiting_clarification',stage:'developer',taskIntent:'analysis',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),events:[],result:{browserLoginRequired:true,summary:'等待本机登录，完成后自动继续',finalMessage:'任务已保留'}}));

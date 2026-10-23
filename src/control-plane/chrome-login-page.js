@@ -34,10 +34,10 @@ export function chromeLoginPage(request) {
   if (!setValue(passwordInput, password)) return { error: '登录密码输入框不可填写' };
   const buttons = [...scope.querySelectorAll('button,input[type="submit"],[role="button"]')].filter(visible);
   const submit = buttons.find((el) => /登录|登入|sign\s*in|log\s*in|submit|确定|继续/i
-    .test((el.innerText || el.value || el.getAttribute('aria-label') || '').trim()))
+    .test((el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g,'')))
     ?? buttons.find((el) => el.type === 'submit');
   if (submit) submit.click();
-  else if (form?.requestSubmit) form.requestSubmit();
+  else if (form?.requestSubmit && form.method.toLowerCase()==='post' && new URL(form.action||location.href).origin===base.origin) form.requestSubmit();
   else return { error: '未找到登录提交按钮' };
   return { submitted: true, loginRequired: true };
 }
