@@ -16,7 +16,15 @@ export function prepareWebsiteQuery(context,job,request){
   if(issue)throw Object.assign(new Error('Invalid website purpose'),{queryDiagnostic:{code:'TEXT_PARAMETER',index:0,reason:issue,length:typeof purpose==='string'?purpose.length:null,maxLength:200}});
   assertSourceRuntimeTier(context.projects.projects?.[job.projectId],job.sourceEnvironment,request.tier);
   const cfg=await loadEnvironments();
-  const baseUrl=canonicalWebsite(cfg,job.projectId,request.tier,request.url),environmentId=websiteKey(job.projectId,request.tier,baseUrl);
+  const requestedUrl=canonicalWebsite(cfg,job.projectId,request.tier,request.url);
+  // A deep page in the same question stays in its already-used application entry.
+  // Do not copy a grant or bootstrap endpoint list into a freshly registered page.
+  const known=(job.context??[]).slice().reverse().map(c=>cfg.environments[c.result?.environmentEvidence?.environmentId]).find(e=>{
+   if(!e||e.kind!=='website'||e.projectId!==job.projectId||e.tier!==request.tier)return false;
+   const base=new URL(e.baseUrl),target=new URL(requestedUrl),prefix=base.pathname.replace(/\/$/,'');
+   return base.origin===target.origin&&(target.pathname===prefix||target.pathname.startsWith(prefix+'/'));
+  });
+  const baseUrl=known?websiteUrl(known.baseUrl):requestedUrl,environmentId=websiteKey(job.projectId,request.tier,baseUrl);
   if(cfg.environments[environmentId] && websiteUrl(cfg.environments[environmentId].baseUrl)!==baseUrl)throw new Error('网页入口登记冲突，未复用其他页面');
   if(!cfg.environments[environmentId]){
    const owners=context.projects.ownerOpenIdsByProfile??{};

@@ -11,6 +11,8 @@ import {BrowserInputError,validateBrowserTool,websitePageLocation} from '../src/
 import {websiteTools} from '../src/runner/environment-job.js';
 import {QueryInputError} from '../src/runner/environment-tools.js';
 import {investigateEnvironment} from '../src/runner/environment-investigator.js';
+import {prepareWebsiteQuery} from '../src/control-plane/website-query.js';
+import {websiteKey} from '../src/shared/website-policy.js';
 import {planQuery} from '../src/shared/environment-access.js';
 import {WebsiteEvidenceDelivery,websiteEvidenceFile} from '../src/control-plane/website-evidence.js';
 import {pruneHistory} from '../src/shared/retention.js';
@@ -40,7 +42,8 @@ test('real browser navigates framework/ARIA menus, retains concrete refs and cap
  snapshot=await browser.run(job,e,'browser_search',{ref:query.ref,text:'synthetic-private-value'});assert.equal(await page.locator('#query').inputValue(),'synthetic-private-value');assert.equal(await page.locator('#decoy').inputValue(),'');
  await assert.rejects(browser.run(job,e,'browser_search',{ref:snapshot.controls.find(c=>c.label==='查询').ref,text:'x'}),e=>e.code==='BROWSER_CONTROL_TYPE');
  const stale=snapshot.controls.find(c=>c.label==='搜索名称').ref;await page.locator('#query').evaluate(el=>el.remove());await assert.rejects(browser.run(job,e,'browser_search',{ref:stale,text:'x'}),e=>e.code==='BROWSER_REF_STALE');
- const shot=await browser.run(job,e,'browser_screenshot');const file=await websiteEvidenceFile(dir,job.id,shot.screenshot);assert.equal((await stat(file)).mode&0o777,0o600);assert.match(shot.screenshot.url,/#\/orders$/);
+ await page.evaluate(()=>{const button=document.createElement('button');button.textContent='查看';button.onclick=()=>{document.querySelector('#view').textContent='订单详情';};document.body.append(button);});
+ const shot=await browser.run(job,e,'browser_screenshot');assert.ok(shot.controls.find(c=>c.label==='查看'));await browser.run(job,e,'browser_click',{ref:shot.controls.find(c=>c.label==='查看').ref});assert.match((await browser.run(job,e,'browser_snapshot')).pageText,/订单详情/);const file=await websiteEvidenceFile(dir,job.id,shot.screenshot);assert.equal((await stat(file)).mode&0o777,0o600);assert.match(shot.screenshot.url,/#\/orders$/);
  await browser.run({id:'job-two'},e,'connection');await assert.rejects(browser.run({id:'job-two'},e,'browser_click',{ref:snapshot.controls[0].ref}),e=>e.code==='BROWSER_REF_STALE');
  await page.evaluate(()=>fetch('/save',{method:'POST'}).catch(()=>{}));assert.equal(writes,0);
  // Hold a detached ref: no 10s locator auto-wait and no accidental click after re-render.
@@ -72,7 +75,7 @@ test('screenshot outbox binds original question/profile, retries without recaptu
  const job={id:'job',questionId:'q',status:'running',lease:{id:'lease'},originalQuestion:'请提供异常截图',senderId:'ou_member',originProfile:'profile-a'};
  const state={jobs:[job],questions:{q:{generation:1,messageId:'original-message',profile:'profile-a',replyInThread:true}}};let count=0,fail=true;const sent=[];
  const context={config:{dataDir:dir},store:{read:async()=>structuredClone(state),transact:async fn=>fn(state)},feishu:{replyImage:async(message,file,options)=>{count++;if(fail)throw new Error('network');sent.push({message,options});return {data:{message_id:'image-message'}};}}};
- const delivery=new WebsiteEvidenceDelivery(context);t.after(()=>delivery.close());await delivery.capture(job,item);await delivery.retry();assert.equal(count,1);const entry=Object.values(state.websiteEvidenceDeliveries)[0];assert.equal(entry.messageId,undefined);fail=false;entry.retryAt=0;await delivery.retry();assert.equal(entry.messageId,'image-message');assert.equal(sent[0].message,'original-message');assert.equal(sent[0].options.profile,'profile-a');assert.equal(sent[0].options.replyInThread,true);await delivery.retry();assert.equal(count,2);
+ const delivery=new WebsiteEvidenceDelivery(context);t.after(()=>delivery.close());await delivery.capture(job,item);await delivery.retry();assert.equal(count,1);const entry=Object.values(state.websiteEvidenceDeliveries)[0];assert.equal(entry.messageId,undefined);fail=false;entry.retryAt=0;await delivery.retry();assert.equal(entry.messageId,'image-message');assert.equal(sent[0].message,'original-message');assert.equal(sent[0].options.profile,'profile-a');assert.equal(sent[0].options.replyInThread,true);assert.equal((await delivery.status(job))[0].delivery,'sent');state.questions.q.generation++;assert.equal((await delivery.status(job))[0].delivery,'sent');await delivery.retry();assert.equal(count,2);
  await assert.rejects(delivery.capture({...job,originalQuestion:'只检查页面'},item),/未要求截图/);
  await assert.rejects(websiteEvidenceFile(dir,'job',{...item,name:'../a.png'}));await writeFile(file,Buffer.from('modified'));await assert.rejects(websiteEvidenceFile(dir,'job',item));
  await rm(file);await symlink('/etc/hosts',file);await assert.rejects(websiteEvidenceFile(dir,'job',item));
@@ -95,4 +98,22 @@ test('stale screenshot generation and private destination never spill into a pub
  const item={name:'b.png',bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')},job={id:'job',questionId:'q',status:'running',lease:{id:'lease'},originalQuestion:'请截图',visibility:'requester',senderId:'ou_private'};
  const state={jobs:[job],questions:{q:{generation:1,messageId:'message',profile:'second-profile',visibility:'requester',senderId:'ou_private'}}};const options=[];const context={config:{dataDir:dir},store:{read:async()=>structuredClone(state),transact:async fn=>fn(state)},feishu:{replyImage:async(m,f,o)=>{options.push(o);return {data:{message_id:'private-image'}};}}};const delivery=new WebsiteEvidenceDelivery(context);t.after(()=>delivery.close());await delivery.capture(job,item);await delivery.retry();assert.equal(options[0].privateRecipient,'ou_private');assert.equal(options[0].profile,'second-profile');
  const entry=Object.values(state.websiteEvidenceDeliveries)[0];delete entry.messageId;state.questions.q.generation++;await delivery.retry();assert.equal(entry.superseded,true);assert.equal(options.length,1);
+});
+
+
+test('transient loading is superseded only by confirmed readiness on the same page',async()=>{
+ const q={mode:'investigate',reviewed:true,description:'网页',maxRows:10,timeoutMs:1000,parameters:[{name:'purpose',type:'string'}]},e={kind:'website',projectId:'demo',tier:'uat',baseUrl:'https://example.test/',membersRead:true,ownerOpenIdsByProfile:{owner:['ou_admin']},queries:{investigate:q}},cfg={version:1,environments:{web:e}};
+ const plan=planQuery(cfg,{environmentId:'web',queryId:'investigate',parameters:['查看页面']},'demo',{profile:'owner',senderId:'ou_member'});
+ for(const url of ['https://example.test/','https://example.test/different']){let n=0;const result=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,tools:async()=>({spec:[{tool:'connection'},{tool:'browser_snapshot'}],run:async tool=>tool==='connection'?{partial:true,pageStatus:'loading',url:'https://example.test/',rows:[]}:{pageStatus:'ready',url,rows:[]},close:async()=>{}}),planner:async()=>({next:async()=>++n===1?{tool:'browser_snapshot',arguments:'{}'}:{tool:'finish',complete:true,summary:'已读取页面'},close:async()=>{}})});assert.equal(result.partial,url!=='https://example.test/');}
+});
+
+
+test('same-question deep-page continuation keeps the already-used entry without copying grants across sites or environments',async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'web-entry-')),old=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(dir,'env.json');t.after(async()=>{if(old===undefined)delete process.env.AGENTOS_ENVIRONMENTS_FILE;else process.env.AGENTOS_ENVIRONMENTS_FILE=old;await rm(dir,{recursive:true,force:true});});
+ const url='https://business.test/app/',id=websiteKey('demo','uat',url),entry={projectId:'demo',tier:'uat',kind:'website',baseUrl:url,credentialRef:'original-ref',membersRead:true,ownerOpenIdsByProfile:{owner:['ou_admin']},queries:{investigate:{mode:'investigate',reviewed:true,description:'检查网页',maxRows:20,timeoutMs:1000,parameters:[{name:'purpose',type:'string',maxLength:200}],browser:true,readEndpoints:[{method:'POST',path:'/identity/context',reviewed:true}]}}};await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify({version:1,environments:{[id]:entry}}));
+ const context={projects:{ownerOpenIdsByProfile:{owner:['ou_admin']},projects:{}}},job={projectId:'demo',sourceEnvironment:'sit',originProfile:'owner',context:[{kind:'environment_result',result:{environmentEvidence:{environmentId:id}}}]};
+ assert.equal((await prepareWebsiteQuery(context,job,{url:url+'orders/detail',tier:'uat',purpose:'查看详情'})).environmentId,id);
+ for(const [target,project,tier]of [['https://other.test/app/orders','demo','uat'],['https://business.test/application/orders','demo','uat'],[url+'orders','other','uat'],[url+'orders','demo','prd']]){
+ const request=await prepareWebsiteQuery(context,{...job,projectId:project,sourceEnvironment:tier==='prd'?'prd':'sit'},{url:target,tier,purpose:'只读检查'});assert.notEqual(request.environmentId,id);const config=JSON.parse(await readFile(process.env.AGENTOS_ENVIRONMENTS_FILE,'utf8'));assert.equal(config.environments[request.environmentId].queries.investigate.readEndpoints,undefined);
+ }
 });

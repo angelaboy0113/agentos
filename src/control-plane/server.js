@@ -357,7 +357,7 @@ async function route(context) {
     if(job?.status!=='running'||!job.lease?.id||body.leaseId!==job.lease.id||body.runnerId!==job.lease.runnerId)return json(response,409,{error:'Stale or foreign Runner lease'});
     const e=verifyApprovedPlan(await loadEnvironments(),job.environmentAccess??{});if(e.kind!=='website')throw new Error('Not a website grant');
     if(body.tool==='browser_screenshot'&&!screenshotRequested(job))throw new Error('当前原问题未要求截图交付');
-    const result=await context.websiteBrowser.run(job,e,body.tool,body.args);if(body.tool==='browser_screenshot'&&result.screenshot)Object.assign(result.screenshot,await context.websiteEvidence.capture(job,result.screenshot));return json(response,200,{result});
+    const result=await context.websiteBrowser.run(job,e,body.tool,body.args);if(body.tool==='browser_screenshot'&&result.screenshot)Object.assign(result.screenshot,await context.websiteEvidence.capture(job,result.screenshot));result.screenshotDeliveries=await context.websiteEvidence.status(job);return json(response,200,{result});
   }
   const eventMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/events$/);
   if (request.method === 'POST' && eventMatch) {

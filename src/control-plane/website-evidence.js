@@ -29,6 +29,10 @@ export class WebsiteEvidenceDelivery {
   // Failed delivery stays in an outbox; it must never repeat a webpage action.
   void this.retry().catch(()=>{});const entry=(await this.context.store.read()).websiteEvidenceDeliveries?.[key];return {delivery:entry?.messageId?'sent':'pending',messageId:entry?.messageId??null};
  }
+ async status(job){
+  const state=await this.context.store.read(),q=state.questions?.[job.questionId];
+  return Object.values(state.websiteEvidenceDeliveries??{}).filter(e=>e.sourceJobId===job.id&&(!job.questionId||e.messageId||e.questionGeneration===q?.generation)&&!e.superseded).map(e=>({...e.item,delivery:e.messageId?'sent':'pending',messageId:e.messageId??null}));
+ }
  async retry(){
   if(this.closed||typeof this.context.feishu.replyImage!=='function')return;
   const state=await this.context.store.read();
