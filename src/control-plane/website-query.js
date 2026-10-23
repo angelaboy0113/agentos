@@ -1,3 +1,4 @@
+import {assertSourceRuntimeTier} from '../shared/source-environments.js';
 import {stateView} from '../shared/state-view.js';
 import { canonicalWebsite } from '../shared/website-aliases.js';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
@@ -8,8 +9,11 @@ let updates=Promise.resolve();
 const polling=new WeakMap();
 export function prepareWebsiteQuery(context,job,request){
  const pending=updates.then(async()=>{
-  if(!request||!['uat','prd'].includes(request.tier)||typeof request.purpose!=='string'||!request.purpose.trim()||request.purpose.length>200)throw new Error('网页排查需要明确环境、目的和发现的入口');
-  if(job.sourceEnvironment&&job.sourceEnvironment!==request.tier)throw new Error('网页环境必须与本问题环境一致');
+  if(!request||!['uat','prd'].includes(request.tier))throw Object.assign(new Error('网页排查运行分级无效'),{queryDiagnostic:{code:'WEBSITE_TIER_INVALID',reason:'网页排查未指定有效的测试/生产运行分级。',correction:'按协议使用 uat（测试）或 prd（生产），源码环境ID保持本项目配置。'}});
+  const purpose=request.purpose;
+  const issue=typeof purpose!=='string'?'type':!purpose.trim()?'empty':/[\u0000-\u001f\u007f]/.test(purpose)?'control_characters':purpose.length>200?'length':null;
+  if(issue)throw Object.assign(new Error('Invalid website purpose'),{queryDiagnostic:{code:'TEXT_PARAMETER',index:0,reason:issue,length:typeof purpose==='string'?purpose.length:null,maxLength:200}});
+  assertSourceRuntimeTier(context.projects.projects?.[job.projectId],job.sourceEnvironment,request.tier);
   const cfg=await loadEnvironments();
   const baseUrl=canonicalWebsite(cfg,job.projectId,request.tier,request.url),environmentId=websiteKey(job.projectId,request.tier,baseUrl);
   if(cfg.environments[environmentId] && websiteUrl(cfg.environments[environmentId].baseUrl)!==baseUrl)throw new Error('网页入口登记冲突，未复用其他页面');

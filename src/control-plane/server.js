@@ -1,3 +1,4 @@
+import {assertSourceRuntimeTier,sourceEnvironmentForTier} from '../shared/source-environments.js';
 import {HistoryRetention} from './retention.js';
 import { resolveProjectId, routeAgent } from '../shared/project-scope.js';
 import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
@@ -288,6 +289,7 @@ async function route(context) {
       if (!query || sourceResult.outcome !== 'needs_clarification') throw new Error('当前结果没有可执行的环境查询');
       const plan = planQuery(await loadEnvironments(), query, job.projectId,
         { senderId: job.senderId, profile: job.originProfile });
+      assertSourceRuntimeTier(context.projects.projects[job.projectId],job.sourceEnvironment,plan.tier);
       const convergence = environmentContinuation(await store.read(), job, query, sourceResult);
       if (!convergence.continue) throw Object.assign(new Error(convergence.reason), { queryDiagnostic: { code: convergence.terminal?'CONVERGENCE_STALLED':'REPEATED_TARGET', reason: convergence.reason } });
       if(convergence.metadata)Object.assign(plan,convergence.metadata);
@@ -392,6 +394,7 @@ async function route(context) {
         }
         const plan = planQuery(await loadEnvironments(), body.result.environmentQuery, job.projectId,
           { senderId: job.senderId, profile: job.originProfile });
+        assertSourceRuntimeTier(context.projects.projects[job.projectId],job.sourceEnvironment,plan.tier);
         if(continuation.metadata)Object.assign(plan,continuation.metadata);
         routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), environmentPlan: plan };
         if (!routing.agentProfile) throw new Error('开发角色未配置');
@@ -418,7 +421,7 @@ async function route(context) {
       const prior = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess && j.id !== job.id && j.result?.environmentEvidence);
       const hash = body.result.environmentEvidence?.resultHash;
       const stalled = hash && prior.length >= 2 && prior.slice(-2).every(j => j.result.environmentEvidence.resultHash === hash);
-      if (!stalled) routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), resumeInvestigation: true };
+      if (!stalled) routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), resumeInvestigation: true, sourceEnvironment:sourceEnvironmentForTier(context.projects.projects[job.projectId],job.environmentAccess.tier,job.sourceEnvironment) };
       else body.result.summary = '连续三轮环境调查没有新增证据，已暂停。需要调整调查路径或补充缺失工具。' + (body.result.summary ?? '');
     }
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId

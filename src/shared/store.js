@@ -360,7 +360,7 @@ export class JsonStore {
       const message = `${diagnostic.code === 'REPEATED_TARGET' ? '本次追加查询由 AgentOS 自动暂停' : '本次追加查询尚未执行'}：${diagnostic.reason} ${diagnostic.correction ?? ''}`.trim();
       const result = { ...structuredClone(sourceResult), outcome: stalled ? 'blocked' : 'needs_clarification', environmentQuery: null, websiteQuery: null,
         queryRejection: { ...structuredClone(diagnostic), retry: !stalled }, summary: message,
-        finalMessage: stalled ? `${message}\n\n同一无效查询在自查后仍未修正，已停止空转并保留现有证据。` : `${message}\n\n正在同一会话内修正查询范围并继续，不需要用户重新授权。` };
+        finalMessage: stalled ? `${message}\n\n${diagnostic.pause ?? '本次申请未通过，自动调查已停止，已有证据保留。'}` : `${message}\n\n正在同一会话内修正查询范围并继续，不需要用户重新授权。` };
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'query_rejection', result }]);
       job.updatedAt = new Date().toISOString();
       job.events.push({ id: createId('EVT'), type: 'continuous_query_rejected', at: job.updatedAt, code: diagnostic.code ?? 'INVALID_QUERY' });
@@ -560,7 +560,7 @@ export class JsonStore {
         && completionRouting.agentProfile) {
         nextJob = makeNextJob(job, 'developer', completionRouting, job.updatedAt);
         delete nextJob.environmentAccess;
-        Object.assign(nextJob, { workflow: 'analysis_review', sourceEnvironment: job.environmentAccess.tier,
+        Object.assign(nextJob, { workflow: 'analysis_review', sourceEnvironment: completionRouting.sourceEnvironment ?? job.sourceEnvironment ?? job.environmentAccess.tier,
           instruction: job.originalQuestion ?? job.instruction,
           delegation: { fromStage: job.stage, toStage: 'developer', reason: '结合环境证据继续调查原问题，按缺口选择下一步工具' } });
         job.nextJobId = nextJob.id;

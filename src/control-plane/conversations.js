@@ -1,3 +1,4 @@
+import {sourceEnvironmentForTier} from '../shared/source-environments.js';
 import { resolveProjectId, routeAgent, assistantInstructions } from '../shared/project-scope.js';
 import {stateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
@@ -351,7 +352,7 @@ export class ConversationService {
       project: projectId ? { id: projectId, name: projects.projects[projectId]?.displayName ?? projectId,
         sourceDirectory: projects.projects[projectId]?.repoPath ?? null,
         sourceEnvironments: sourceEnvironmentCatalog(projects.projects[projectId]),
-        sourceEnvironmentRule: '源码任务必须选择 sourceEnvironments 中匹配本问题的 id，不能从其它问题借用环境。没有明确环境且未配置默认值时先询问用户；不能将 PRD 当 UAT，也不能用历史快照证明当前源码。',
+        sourceEnvironmentRule: 'sourceEnvironments.id 是源码环境名，runtimeTier 是运行分级；例如 sit 对应 uat（测试），二者不能直接当成同一个ID。源码任务必须选择 sourceEnvironments 中匹配本问题的 id，不能从其它问题借用环境。没有明确环境且未配置默认值时先询问用户；不能将 PRD 当 UAT，也不能用历史快照证明当前源码。',
         analysisWorkspace: 'Runner 先同步 analysisRepositories 各仓 origin 分支，再只读分析；缺配置或同步失败则阻塞',
         implementationWorkspace: 'Runner 创建的隔离 Git worktree；不自动包含独立子仓' } : null,
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
@@ -396,7 +397,8 @@ export class ConversationService {
           const sources = catalog(await loadEnvironments(), projectId).filter(e=>e.kind==='nacos' && e.tier===decision.environmentSetup.tier && e.queries.some(q=>q.queryId==='investigate'));
           const predecessor=(await store.read()).jobs?.find(j=>j.id===turn.setupSourceJobId && j.questionId===turn.questionId && j.projectId===projectId && j.chatId===turn.chatId && j.originProfile===turn.profile);
           const tier=decision.environmentSetup.tier;
-          const sourceId=decision.sourceEnvironment || tier;
+          let sourceId;
+          try{sourceId=sourceEnvironmentForTier(projects.projects[projectId],tier,decision.sourceEnvironment);}catch(error){return {notice:error.message};}
           const canInspect=projects.projects[projectId]?.analysisSourceMode==='isolated' && Object.hasOwn(projects.projects[projectId]?.analysisEnvironments??{},sourceId);
           if(sources.length===0 && canInspect && predecessor?.connectionSourceDiscovery?.tier!==tier){
             turn.connectionSourceDiscovery={tier,sourceEnvironment:sourceId};
@@ -455,9 +457,10 @@ export class ConversationService {
       if (decision.intent === 'analysis') {
         // Environment-first investigations still return to the same source worker.
         // Preserve an explicit source choice, otherwise use the verified runtime
-        // tier when it names a configured source environment (uat/prd).
-        const selectedEnvironment = decision.sourceEnvironment || environmentAccess?.tier;
-        try { sourceEnvironment = selectSourceEnvironment(projects.projects[projectId], selectedEnvironment); }
+        // tier through this project's explicit/standard mapping, never as a branch ID.
+        try { sourceEnvironment = environmentAccess
+          ? sourceEnvironmentForTier(projects.projects[projectId],environmentAccess.tier,decision.sourceEnvironment)
+          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment); }
         catch (error) { return { notice: error.message }; }
       }
       // Every newly created analysis uses the same persistent developer job,
