@@ -31,7 +31,7 @@ export class HistoryRetention {
   await c.knowledge.prune?.(cutoff);
   await c.contacts.index?.prune?.(cutoff);
   let files=0;const scan=(root,options={})=>sweepArtifacts({root,cutoff,...projection,...options});
-  for(const name of ['exports','attachments','contact-images','environment-enrollments','smoke','card-previews'])files+=await scan(path.join(c.config.dataDir,name));
+  for(const name of ['website-evidence','exports','attachments','contact-images','environment-enrollments','smoke','card-previews'])files+=await scan(path.join(c.config.dataDir,name));
   for(const name of ['reports','images','downloads'])files+=await scan(path.join(c.config.dataDir,'lark-cli',name));
   files+=await scan(path.join(c.config.dataDir,'worktrees','analysis-resources'));
   const eventRoot=path.join(c.config.dataDir,'lark-cli-events');

@@ -6,6 +6,8 @@ import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequ
 import {ContactChannels} from './contact-channels.js';
 import {isPrivate,cardDestination} from './private-cards.js';
 import {ContactDirectory} from './contact-directory.js';
+import {WebsiteEvidenceDelivery,screenshotRequested} from './website-evidence.js';
+import {BrowserInputError} from '../shared/browser-tool-input.js';
 import {ReportDelivery} from './report-delivery.js';
 import {validateReportFiles} from '../shared/report-files.js';
 import { TeamKnowledgeService } from './team-knowledge.js';
@@ -68,7 +70,7 @@ export async function createControlPlane(overrides = {}) {
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
   context.cards = cards;
-  context.reports=new ReportDelivery(context);cards.afterRetry=state=>context.reports.retry(state);
+  context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();};
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
   if (cards.enabled) await store.transact((state) => {
@@ -91,7 +93,7 @@ export async function createControlPlane(overrides = {}) {
       if(!await durableControl(context,request,response))await route({ ...context, request, response });
     } catch (error) {
       console.error('[control-plane]', error);
-      if (!response.headersSent) json(response, error.statusCode ?? 500, { ok: false, error: error.message });
+      if (!response.headersSent) json(response, error.statusCode ?? 500, { ok: false, error: error.message,...(error instanceof BrowserInputError?{code:error.code}:{}) });
       else response.destroy();
     }
   });
@@ -99,13 +101,14 @@ export async function createControlPlane(overrides = {}) {
   server.once('listening', () => {
     context.retention.start();
     cards.start();
+    context.websiteEvidence.retry().catch(()=>console.error('[website-evidence] recovery unavailable'));
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
     context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
   server.once('close', () => {
-    void Promise.allSettled([context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards };
 }
@@ -353,7 +356,8 @@ async function route(context) {
     requireBearer(request,config.runnerToken,'runner');const body=await readJson(request);const job=await store.getJob(decodeURIComponent(websiteMatch[1]));
     if(job?.status!=='running'||!job.lease?.id||body.leaseId!==job.lease.id||body.runnerId!==job.lease.runnerId)return json(response,409,{error:'Stale or foreign Runner lease'});
     const e=verifyApprovedPlan(await loadEnvironments(),job.environmentAccess??{});if(e.kind!=='website')throw new Error('Not a website grant');
-    const result=await context.websiteBrowser.run(job,e,body.tool,body.args);return json(response,200,{result});
+    if(body.tool==='browser_screenshot'&&!screenshotRequested(job))throw new Error('当前原问题未要求截图交付');
+    const result=await context.websiteBrowser.run(job,e,body.tool,body.args);if(body.tool==='browser_screenshot'&&result.screenshot)Object.assign(result.screenshot,await context.websiteEvidence.capture(job,result.screenshot));return json(response,200,{result});
   }
   const eventMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/events$/);
   if (request.method === 'POST' && eventMatch) {

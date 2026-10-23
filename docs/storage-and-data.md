@@ -27,6 +27,7 @@
 | `data/exports/<JOB>/report-*.verification.json` | 最终文件的列/覆盖/分量核验及业务依据，与CSV绑定；不等于人工业务验收 | 是 | 否 |
 | `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；不完整集不保存，不进入团队知识。24小时后不再复用；启用历史保留策略后随过期任务清理 | 是 | 否 |
 | `data/lark-cli/reports/` | CLI 文件回复副本，需与正式导出文件分别清理 | 是 | 否 |
+| `data/website-evidence/<JOB>/` | 用户要求的当前网页视口截图，输入区遮挡；摘要校验后通过原话题投递，待发送保存在websiteEvidenceDeliveries，随问题保留策略清理 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
 | `data/lark-cli/` | lark-cli 消息资源下载工作目录 | 是 | 否 |
 | `data/lark-cli-events/<profile>/messages/<messageId>/` | 长连接消息中的图片、文件、音频和媒体 | 是 | 否 |

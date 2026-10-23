@@ -34,7 +34,7 @@ export function pruneHistory(state,cutoff,{busyJobs=new Set(),busyCards=new Set(
  for(const [key,c] of Object.entries(state.cardMessages??{}))if(busyCards.has(key)||c.revision!==c.deliveredRevision||(c.terminalMention&&!c.mentionDelivered)||c.retiredMessageIds?.length){
   keep(key.split(':')[1]);
  }
- for(const e of values(state.reportDeliveries))if(!e.messageId&&!e.superseded) {keep(e.sourceJobId);keep(e.questionId);}
+ for(const e of [...values(state.reportDeliveries),...values(state.websiteEvidenceDeliveries)])if(!e.messageId&&!e.superseded) {keep(e.sourceJobId);keep(e.questionId);}
  const removed=new Set(nodes.filter(x=>!retained.has(root(x.id))).map(x=>x.id));
  const counts={};
  for(const key of ['jobs','conversations'])if(state[key]){const n=state[key].length;state[key]=state[key].filter(x=>!removed.has(x.id));counts[key]=n-state[key].length;}
@@ -44,7 +44,7 @@ export function pruneHistory(state,cutoff,{busyJobs=new Set(),busyCards=new Set(
  const keptTurns=new Set((state.conversations??[]).map(x=>x.id));
  for(const [key,value] of Object.entries(state.processedMessages??{}))if(!keptJobs.has(value)&&!keptTurns.has(value))delete state.processedMessages[key];
  for(const [key,value] of Object.entries(state.cardMessages??{}))if(removed.has(key.split(':')[1])){delete state.cardMessages[key];counts.cards=(counts.cards??0)+1;}
- for(const [key,value] of Object.entries(state.reportDeliveries??{}))if(removed.has(value.sourceJobId)||removed.has(value.questionId))delete state.reportDeliveries[key];
+ for(const collection of ['reportDeliveries','websiteEvidenceDeliveries'])for(const [key,value] of Object.entries(state[collection]??{}))if(removed.has(value.sourceJobId)||removed.has(value.questionId))delete state[collection][key];
  for(const [key,value] of Object.entries(state.effects??{}))if(hasRemoved(value)||[...removed].some(id=>key.includes(id))||old(value,cutoff))delete state.effects[key];
  for(const [key,value] of Object.entries(state.controlReceipts??{}))if(old(value,cutoff)&&!keptJobs.has(value.jobId))delete state.controlReceipts[key];
  for(const key of ['adminAudit','cardCallbackAudit','cardActionPresentationFailures'])if(state[key])state[key]=state[key].filter(x=>!old(x,cutoff));

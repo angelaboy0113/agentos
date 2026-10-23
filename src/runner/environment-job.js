@@ -1,3 +1,5 @@
+import {BrowserInputError,validateBrowserTool,correctableBrowserCodes,screenshotRequested} from '../shared/browser-tool-input.js';
+import {QueryInputError} from './environment-tools.js';
 import {controlPost} from './control-client.js';
 import {buildSourceQueryContext} from './source-query-context.js';
 import { connectionEndpoints } from '../shared/connection-endpoints.js';
@@ -54,20 +56,21 @@ export async function executeEnvironmentJob(job, config, emit) {
   const presented = presentEnvironmentResult(plan, result, explanation);
   const safeSummary = presented.metadata;
   const scopeDetails = publicText(`查询范围与授权\n环境：${plan.environmentId} (${plan.tier}) · 模板：${plan.queryId}\n参数：${JSON.stringify(plan.parameters)}\n最多 ${plan.maxRows} 条 · 超时 ${plan.timeoutMs} ms\n授权截止：${plan.expiresAt}\n仅本次只读查询，不授权修改。`);
-  return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, explanation ? `业务解释\n${explanation}` : '', result.toolInputErrors?.length?`工具修正记录（按具体提示修正，不代表授权不足）\n${JSON.stringify(result.toolInputErrors)}`:'', result.summary ? `排查记录\n${result.summary}` : '', result.runtimeDiscoveries?.length ? `调度入口证据（待网页核验）\n${JSON.stringify(result.runtimeDiscoveries)}` : '', presented.details, result.fileInspections?.length?`已绑定文件的审阅证据\n${JSON.stringify(result.fileInspections)}`:'', result.datasetCatalog?.length?`任务内可接续的数据集\n${JSON.stringify(result.datasetCatalog)}`:'', result.exportFiles?.length?`完整报表文件\n${JSON.stringify(result.exportFiles)}\n文件由受控工具生成，最终结论通过后回复至原提问；尚需核对原问题的所有字段及业务口径。`:'', (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
+  return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, explanation ? `业务解释\n${explanation}` : '', result.toolInputErrors?.length?`工具修正记录（按具体提示修正，不代表授权不足）\n${JSON.stringify(result.toolInputErrors)}`:'', result.summary ? `排查记录\n${result.summary}` : '', result.runtimeDiscoveries?.length ? `调度入口证据（待网页核验）\n${JSON.stringify(result.runtimeDiscoveries)}` : '', presented.details, result.fileInspections?.length?`已绑定文件的审阅证据\n${JSON.stringify(result.fileInspections)}`:'', result.datasetCatalog?.length?`任务内可接续的数据集\n${JSON.stringify(result.datasetCatalog)}`:'', result.websiteScreenshots?.length?`实际页面截图（由控制服务独立发送原话题）\n${JSON.stringify(result.websiteScreenshots)}`:'', result.exportFiles?.length?`完整报表文件\n${JSON.stringify(result.exportFiles)}\n文件由受控工具生成，最终结论通过后回复至原提问；尚需核对原问题的所有字段及业务口径。`:'', (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
     websiteMismatch: result.websiteMismatch === true, runtimeDiscoveries: result.runtimeDiscoveries ?? [], connectionEndpoints: connectionEndpoints(result.rows), environmentEvidence: result.evidence,
-    fileInspections:result.fileInspections??[],environmentFailure:result.failure??null,toolInputErrors:result.toolInputErrors??[],exportFiles:result.exportFiles??[], evidenceRecords: presented.records, memorySafeSummary: safeSummary, verification: [] };
+    websiteScreenshots:result.websiteScreenshots??[],fileInspections:result.fileInspections??[],environmentFailure:result.failure??null,toolInputErrors:result.toolInputErrors??[],exportFiles:result.exportFiles??[], evidenceRecords: presented.records, memorySafeSummary: safeSummary, verification: [] };
   } catch(error){const local=phase==='environment_claim';const reason=local?(error.statusCode?'本机环境领取请求被拒绝或回执不可用，未执行本轮环境查询。':'本机控制请求回执无法核实，已保留任务；未盲目重复执行环境查询。'):'环境步骤等待或结果整理中断；未据此确认业务故障。';return {outcome:'blocked',summary:reason,finalMessage:reason+'\n'+failureDiagnostic(error),investigationStopped:{code:local?(error.code??'CONTROL_REQUEST_REJECTED'):'ENVIRONMENT_INTERRUPTED',reason},verification:[]};} finally { clearInterval(heartbeat); }
 }
 
-function websiteTools(job,config){
+export function websiteTools(job,config){
  return {spec:[{tool:'connection',args:{},description:'打开从原问题或项目源码发现的业务网页，复用本机登录会话'},
  {tool:'report_wrong_site',args:{},description:'当前页面属于其他系统或不是原问题的目标应用时报告入口不匹配，返回原问题继续查找正确入口，不扩大权限'},
+ {tool:'browser_screenshot',args:{},description:'保存当前已打开页面的视口截图，遮挡输入框，由控制服务发送原话题；异常页面应截图并记路径和复现步骤'},
  {tool:'browser_open',args:{},description:'查看当前业务网页'}, {tool:'browser_snapshot',args:{},description:'刷新页面文本和引用'},
  {tool:'browser_click',args:{ref:'当前read-action引用'},description:'查看详情、日志、菜单、翻页；不能启动停止或修改'},
  {tool:'browser_select',args:{ref:'当前select引用',value:'返回的选项value'},description:'选择查询筛选项'},
- {tool:'browser_search',args:{ref:'当前search引用',text:'查询条件'},description:'填写搜索条件，再点击查询'}],
- async run(tool,args={}){if(tool==='report_wrong_site')return {websiteMismatch:true,partial:true,stage:'当前网站与问题目标不匹配，需要重新发现正确入口；不是用户权限不足'};const response=await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/website-tool`,{method:'POST',signal:AbortSignal.timeout(45000),headers:{authorization:`Bearer ${config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({leaseId:job.lease.id,runnerId:job.lease.runnerId,tool,args})});const value=await response.json();if(!response.ok)throw new Error(value.error??'网页工具执行失败');return value.result;},async close(){}};
+ {tool:'browser_search',args:{ref:'当前search引用',text:'查询条件'},description:'填写搜索条件，再点击查询'}].filter(x=>x.tool!=='browser_screenshot'||screenshotRequested(job)),
+ async run(tool,args={}){if(tool==='report_wrong_site')return {websiteMismatch:true,partial:true,stage:'当前网站与问题目标不匹配，需要重新发现正确入口；不是用户权限不足'};try{validateBrowserTool(tool,args);}catch(error){if(error instanceof BrowserInputError)throw new QueryInputError(error.code,error.message);throw error;}const response=await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/website-tool`,{method:'POST',signal:AbortSignal.timeout(45000),headers:{authorization:`Bearer ${config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({leaseId:job.lease.id,runnerId:job.lease.runnerId,tool,args})});const value=await response.json();if(!response.ok){if(response.status===400&&correctableBrowserCodes.has(value.code))throw new QueryInputError(value.code,value.error);throw new Error(value.error??'网页工具执行失败');}return value.result;},async close(){}};
 }
 
 // Original requirements must not be replaced by the short purpose of one query round.

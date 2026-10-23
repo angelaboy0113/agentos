@@ -1,12 +1,13 @@
 import {browserLoginState,authResponseState} from '../shared/browser-login-state.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,createHash } from 'node:crypto';
+import {BrowserInputError,validateBrowserTool,websitePageLocation} from '../shared/browser-tool-input.js';
 import { chromium } from 'playwright';
 import { mkdir, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { websiteSessionKey, websiteRequestAllowed, writeAction, cleanWebsiteText } from '../shared/website-policy.js';
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
- constructor(dataDir, driver=chromium, authorize=async()=>true){this.authorize=authorize;this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
+ constructor(dataDir, driver=chromium, authorize=async()=>true){this.authorize=authorize;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
  async session(e) {
   const key=websiteSessionKey(e.projectId,e.tier,e.baseUrl);
   if(this.contexts.has(key))return this.contexts.get(key);
@@ -19,8 +20,8 @@ export class WebsiteBrowser {
    await context.addInitScript(()=>{for(const key of ['RTCPeerConnection','webkitRTCPeerConnection','WebTransport'])Object.defineProperty(window,key,{value:undefined,configurable:false});});
    await context.route('**/*',async route=>{
     const r=route.request();let page;try{page=r.frame().page();}catch{}
-    const state=[...this.pages.values()].find(s=>s.page===page);
-    let allow=false;try{allow=websiteRequestAllowed(e.baseUrl,{url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},state?.waiting===true,e.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{}
+    const state=[...this.pages.values()].find(s=>s.page===page),target=state?.environment??e;
+    let allow=false;try{allow=websiteRequestAllowed(target.baseUrl,{url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{}
     if(allow&&!state)allow=false;
     if(allow&&state) {try{allow=await this.authorize(state.job,state.waiting,r);}catch{allow=false;}}
     if(!allow){if(state){state.blocked.add(`${r.method()} ${new URL(r.url()).pathname}`);if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${new URL(r.url()).pathname}`);}await route.abort().catch(()=>{});return;}
@@ -31,9 +32,13 @@ export class WebsiteBrowser {
   })();this.opening.set(key,p);try{return await p;}finally{this.opening.delete(key);}
  }
  async state(job,e){
-  if(this.pages.has(job.id))return this.pages.get(job.id);
+  if(this.pages.has(job.id)){
+   const existing=this.pages.get(job.id);
+   if(websiteSessionKey(e.projectId,e.tier,e.baseUrl)!==websiteSessionKey(existing.environment.projectId,existing.environment.tier,existing.environment.baseUrl)||e.baseUrl!==existing.environment.baseUrl)await this.release(job.id);
+   else {existing.job=job;existing.environment=e;return existing;}
+  }
   const session=await this.session(e),page=await session.context.newPage();
-  const s={job,page,session,refPrefix:randomUUID(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedLoginReads:new Set()};this.pages.set(job.id,s);
+  const s={job,page,session,environment:e,refPrefix:randomUUID(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedLoginReads:new Set()};this.pages.set(job.id,s);
   page.on('response',async response=>{
    const req=response.request();if(req.method()!=='POST'||!/\/(?:login|signin|sign-in|authenticate|auth|token)(?:[/?#]|$)/i.test(new URL(response.url()).pathname))return;
    if(new URL(response.url()).origin!==new URL(e.baseUrl).origin)return;
@@ -56,6 +61,8 @@ export class WebsiteBrowser {
  async loginReady(job,e){const s=await this.state(job,e);return (await this.loginStatus(s)).pageReady===true;}
  async submitCredentials(job,e,cred,{force=false}={}){
   if(!await this.authorize(job,true,{url:()=>e.baseUrl,method:()=> 'GET',resourceType:()=> 'document'}))throw new Error('当前任务没有有效网站登录范围');
+  const opened=this.pages.get(job.id);
+  if(opened&&(websiteSessionKey(e.projectId,e.tier,e.baseUrl)!==websiteSessionKey(opened.environment.projectId,opened.environment.tier,opened.environment.baseUrl)||opened.environment.baseUrl!==e.baseUrl))throw new Error('凭据目标与已打开的任务登录范围不一致；本次未导航或填写');
   const s=await this.state(job,e);
   const current=new URL(s.page.url()),base=new URL(e.baseUrl),prefix=base.pathname.replace(/\/$/,'');
   const authPath=/\/(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[/?#]|$)/i.test(current.pathname+current.hash);
@@ -80,37 +87,72 @@ export class WebsiteBrowser {
   return {...status,authenticated:status.pageReady===true,attempted:true,submissionUnconfirmed:!s.authPostSeen&&status.loginRequired};
  }
  async run(job,e,tool,args={}) {
+  validateBrowserTool(tool,args);
   const s=await this.state(job,e);
+  // A ref belongs to one immutable element handle in one page generation, never nth(i).
+  const previous=s.operation??Promise.resolve();
+  const operation=previous.catch(()=>{}).then(()=>this.perform(s,tool,args));s.operation=operation;
+  try{return await operation;}finally{if(s.operation===operation)s.operation=null;}
+ }
+ async perform(s,tool,args){
   const login=await this.loginStatus(s);
-  if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'已在运行AgentOS的电脑上打开登录页面；登录后自动继续原问题，无需回复继续。'};}
+  if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
+  if(tool==='browser_screenshot')return this.screenshot(s);
   if(!login.pageReady)return {stage:'页面尚未就绪',pageStatus:'loading',partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.reload({waitUntil:'domcontentloaded'});}
   if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot')return this.snapshot(s);
-  const ref=s.refs.get(args.ref);if(!ref)throw new Error('页面引用过期，请重新获取browser_snapshot');
-  if(writeAction.test(await ref.el.innerText().catch(()=>'')))throw new Error('该操作可能改变业务状态，需要单独授权，本次未执行');
-  if(tool==='browser_search'&&ref.type==='search'&&typeof args.text==='string'&&args.text.length<=200){await ref.el.fill(args.text);}
-  else if(tool==='browser_select'&&ref.type==='select'&&typeof args.value==='string'&&args.value.length<=200){await ref.el.selectOption(args.value);}
-  else if(tool==='browser_click'&&ref.type==='read-action'){await ref.el.click();await s.page.waitForLoadState('domcontentloaded').catch(()=>{});}
-  else throw new Error('未开放该网页操作');
+  const ref=s.refs.get(args.ref);if(!ref)throw new BrowserInputError('BROWSER_REF_STALE','页面引用已过期；先browser_snapshot，再使用新引用。');
+  const current=await ref.el.evaluate(controlMetadata).catch(()=>null);
+  if(!current||!current.visible)throw new BrowserInputError('BROWSER_REF_STALE','原控件已移除或隐藏；先browser_snapshot，不重复旧操作。');
+  if(current.label!==ref.rawLabel||current.type!==ref.type)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
+  if(writeAction.test(current.label))throw new Error('该操作可能改变业务状态，本次未执行');
+  const expected={browser_search:'search',browser_select:'select',browser_click:'read-action'}[tool];
+  if(ref.type!==expected)throw new BrowserInputError('BROWSER_CONTROL_TYPE','当前引用不是该工具对应的控件；菜单和详情用browser_click，输入框用browser_search，原生下拉框用browser_select。');
+  try{
+   if(tool==='browser_search')await ref.el.fill(args.text,{timeout:8000});
+   else if(tool==='browser_select')await ref.el.selectOption(args.value,{timeout:8000});
+   else await ref.el.click({timeout:8000});
+  }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   return this.snapshot(s);
  }
  async snapshot(s){
-  s.refs.clear();s.generation++;
+  await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;
   const text=await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
-  const loc=s.page.locator('a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');const controls=[];
-  for(let i=0,n=Math.min(await loc.count(),150);i<n;i++){
-   const el=loc.nth(i);if(!await el.isVisible()||!await el.isEnabled())continue;
-   const tag=await el.evaluate(x=>x.tagName.toLowerCase());const row=await el.evaluate(x=>x.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]'));
-   const rawLabel=cleanWebsiteText((await el.innerText().catch(()=>''))||await el.getAttribute('placeholder')||await el.getAttribute('aria-label')||await el.getAttribute('title')||await el.getAttribute('name')||await el.getAttribute('id')||'').trim().slice(0,100);const label=row&&rawLabel?`行详情：${rawLabel}`:rawLabel;
-   if(!label||writeAction.test(label))continue;
-   if(tag==='input'&&!/搜索|查询|日期|时间|名称|编号|search|filter|date|name|id/i.test(label))continue;
-   // Expose navigation, view, search and pagination controls; unknown effects are not guessed.
-   if(tag!=='input'&&tag!=='select'&&tag!=='a'&&!row&&!/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|确定|search|query|view|detail|log|next|previous|refresh/i.test(label))continue;
-   const ref=`${s.refPrefix}-${s.generation}-${i}`,type=tag==='input'?'search':tag==='select'?'select':'read-action';s.refs.set(ref,{el,type});controls.push({ref,type,label,...(tag==='select'?{options:await el.locator('option').evaluateAll(xs=>xs.slice(0,100).map(x=>({value:x.value,label:x.textContent})))}:{})});
+  const handles=await s.page.locator('a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[aria-haspopup="menu"],.el-submenu__title,.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]').elementHandles();
+  const controls=[];
+  for(const [i,el]of handles.entries()){
+   const info=i<300?await el.evaluate(controlMetadata).catch(()=>null):null;
+   if(!info?.type||writeAction.test(info.label)){await el.dispose();continue;}
+   const label=cleanWebsiteText(info.label).slice(0,100),ref=`${s.refPrefix}-${s.generation}-${i}`;
+   s.refs.set(ref,{el,type:info.type,rawLabel:info.label});controls.push({ref,type:info.type,label,...(info.options?{options:info.options}:{})});
   }
-  return {stage:'已读取业务网页',url:new URL(s.page.url()).origin+new URL(s.page.url()).pathname,pageText:cleanWebsiteText(text),controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；不代表任务已执行或数据已修改。'};
+  return {stage:'已读取业务网页',url:websitePageLocation(s.page.url()),pageText:cleanWebsiteText(text),controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。'};
+ }
+ async screenshot(s){
+  if(!/^[A-Za-z0-9_-]+$/.test(s.job.id))throw new Error('Invalid evidence job');
+  const dir=path.join(this.evidenceRoot,s.job.id);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.evidenceRoot,0o700);await chmod(dir,0o700);
+  const name=randomUUID()+'.png',file=path.join(dir,name);
+  const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:[s.page.locator('input,textarea,[contenteditable="true"],[data-sensitive]')]});await chmod(file,0o600);
+  return {stage:'已保存当前网页截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url())},rows:[],note:'当前视口截图；输入框已遮挡。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};
  }
  async release(id){const s=this.pages.get(id);this.pages.delete(id);await s?.page.close().catch(()=>{});}
  async close(){await Promise.allSettled([...this.contexts.values()].map(s=>s.context.close()));this.contexts.clear();this.pages.clear();}
+}
+
+// Runs on a concrete DOM element: synchronous reads never auto-wait for input.innerText.
+export function controlMetadata(el){
+ const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
+ if(!visible||el.disabled||el.getAttribute('aria-disabled')==='true'||el.closest('[contenteditable="true"]'))return {visible:false};
+ const tag=el.tagName.toLowerCase(),row=el.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');
+ const title=el.matches('[role="menuitem"],[role="treeitem"]')?el.querySelector(':scope > .el-submenu__title,:scope > .ant-menu-submenu-title'):null;
+ const label=((title??el).innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+ if(!label)return {visible:true,label,type:null};
+ let type=null;
+ if(tag==='input'){if(!el.readOnly&&/^(text|search|date|datetime-local|number|month|week|time|tel)$/.test(el.type)&&/搜索|查询|日期|时间|名称|编号|search|filter|date|name|id/i.test(label))type='search';}
+ else if(tag==='select')type='select';
+ else if(tag==='a'||row||el.matches('[role="menuitem"],[role="treeitem"],[aria-haspopup="menu"],.el-submenu__title,.ant-menu-submenu-title')||/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|确定|search|query|view|detail|log|next|previous|refresh/i.test(label))type='read-action';
+ // Avoid duplicating the parent menuitem and its actual submenu title.
+ if(title)type=null;
+ return {visible:true,label:row?'行详情：'+label:label,type,...(tag==='select'?{options:[...el.options].slice(0,100).map(x=>({value:x.value,label:x.textContent}))}:{})};
 }
