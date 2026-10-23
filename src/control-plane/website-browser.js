@@ -1,3 +1,4 @@
+import {waitForCaptureReady,screenshotSecretSelector} from '../shared/website-capture.js';
 import {browserLoginState,authResponseState} from '../shared/browser-login-state.js';
 import { randomUUID,createHash } from 'node:crypto';
 import {BrowserInputError,validateBrowserTool,websitePageLocation} from '../shared/browser-tool-input.js';
@@ -38,7 +39,12 @@ export class WebsiteBrowser {
    else {existing.job=job;existing.environment=e;return existing;}
   }
   const session=await this.session(e),page=await session.context.newPage();
-  const s={job,page,session,environment:e,refPrefix:randomUUID(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedLoginReads:new Set()};this.pages.set(job.id,s);
+  const s={job,page,session,environment:e,refPrefix:randomUUID(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
+  page.on('request',request=>{
+   if(['xhr','fetch','document'].includes(request.resourceType())&&new URL(request.url()).origin===new URL(s.environment.baseUrl).origin){s.pendingReads.add(request);s.lastReadActivity=Date.now();}
+  });
+  const settled=request=>{if(s.pendingReads.delete(request))s.lastReadActivity=Date.now();};
+  page.on('requestfinished',settled);page.on('requestfailed',settled);
   page.on('response',async response=>{
    const req=response.request();if(req.method()!=='POST'||!/\/(?:login|signin|sign-in|authenticate|auth|token)(?:[/?#]|$)/i.test(new URL(response.url()).pathname))return;
    if(new URL(response.url()).origin!==new URL(e.baseUrl).origin)return;
@@ -118,7 +124,7 @@ export class WebsiteBrowser {
  }
  async snapshot(s){
   await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;
-  const text=await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
+  const text=await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden],[data-sensitive],[data-agentos-secret]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
   const handles=await s.page.locator('a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[aria-haspopup="menu"],.el-submenu__title,.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]').filter({visible:true}).elementHandles();
   const controls=[];
   for(const [i,el]of handles.entries()){
@@ -132,10 +138,12 @@ export class WebsiteBrowser {
  }
  async screenshot(s){
   if(!/^[A-Za-z0-9_-]+$/.test(s.job.id))throw new Error('Invalid evidence job');
+  const readiness=await waitForCaptureReady(s);
+  if((await this.loginStatus(s)).loginRequired)return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   const dir=path.join(this.evidenceRoot,s.job.id);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.evidenceRoot,0o700);await chmod(dir,0o700);
   const name=randomUUID()+'.png',file=path.join(dir,name);
-  const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:[s.page.locator('input,textarea,[contenteditable="true"],[data-sensitive]')]});await chmod(file,0o600);
-  return {...await this.snapshot(s),stage:'已保存当前网页截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url())},rows:[],note:'当前视口截图；输入框已遮挡。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};
+  const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:[s.page.locator(screenshotSecretSelector)],maskColor:'#6b7280',...(readiness.status==='ready'?{}:{style:'body::after{content:"页面加载尚未完成 · 现场截图";position:fixed;top:8px;right:12px;z-index:2147483647;background:#fff3cd;color:#704d00;padding:6px 10px;border:1px solid #e6ce81;border-radius:4px;font:13px sans-serif;pointer-events:none}'})});await chmod(file,0o600);
+  return {...await this.snapshot(s),...(readiness.status==='ready'?{}:{pageStatus:'loading',partial:true}),stage:readiness.status==='ready'?'已保存稳定网页截图':'已保存加载未完成的现场截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url()),readiness},rows:[],note:'已等待接口、加载指示和页面稳定；正常业务字段保留，凭据及显式敏感区用灰色遮挡。readiness.status为ready仅代表渲染稳定，不代表业务正常；其它状态是加载未完成的现场证据。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};
  }
  async release(id){const s=this.pages.get(id);this.pages.delete(id);await s?.page.close().catch(()=>{});}
  async close(){await Promise.allSettled([...this.contexts.values()].map(s=>s.context.close()));this.contexts.clear();this.pages.clear();}
