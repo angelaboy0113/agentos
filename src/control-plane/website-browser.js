@@ -20,10 +20,10 @@ export class WebsiteBrowser {
    await context.route('**/*',async route=>{
     const r=route.request();let page;try{page=r.frame().page();}catch{}
     const state=[...this.pages.values()].find(s=>s.page===page);
-    let allow=false;try{allow=websiteRequestAllowed(e.baseUrl,{url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},state?.waiting===true);}catch{}
+    let allow=false;try{allow=websiteRequestAllowed(e.baseUrl,{url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},state?.waiting===true,e.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{}
     if(allow&&!state)allow=false;
     if(allow&&state) {try{allow=await this.authorize(state.job,state.waiting,r);}catch{allow=false;}}
-    if(!allow){if(state){state.blocked.add(`${r.method()} ${new URL(r.url()).pathname}`);if(['xhr','fetch'].includes(r.resourceType())&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${new URL(r.url()).pathname}`);}await route.abort().catch(()=>{});return;}
+    if(!allow){if(state){state.blocked.add(`${r.method()} ${new URL(r.url()).pathname}`);if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${new URL(r.url()).pathname}`);}await route.abort().catch(()=>{});return;}
     await route.continue();
    });
    context.on('close',()=>{this.contexts.delete(key);for(const [id,s]of this.pages)if(s.session===session)this.pages.delete(id);});
@@ -49,7 +49,7 @@ export class WebsiteBrowser {
   if(state.loginRequired){s.waiting=true;s.sawLogin=true;}
   else if(state.pageReady){if(s.waiting&&s.sawLogin)s.reloadAfterLogin=true;s.waiting=false;}
   if(s.blockedLoginReads.size&&state.loginRequired&&!state.credentialRejected)state.blockedRequests=[...s.blockedLoginReads].slice(-8);
-  return state;
+  return {...state,diagnostic:{credentialAttempted:s.credentialAttempted===true,authRequestObserved:s.authPostSeen===true,authResult:s.authResult?.loginState??null,blockedRequests:[...s.blockedLoginReads].slice(-8)}};
  }
  async needsLogin(s){const state=await this.loginStatus(s);return state.loginRequired||!state.pageReady;}
  async loginStatusFor(job,e){return this.loginStatus(await this.state(job,e));}

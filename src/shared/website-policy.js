@@ -9,7 +9,7 @@ export function websiteUrl(input) {
 export const websiteSessionKey = (project,tier,url) => 'web-'+createHash('sha256').update(JSON.stringify([project,tier,new URL(websiteUrl(url)).origin])).digest('hex').slice(0,24);
 // Registration identifies the requested application entry; session storage remains origin-scoped.
 export const websiteKey = (project,tier,url) => 'web-entry-'+createHash('sha256').update(JSON.stringify([project,tier,websiteUrl(url)])).digest('hex').slice(0,24);
-export function websiteRequestAllowed(base, request, manualLogin=false) {
+export function websiteRequestAllowed(base, request, manualLogin=false, readEndpoints=[]) {
  let u; try {u=new URL(request.url);}catch{return false;}
  if(u.origin!==new URL(base).origin || !['GET','HEAD','POST','OPTIONS'].includes(request.method))return false;
  const parts=decodeURIComponent(u.pathname).replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
@@ -19,14 +19,25 @@ export function websiteRequestAllowed(base, request, manualLogin=false) {
  if(manualLogin && /^(login|signin|sign-in|authenticate|auth|captcha|verify)(?:\.[a-z]+)?$/i.test(tail))return true;
  if(request.method==='POST') {
    // Known read-shaped routes only. A model cannot grant a new method or write route.
-   if(!reads.test(tail)||/login|auth/i.test(tail))return false;
+   const reviewed=readEndpoints.some(e=>e.reviewed===true&&e.method==='POST'&&e.path===u.pathname);
+   if((!reads.test(tail)||/login|auth/i.test(tail))&&!reviewed)return false;
    if((request.body??'').length>16000)return false;
    try { const values=JSON.stringify(JSON.parse(request.body??'{}')); if(/"(?:action|operation|command|cmd|method)"\s*:\s*"(?:save|delete|update|execute|trigger|start|stop)"/i.test(values))return false;}catch{if(/(?:^|&)(?:action|operation|cmd|method)=(?:save|delete|update|execute|trigger|start|stop)(?:&|$)/i.test(request.body??''))return false;}
    return true;
  }
  if(request.method==='OPTIONS')return true;
- return request.resourceType==='document'||/\.(?:js|css|png|jpg|jpeg|svg|ico|woff2?|ttf|map)$/i.test(tail)||reads.test(tail)||u.pathname==='/' || /\/(?:api\/)?(?:menus?|permissions?|profiles?|users?\/me)$/i.test(u.pathname);
+ return request.resourceType==='document'||/\.(?:js|css|png|jpg|jpeg|svg|ico|woff2?|ttf|map)$/i.test(tail)||reads.test(tail)||u.pathname==='/' || readEndpoints.some(e=>e.reviewed===true&&e.method===request.method&&e.path===u.pathname) || /\/(?:api\/)?(?:menus?|permissions?|profiles?|users?\/me)$/i.test(u.pathname);
 }
 export function cleanWebsiteText(value) {
  return String(value??'').replace(/\b(?:Bearer\s+)[A-Za-z0-9._~+\/-]+/gi,'[凭据已隐藏]').replace(/((?:password|passwd|secret|access.?token|refresh.?token|authorization|cookie)\s*[:=]\s*)[^\s,;]+/gi,'$1[已隐藏]').slice(0,10000);
+}
+
+export function validateWebsiteReadEndpoints(value){
+ if(!Array.isArray(value)||value.length>32)throw new Error('网站只读接口配置必须为最多32项');
+ for(const e of value){
+  if(!e||Object.keys(e).some(k=>!['method','path','reviewed'].includes(k))||!['GET','POST'].includes(e.method)||e.reviewed!==true||typeof e.path!=='string'||!/^\/[A-Za-z0-9_./-]+$/.test(e.path)||e.path.includes('..')||e.path.includes('//'))throw new Error('网站只读接口必须为审核后的固定路径和GET/POST方法');
+  const parts=e.path.replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
+  if(parts.some(p=>writeAction.test(p)))throw new Error('网站只读接口不能包含修改操作');
+ }
+ return value;
 }

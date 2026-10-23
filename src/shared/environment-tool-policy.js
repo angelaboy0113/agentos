@@ -1,5 +1,7 @@
+import {validateWebsiteReadEndpoints} from './website-policy.js';
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 export function validateToolQuery(e, q) {
+  if(q.readEndpoints!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw new Error('固定只读接口仅支持审核后的网站排查');validateWebsiteReadEndpoints(q.readEndpoints);}
   if (q.browser !== undefined && (typeof q.browser !== 'boolean' || !['nacos','website'].includes(e.kind) || q.mode !== 'investigate')) throw new Error('浏览器只支持已授权的Nacos工具排查');
   if(q.exportMaxRows!==undefined&&(e.kind!=='mysql'||q.mode!=='investigate'||(q.exportMaxRows!=='all'&&(!Number.isSafeInteger(q.exportMaxRows)||q.exportMaxRows<1))))throw new Error('完整报表行数须为MySQL排查的all或正安全整数，由管理员配置');
   if(q.exportTimeoutMs!==undefined&&(!q.exportMaxRows||!Number.isInteger(q.exportTimeoutMs)||q.exportTimeoutMs<1000||q.exportTimeoutMs>60000))throw new Error('完整报表单工具时限必须为1000至60000毫秒');

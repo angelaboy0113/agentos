@@ -1,3 +1,4 @@
+import {websiteRequestAllowed,validateWebsiteReadEndpoints} from '../src/shared/website-policy.js';
 import test from 'node:test';import assert from 'node:assert/strict';
 import http from 'node:http';import {mkdtemp,rm,writeFile} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {chromium} from 'playwright';
 import {WebsiteBrowser} from '../src/control-plane/website-browser.js';
@@ -32,12 +33,12 @@ test('real isolated browser submits spaced login button, completes read-only boo
  const d=await mkdtemp(path.join(os.tmpdir(),'login-bootstrap-')),old=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(d,'env.json');let reject=false,posts=0,bootstrap=0,writes=0;
  const server=http.createServer((req,res)=>{
   if(req.url==='/login'&&req.method==='POST'){posts++;res.setHeader('content-type','application/json');if(reject){res.end(JSON.stringify({success:false,message:'密码错误'}));return;}res.setHeader('set-cookie','session=fixture; Path=/');res.end('{"success":true}');return;}
-  if(req.url==='/getProfile'){bootstrap++;res.setHeader('content-type','application/json');res.end('{"ok":true}');return;}
+  if(req.url==='/identity/context'){bootstrap++;res.setHeader('content-type','application/json');res.end('{"ok":true}');return;}
   if(req.url==='/save'){writes++;res.end('bad');return;}
   if(req.url==='/app'){res.writeHead(302,{location:'/login'});res.end();return;}
-  res.setHeader('content-type','text/html; charset=utf-8');res.end(`<form><input name="username" placeholder="用户名"><input type="password"><button type="button" onclick="fetch('/login',{method:'POST',body:'fixture'}).then(r=>r.json()).then(async r=>{if(!r.success){document.querySelector('#error').innerText='密码错误';return;}await fetch('/getProfile');document.body.innerHTML='<h1>订单首页</h1>';history.replaceState(null,'','/home')})">登 录</button><div id="error" role="alert"></div></form>`);
+  res.setHeader('content-type','text/html; charset=utf-8');res.end(`<form><input name="username" placeholder="用户名"><input type="password"><button type="button" onclick="fetch('/login',{method:'POST',body:'fixture'}).then(r=>r.json()).then(async r=>{if(!r.success){document.querySelector('#error').innerText='密码错误';return;}await fetch('/identity/context',{method:'POST',body:'{}'});document.body.innerHTML='<h1>订单首页</h1>';history.replaceState(null,'','/home')})">登 录</button><div id="error" role="alert"></div></form>`);
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const e=entry(`http://login-fixture.test:${server.address().port}/app`),config=cfg(e);await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(config));const store=new JsonStore(path.join(d,'state.json'));const plan=planQuery(config,query,'demo',actor);const job={id:'j',projectId:'demo',originProfile:'owner',senderId:'ou_admin',environmentAccess:plan,status:'awaiting_clarification',result:{browserLoginRequired:true},events:[]};await store.transact(s=>s.jobs.push(job));
+ const e=entry(`http://login-fixture.test:${server.address().port}/app`);e.queries.investigate.readEndpoints=[{method:'POST',path:'/identity/context',reviewed:true}];const config=cfg(e);await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(config));const store=new JsonStore(path.join(d,'state.json'));const plan=planQuery(config,query,'demo',actor);const job={id:'j',projectId:'demo',originProfile:'owner',senderId:'ou_admin',environmentAccess:plan,status:'awaiting_clarification',result:{browserLoginRequired:true},events:[]};await store.transact(s=>s.jobs.push(job));
  const driver={launchPersistentContext:(dir,opts)=>chromium.launchPersistentContext(dir,{...opts,headless:true,args:[...opts.args,'--no-proxy-server','--host-resolver-rules=MAP login-fixture.test 127.0.0.1']})};
  const browser=new WebsiteBrowser(d,driver,(...args)=>authorizeWebsiteRequest({store},...args));t.after(async()=>{await browser.close();await new Promise(r=>server.close(r));if(old===undefined)delete process.env.AGENTOS_ENVIRONMENTS_FILE;else process.env.AGENTOS_ENVIRONMENTS_FILE=old;await rm(d,{recursive:true,force:true});});
  assert.equal((await browser.run(job,e,'connection')).loginRequired,true);const result=await browser.submitCredentials(job,e,{username:'fixture-user',password:'fixture-password'});assert.equal(result.authenticated,true);assert.equal(posts,1);assert.equal(bootstrap,1);assert.equal(await browser.loginReady(job,e),true);
@@ -52,4 +53,15 @@ test('real isolated browser submits spaced login button, completes read-only boo
  const unconfirmed=await browser.submitCredentials(job,e,{username:'fixture-user',password:'fixture-password'},{force:true});assert.equal(unconfirmed.submissionUnconfirmed,true);assert.equal(posts,2);
  await assert.rejects(()=>browser.submitCredentials(job,{...e,baseUrl:'https://other.example/'},{username:'fixture-user',password:'fixture-password'},{force:true}),/范围/);
 
+});
+
+test('reviewed nonstandard read POSTs retain exact path/method/origin and mutation checks',()=>{
+ const rules=[{method:'POST',path:'/identity/context',reviewed:true}],base='https://site.example/';validateWebsiteReadEndpoints(rules);
+ const req={url:base+'identity/context',method:'POST',body:'{}',resourceType:'fetch'};
+ assert.equal(websiteRequestAllowed(base,req,false),false);assert.equal(websiteRequestAllowed(base,req,false,rules),true);
+ assert.equal(websiteRequestAllowed(base,{...req,url:'https://other.example/identity/context'},false,rules),false);
+ assert.equal(websiteRequestAllowed(base,{...req,url:base+'identity/other'},false,rules),false);
+ assert.equal(websiteRequestAllowed(base,{...req,body:'{"action":"delete"}'},false,rules),false);
+ for(const path of ['/user/update','/user/*','https://other.example/context','/../context'])assert.throws(()=>validateWebsiteReadEndpoints([{method:'POST',path,reviewed:true}]));
+ assert.throws(()=>validateWebsiteReadEndpoints([{method:'POST',path:'/identity/context',reviewed:false}]));
 });
