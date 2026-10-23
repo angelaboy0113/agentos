@@ -143,6 +143,20 @@ export class MemoryService {
       }
     });
   }
+  async prune(cutoff, expiredRefs) {
+    return this.serial(async()=>{
+      const cache=await this.read();
+      for(const [key,scope] of Object.entries(cache.scopes)) {
+        scope.items=(scope.items??[]).filter(x=>!expiredRefs.has(x.ref));
+        if(Date.parse(scope.updatedAt)<cutoff||!scope.items.length)delete cache.scopes[key];
+      }
+      for(const [key,refs] of Object.entries(cache.tombstones)) {
+        cache.tombstones[key]=refs.filter(ref=>!expiredRefs.has(ref));
+        if(!cache.tombstones[key].length)delete cache.tombstones[key];
+      }
+      await this.write(cache);
+    });
+  }
   async forget(turn, projectId, refs) {
     return this.serial(async () => {
       const cache = await this.read(), key = memoryScope(turn, projectId);

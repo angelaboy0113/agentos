@@ -1,3 +1,4 @@
+import {HistoryRetention} from './retention.js';
 import { resolveProjectId, routeAgent } from '../shared/project-scope.js';
 import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
 import {ContactChannels} from './contact-channels.js';
@@ -82,6 +83,7 @@ export async function createControlPlane(overrides = {}) {
   });
   const conversations = new ConversationService(context, { ...await loadConversationSettings(config.conversationFile), memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
+  context.retention = new HistoryRetention(context);
   const server = http.createServer(async (request, response) => {
     try {
       if(!await durableControl(context,request,response))await route({ ...context, request, response });
@@ -93,13 +95,16 @@ export async function createControlPlane(overrides = {}) {
   });
 
   server.once('listening', () => {
+    context.retention.start();
     cards.start();
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
     context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
-  server.once('close', () => { conversations.stop(); cards.stop(); void context.reports.close(); void context.websiteBrowser.close(); void context.knowledge.close(); });
+  server.once('close', () => {
+    void Promise.allSettled([context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+  });
   return { server, config, projects, agents, store, conversations, cards };
 }
 
@@ -185,7 +190,7 @@ async function route(context) {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
-      investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1',
+      investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun },
       controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,

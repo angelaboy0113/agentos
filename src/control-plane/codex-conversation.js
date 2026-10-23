@@ -146,6 +146,12 @@ export class CodexConversationEngine {
     }
   }
 
+  async prune(cutoff, retainedKeys) {
+    const keep=new Set(retainedKeys);
+    for(const [key,session] of this.sessions)if(session.active)keep.add(key);
+    await this.registry.prune(cutoff,keep);
+    for(const [key,session] of this.sessions)if(!session.active&&!keep.has(key)&&session.touched<cutoff)this.releaseSession(key,session);
+  }
   async close() {
     this.closed = true;
     this.sessions.clear();

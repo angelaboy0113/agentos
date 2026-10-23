@@ -25,7 +25,7 @@
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送、幂等记录及最近 200 项本机设置审计 | 是 | 否 |
 | `data/exports/<JOB>/` | 完整分组报表 CSV，含实时业务金额；通过文件校验后回复原提问。见[报表导出](report-exports.md) | 是 | 否 |
 | `data/exports/<JOB>/report-*.verification.json` | 最终文件的列/覆盖/分量核验及业务依据，与CSV绑定；不等于人工业务验收 | 是 | 否 |
-| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；不完整集不保存，不进入团队知识。24小时后不再复用，但不自动删除文件 | 是 | 否 |
+| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；不完整集不保存，不进入团队知识。24小时后不再复用；启用历史保留策略后随过期任务清理 | 是 | 否 |
 | `data/lark-cli/reports/` | CLI 文件回复副本，需与正式导出文件分别清理 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
 | `data/lark-cli/` | lark-cli 消息资源下载工作目录 | 是 | 否 |
@@ -91,7 +91,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 
 ## 联系人信息图
 
-`data/contact-index/directory.sqlite`保存受范围/权限指纹限制的最小目录候选，不含手机号或邮箱；与团队知识SQLite分开。`data/contact-images/`保存个人资料PNG和校验回执，`data/lark-cli/images/`为CLI上传副本；对话outcome登记原提问范围与投递状态。文件含人员资料，使用本机受限权限，不进入Git或团队知识；停稳后备份，没有自动清理服务。配置和验收见[联系人信息图](contact-images.md)。
+`data/contact-index/directory.sqlite`保存受范围/权限指纹限制的最小目录候选，不含手机号或邮箱；与团队知识SQLite分开。`data/contact-images/`保存个人资料PNG和校验回执，`data/lark-cli/images/`为CLI上传副本；对话outcome登记原提问范围与投递状态。文件含人员资料，使用本机受限权限，不进入Git或团队知识；停稳后备份；启用历史保留策略后清理过期本地图片与索引。配置和验收见[联系人信息图](contact-images.md)。
 
 私有卡片的visibility、固定收件者、privateDeliveryKind及旧临时卡片清理队列随问题/任务和cardMessages存入原状态JSON；共享知识不自动接收私有调查。私有附件仍保存在原本地目录，私聊投递不代表本地管理员隔离。
 
@@ -104,3 +104,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 data/local-executions保存本机实际fork的父/工作进程和租约身份，随状态/回执/exports成套备份；不入Git或共享知识。进程存在、外机、旧无登记、Windows或无法证明整个进程组已退出时，不自动解除执行隔离。见[空值与本机异常退出恢复](local-executor-recovery.md)。
 
 报表分卷临时副本位于`exports/<JOB>/.delivery-*`，正常完成/异常退出投递函数时清理；进程崩溃可能保留，确认无投递后可清理，不删除主报表或核验记录。`reportDeliveries.parts`保存每卷名称、字节、SHA-256与消息回执，不保存正文。详见[报表导出](report-exports.md)。
+
+## 可选历史保留策略
+
+独立多系统启动器默认保留30天；通用服务需设置 `AGENTOS_RETENTION_DAYS` 显式启用。启动及每日清理已结束且无在途交付依赖的过期问题、任务、索引、缓存和允许目录内的文件。活动/等待问题、配置凭据、源码和开发worktree不因达到30天被删除。并非整盘清理，飞书服务器与系统级Codex记录不受影响。完整目录、配置、失败与验收边界见[多系统说明：本地历史保留与自动释放](system-assistants.md#本地历史保留与自动释放)。

@@ -51,6 +51,10 @@ export class TeamKnowledgeService {
     this.model=options.model??new KnowledgeModel({dataDir:context.config.dataDir,file:context.config.codexRuntimeFile});
     this.now=options.now??Date.now;this.source=options.source??new KnowledgeSource({now:this.now});this.options=options;this.queue=Promise.resolve();this.inflight=new Set();
   }
+  async prune(cutoff){
+    const run=this.queue.then(async()=>{await this.store.open();this.store.expire(cutoff);this.source.cache?.clear();});
+    this.queue=run.catch(()=>{});return run;
+  }
   async settings(){
     if(this.options.settings)return knowledgeSettings(this.options.settings);
     try{return knowledgeSettings(JSON.parse(await readFile(this.file,'utf8')));}catch(error){if(error.code==='ENOENT')return knowledgeSettings();throw error;}

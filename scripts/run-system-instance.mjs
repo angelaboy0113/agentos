@@ -42,6 +42,7 @@ if (mode === '--check') process.exit(pending.length ? 2 : 0);
 if (pending.length) throw new Error('接入尚未完成，拒绝连接事件或启动服务');
 for (const key of Object.keys(process.env)) if (/^(AGENTOS_|FEISHU_|LARKSUITE_CLI_CONFIG_DIR$)/.test(key)) delete process.env[key];
 Object.assign(process.env, {
+  AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),
   AGENTOS_DATA_DIR: path.join(runtime, 'data'), AGENTOS_RUNNER_WORKTREE_ROOT: path.join(runtime, 'data', 'worktrees'),
   AGENTOS_BROWSER_MODE: 'isolated', AGENTOS_RUNNER_CONCURRENCY: String(instance.concurrency ?? 3),

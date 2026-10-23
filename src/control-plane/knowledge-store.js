@@ -37,6 +37,12 @@ export class KnowledgeStore {
     this.db.prepare('DELETE FROM captures WHERE updated_at<?').run(now-90*86400000);
     this.hot.clear();
   }
+  expire(cutoff) {
+    this.db.prepare('DELETE FROM entries WHERE verified_at<?').run(cutoff);
+    this.db.prepare('DELETE FROM captures WHERE updated_at<?').run(cutoff);
+    this.db.exec('DELETE FROM tokens WHERE entry_id NOT IN (SELECT id FROM entries); VACUUM');
+    this.hot.clear();
+  }
   put(entry, status = 'active') {
     this.hot.clear();
     this.db.exec('BEGIN IMMEDIATE');

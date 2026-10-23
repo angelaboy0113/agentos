@@ -1,3 +1,4 @@
+import {installDailyLogs} from '../shared/daily-logs.js';
 import path from 'node:path';
 import {publishQuestion} from './questions.js';
 import {recoverLocalExecutions} from '../runner/local-executions.js';
@@ -9,6 +10,7 @@ import { createRunnerPool } from '../runner/index.js';
 import { runnerConfig } from '../runner/config.js';
 
 async function main() {
+  if(process.env.AGENTOS_LOG_DIR)installDailyLogs(process.env.AGENTOS_LOG_DIR);
   const adminToken = process.env.AGENTOS_ADMIN_TOKEN || randomBytes(32).toString('hex');
   const runnerToken = process.env.AGENTOS_RUNNER_TOKEN || randomBytes(32).toString('hex');
   const app = await createControlPlane({
