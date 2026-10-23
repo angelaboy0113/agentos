@@ -51,6 +51,17 @@ export function causalEvidenceComplete(job,result) {
 }
 
 const questionAnswered=(job,result,root)=>root?.required===true&&root.status==='verified'&&nonempty(root.evidence)&&causalEvidenceComplete(job,result);
+// Task acceptance describes whether the question was answered, not whether the
+// inspected subject is healthy. Preserve contradictory failed checks as findings.
+function answeredQuestionChecks(checks,root,answered){
+ if(!Array.isArray(checks))return checks;
+ const ids=new Set(checks.map(c=>c?.id));
+ return checks.flatMap(check=>{
+  if(!answered||check?.id!==QUESTION_GOAL_ID||check.required!==true||check.status!=='failed'||!nonempty(check.evidence))return [check];
+  let id=QUESTION_GOAL_ID+'-finding',n=1;while(ids.has(id))id=QUESTION_GOAL_ID+'-finding-'+(++n);ids.add(id);
+  return [{...check,status:'passed',evidence:root.evidence},{...check,id,required:false}];
+ });
+}
 // The question is the acceptance target. Investigation leads may aid that target,
 // but discovering a new field must not silently expand the user's request.
 export function normalizeQuestionScope(job, result) {
@@ -63,13 +74,15 @@ export function normalizeQuestionScope(job, result) {
  if(causalIncomplete){root={...root,status:'open'};goals.splice(goals.findIndex(goal=>goal.id===QUESTION_GOAL_ID),1,root);}
  const answered=questionAnswered(job,{...result,investigation:{...investigation,goals}},root);
  const promoted=answered&&result.outcome!=='ready';
- const handoff=result.handoff?{...result.handoff,checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID?check:{...check,required:false}),
+ const completedWithFindings=answered&&result.handoff?.checks?.some(check=>check?.id===QUESTION_GOAL_ID&&check.required===true&&check.status==='failed'&&nonempty(check.evidence));
+ const handoff=result.handoff?{...result.handoff,checks:answeredQuestionChecks(result.handoff.checks?.map(check=>check?.id===QUESTION_GOAL_ID?check:check&&({...check,required:false})),root,answered),
   ...(answered?{returnTo:'none',risks:[...new Set([...(result.handoff.risks??[]),...(investigation.blocker?[`补充调查受限：${investigation.blocker.needed}`]:[])])]}:{})}:result.handoff;
  const causalNote='用户询问的是原因，但现有材料只证明了现象或候选路径，因果证据尚未闭环。';
  return {...result,outcome:answered?'ready':causalIncomplete&&result.outcome==='ready'?'partial':result.outcome,
   ...(causalIncomplete?{summary:`${causalNote} ${result.summary??''}`.slice(0,1200)}:{}),
   ...(promoted?{summary:`原问题已核实：${root.evidence}。补充调查的限制见详情。`.slice(0,1200),
    finalMessage:`原问题已核实：${root.evidence}\n\n补充调查说明（不影响上述结论）：\n${result.finalMessage??''}`} : {}),
+  ...(completedWithFindings?{summary:`调查已完成；存在未通过项。${root.evidence}`.slice(0,1200),finalMessage:`原问题检查已完成，发现未通过项；具体异常及无法对照的项目如下。\n\n${result.finalMessage??''}`} : {}),
   investigation:{...investigation,goals,status:answered?'complete':investigation.status==='complete'?'continue':investigation.status,
    blocker:answered?null:investigation.blocker},handoff,
   ...(answered?{environmentQuery:null,websiteQuery:null,environmentSetup:null}: {})};
