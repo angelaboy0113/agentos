@@ -110,6 +110,12 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
   留空；不要照搬其他电脑的路径、账号、模型权限或代理端口。
 - 需要 UAT/PRD、Nacos、MySQL 或网站排查时，使用专用只读账号、允许范围、环境负责人、
   Keychain 和审批流程；未配置的能力保持关闭并记录。
+- 网站表单排查先读docs/shared-chrome.md：创建/编辑菜单是页面导航，不能凭关键词误拦。
+  browser_open只读当前页；已核实hash路由用browser_navigate，临时复现用browser_fill、
+  browser_select及日期面板点击，核对snapshot中的disabled/readOnly/value和interactionError。
+  不强改DOM解禁；共享Chrome没有网络只读保证，先核实页面是否自动保存，真正保存提交
+  需要明确授权。验证两种后端和不同表单场景，不把临时网页回归当真实PRD验收。
+  不新增或收紧任务总时长、轮次、调用截停限制；需要此类规则时先说明影响并征得用户同意。
 
 - 需要团队知识时，先读取 docs/team-knowledge.md，再从 config/knowledge.example.json 建立
   缺失的 config/knowledge.local.json。仅在本团队明确要求启用时设置 enabled=true；未确认

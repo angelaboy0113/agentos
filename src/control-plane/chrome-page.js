@@ -10,49 +10,76 @@ export function chromePage(request) {
  if(current.origin!==base.origin || !(current.pathname===prefix||current.pathname.startsWith(prefix+'/')))
   return {error:'浏览器已离开本次批准的应用范围，请重新确认页面'};
  const write=/新增|创建|保存|修改|编辑|删除|启动|停止|执行|触发|重跑|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout)\b/i;
+ const terminalWrite=/保存|删除|启动|停止|触发|重跑|终止|发布|提交|审批通过|支付|注销|退出|\b(save|delete|remove|start|stop|trigger|execute|run|restart|kill|publish|submit|approve|pay|logout)\b/i;
  const read=/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|search|query|view|detail|log|next|previous|refresh/i;
  const isRow=el=>el.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');
+ const fieldLabel=el=>{
+  const explicit=el.id?[...document.querySelectorAll('label[for]')].find(x=>x.htmlFor===el.id)?.innerText:'';
+  const group=el.closest('.ant-form-item,.el-form-item,[role=group],fieldset');
+  return explicit||group?.querySelector('label,.ant-form-item-label,.el-form-item__label,legend')?.innerText||'';
+ };
  const label=el=>{
-  const text=(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+  const text=(el.getAttribute('aria-label')||(el.closest('[role=grid],.ant-picker-panel,.ant-calendar,.el-picker-panel')?el.getAttribute('title'):'')||((el.matches('input,select,textarea,[role=combobox]'))?fieldLabel(el):'')||el.innerText||el.getAttribute('placeholder')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
   return isRow(el)&&text?`行详情：${text}`:text;
  };
+ const disabled=el=>el.disabled===true||el.getAttribute('aria-disabled')==='true'||!!el.closest('[aria-disabled=true],.ant-picker-cell-disabled,.ant-calendar-disabled-cell,.ant-picker-disabled,.el-input.is-disabled,.el-date-table td.disabled');
+ const picker=el=>!!el.closest('[role=grid],.ant-picker-panel,.ant-calendar,.el-picker-panel,input[type=date],input[type=datetime-local]');
  function type(el){
-  if(!visible(el)||el.disabled||el.closest('[contenteditable="true"]'))return null;
-  const text=label(el),tag=el.tagName.toLowerCase();if(!text||write.test(text))return null;
-  if(el.closest('[role=menu]')&&(el.matches('[role=menuitem]')||el.classList.contains('ant-menu-submenu-title')))return 'read-action';
-  if(tag==='input')return /^(text|search|date|datetime-local|number)$/.test(el.type)&&/搜索|查询|日期|时间|名称|编号|search|filter|date|name|id/i.test(text)?'search':null;
-  if(tag==='select')return 'select';
-  // Ant Design and similar data tables commonly attach the detail navigation to the row itself instead of rendering a labelled link.
-  // A row key identifies an existing record; clicking it only drills into that record and remains subject to the same-origin/read-only label checks above.
-  if(isRow(el))return 'read-action';
+  if(!visible(el)||el.closest('[contenteditable="true"]'))return null;
+  const text=label(el),tag=el.tagName.toLowerCase();if(!text)return null;
+  // A menu or a route link opens a page. Creating a record still requires its submit action.
+  const menu=el.closest('[role=menu]')&&(el.matches('[role=menuitem]')||el.classList.contains('ant-menu-submenu-title'));
+  if(menu&&!terminalWrite.test(text))return 'read-action';
   if(tag==='a'){
    const raw=el.getAttribute('href');if(!raw||raw.startsWith('javascript:'))return null;
    const u=new URL(raw,location.href);
-   if(u.origin!==base.origin||!(u.pathname===prefix||u.pathname.startsWith(prefix+'/'))||write.test(decodeURIComponent(u.pathname+u.search+u.hash)))return null;
+   if(u.origin!==base.origin||!(u.pathname===prefix||u.pathname.startsWith(prefix+'/'))||terminalWrite.test(text)||terminalWrite.test(decodeURIComponent(u.pathname+u.search+u.hash)))return null;
    return 'read-action';
   }
+  if(tag==='input'||tag==='textarea'){
+   if(tag==='input'&&!/^(text|search|date|datetime-local|number|email|tel|month|time|week)$/.test(el.type))return null;
+   if(/password|passwd|secret|token/i.test(el.name+' '+el.id))return null;
+   return /搜索|查询|search|filter/i.test(text)?'search':'form-field';
+  }
+  if(tag==='select')return 'select';
+  if(terminalWrite.test(text))return null;
+  if(write.test(text)&&!picker(el))return null;
+  if(isRow(el))return 'read-action';
+  if(picker(el))return 'form-action';
+  if(el.matches('[role=option],[role=tab],[role=combobox]'))return 'form-action';
   return read.test(text)?'read-action':null;
  }
  const key='__agentos_read_'+token;
  const state=window[key];
+ if(tool==='browser_navigate'){
+  let target;try{target=new URL(args.url,location.href);}catch{return {error:'页面地址无效'};}
+  const scoped=target.origin===base.origin&&(target.pathname===prefix||target.pathname.startsWith(prefix+'/'));
+  const linked=Object.values(state?.refs??{}).some(r=>r.type==='read-action'&&r.href&&new URL(r.href,location.href).href===target.href&&r.el.isConnected);
+  const hashRoute=target.pathname===current.pathname&&target.search===current.search&&target.hash.startsWith('#/');
+  if(!scoped||terminalWrite.test(decodeURIComponent(target.pathname+target.search+target.hash))||(!linked&&!hashRoute))return {error:'请使用当前页面链接，或同一应用中已从源码核实的前端 hash 路由；不能把业务接口当页面跳转'};
+  if(target.href===current.href)return {acted:false,stage:'已在目标页面',url:target.href};
+  location.href=target.href;return {acted:true};
+ }
  if(!['connection','browser_open','browser_snapshot'].includes(tool)){
   const ref=state?.refs?.[args.ref];
-  if(!ref||state.url!==location.href||!ref.el.isConnected||type(ref.el)!==ref.type||label(ref.el)!==ref.label||ref.el.getAttribute('href')!==ref.href)return {error:'页面引用已变化，请重新获取页面'};
+  if(!ref||state.url!==location.href||!ref.el.isConnected||type(ref.el)!==ref.type||label(ref.el)!==ref.label||ref.el.getAttribute('href')!==ref.href)return {recoverable:true,error:'页面引用已变化，请重新获取页面'};
   const el=ref.el;
-  if(tool==='browser_click'&&ref.type==='read-action')el.click();
-  else if(tool==='browser_search'&&ref.type==='search'&&typeof args.text==='string'&&args.text.length<=200){
-   const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(el,args.text);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
-  }else if(tool==='browser_select'&&ref.type==='select'&&typeof args.value==='string'&&args.value.length<=200&&[...el.options].some(o=>o.value===args.value)){
+  if(disabled(el))return {recoverable:true,error:'控件当前被禁用；请根据快照的 disabled、readOnly 和关联字段状态继续定位，不能强制解锁'};
+  if(tool==='browser_click'&&['read-action','form-field','form-action'].includes(ref.type))el.click();
+  else if(['browser_search','browser_fill'].includes(tool)&&['search','form-field'].includes(ref.type)&&typeof args.text==='string'){
+   if(el.readOnly)return {recoverable:true,error:'字段为只读输入，请点击打开日期/选项面板，不强行修改只读值'};
+   const setter=Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set;setter.call(el,args.text);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+  }else if(tool==='browser_select'&&ref.type==='select'&&typeof args.value==='string'&&[...el.options].some(o=>o.value===args.value)){
    el.value=args.value;el.dispatchEvent(new Event('change',{bubbles:true}));
-  }else return {error:'本次只开放查询、查看与分页操作'};
+  }else return {recoverable:true,error:'该引用不支持此操作；页面导航和临时表单交互可用，业务提交需单独授权'};
   state.refs={};return {acted:true};
  }
  if(credentialFormVisible)return {loginRequired:true,credentialFormVisible:true,verificationRequired:false,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在此Chrome页面完成，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
  const refs={},controls=[],generation=(state?.generation??0)+1;let n=0;
- for(const el of [...document.querySelectorAll('a,[role=link],button,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]')].slice(0,500)){
+ for(const el of [...document.querySelectorAll('a,[role=link],button,select,textarea,[role=button],input,[role=menuitem],[role=option],[role=tab],[role=combobox],[role=gridcell],.ant-picker-cell,.ant-calendar-date,.el-date-table td,.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]')].slice(0,500)){
   const t=type(el);if(!t)continue;const ref=token+'-'+generation+'-'+n++;
   const text=label(el);refs[ref]={el,type:t,label:text,href:el.getAttribute('href')};
-  controls.push({ref,type:t,label:text,...(t==='select'?{options:[...el.options].slice(0,100).map(o=>({value:o.value,label:o.textContent}))}:{})});
+  controls.push({ref,type:t,label:text,disabled:disabled(el),readOnly:el.readOnly===true,...(['search','form-field','select'].includes(t)?{value:el.value??'',inputType:el.type??'',ariaInvalid:el.getAttribute('aria-invalid'),ariaExpanded:el.getAttribute('aria-expanded')}:{}),...(t==='select'?{options:[...el.options].slice(0,100).map(o=>({value:o.value,label:o.textContent}))}:{})});
   if(controls.length>=150)break;
  }
  Object.defineProperty(window,key,{value:{url:location.href,refs,generation},configurable:true});

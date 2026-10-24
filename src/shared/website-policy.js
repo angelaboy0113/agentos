@@ -13,7 +13,9 @@ export function websiteRequestAllowed(base, request, manualLogin=false) {
  let u; try {u=new URL(request.url);}catch{return false;}
  if(u.origin!==new URL(base).origin || !['GET','HEAD','POST','OPTIONS'].includes(request.method))return false;
  const parts=decodeURIComponent(u.pathname).replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
- if(parts.some(x=>writeAction.test(x)))return false;
+ // Opening a create/edit HTML page is navigation; data-writing requests retain the existing policy.
+ const formDocument=request.method==='GET'&&request.resourceType==='document';
+ if(parts.some(x=>writeAction.test(x)&&!(formDocument&&/^(create|add|edit|new)$/i.test(x))))return false;
  for(const [key,value] of u.searchParams) if(writeAction.test(key)||/^(action|operation|command|cmd|method)$/i.test(key)&&writeAction.test(value)) return false;
  const tail=u.pathname.split('/').filter(Boolean).at(-1)??'index';
  if(manualLogin && /^(login|signin|sign-in|authenticate|auth|captcha|verify)(?:\.[a-z]+)?$/i.test(tail))return true;

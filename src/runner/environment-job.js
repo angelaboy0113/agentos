@@ -63,9 +63,11 @@ export async function executeEnvironmentJob(job, config, emit) {
 function websiteTools(job,config){
  return {spec:[{tool:'connection',args:{},description:'打开从原问题或项目源码发现的业务网页，复用本机登录会话'},
  {tool:'report_wrong_site',args:{},description:'当前页面属于其他系统或不是原问题的目标应用时报告入口不匹配，返回原问题继续查找正确入口，不扩大权限'},
- {tool:'browser_open',args:{},description:'查看当前业务网页'}, {tool:'browser_snapshot',args:{},description:'刷新页面文本和引用'},
- {tool:'browser_click',args:{ref:'当前read-action引用'},description:'查看详情、日志、菜单、翻页；不能启动停止或修改'},
- {tool:'browser_select',args:{ref:'当前select引用',value:'返回的选项value'},description:'选择查询筛选项'},
+ {tool:'browser_open',args:{},description:'查看当前业务网页；本工具不跳转，进入已核实的路由应使用browser_navigate'}, {tool:'browser_snapshot',args:{},description:'刷新页面文本和引用'},
+ {tool:'browser_click',args:{ref:'当前read-action引用'},description:'进入菜单/创建表单/详情、打开日期控件、选择日历日期、翻页；禁用状态用于诊断，不强行解锁；不能保存提交或启动停止'},
+ {tool:'browser_navigate',args:{url:'当前页面实际链接，或从源码核实的同应用hash路由'},description:'进入表单或详情页面；打开创建/编辑页不等于提交业务数据；不能跳转业务接口'},
+ {tool:'browser_fill',args:{ref:'当前form-field或search引用',text:'原问题所需的临时输入值'},description:'临时填写表单以复现问题，不按回车、不保存提交；只读日期输入应点击打开日历；注意页面可能自动保存，先结合源码核实事件'},
+ {tool:'browser_select',args:{ref:'当前select引用',value:'返回的选项value'},description:'选择筛选项或表单选项以复现原问题，不保存提交'},
  {tool:'browser_search',args:{ref:'当前search引用',text:'查询条件'},description:'填写搜索条件，再点击查询'}],
  async run(tool,args={}){if(tool==='report_wrong_site')return {websiteMismatch:true,partial:true,stage:'当前网站与问题目标不匹配，需要重新发现正确入口；不是用户权限不足'};const response=await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/website-tool`,{method:'POST',signal:AbortSignal.timeout(45000),headers:{authorization:`Bearer ${config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({leaseId:job.lease.id,runnerId:job.lease.runnerId,tool,args})});const value=await response.json();if(!response.ok)throw new Error(value.error??'网页工具执行失败');return value.result;},async close(){}};
 }

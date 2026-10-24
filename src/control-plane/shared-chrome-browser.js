@@ -19,16 +19,17 @@ export class SharedChromeBrowser{
   await this.allowed(job,e,s.waiting);
   const request={baseUrl:s.baseUrl,token:s.token,tool,args};
   const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${chromePage.toString()})(${JSON.stringify(request)}))`});
-  if(raw.error)throw new Error(raw.error);
+  if(raw.error&&!raw.recoverable)throw new Error(raw.error);
   s.waiting=raw.loginRequired===true;if(!s.waiting)s.credentialAttempted=false;
   if(raw.pageText)raw.pageText=cleanWebsiteText(raw.pageText);
-  if(raw.controls)raw.controls=raw.controls.map(c=>({...c,label:cleanWebsiteText(c.label),...(c.options?{options:c.options.map(o=>({...o,label:cleanWebsiteText(o.label)}))}:{})}));
+  if(raw.controls)raw.controls=raw.controls.map(c=>({...c,label:cleanWebsiteText(c.label),...(c.value!==undefined?{value:cleanWebsiteText(c.value)}:{}),...(c.options?{options:c.options.map(o=>({...o,label:cleanWebsiteText(o.label)}))}:{})}));
   return raw;
  }
  run(job,e,tool,args={}){return this.serial(async()=>{
-  if(!['connection','browser_open','browser_snapshot','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(!['connection','browser_open','browser_snapshot','browser_click','browser_search','browser_select','browser_fill','browser_navigate'].includes(tool))throw new Error('未开放该网页操作');
   await this.allowed(job,e);const s=await this.state(job,e);
   let r=await this.snapshot(job,e,s,tool,args);
+  if(r.error&&r.recoverable){const interactionError=r.error;r=await this.snapshot(job,e,s,'browser_snapshot',{});r.interactionError=interactionError;r.partial=true;r.stage='交互未完成，已刷新控件引用和状态，请调整步骤';}
   if(r.acted)r=await this.snapshot(job,e,s,'browser_snapshot',{});
   for(let attempt=0;attempt<3&&['empty','loading'].includes(r.pageStatus);attempt++){await this.wait(400);r=await this.snapshot(job,e,s,'browser_snapshot',{});}
   if(r.loginRequired)await this.transport({operation:'focus',tabId:s.tabId,windowId:s.windowId});

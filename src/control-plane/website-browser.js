@@ -1,8 +1,9 @@
+import { chromePage } from './chrome-page.js';
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright';
 import { mkdir, chmod } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteSessionKey, websiteRequestAllowed, writeAction, cleanWebsiteText } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteRequestAllowed, cleanWebsiteText } from '../shared/website-policy.js';
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
  constructor(dataDir, driver=chromium, authorize=async()=>true){this.authorize=authorize;this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
@@ -55,32 +56,13 @@ export class WebsiteBrowser {
   const s=await this.state(job,e);
   if(await this.needsLogin(s)){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'已在运行AgentOS的电脑上打开登录页面；登录后自动继续原问题，无需回复继续。'};}
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.reload({waitUntil:'domcontentloaded'});}
-  if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot')return this.snapshot(s);
-  const ref=s.refs.get(args.ref);if(!ref)throw new Error('页面引用过期，请重新获取browser_snapshot');
-  if(writeAction.test(await ref.el.innerText().catch(()=>'')))throw new Error('该操作可能改变业务状态，需要单独授权，本次未执行');
-  if(tool==='browser_search'&&ref.type==='search'&&typeof args.text==='string'&&args.text.length<=200){await ref.el.fill(args.text);}
-  else if(tool==='browser_select'&&ref.type==='select'&&typeof args.value==='string'&&args.value.length<=200){await ref.el.selectOption(args.value);}
-  else if(tool==='browser_click'&&ref.type==='read-action'){await ref.el.click();await s.page.waitForLoadState('domcontentloaded').catch(()=>{});}
-  else throw new Error('未开放该网页操作');
-  if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
-  return this.snapshot(s);
+  const result=await s.page.evaluate(chromePage,{baseUrl:e.baseUrl,token:s.refPrefix,tool,args});
+  if(result.error){if(result.recoverable)return {...await this.snapshot(s),interactionError:result.error,partial:true,stage:'交互未完成，已刷新控件引用和状态，请调整步骤'};throw new Error(result.error);}
+  if(result.acted){await s.page.waitForLoadState('domcontentloaded').catch(()=>{});return this.snapshot(s);}
+  return this.cleanSnapshot(s,result);
  }
- async snapshot(s){
-  s.refs.clear();s.generation++;
-  const text=await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
-  const loc=s.page.locator('a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');const controls=[];
-  for(let i=0,n=Math.min(await loc.count(),150);i<n;i++){
-   const el=loc.nth(i);if(!await el.isVisible()||!await el.isEnabled())continue;
-   const tag=await el.evaluate(x=>x.tagName.toLowerCase());const row=await el.evaluate(x=>x.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]'));
-   const rawLabel=cleanWebsiteText((await el.innerText().catch(()=>''))||await el.getAttribute('placeholder')||await el.getAttribute('aria-label')||await el.getAttribute('title')||await el.getAttribute('name')||await el.getAttribute('id')||'').trim().slice(0,100);const label=row&&rawLabel?`行详情：${rawLabel}`:rawLabel;
-   if(!label||writeAction.test(label))continue;
-   if(tag==='input'&&!/搜索|查询|日期|时间|名称|编号|search|filter|date|name|id/i.test(label))continue;
-   // Expose navigation, view, search and pagination controls; unknown effects are not guessed.
-   if(tag!=='input'&&tag!=='select'&&tag!=='a'&&!row&&!/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|确定|search|query|view|detail|log|next|previous|refresh/i.test(label))continue;
-   const ref=`${s.refPrefix}-${s.generation}-${i}`,type=tag==='input'?'search':tag==='select'?'select':'read-action';s.refs.set(ref,{el,type});controls.push({ref,type,label,...(tag==='select'?{options:await el.locator('option').evaluateAll(xs=>xs.slice(0,100).map(x=>({value:x.value,label:x.textContent})))}:{})});
-  }
-  return {stage:'已读取业务网页',url:new URL(s.page.url()).origin+new URL(s.page.url()).pathname,pageText:cleanWebsiteText(text),controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；不代表任务已执行或数据已修改。'};
- }
+ cleanSnapshot(s,result){return {...result,pageText:cleanWebsiteText(result.pageText),controls:result.controls?.map(c=>({...c,label:cleanWebsiteText(c.label),...(c.value!==undefined?{value:cleanWebsiteText(c.value)}:{})})),blockedRequests:[...s.blocked].slice(-10)};}
+ async snapshot(s){return this.cleanSnapshot(s,await s.page.evaluate(chromePage,{baseUrl:s.session.e.baseUrl,token:s.refPrefix,tool:'browser_snapshot'}));}
  async release(id){const s=this.pages.get(id);this.pages.delete(id);await s?.page.close().catch(()=>{});}
  async close(){await Promise.allSettled([...this.contexts.values()].map(s=>s.context.close()));this.contexts.clear();this.pages.clear();}
 }

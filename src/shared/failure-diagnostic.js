@@ -7,7 +7,7 @@ const stages = Object.freeze({
   group_dataset:'分组查询与保存数据',linked_group_dataset:'关联分组查询与保存数据',inspect_dataset:'读取任务内数据集',list_datasets:'列出任务内数据集',enrich_dataset:'组合业务维度',compare_datasets:'核对数据集差异',inspect_report:'读取文件绑定审阅证据',refresh_report:'集中刷新与重算报表',compose_report:'生成清单草稿',finalize_report:'核验最终清单',read_source_evidence:'读取已核验源码',
   connection: '环境连接检查', discover: '发现配置', read_config: '读取配置',
   browser_open: '打开后台浏览器页面', browser_click: '点击页面控件',
-  browser_snapshot: '读取页面', browser_search: '搜索页面',
+  browser_snapshot: '读取页面及字段状态', browser_search: '搜索页面', browser_navigate: '进入业务表单页面', browser_fill: '临时填写表单复现', browser_select: '选择页面选项',
   select: '数据库只读查询', schema: '读取表结构', tables: '发现数据表', planning: '规划下一步排查'
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
