@@ -6,18 +6,21 @@ const clip = (text, size) => Array.from(text).slice(0, size).join('');
 export const PRIMARY_RESPONSE_LIMIT = 1200;
 export const PRIMARY_ANALYSIS_LIMIT = 2400;
 const TECHNICAL_APPENDIX_HEADING = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?(?:技术依据|源码与数据依据|代码与数据依据|技术细节)\s*[：:]?\s*(?:\*\*)?\s*[：:]?\s*(?=\n|$)/i;
-export function publicText(text) {
-  // Decode legacy escaping before redaction, then escape markup exactly once.
-  return String(text ?? '').replace(/&amp;/g, '&')
-    .replace(/&#(?:x([\da-f]+)|(\d+));/gi, (raw, hex, dec) => {
-      const n = parseInt(hex ?? dec, hex ? 16 : 10);
-      return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : raw;
-    }).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+export function plainEvidenceText(text) {
+  return String(text ?? '')
     .replace(/-----BEGIN [\s\S]*?PRIVATE KEY-----[\s\S]*?-----END [\s\S]*?PRIVATE KEY-----/g, '[密钥已隐藏]')
     .replace(/\b(?:Bearer\s+|sk-)[\w.+\-/=]+/gi, '[凭据已隐藏]')
     .replace(/((?:password|passwd|secret|access[_-]?token|api[_-]?key|authorization)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1[已隐藏]')
-    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[已隐藏]@')
-    .replace(/&/g, '&amp;').replace(/</g, '&#60;').replace(/>/g, '&#62;');
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[已隐藏]@');
+}
+export function publicText(text) {
+  // Decode legacy escaping before redaction, then escape markup exactly once.
+  const decoded = String(text ?? '').replace(/&amp;/g, '&')
+    .replace(/&#(?:x([\da-f]+)|(\d+));/gi, (raw, hex, dec) => {
+      const n = parseInt(hex ?? dec, hex ? 16 : 10);
+      return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : raw;
+    }).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  return plainEvidenceText(decoded).replace(/&/g, '&amp;').replace(/</g, '&#60;').replace(/>/g, '&#62;');
 }
 
 function cleanedMarkdown(text) {

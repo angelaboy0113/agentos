@@ -12,7 +12,7 @@ export async function credential(ref) {
   catch { throw new Error('本机凭据不可读取；请在 Mac 本机完成安全录入或解锁钥匙串'); }
 }
 const clean = (value, secrets = []) => {
-  let s = String(value ?? '').slice(0, 500);
+  let s = String(value ?? '');
   for (const secret of secrets.filter((x) => typeof x === 'string' && x.length)) s = s.split(secret).join('[已隐藏]');
   return s.replace(/(?:password|passwd|secret|token)\s*[:=]\s*[^\s,;]+/gi, '[敏感字段已隐藏]').replace(/[\x00-\x08\x0b-\x1f]/g, '');
 };
@@ -76,7 +76,6 @@ export async function readEnvironment(plan, adapters = {}) {
     const cred = await (adapters.credential ?? credential)(e.credentialRef);
     if (typeof cred.username !== 'string' || typeof cred.password !== 'string') throw new Error('credential');
     const result = await (e.kind === 'mysql' ? mysqlRead : nacosRead)(e, q, ...(e.kind === 'mysql' ? [plan.parameters, cred, adapters] : [cred, adapters]));
-    while (Buffer.byteLength(JSON.stringify(result.rows)) > 24000) { result.rows.pop(); result.truncated = true; }
     return { ...result, evidence: { environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash,
       readAt: new Date().toISOString(), rowCount: result.rows.length, resultHash: fingerprint(result.rows) } };
   } catch (error) {

@@ -237,7 +237,7 @@ export function analysisThreadId(job, workspace) {
 function continuationEvidence(job){
  const entry=(job.context??[]).at(-1);const result=entry?.result??{};
  return {kind:entry?.kind??'evidence',outcome:result.outcome,environmentEvidence:result.environmentEvidence,
-  evidenceRecords:Array.isArray(result.evidenceRecords)?result.evidenceRecords.slice(0,40):result.evidenceRecords,runtimeDiscoveries:result.runtimeDiscoveries,websiteMismatch:result.websiteMismatch,
+  evidenceRecords:result.evidenceRecords,runtimeDiscoveries:result.runtimeDiscoveries,websiteMismatch:result.websiteMismatch,
   queryRejection:result.queryRejection,memorySafeSummary:result.memorySafeSummary,summary:result.summary,
   finalMessage:typeof result.finalMessage==='string'?result.finalMessage.slice(0,8000):result.finalMessage,
   investigation:result.investigation};

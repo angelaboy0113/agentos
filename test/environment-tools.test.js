@@ -167,7 +167,7 @@ test('MySQL JSON fields remain readable while nested secrets are removed',async(
   const result=await tools.run('select',{table:'orders',columns:['fee_json'],filters:[{column:'id',op:'=',value:'one'}]});
   const value=result.rows[0].fee_json;
   assert.match(value,/临促费/);assert.match(value,/unitPrice/);assert.match(value,/130/);assert.match(value,/32\.5/);
-  assert.doesNotMatch(value,/\[object Object\]|must-not-leak|also-hidden|password|token/);assert.ok(value.length<=500);
+  assert.doesNotMatch(value,/\[object Object\]|must-not-leak|also-hidden|password|token/);assert.equal(value,JSON.stringify({items:payload.items,nested:{amount:32.5}}));
  }finally{await tools.close();}
 });
 test('schema can discover exact fields in a wide table without paging through unrelated columns', async () => {
@@ -456,4 +456,21 @@ test('a finally verified alternative report clears abandoned input errors but or
  tools:async()=>({spec:[{tool:'connection'},{tool:'enrich_dataset'},{tool:'linked_group_dataset'},{tool:'finalize_report'}],run:async tool=>{if(tool==='enrich_dataset')throw new QueryInputError('REPORT_INPUT','lookup关联键重复');if(tool==='finalize_report')return {exportFile:{id:'verified',rowCount:2}};return {stage:'corrected relation',dataHash:'stable'};},close:async()=>{}}),
  planner:async()=>({next:async()=>[{tool:'enrich_dataset',arguments:'{}'},{tool:'linked_group_dataset',arguments:'{}'},{tool:'finalize_report',arguments:'{}'}][n++],close:async()=>{}})});
  assert.equal(r.partial,false);assert.equal(r.toolInputErrors[0].resolved,true);assert.equal(r.exportFiles.length,1);
+});
+
+test('long database rule and JSON fields survive tool, planner and source evidence without length clipping',async()=>{
+ const rule='SELECT /* 合成规则 */ '+ 'column_alias,'.repeat(4000)+'final_marker FROM details WHERE status <> 0 AND amount < 5 AND label = \'&amp;\'';
+ const payload={items:Array.from({length:65},(_,i)=>({index:i,note:'内容'.repeat(12)})),fields:Object.fromEntries(Array.from({length:60},(_,i)=>['field'+i,i])),password:'hidden-json'};
+ const q={...query,maxCalls:10},env={...environment,kind:'mysql',host:'fake',database:'demo',queries:{investigate:q}};
+ const cfg={version:1,environments:{env}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对指定规则及关联明细']},'demo',{profile:'owner',senderId:'ou_member'});
+ const driver={createConnection:async()=>({query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async stmt=>stmt.sql.includes('information_schema')?[[{table_name:'orders',column_name:'id'},{table_name:'orders',column_name:'rule_text'},{table_name:'orders',column_name:'payload'}]]:[[{rule_text:rule,payload}]],rollback:async()=>{},destroy:()=>{}})};
+ let n=0;
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,tools:async(e,q,c)=>createEnvironmentTools(e,q,c,{mysql:driver}),planner:async()=>({next:async input=>{
+ n++;if(n===1)return{tool:'schema',arguments:'{"table":"orders"}'};
+ if(n===2)return{tool:'select',arguments:JSON.stringify({table:'orders',columns:['rule_text','payload'],filters:[{column:'id',op:'=',value:'one'}]})};
+ const row=input.results.at(-1).result.rows[0];assert.equal(row.rule_text,rule);assert.equal(JSON.parse(row.payload).items.length,65);assert.equal(JSON.parse(row.payload).fields.field59,59);assert.doesNotMatch(row.payload,/hidden-json|password/);
+ return{tool:'finish',summary:'已读取完整规则，合成场景验证结束',complete:true};},close:async()=>{}})});
+ assert.equal(r.partial,false);assert.equal(r.rows[0].rule_text,rule);
+ const {presentEnvironmentResult}=await import('../src/runner/environment-result-presentation.js');
+ const p=presentEnvironmentResult({...plan,kind:'mysql'},r);assert.equal(p.records[0].rule_text,rule);assert.ok(p.details.includes('final_marker FROM details WHERE status &#60;&#62; 0 AND amount &#60; 5'));assert.ok(p.details.length>24000);
 });

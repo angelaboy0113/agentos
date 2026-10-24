@@ -220,3 +220,11 @@ test('continuation cannot re-request identical environment scope from the same q
  const r=await fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${job.id}/events`,{method:'POST',headers:{authorization:`Bearer ${app.config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({type:'completed',leaseId:job.lease.id,runnerId:'r',result:{outcome:'needs_clarification',environmentQuery:request}})});
  assert.equal(r.status,200);const state=await app.store.read();assert.equal(state.jobs.length,3);assert.equal(state.jobs[0].status,'completed');assert.equal(state.jobs[0].result.queryRejection.code,'DUPLICATE_QUERY');assert.equal(state.jobs[2].status,'queued');assert.equal(state.jobs[2].environmentAccess,undefined);assert.equal(state.jobs.filter(j=>j.environmentAccess).length,1);
 });
+
+test('reviewed SQL reads preserve long fields and rows beyond former 24KB result clipping',async()=>{
+ const cfg=config(),text='规则内容'.repeat(9000)+'TAIL';
+ const plan=planQuery(cfg,{environmentId:'prd',queryId:'order',parameters:['one']},'demo',{profile:'owner',senderId:'ou_owner'});plan.approvedBy='ou_owner';
+ const c={query:async()=>[[{grant:'GRANT SELECT ON demo.* TO reader'}]],execute:async()=>[[{order_id:'one',status:text+' synthetic-secret'},{order_id:'two',status:'last row'}]],rollback:async()=>{},destroy:()=>{}};
+ const r=await readEnvironment(plan,{config:cfg,credential:async()=>({username:'synthetic-reader',password:'synthetic-secret'}),mysql:{createConnection:async()=>c}});
+ assert.equal(r.rows.length,2);assert.equal(r.truncated,false);assert.equal(r.rows[0].status,text+' [已隐藏]');assert.equal(r.rows[1].order_id,'two');
+});

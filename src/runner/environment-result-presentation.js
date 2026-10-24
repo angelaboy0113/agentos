@@ -1,6 +1,7 @@
-import { publicText } from '../control-plane/result-presentation.js';
+import { publicText, plainEvidenceText } from '../control-plane/result-presentation.js';
 const sensitive = /password|passwd|secret|token|credential|authorization|username|private.?key/i;
-const cell = v => publicText(typeof v === 'object' ? '[结构化值]' : String(v ?? '')).replace(/[\r\n]+/g, ' ').slice(0, 160);
+const evidenceValue = v => publicText(typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''));
+const cell = v => evidenceValue(v).replace(/[\r\n]+/g, ' ').slice(0, 160);
 export function presentEnvironmentResult(plan, result, explanation = '') {
   const rows = [...new Map((result.rows ?? []).map(row => {
     const safe = Object.fromEntries(Object.entries(row).filter(([key]) => !sensitive.test(key)));
@@ -26,8 +27,8 @@ export function presentEnvironmentResult(plan, result, explanation = '') {
       timeout ? '尚未确认\n本次超时不能作为用户所报问题的原因；业务原因仍需进一步核实。' : '',
       timeout ? '下一步\n建议从中断的查询继续，缩小范围并核对相关证据；需要其他系统证据时再补充接入。尚未自动重试。' : '',
       '查询记录、技术字段和执行过程见详情。'].filter(Boolean).join('\n\n');
-  const details = rows.map((row,i) => `记录 ${i+1}（查询证据，不代表原因）\n\n${Object.entries(row).map(([k,v]) => `- ${cell(k)}：${cell(v)}`).join('\n\n')}`).join('\n\n');
+  const details = rows.map((row,i) => `记录 ${i+1}（查询证据，不代表原因）\n\n${Object.entries(row).map(([k,v]) => `- ${cell(k)}：${evidenceValue(v)}`).join('\n\n')}`).join('\n\n');
   const metadata = `${plan.tier.toUpperCase()} · ${plan.description}：${noBusinessRead?(fileEvidence?'已读取或核验已有报表文件，未重复查询业务表':'本轮未执行业务数据查询；没有返回业务记录不代表数据库为空'):`返回 ${unique.length} 条去重结果`}${result.truncated ? '（结果受限，非全部数据）' : ''}。读取时间：${result.evidence.readAt}。${note}`;
-  const records = rows.slice(0, 20).map(row => Object.fromEntries(Object.entries(row).map(([key,value]) => [cell(key), cell(value)])));
+  const records = rows.map(row => Object.fromEntries(Object.entries(row).map(([key,value]) => [key, plainEvidenceText(typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''))])));
   return { summary, details, metadata, records };
 }

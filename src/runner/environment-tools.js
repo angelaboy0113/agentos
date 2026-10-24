@@ -16,16 +16,15 @@ function safeStructured(value,depth=0,seen=new WeakSet()){
  if(Buffer.isBuffer(value))return `[二进制 ${value.length} 字节]`;
  if(typeof value!=='object')return String(value);
  if(seen.has(value))return '[循环引用]';
- if(depth>=5)return '[嵌套内容已截断]';
  seen.add(value);
- if(Array.isArray(value))return value.slice(0,30).map(item=>safeStructured(item,depth+1,seen));
- return Object.fromEntries(Object.entries(value).slice(0,40)
+ if(Array.isArray(value))return value.map(item=>safeStructured(item,depth+1,seen));
+ return Object.fromEntries(Object.entries(value)
   .filter(([key])=>!secretName.test(key)).map(([key,item])=>[key,safeStructured(item,depth+1,seen)]));
 }
-const bounded = (x, secrets = []) => {
+const sanitizedValue = (x, secrets = []) => {
  let s=typeof x==='object'&&x!==null?JSON.stringify(safeStructured(x)):String(x??'');
  for(const v of secrets.filter(Boolean))s=s.split(v).join('[已隐藏]');
- return s.slice(0,500);
+ return s;
 };
 export class QueryInputError extends Error {
   constructor(code, message) { super(`[${code}] ${message}`); this.code = code; }
@@ -262,7 +261,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
               for (const x of v.data) { if (configs.size >= 100) { truncated = true; break; } if (typeof x.dataId !== 'string' || typeof x.group !== 'string') continue;
                 configs.set(`config-${configs.size + 1}`, { namespace, dataId: x.dataId, group: x.group }); }
             }
-            return { configs: [...configs].map(([ref, x]) => ({ ref, namespace: bounded(x.namespace, secrets), dataId: bounded(x.dataId, secrets), group: bounded(x.group, secrets) })), truncated };
+            return { configs: [...configs].map(([ref, x]) => ({ ref, namespace: sanitizedValue(x.namespace, secrets), dataId: sanitizedValue(x.dataId, secrets), group: sanitizedValue(x.group, secrets) })), truncated };
           }
           const x = configs.get(args.ref); if (!x) throw new Error('仅可读取本次发现的配置引用');
           const content = await nacos('/v1/cs/configs', { tenant: x.namespace, group: x.group, dataId: x.dataId });
@@ -324,7 +323,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         if(tool==='group_count'){
           const statement=groupCountStatement(args,tables,q);
           const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
-          return {table:args.table,rows:rows.slice(0,q.maxRows).map(row=>Object.fromEntries([...statement.groupColumns,'duplicate_count'].map(key=>[key,bounded(row[key],secrets)]))),
+          return {table:args.table,rows:rows.slice(0,q.maxRows).map(row=>Object.fromEntries([...statement.groupColumns,'duplicate_count'].map(key=>[key,sanitizedValue(row[key],secrets)]))),
             truncated:rows.length>q.maxRows,groupColumns:statement.groupColumns,stage:`已按 ${statement.groupColumns.join('、')} 核对重复组合`};
         }
         if(tool==='collect_values'){
@@ -336,11 +335,11 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         if(tool==='aggregate'||tool==='linked_aggregate'){
           const statement=tool==='aggregate'?aggregateStatement(args,tables,columnTypes,q,valueSets):linkedAggregateStatement(args,tables,columnTypes,q,valueSets);
           const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
-          return {rows:rows.slice(0,1).map(row=>Object.fromEntries(statement.columns.map(key=>[key,bounded(row[key],secrets)]))),truncated:false,stage:tool==='aggregate'?'已完成单表汇总':'已完成受控关联汇总'};
+          return {rows:rows.slice(0,1).map(row=>Object.fromEntries(statement.columns.map(key=>[key,sanitizedValue(row[key],secrets)]))),truncated:false,stage:tool==='aggregate'?'已完成单表汇总':'已完成受控关联汇总'};
         }
         const statement = selectStatement(args, tables, q);
         const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
-        return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, bounded(r[k], secrets)]))), truncated: rows.length > q.maxRows };
+        return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, sanitizedValue(r[k], secrets)]))), truncated: rows.length > q.maxRows };
       })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['group_dataset','linked_group_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','inspect_report','inspect_dataset','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
     } catch (error) { if(error instanceof ReportInspectionError)throw new QueryInputError(error.code,error.message); if(error instanceof DatasetCapacityError)throw new QueryInputError(error.code,error.message); if(error instanceof ReportInputError)throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
