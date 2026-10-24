@@ -485,7 +485,7 @@ async function handleFeishuEvent(context, envelope) {
   const attachments = [];
   for (const resource of parsed.resources) {
     const item = await context.feishu.downloadMessageResource(message.message_id, message.message_id, resource.key, resource.type);
-    if (item) attachments.push(item);
+    if (item) attachments.push({...item,...(resource.name?{name:resource.name}:{})});
   }
   return handleLarkCliEvent(context, {
     type: 'im.message.receive_v1', message_id: message.message_id,create_time:message.create_time,

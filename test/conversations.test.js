@@ -347,3 +347,10 @@ test('contact intent generates one image and retries delivery without repeating 
  await send(message('contact-message','工号00110036是谁，发张资料图'));let turn=(await app.store.read()).conversations[0];assert.equal(turn.status,'ready');assert.equal(lookups,1);assert.equal(inputs.length,1);
  await app.store.transact(s=>{s.conversations[0].retryAt=new Date(0).toISOString();});await app.conversations.idle();turn=(await app.store.read()).conversations[0];assert.equal(turn.status,'sent');assert.equal(turn.contactImageMessageId,'image-result');assert.equal(lookups,1);assert.equal(inputs.length,1);assert.equal(out[0].id,'contact-message');assert.equal(out[0].options.profile,'owner');assert.equal(out[0].options.idempotencyKey,out[1].options.idempotencyKey);assert.equal((await app.store.read()).jobs.length,0);
 });
+
+test('uploaded file-only analysis from ordinary member bypasses source-environment prerequisite and keeps question attachments',async t=>{
+ const {send,app,inputs}=await setup(t,()=>decision({action:'reply',intent:'none',requiresFileInspection:true,requiresSourceInspection:false,instruction:'读取上传CSV，核对所有行并计算金额合计',attachmentIds:['file-one'],sourceEnvironment:''}));
+ app.conversations.context.projects.projects.demo.analysisSources={uat:{repositories:[{path:'.',branch:'uat'}]},prd:{repositories:[{path:'.',branch:'prd'}]}};
+ await send(message('file-analysis-request','核对这个文件',{sender_id:'ordinary',attachments:[{id:'file-one',type:'file',name:'明细.csv',path:'/synthetic/input.csv',contentType:'text/csv'}]}));
+ const state=await app.store.read();assert.equal(state.jobs.length,1);const job=state.jobs[0];assert.equal(job.analysisScope,'attachments');assert.equal(job.sourceEnvironment,undefined);assert.equal(job.taskIntent,'analysis');assert.equal(job.senderId,'ordinary');assert.equal(job.attachments[0].name,'明细.csv');assert.equal(inputs[0].fileInput.available,true);
+});

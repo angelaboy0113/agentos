@@ -196,6 +196,8 @@ function validateDecisionValue(value) {
   if (!Array.isArray(value.attachmentIds) || value.attachmentIds.some((id) => typeof id !== 'string')) throw new Error('Invalid attachments');
   if (value.sourceEnvironment !== undefined && (typeof value.sourceEnvironment !== 'string' || value.sourceEnvironment.length > 100)) throw new Error('Invalid source environment');
   if (value.requiresSourceInspection !== undefined && typeof value.requiresSourceInspection !== 'boolean') throw new Error('Invalid source inspection decision');
+  if(value.requiresFileInspection!==undefined&&typeof value.requiresFileInspection!=='boolean')throw new Error('Invalid file inspection decision');
+  if(value.requiresFileInspection){if(!value.attachmentIds.length||!value.instruction.trim()||!['reply','create_task'].includes(value.action)||!['none','analysis'].includes(value.intent)||value.environmentSetup)throw new Error('File inspection requires a scoped readonly task and attached files');value={...value,action:'create_task',intent:'analysis',jobId:''};}
   if(value.action==='lookup_contact'){
     const q=value.contactLookup;
     if(!q||!['name','employee_no'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.query.length>100||typeof q.candidateId!=='string'||q.candidateId.length>200

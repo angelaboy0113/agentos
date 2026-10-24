@@ -1,3 +1,5 @@
+import {inputFileMetadata,messageResources} from '../shared/input-files.js';
+import {realpath} from 'node:fs/promises';
 import { EditedMentionWatcher } from './edited-mentions.js';
 import { copyFile, mkdir, readdir, stat, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -107,6 +109,12 @@ export class LarkEventSource {
     event.agent_profile = this.config.profile ?? null;
     event.agent_role = this.config.role ?? null;
     event.attachments = await this.downloadAttachments(event);
+    const parent=event.reply_to??event.parent_id;
+    const explicitlyAddressed=event.chat_type==='p2p'||(event.mentions??[]).some(m=>[m.id?.open_id??m.id,m.open_id,m.user_id].includes(this.config.botOpenId));
+    if(parent&&explicitlyAddressed){
+      try{const referenced={...event,message_type:'file',message_id:parent,attachmentErrors:[]};event.attachments=[...new Map([...event.attachments,...await this.downloadAttachments(referenced,event.chat_id)].map(a=>[a.id,a])).values()];event.attachmentErrors=[...(event.attachmentErrors??[]),...referenced.attachmentErrors];}
+      catch{event.attachmentErrors=[...(event.attachmentErrors??[]),'原回复消息的附件未能下载；保留当前提问，请核对机器人对原文件的读取权限或重新上传。'];}
+    }
     if (event.attachments.length > 0 && isAttachmentPlaceholder(event.content, event.message_type)) {
       event.content = '';
     }
@@ -151,13 +159,13 @@ export class LarkEventSource {
     }
   }
 
-  async downloadAttachments(event) {
+  async downloadAttachments(event,expectedChatId=event.chat_id) {
     if (!['image', 'file', 'audio', 'media', 'post'].includes(event.message_type)) return [];
     const messageId = event.message_id ?? event.id;
     if (!messageId) return [];
     const directory = path.join(this.config.cwd, 'messages', sanitizeSegment(messageId));
     await mkdir(directory, { recursive: true });
-    await runLarkCli([
+    const result=await (this.config.runLarkCli??runLarkCli)([
       'im', '+messages-mget', '--as', 'bot', '--message-ids', messageId,
       '--download-resources', '--no-reactions', '--json',
     ], {
@@ -166,13 +174,17 @@ export class LarkEventSource {
       profile: this.config.profile,
       configDir: this.config.configDir,
     });
-    const files = await listFiles(directory);
-    return Promise.all(files.map(async (file, index) => ({
-      id: `${sanitizeSegment(messageId)}-${index + 1}`,
-      path: file,
-      contentType: contentType(file),
-      type: /\.(png|jpe?g|gif|webp|bmp)$/i.test(file) ? 'image' : 'file',
-    })));
+    const resources=messageResources(result),attachments=[];
+    for(const resource of resources){
+      if(resource.message_id&&resource.message_id!==messageId)continue;
+      if(expectedChatId&&resource.chatId&&resource.chatId!==expectedChatId)throw new Error('原文件不属于当前群聊');
+      if(resource.error||!resource.local_path){event.attachmentErrors=[...(event.attachmentErrors??[]),'附件资源下载失败，不能当作文件内容为空'];continue;}
+      const file=await realpath(path.resolve(directory,resource.local_path));const root=await realpath(directory);const rel=path.relative(root,file);
+      if(rel.startsWith('..')||path.isAbsolute(rel))throw new Error('附件下载路径离开本消息资源目录');
+      const id=`${sanitizeSegment(messageId)}-${createHash('sha256').update(resource.key??file).digest('hex').slice(0,16)}`;
+      attachments.push(await inputFileMetadata(file,{id,name:resource.name,type:resource.type,sourceMessageId:messageId}));
+    }
+    return [...new Map(attachments.map(a=>[a.id,a])).values()];
   }
 }
 
@@ -231,27 +243,9 @@ export function isForThisBot(event, botOpenId) {
     .filter(Boolean).includes(botOpenId));
 }
 
-async function listFiles(directory) {
-  const result = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const target = path.join(directory, entry.name);
-    if (entry.isDirectory()) result.push(...await listFiles(target));
-    else if (entry.isFile() && (await stat(target)).size > 0) result.push(target);
-  }
-  return result;
-}
-
 function isAttachmentPlaceholder(content, messageType) {
   const text = String(content ?? '').trim();
   return messageType !== 'post' && (!text || /^\[(image|file|audio|media)\]$/i.test(text));
-}
-
-function contentType(file) {
-  if (/\.png$/i.test(file)) return 'image/png';
-  if (/\.jpe?g$/i.test(file)) return 'image/jpeg';
-  if (/\.gif$/i.test(file)) return 'image/gif';
-  if (/\.webp$/i.test(file)) return 'image/webp';
-  return 'application/octet-stream';
 }
 
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }

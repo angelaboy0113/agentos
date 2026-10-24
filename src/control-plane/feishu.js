@@ -1,3 +1,7 @@
+import {inputFileMetadata} from '../shared/input-files.js';
+import {Readable} from 'node:stream';
+import {pipeline} from 'node:stream/promises';
+import {createWriteStream} from 'node:fs';
 import {openAsBlob} from 'node:fs';
 import {stat} from 'node:fs/promises';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -109,8 +113,8 @@ export class FeishuClient {
     await mkdir(directory, { recursive: true });
     const id = createId('ATT');
     const file = path.join(directory, `${id}${extension}`);
-    await writeFile(file, Buffer.from(await response.arrayBuffer()));
-    return { id, type, contentType, path: file, originalResourceKey: resourceKey };
+    await pipeline(Readable.fromWeb(response.body),createWriteStream(file,{mode:0o600}));
+    return {...await inputFileMetadata(file,{id,type}),contentType,originalResourceKey:resourceKey};
   }
 }
 
@@ -122,7 +126,7 @@ export function parseFeishuMessage(message) {
 
   if (message.message_type === 'text') text = raw.text ?? '';
   if (message.message_type === 'image' && raw.image_key) resources.push({ key: raw.image_key, type: 'image' });
-  if (message.message_type === 'file' && raw.file_key) resources.push({ key: raw.file_key, type: 'file' });
+  if (message.message_type === 'file' && raw.file_key) resources.push({ key: raw.file_key, type: 'file', ...(raw.file_name?{name:raw.file_name}:{}) });
   if (message.message_type === 'post') {
     for (const locale of Object.values(raw)) {
       if (!locale || typeof locale !== 'object') continue;

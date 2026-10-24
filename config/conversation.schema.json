@@ -14,7 +14,8 @@
     "environmentSetup",
     "sourceEnvironment",
     "knowledgeMatch",
-    "contactLookup"
+    "contactLookup",
+    "requiresFileInspection"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -241,6 +242,10 @@
           }
         }
       ]
+    },
+    "requiresFileInspection": {
+      "type": "boolean",
+      "description": "用户要求实际读取上传文件时为true，普通聊天false；文件内容不在聊天元信息中，安排只读analysis；同时查源码时requiresSourceInspection=true。"
     }
   }
 }

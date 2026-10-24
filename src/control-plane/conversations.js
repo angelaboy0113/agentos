@@ -87,7 +87,7 @@ export class ConversationService {
         projectId: this.context.projects.chatProjectMap[routedChatId] ?? null,
         parentId: event.reply_to ?? event.root_id ?? null,
         ...(this.context.projects.topicChatIds?.includes(event.chat_id) || event.thread_id ? { replyInThread: true } : {}),
-        content: event.content ?? '', attachments: event.attachments ?? [],
+        content: event.content ?? '', attachments: event.attachments ?? [], attachmentErrors:event.attachmentErrors??[],
         status: 'queued', createdAt: new Date().toISOString(),
         sessionKey: JSON.stringify([routedChatId, event.sender_id, profile, event.agent_role ?? 'owner_intake',
           this.context.projects.chatProjectMap[routedChatId] ?? null]),
@@ -352,7 +352,7 @@ export class ConversationService {
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
       history: history.map((item) => ({ senderId: item.senderId, user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
         evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
-      jobs, attachments, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
+      jobs, attachments, attachmentErrors:turn.attachmentErrors??[], fileInput:{available:attachments.some(a=>a.type!=='image'),rule:'上传文件当前只有元信息。实际读取需求须requiresFileInspection=true并选择attachmentIds，程序创建只读任务读取完整本机文件。纯文件任务不需要源码环境，不能假装已经读过。'}, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
     }, this.memory.settings);
     return input;
   }
@@ -431,8 +431,9 @@ export class ConversationService {
         if (!turn.questionId) throw new Error('环境查询需要开启问题主卡片并在群里发起');
         environmentAccess = planQuery(await loadEnvironments(), decision.environmentQuery, projectId, turn);
       }
+      const fileOnly=decision.requiresFileInspection===true&&!decision.requiresSourceInspection&&!decision.environmentQuery&&!decision.sourceEnvironment;
       let sourceEnvironment;
-      if (decision.intent === 'analysis') {
+      if (decision.intent === 'analysis'&&!fileOnly) {
         // Environment-first investigations still return to the same source worker.
         // Preserve an explicit source choice, otherwise use the verified runtime
         // tier when it names a configured source environment (uat/prd).
@@ -461,12 +462,12 @@ export class ConversationService {
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction,
         originalQuestion: turn.questionId ? questionRequest(await store.read(), turn.questionId) : turn.content,
-        attachments: [...(turn.resumeAttachments??[]),...attachments],
+        ...(fileOnly?{analysisScope:'attachments'}:{}), attachments: [...(turn.resumeAttachments??[]),...attachments],
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
-          reason: route.workflow === 'continuous_analysis' ? '交给开发在同一会话内完成只读调查和最终回答' : '按角色边界转交负责人协调' } : null,
+          reason: fileOnly?'在同一只读会话中读取上传文件并完成分析':route.workflow === 'continuous_analysis' ? '交给开发在同一会话内完成只读调查和最终回答' : '按角色边界转交负责人协调' } : null,
       });
       if(turn.setupPending && !decision.environmentSetup)await this.update(turn.id,{setupPending:false});
-      return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${route.workflow === 'continuous_analysis' ? '执行：同一开发会话持续完成源码与环境只读调查\n' : ''}状态：${created.job.status === 'awaiting_environment_approval' ? '等待环境负责人批准本次查询' : '等待执行'}` };
+      return { jobId: created.job.id, notice: `已创建任务 ${created.job.id}\n项目：${created.job.projectName}\n交给：${stageLabel(created.job.stage)}\n${fileOnly?'执行：读取上传文件并完成只读分析\n':route.workflow === 'continuous_analysis' ? '执行：同一开发会话持续完成源码与环境只读调查\n' : ''}状态：${created.job.status === 'awaiting_environment_approval' ? '等待环境负责人批准本次查询' : '等待执行'}` };
     }
     const job = await store.getJob(decision.jobId);
     if (!job || job.chatId !== turn.chatId || job.projectId !== projectId) throw new Error('本群没有这个任务，不能跨群操作。');
