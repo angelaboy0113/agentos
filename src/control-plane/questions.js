@@ -27,7 +27,7 @@ export function attachQuestion(state, turn, event, projects) {
   const related = broadTopicRoot ? (threadLatest ?? explicit) : (explicit ?? threadLatest);
   const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && ['requested','opening','login_required','awaiting_tls_confirmation'].includes(e.status));
   const relatedTurn = related && state.conversations.find(t => t.id === related.latestTurnId);
-  const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && (pending(relatedTurn)||relatedTurn.setupPending||relatedTurn.outcome?.contactCandidates?.length))) ? related : null;
+  const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && (pending(relatedTurn)||relatedTurn.setupPending||relatedTurn.cloudInputPending||relatedTurn.outcome?.contactCandidates?.length))) ? related : null;
   const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
     ...(turn.directoryChannel?{directoryChannel:structuredClone(turn.directoryChannel)}:{}), ...(turn.visibility?{visibility:turn.visibility}:{}), threadRootId: event.root_id ?? turn.messageId, projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
     ...(turn.replyInThread ? { replyInThread: true } : {}),
@@ -52,7 +52,7 @@ export function questionView(state, questionId, projects = {}) {
   const useJob = job && (activeQuestionJob(job) || turn.outcome?.jobId || turn.outcome?.nextJobId);
   const shown = useJob ? job : turn;
   let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard({...turn,setupPending:Boolean(enrollment)||turn.setupPending});
-  const terminal = !enrollment && !turn.setupPending && !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
+  const terminal = !enrollment && !turn.cloudInputPending && !turn.setupPending && !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
   const label = card.header.title.content;
   card.header.title.content = questionTitle(q.title);
   card.header.subtitle.content = `${q.id} · ${label}`;
@@ -93,7 +93,7 @@ function sourceVersion(state, id) {
   const q = state.questions[id];
   return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId,
     state.jobs.filter((j) => j.questionId === id).map((j) => [j.id, j.status, j.updatedAt, j.events.length, j.nextJobId, j.result]),
-    state.conversations.filter((t) => t.questionId === id).map((t) => [t.id, t.status, t.response, t.outcome])])).digest('hex');
+    state.conversations.filter((t) => t.questionId === id).map((t) => [t.id, t.status, t.response, t.outcome,t.cloudFileProgress,t.cloudInputPending])])).digest('hex');
 }
 const locks = new WeakMap();
 export function publishQuestion(context, id) {

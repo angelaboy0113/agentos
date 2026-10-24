@@ -116,13 +116,17 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
   不强改DOM解禁；共享Chrome没有网络只读保证，先核实页面是否自动保存，真正保存提交
   需要明确授权。验证两种后端和不同表单场景，不把临时网页回归当真实PRD验收。
   不新增或收紧任务总时长、轮次、调用截停限制；需要此类规则时先说明影响并征得用户同意。
-- 文件上传先读docs/file-input.md：群里先发文件，回复该文件并@机器人说明目标。
+- 文件上传先读docs/file-input.md：普通群发文件后回复@；话题群先上传飞书云空间，再贴文件链接@说明目标。
   聊天只看元信息，需实际读取时requiresFileInspection=true并选择attachmentIds；纯文件
   analysisScope=attachments不要求源码环境，混合源码对照仍走原范围。核对原名/格式、
   SHA-256与实际完整文件路径、初轮/续轮读取、资源错误和现有30天清理。当前机器需具备
   对应只读解析工具；不执行上传宏/脚本，不假装解析过，纯文件内容不自动进入团队知识。
   升级控制面、事件消费者、Runner；自定义决策端适配新增布尔字段。使用合成文件验证，
   没有授权时不向真实群发测试消息或读取用户私人文件。
+  云链接只用当前机器人CLI profile与固定Drive API；原始file下载优先最小
+  drive:file:download，missing_scopes可能为候选项，不全选读写。文件共享范围与应用
+  scope分别验证，缺项橙色等待，补齐后同题回复重试。在线文档导出按持久票据续查，
+  不加总轮询/耗时上限；权限申请、发布与分享须相应授权，不以个人或其他机器人绕过。
 
 - 需要团队知识时，先读取 docs/team-knowledge.md，再从 config/knowledge.example.json 建立
   缺失的 config/knowledge.local.json。仅在本团队明确要求启用时设置 enabled=true；未确认

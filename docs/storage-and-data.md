@@ -106,3 +106,5 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 报表分卷临时副本位于`exports/<JOB>/.delivery-*`，正常完成/异常退出投递函数时清理；进程崩溃可能保留，确认无投递后可清理，不删除主报表或核验记录。`reportDeliveries.parts`保存每卷名称、字节、SHA-256与消息回执，不保存正文。详见[报表导出](report-exports.md)。
 
 文件输入按消息资源列表接收并保留原名/格式/大小/SHA-256；Runner副本与file-only工作区位于attachments/JOB目录，沿现有30天策略保护活动引用。纯文件分析不自动进入团队知识，详见[file-input.md](file-input.md)。
+
+话题云文件及pending-export/receipt回执存于lark-cli-events/<profile>/messages/<消息>/cloud-files/，含来源URL、请求归属、摘要、导出标记和完成时间，不含访问令牌；沿既有30天消息资源规则清理，活动引用受保护。新提问重新核实，不以旧副本绕过权限。

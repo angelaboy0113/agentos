@@ -62,11 +62,11 @@ export function resultParts(text) {
 export function conversationCard(turn, now = Date.now()) {
   const final = ['ready', 'sent'].includes(turn.status);
   const failed = turn.aiFailed || turn.actionError;
-  const state = final ? (failed ? '未执行' : turn.setupPending ? '等待补齐接入' : '已回复') : turn.status === 'queued' ? '排队中'
+  const state = final ? (failed ? '未执行' : turn.cloudInputPending ? '等待云文件就绪' : turn.setupPending ? '等待补齐接入' : '已回复') : turn.status === 'queued' ? '排队中'
     : turn.connectionWillRetry ? '连接重试中' : '正在处理';
-  const color = failed ? 'red' : turn.setupPending ? 'orange' : final ? 'green' : 'blue';
+  const color = failed ? 'red' : turn.cloudInputPending||turn.setupPending ? 'orange' : final ? 'green' : 'blue';
   const content = final ? '' : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
-    : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
+    : turn.cloudFileProgress&&!['ready','partial'].includes(turn.cloudFileProgress.phase) ? cloudFileProgressText(turn.cloudFileProgress) : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));
@@ -146,3 +146,5 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   const role = ({ owner_intake: '项目负责人', owner_report: '项目负责人', developer: '开发', pm: 'PM', qa: '测试', owner_audit: '审计' })[job.stage] ?? stageLabel(job.stage);
   return card(`${role} · ${label}`, `${job.taskIntent === 'analysis' ? '只读分析' : stageLabel(job.stage)} · ${publicText(clip(job.projectName, 70))}`, color, elements);
 }
+
+function cloudFileProgressText(p){const labels={identify:'正在识别云文件与机器人读取权限',download:'正在下载云文件',export:'正在导出云文档',waiting_export:'云文档正在导出，等待飞书完成'};return `${labels[p.phase]??'正在准备云文件'} · 第${p.current??1}/${p.total??1}份${p.name?'\n文件：'+p.name:''}\n文件就绪后继续分析，无需重复提问。`;}

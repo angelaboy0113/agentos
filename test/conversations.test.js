@@ -354,3 +354,10 @@ test('uploaded file-only analysis from ordinary member bypasses source-environme
  await send(message('file-analysis-request','核对这个文件',{sender_id:'ordinary',attachments:[{id:'file-one',type:'file',name:'明细.csv',path:'/synthetic/input.csv',contentType:'text/csv'}]}));
  const state=await app.store.read();assert.equal(state.jobs.length,1);const job=state.jobs[0];assert.equal(job.analysisScope,'attachments');assert.equal(job.sourceEnvironment,undefined);assert.equal(job.taskIntent,'analysis');assert.equal(job.senderId,'ordinary');assert.equal(job.attachments[0].name,'明细.csv');assert.equal(inputs[0].fileInput.available,true);
 });
+
+test('addressed topic cloud links enter existing file-only job, preserve mixed image input, and unaddressed links do not download',async t=>{
+ let reads=0;const cloudFiles={prepare:async(turn,{onProgress})=>{reads++;assert.equal(turn.profile,'owner');assert.equal(turn.senderId,'ordinary');assert.equal(turn.cloudFileLinks[0].token,'CloudCsv');await onProgress({phase:'download',current:1,total:1,name:'云明细.csv'});return {attachments:[{id:'cloud-csv',name:'云明细.csv',path:'/synthetic/cloud.csv',type:'file',contentType:'text/csv'}],issues:[]};}};
+ const {send,app,inputs}=await setup(t,()=>decision({requiresFileInspection:true,requiresSourceInspection:false,sourceEnvironment:'',instruction:'完整读取云CSV，核对金额与截图',attachmentIds:['cloud-csv','image-one']}),{cloudFiles});
+ await send(message('ignored-cloud','https://tenant.feishu.cn/file/CloudCsv',{mentions:[],sender_id:'ordinary'}));assert.equal(reads,0);assert.equal(inputs.length,0);
+ await send(message('accepted-cloud','读取 https://tenant.feishu.cn/file/CloudCsv',{sender_id:'ordinary',attachments:[{id:'image-one',name:'截图.png',path:'/synthetic/shot.png',type:'image'}]}));assert.equal(reads,1);assert.equal(inputs[0].attachments.length,2);const s=await app.store.read();assert.equal(s.jobs[0].analysisScope,'attachments');assert.deepEqual(s.jobs[0].attachments.map(a=>a.id),['image-one','cloud-csv']);assert.equal(s.conversations[0].cloudFileProgress.phase,'download');
+});

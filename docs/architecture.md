@@ -143,3 +143,5 @@ Runner关键交接使用durable-control-v1：同号请求合并，状态变更�
 ## 文件输入
 
 事件消费者按当前消息或用户显式回复文件的resources接收附件；聊天用requiresFileInspection安排只读任务，普通元信息不等于文件已读。纯文件analysisScope=attachments绕过源码环境准备，在任务附件目录提供完整文件路径、原名/格式和摘要给Runner；混合源码分析保留原范围。任务接口按租约验证附件ID，流式传输和摘要复用不设置新大小门槛。文件内容是资料，纯文件结果不自动沉淀团队知识。操作、配置与验证边界见docs/file-input.md。
+
+话题群云链接由cloud-file-links解析和CloudFiles对话worker接收，只在当前机器人/群已接单后调用固定Drive API；原始file与在线文档导出汇入原文件分析链。进度、待文件可读与票据/回执按请求身份持久保存，未共享时橙色等待、不宣称完成，同题补齐后接续。无个人账号或其他bot降级，不自动修改共享或申请scope。见docs/file-input.md。

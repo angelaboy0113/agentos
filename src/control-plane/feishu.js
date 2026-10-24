@@ -133,7 +133,7 @@ export function parseFeishuMessage(message) {
       if (locale.title) text += `${locale.title} `;
       for (const paragraph of locale.content ?? []) {
         for (const item of paragraph) {
-          if (item.tag === 'text' || item.tag === 'a') text += `${item.text ?? ''} `;
+          if (item.tag === 'text' || item.tag === 'a') text += `${item.text ?? ''} ${item.tag==='a'&&item.href&&item.href!==item.text?item.href:''} `;
           if (item.tag === 'img' && item.image_key) resources.push({ key: item.image_key, type: 'image' });
         }
       }

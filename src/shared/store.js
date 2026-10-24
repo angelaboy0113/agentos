@@ -148,6 +148,7 @@ export class JsonStore {
         context: input.context ?? [],
         attachmentRefs: input.attachmentRefs ?? [],
         attachments: input.attachments ?? [],
+        attachmentErrors:input.attachmentErrors??[],
         status: input.status ?? 'queued',
         lease: null,
         events: [],

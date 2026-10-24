@@ -264,3 +264,11 @@ test('supplement on running question reuses its own session and excludes unrelat
  state=await app.store.read();assert.equal(app.conversations.key(first),app.conversations.key(state.conversations.at(-1)));
  assert.equal(inputs.at(-1).jobs.length,1);assert.equal(inputs.at(-1).jobs[0].instruction,'问题A');assert.doesNotMatch(JSON.stringify(inputs.at(-1)),/问题B/);
 });
+
+test('unshared cloud input stays orange without completion mention and same requester can retry same question after sharing',async t=>{
+ let attempts=0;
+ const {app,context,send,inputs,calls}=await setup(t,input=>input.attachments.length?decision({requiresFileInspection:true,requiresSourceInspection:false,sourceEnvironment:'',instruction:'读取云文件全部数据',attachmentIds:['cloud-csv']}):decision({reply:'文件尚未共享，请共享后回复重试',requiresFileInspection:false}));
+ app.conversations.context.cloudFiles={prepare:async()=>++attempts===1?{attachments:[],issues:[{code:'CLOUD_FILE_ACCESS_DENIED',url:'https://tenant.feishu.cn/file/CloudCsv',message:'机器人尚无阅读权限'}]}:{attachments:[{id:'cloud-csv',name:'data.csv',type:'file',path:'/synthetic/data.csv'}],issues:[]}};
+ await send('cloud-root','ou_asker',{content:'请核对 https://tenant.feishu.cn/file/CloudCsv'});let s=await app.store.read();const q=s.conversations[0].questionId;assert.equal(s.conversations[0].cloudInputPending,true);assert.equal(s.jobs.length,0);let view=questionView(s,q,context.projects);assert.equal(view.terminal,false);assert.equal(view.card.header.template,'orange');assert.equal(calls.some(c=>c.type==='mention'&&/已完成|已结束/.test(c.text)),false);
+ await send('cloud-retry','ou_asker',{content:'已共享，请重试',reply_to:'cloud-root',root_id:'cloud-root'});s=await app.store.read();assert.equal(attempts,2);assert.equal(s.conversations[1].questionId,q);assert.equal(s.conversations[1].cloudInputPending,false);assert.equal(s.jobs.length,1);assert.equal(s.jobs[0].attachments[0].id,'cloud-csv');assert.equal(inputs[1].fileInput.cloudLinks[0].token,'CloudCsv');
+});

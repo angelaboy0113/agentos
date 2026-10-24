@@ -1,3 +1,4 @@
+import {cloudFileLinks} from '../shared/cloud-file-links.js';
 import {stateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
 import { refreshExpiredApprovalCards } from './approval-expiry.js';
@@ -87,7 +88,7 @@ export class ConversationService {
         projectId: this.context.projects.chatProjectMap[routedChatId] ?? null,
         parentId: event.reply_to ?? event.root_id ?? null,
         ...(this.context.projects.topicChatIds?.includes(event.chat_id) || event.thread_id ? { replyInThread: true } : {}),
-        content: event.content ?? '', attachments: event.attachments ?? [], attachmentErrors:event.attachmentErrors??[],
+        content: event.content ?? '', attachments: event.attachments ?? [], attachmentErrors:event.attachmentErrors??[], cloudFileLinks:cloudFileLinks(event.content),
         status: 'queued', createdAt: new Date().toISOString(),
         sessionKey: JSON.stringify([routedChatId, event.sender_id, profile, event.agent_role ?? 'owner_intake',
           this.context.projects.chatProjectMap[routedChatId] ?? null]),
@@ -95,6 +96,7 @@ export class ConversationService {
       const privateParent=Object.values(state.questions??{}).find(q=>q.visibility==='requester'&&q.chatId===turn.chatId&&q.profile===turn.profile&&q.senderId===turn.senderId&&q.projectId===turn.projectId&&[event.reply_to,event.root_id].filter(Boolean).some(id=>id===q.messageId||id===state.cardMessages?.[`question:${q.id}`]?.messageId||state.conversations.some(t=>t.questionId===q.id&&t.messageId===id)));
       if(turn.chatType==='group'&&(requestsPrivateCard(turn.content)||privateParent))turn.visibility='requester';
       if ((this.questionCards||turn.visibility==='requester') && turn.chatType === 'group' && this.context.cards?.enabled) attachQuestion(state, turn, event, this.context.projects);
+      if(!turn.cloudFileLinks.length&&turn.parentId){const parent=state.conversations.find(t=>t.chatId===turn.chatId&&t.profile===turn.profile&&t.senderId===turn.senderId&&[t.messageId,t.feedbackMessageId,...(t.responseIds??[])].includes(turn.parentId));if(parent?.cloudFileLinks?.length)turn.cloudFileLinks=structuredClone(parent.cloudFileLinks);}
       state.conversations.push(turn);
       return { conversation: true, turnId: turn.id, duplicate: false };
     });
@@ -212,6 +214,11 @@ export class ConversationService {
         await this.update(turn.id, { status: 'thinking', aiStartedAt: new Date(aiStarted).toISOString(),
           queueMs: aiStarted - Date.parse(turn.createdAt) });
         try {
+          if(turn.cloudFileLinks?.length&&!turn.cloudFilesPreparedAt&&this.context.cloudFiles&&!turn.directoryChannel){
+            const cloud=await this.context.cloudFiles.prepare(turn,{signal:this.abort.signal,onProgress:async progress=>{turn.cloudFileProgress=progress;await this.update(turn.id,{cloudFileProgress:progress});}});
+            const fields={attachments:[...new Map([...(turn.attachments??[]),...cloud.attachments].map(a=>[a.id,a])).values()],attachmentErrors:[...(turn.attachmentErrors??[]),...cloud.issues.map(e=>e.message)],cloudFileIssues:cloud.issues,cloudInputPending:cloud.issues.length>0,cloudFilesPreparedAt:new Date().toISOString()};
+            Object.assign(turn,fields);await this.update(turn.id,fields);
+          }
           const input = await this.buildInput(turn);
           let decision = validateDecision(await this.decide(input, this.abort.signal, { sessionKey: key,
             onEvent: (event, info) => {
@@ -352,7 +359,7 @@ export class ConversationService {
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
       history: history.map((item) => ({ senderId: item.senderId, user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
         evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
-      jobs, attachments, attachmentErrors:turn.attachmentErrors??[], fileInput:{available:attachments.some(a=>a.type!=='image'),rule:'上传文件当前只有元信息。实际读取需求须requiresFileInspection=true并选择attachmentIds，程序创建只读任务读取完整本机文件。纯文件任务不需要源码环境，不能假装已经读过。'}, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
+      jobs, attachments, attachmentErrors:turn.attachmentErrors??[], fileInput:{cloudIssues:turn.cloudFileIssues??[],cloudLinks:turn.cloudFileLinks??[],available:attachments.some(a=>a.type!=='image'),rule:'上传文件当前只有元信息。实际读取需求须requiresFileInspection=true并选择attachmentIds，程序创建只读任务读取完整本机文件。纯文件任务不需要源码环境，不能假装已经读过。'}, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
     }, this.memory.settings);
     return input;
   }
@@ -462,7 +469,7 @@ export class ConversationService {
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction,
         originalQuestion: turn.questionId ? questionRequest(await store.read(), turn.questionId) : turn.content,
-        ...(fileOnly?{analysisScope:'attachments'}:{}), attachments: [...(turn.resumeAttachments??[]),...attachments],
+        ...(fileOnly?{analysisScope:'attachments'}:{}), attachmentErrors:turn.attachmentErrors??[], attachments: [...(turn.resumeAttachments??[]),...attachments],
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
           reason: fileOnly?'在同一只读会话中读取上传文件并完成分析':route.workflow === 'continuous_analysis' ? '交给开发在同一会话内完成只读调查和最终回答' : '按角色边界转交负责人协调' } : null,
       });

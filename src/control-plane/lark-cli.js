@@ -27,6 +27,7 @@ export function spawnLarkCli(args, options = {}) {
       LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1',
     },
     windowsHide: true,
+    ...(options.signal?{signal:options.signal}:{}),
     stdio: options.stdio ?? [options.input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
   });
 }
@@ -39,16 +40,16 @@ export function runLarkCli(args, options = {}) {
     let stderr = '';
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
-    const timer = setTimeout(() => { child.kill(); reject(new Error('lark-cli request timed out')); }, options.timeoutMs ?? 30_000);
+    const timer = options.timeoutMs===false?null:setTimeout(() => { child.kill(); reject(new Error('lark-cli request timed out')); }, options.timeoutMs ?? 30_000);
     child.stdout?.on('data', (chunk) => { stdout += chunk; });
     child.stderr?.on('data', (chunk) => { stderr += chunk; });
     child.once('error', (error) => { clearTimeout(timer); reject(error); });
     child.once('close', (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`lark-cli exited ${code}: ${stderr || stdout}`));
+      if (code !== 0) {let detail;try{detail=JSON.parse(stderr||stdout).error;}catch{}return reject(Object.assign(new Error(`lark-cli exited ${code}: ${stderr || stdout}`),{cliError:detail}));}
       try {
         const result = stdout.trim() ? JSON.parse(stdout) : {};
-        if (result.ok === false || (typeof result.code === 'number' && result.code !== 0)) return reject(new Error('lark-cli API request rejected'));
+        if (result.ok === false || (typeof result.code === 'number' && result.code !== 0)) return reject(Object.assign(new Error('lark-cli API request rejected'),{cliError:result.error}));
         resolve(result);
       } catch {
         resolve({ raw: stdout.trim() });

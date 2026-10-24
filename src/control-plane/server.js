@@ -1,3 +1,4 @@
+import {CloudFiles} from './cloud-files.js';
 import {validateRetainedRequest,expiredMessage} from '../shared/retention.js';
 import {RetentionService} from './retention.js';
 import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
@@ -57,6 +58,7 @@ export async function createControlPlane(overrides = {}) {
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
     websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
+  context.cloudFiles=overrides.cloudFiles??new CloudFiles(context);
   context.controlReceipts=new ControlReceipts(store);
   context.contacts = overrides.contactService ?? new ContactDirectory(context, { file: config.contactsFile });
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
