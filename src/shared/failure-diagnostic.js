@@ -12,6 +12,8 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['CODEX_RPC_TIMEOUT', /CODEX_RPC_TIMEOUT|Codex RPC timed out/, '本机Codex接口等待', '本机Codex接口未在调用方指定时间内返回；不能据此判断数据库或查询范围有问题。', '检查本机Codex进程与接口状态，保留原问题；无需缩小业务查询范围。'],
+  ['CODEX_DISCONNECTED', /Codex app-server (disconnected|stopped|is not connected|could not start)/, '本机Codex连接', '本机Codex子进程退出或连接断开，当前调查尚未完成。', '检查本机Codex进程与启动配置，恢复后继续原问题；这不是已确认的业务故障。'],
  ['REPORT_INSPECTION', /REPORT_INSPECTION/, '文件审阅证据', '当前文件的登记、摘要或计算来源读取未通过；不代表业务公式已证实错误。', '按已登记fileId读取同一任务的核验资料，不索要本机已有CSV、不重复查库或生成文件。'],
   ['DATASET_CAPACITY', /DATASET_CAPACITY/, '任务数据存储', '本任务中间数据达到实际空间预算，已有成果仍保留；不是数据库故障。', '先复用已有完整数据并修正草稿；确需增加空间时由维护者评估，不重复查询或删除被引用证据。'],
   ['REPORT_INPUT', /\[REPORT_INPUT\]/, '数据集与报表参数校验', '数据集引用、关联列或报表核验参数不符合要求；不是数据库连接故障。', '依据本轮工具返回的具体校验提示修正；使用list_datasets及实际字段，不重复取数或扩大权限。'],

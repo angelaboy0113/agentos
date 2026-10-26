@@ -270,12 +270,13 @@ test('evidence-driven investigation passes twelve calls and legacy maxCalls with
  planner:async()=>({next:async input=>{assert.equal(input.remainingCalls,undefined);return executed<16?{tool:'select',arguments:'{}'}:{tool:'finish',summary:'完成',complete:true};},close:async()=>{}})});
  assert.equal(executed,16);assert.equal(r.partial,false);assert.equal(r.rows.length,15);
 });
-test('investigation performance budget stops additional planning and preserves evidence',async()=>{
+test('investigation ignores legacy time and call budgets while fresh evidence continues',async(t)=>{
+ t.mock.timers.enable({apis:['Date']});
  const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;
- const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,limits:{maxCalls:4,maxMs:60000},
-  tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;return{stage:`step-${calls}`,rows:[{id:calls}]};},close:async()=>{}}),
-  planner:async()=>({next:async input=>input.remainingCalls===0?{tool:'finish',summary:'保留已有证据',complete:false}:{tool:'connection',arguments:'{}'},close:async()=>{}})});
- assert.equal(calls,4);assert.equal(r.partial,true);assert.match(r.summary,/性能预算/);assert.equal(r.rows.length,4);
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,limits:{maxCalls:4,maxMs:1},
+  tools:async()=>({spec:[{tool:'connection'}],run:async()=>{calls++;t.mock.timers.tick(5000);return{stage:`step-${calls}`,rows:[{id:calls}]};},close:async()=>{}}),
+  planner:async()=>({next:async()=>calls<40?{tool:'connection',arguments:'{}'}:{tool:'finish',summary:'完成',complete:true},close:async()=>{}})});
+ assert.equal(calls,40);assert.equal(r.partial,false);assert.equal(r.rows.length,40);
 });
 test('expiry during long investigation retains evidence and prohibits subsequent queries',async()=>{
  const cfg={version:1,environments:{env:environment}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对']},'demo',{profile:'owner',senderId:'ou_member'});let calls=0;

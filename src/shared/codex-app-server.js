@@ -61,13 +61,14 @@ export class CodexAppServer extends EventEmitter {
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  request(method, params, timeoutMs = 15_000) {
+  // Local model work has no implicit deadline. Explicit teardown requests may be bounded.
+  request(method, params, timeoutMs = 0) {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = timeoutMs > 0 ? setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex RPC timed out: ${method}`));
-      }, timeoutMs);
+        reject(Object.assign(new Error(`Codex RPC timed out: ${method}`), { code: "CODEX_RPC_TIMEOUT", rpcMethod: method }));
+      }, timeoutMs) : null;
       const finish = (fn) => (value) => { clearTimeout(timer); this.pending.delete(id); fn(value); };
       const entry = { resolve: finish(resolve), reject: finish(reject) };
       this.pending.set(id, entry);
@@ -86,9 +87,9 @@ export class CodexAppServer extends EventEmitter {
     } else this.emit('notification', message);
   }
 
-  async turn(params, { signal, timeoutMs = 90_000, onEvent } = {}) {
-    await this.start();
+  async turn(params, { signal, timeoutMs = 0, onEvent } = {}) {
     if (signal?.aborted) throw new Error('Codex turn aborted');
+    await waitForStart(this.start(), signal);
     return new Promise((resolve, reject) => {
       let turnId, final = '', done = false;
       const started = Date.now();
@@ -108,7 +109,7 @@ export class CodexAppServer extends EventEmitter {
       };
       const abort = () => { interrupt(); finish(new Error('Codex turn aborted')); };
       const disconnected = () => finish(new Error('Codex app-server disconnected'));
-      const timer = setTimeout(() => { interrupt(); finish(new Error('Codex 对话超过时限，未执行任务动作')); }, timeoutMs);
+      const timer = timeoutMs > 0 ? setTimeout(() => { interrupt(); finish(new Error('Codex 对话超过时限，未执行任务动作')); }, timeoutMs) : null;
       const receive = ({ method, params: event = {} }) => {
         const eventTurnId = event.turnId ?? event.turn?.id;
         if (event.threadId !== params.threadId || (turnId && eventTurnId && eventTurnId !== turnId)) return;
@@ -149,4 +150,14 @@ export class CodexAppServer extends EventEmitter {
       child.kill();
     });
   }
+}
+
+function waitForStart(starting, signal) {
+  if (!signal) return starting;
+  return new Promise((resolve, reject) => {
+    const abort = () => { signal.removeEventListener('abort', abort); reject(new Error('Codex turn aborted')); };
+    signal.addEventListener('abort', abort, {once:true});
+    starting.then(value => {signal.removeEventListener('abort',abort);resolve(value);},error => {signal.removeEventListener('abort',abort);reject(error);});
+    if(signal.aborted) abort();
+  });
 }

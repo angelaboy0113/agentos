@@ -8,7 +8,7 @@ import path from 'node:path';
 import { CodexAppServer } from '../src/shared/codex-app-server.js';
 import { codexEnvironment, discoverMacCodexBinary, discoverWindowsCodexBinary, loadCodexRuntimeSettings, resolveCodexBinary, saveCodexRuntimeSettings } from '../src/shared/codex-runtime.js';
 
-function fakeServer() {
+function fakeServer({ hold = [] } = {}) {
   const requests = [], children = [];
   const spawn = () => {
     const child = new EventEmitter();
@@ -18,7 +18,7 @@ function fakeServer() {
       for (const line of data.toString().trim().split('\n')) {
         const msg = JSON.parse(line);
         requests.push(msg);
-        if (msg.id && msg.method) queueMicrotask(() => child.stdout.write(JSON.stringify({ id: msg.id,
+        if (msg.id && msg.method && !hold.includes(msg.method)) queueMicrotask(() => child.stdout.write(JSON.stringify({ id: msg.id,
           result: msg.method === 'turn/start' ? { turn: { id: `turn-${msg.params.threadId}` } } : {} }) + '\n'));
       }
     });
@@ -166,4 +166,45 @@ test('the codex sentinel in CODEX_BIN still enables desktop discovery', async (t
   } finally {
     if (before === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = before;
   }
+});
+
+
+test('default RPC and model wait survive old deadlines; completion and close still settle', async (t) => {
+  const { app, children, requests, notify } = fakeServer({hold:['initialize','account/read']});
+  t.after(()=>app.close());
+  t.mock.timers.enable({apis:['setTimeout']});
+  let started=false;
+  const startup=app.start().then(()=>{started=true;});
+  t.mock.timers.tick(16000);
+  await Promise.resolve();
+  assert.equal(started,false);
+  const init=requests.find(x=>x.method==='initialize');
+  app.receive({id:init.id,result:{}});await startup;
+  let answered=false;
+  const account=app.request('account/read',{}).then(v=>{answered=true;return v;});
+  t.mock.timers.tick(120000);await Promise.resolve();assert.equal(answered,false);
+  app.receive({id:requests.find(x=>x.method==='account/read').id,result:{account:{type:'chatgpt'}}});
+  assert.equal((await account).account.type,'chatgpt');
+  const turn=app.turn({threadId:'long'});await new Promise(setImmediate);
+  t.mock.timers.tick(600000);await Promise.resolve();
+  assert.equal(requests.filter(x=>x.method==='turn/interrupt').length,0);
+  notify('turn/completed',{threadId:'long',turn:{id:'turn-long',status:'completed',items:[{type:'agentMessage',text:'done'}]}});
+  assert.equal((await turn).text,'done');
+  const pending=app.request('account/read',{});const rejected=assert.rejects(pending,/disconnected/);
+  children[0].kill();await rejected;assert.equal(app.pending.size,0);
+});
+
+test('unbounded model wait remains explicitly cancellable without replay', async(t)=>{
+ const {app,requests}=fakeServer();t.after(()=>app.close());
+ const controller=new AbortController();const turn=app.turn({threadId:'cancel'},{signal:controller.signal});
+ const rejected=assert.rejects(turn,/aborted/);await new Promise(setImmediate);controller.abort();await rejected;
+ assert.equal(requests.filter(x=>x.method==='turn/start').length,1);
+ assert.equal(requests.filter(x=>x.method==='turn/interrupt').length,1);
+});
+
+test('cancellation settles even while shared server initialization is still waiting',async(t)=>{
+ const {app,requests}=fakeServer({hold:['initialize']});t.after(()=>app.close());
+ const controller=new AbortController();const waiting=app.turn({threadId:'never-started'},{signal:controller.signal});
+ const rejected=assert.rejects(waiting,/aborted/);controller.abort();await rejected;
+ assert.equal(requests.some(x=>x.method==='turn/start'),false);
 });

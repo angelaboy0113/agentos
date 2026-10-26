@@ -53,3 +53,10 @@ test('native Chrome object lookup failures are classified as a recoverable brows
  assert.match(diagnostic,/日常Chrome自动化通道未就绪/);
  assert.doesNotMatch(diagnostic,/EXECUTION_ERROR/);
 });
+
+
+test('local Codex wait/disconnect diagnostics do not blame query size or database',()=>{
+ assert.match(failureDiagnostic(new Error('Codex RPC timed out: thread/start')),/CODEX_RPC_TIMEOUT/);
+ assert.doesNotMatch(failureDiagnostic(new Error('Codex RPC timed out: thread/start')),/缩小查询范围后/);
+ assert.match(failureDiagnostic(new Error('Codex app-server disconnected')),/CODEX_DISCONNECTED/);
+});
