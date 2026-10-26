@@ -69,12 +69,12 @@ async function applyCardAction(context, event) {
   const effectKey = `card-action:${profile}:${event.event_id}`;
   const admin = isAdministrator(projects, { profile, senderId: event.operator_id });
   const creator = isTaskCreator(projects, job, { profile, senderId: event.operator_id });
-  let result;
+  let result, action, version, instruction;
   try {
     if (!admin && !creator) throw new Error('只有本任务发起人或真人管理员可以操作；转交后身份未识别时，请核对跨应用真人身份映射。');
     const value = parse(event.action_value);
-    const action = event.action_name?.startsWith('clarify_') ? 'clarify' : value.action;
-    const version = action === 'clarify' ? event.action_name.slice('clarify_'.length) : value.version;
+    action = event.action_name?.startsWith('clarify_') ? 'clarify' : value.action;
+    version = action === 'clarify' ? event.action_name.slice('clarify_'.length) : value.version;
     if (!['cancel', 'approve', 'approve_environment', 'renew_environment', 'clarify', 'refresh'].includes(action)) throw new Error('不支持的卡片操作。');
     if (action === 'approve' && !admin) throw new Error('只有真人管理员可以确认进入下一阶段。');
     // Recheck inside the same state transaction as mutation; old cards cannot control a new attempt.
@@ -83,8 +83,9 @@ async function applyCardAction(context, event) {
       if (freshCard?.messageId !== event.message_id || freshCard.destination.profile !== profile
         || current.chatId !== cardActionChat(freshCard,event) || (questionId ? freshState.questions?.[questionId]?.profile : current.agentProfile) !== profile
         || (questionId && questionJob(freshState, questionId)?.id !== current.id)
-        || jobActionVersion(current) !== version || !hasAction(freshCard.card, action, version)) {
-        throw new Error('这张卡片已过期，请操作最新任务卡片。');
+        ) throw new Error('这张卡片对应的任务已更新，已刷新卡片，请使用最新按钮。');
+      if(jobActionVersion(current)!==version || !hasAction(freshCard.card,action,version)) {
+        throw Object.assign(new Error('这张卡片对应的任务已更新，已刷新卡片，请使用最新按钮。'),{code:'CARD_VERSION_CHANGED'});
       }
     };
     if (action === 'refresh') {
@@ -110,9 +111,9 @@ async function applyCardAction(context, event) {
       if (!canContinueTask(projects, job, { profile, senderId: event.operator_id })) {
         throw new Error('只有真人管理员可以补充并继续非只读任务；普通成员只能继续自己的只读源码排查。');
       }
-      const instruction = String(parse(event.form_value).clarification ?? '').trim();
+      instruction = String(parse(event.form_value).clarification ?? '').trim();
       if (!instruction || instruction.length > 1000) throw new Error('请填写 1–1000 字的补充信息。');
-      const updated = await store.resumeClarification(job.id, { instruction }, effectKey, guard);
+      const updated = await store.resumeClarification(job.id, { instruction, cardSubmission:{version,profile,messageId:event.message_id,operatorId:event.operator_id} }, effectKey, guard);
       result = { job: updated, resubmitted: true, message: '补充已提交，当前阶段重新排队。' };
     }
     // Re-delivery retries only presentation. The business mutation above is effect-idempotent.
@@ -126,17 +127,20 @@ async function applyCardAction(context, event) {
     return { ok: true, message: result.message };
   } catch (error) {
     // Do not echo arbitrary callback input, tokens or raw errors into the group.
-    const known = /^(只有|这张卡片|请填写|不支持|当前任务|查询授权|查询申请)/.test(error.message) ? error.message : '操作未完成：任务状态可能已变化，请刷新后重试。';
+    const latest=await store.getJob(job.id);
+    const duplicate=error.code==='CARD_VERSION_CHANGED' && action==='clarify' && instruction && acceptedClarification(latest,{version,profile,messageId:event.message_id,operatorId:event.operator_id,instruction});
+    const duplicateMessage=['queued','running'].includes(latest.status)?'这份补充已提交，任务正在排队或处理中，请勿重复提交。':'这份补充已提交，任务状态已更新，请查看最新卡片。';
+    const known = duplicate ? duplicateMessage : error.code==='CARD_VERSION_CHANGED' && action==='clarify' ? '当前任务已更新，本次新补充尚未提交。已刷新卡片，请在最新卡片中重新提交。' : /^(只有|这张卡片|请填写|不支持|当前任务|查询授权|查询申请)/.test(error.message) ? error.message : '操作未完成：任务状态可能已变化，请刷新后重试。';
     // Refresh the known owned card even when an approval has expired; no grant is renewed here.
     await refreshActionCard(context, { questionId, key, job, savedCard, event });
-    const noticeKey = `${effectKey}:notice`;
+    const noticeKey = duplicate ? `clarification-receipt:${profile}:${job.id}:${version}:${event.operator_id}:${['queued','running'].includes(latest.status)?'active':'updated'}` : `${effectKey}:notice`;
     const accepted = await store.transactEffect(noticeKey, () => ({ message: known }));
     const delivered = (await store.read()).cardActionNotices?.[noticeKey];
     if (!delivered && savedCard.destination.visibility!=='requester') {
       await context.feishu.reply(event.message_id, accepted.message, { profile, replyInThread: savedCard.destination.replyInThread, idempotencyKey: noticeKey });
       await store.transact((fresh) => { fresh.cardActionNotices ??= {}; fresh.cardActionNotices[noticeKey] = true; });
     }
-    return { ok: false, message: accepted.message };
+    return { ok: Boolean(duplicate), ...(duplicate?{duplicate:true}:{}), message: accepted.message };
   }
 }
 
@@ -145,4 +149,15 @@ function hasAction(node, action, version) {
   if (action === 'clarify' && node.tag === 'button' && node.name === `clarify_${version}`) return true;
   if (node.type === 'callback' && node.value?.action === action && node.value?.version === version) return true;
   return Object.values(node).some((child) => hasAction(child, action, version));
+}
+
+// A receipt proves acceptance; stale form versions never authorize another mutation.
+function acceptedClarification(job,{version,profile,messageId,operatorId,instruction}){
+ return (job.events??[]).some((e,i)=>{
+  if(e.type!=='clarification_received'||e.message!==instruction)return false;
+  const r=e.cardSubmission;
+  if(r)return r.version===version&&r.profile===profile&&r.messageId===messageId&&r.operatorId===operatorId;
+  // Legacy events have no receipt. Reconstruct the exact preceding attempt version.
+  return jobActionVersion({...job,events:job.events.slice(0,i)})===version;
+ });
 }

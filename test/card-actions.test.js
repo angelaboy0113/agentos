@@ -187,3 +187,36 @@ test('legacy expired approval renewal is idempotent and resumes under read-only 
 
  assert.equal((await handleCardAction(context,event('approve_environment',{card_content:'',action_value:JSON.stringify({action:'approve_environment',version:jobActionVersion(current)})}))).ok,false);
 });
+
+test('second click with a new event ID acknowledges the accepted clarification without a second run',async t=>{
+ const {context,create,store,notices}=await setup(t);const {job,event}=await create('awaiting_clarification','analysis');
+ const submit=()=>event('clarify',{action_name:`clarify_${jobActionVersion(job)}`,form_value:JSON.stringify({clarification:'补充账号A，继续只读核对'})});
+ assert.equal((await handleCardAction(context,submit())).ok,true);
+ const repeat=await handleCardAction(context,submit());assert.equal(repeat.ok,true);assert.equal(repeat.duplicate,true);assert.match(repeat.message,/已提交.*排队或处理中/);assert.doesNotMatch(repeat.message,/过期/);
+ await handleCardAction(context,submit());const current=await store.getJob(job.id);assert.equal(current.events.filter(e=>e.type==='clarification_received').length,1);assert.equal(notices.length,1);
+ assert.equal(current.events.find(e=>e.type==='clarification_received').cardSubmission.version,jobActionVersion(job));
+});
+test('stale form with different text does not discard it as an accepted duplicate or change the active job',async t=>{
+ const {context,create,store}=await setup(t);const {job,event}=await create('awaiting_clarification','analysis');
+ const submit=text=>event('clarify',{action_name:`clarify_${jobActionVersion(job)}`,form_value:JSON.stringify({clarification:text})});
+ await handleCardAction(context,submit('第一份补充'));const r=await handleCardAction(context,submit('另一份新补充'));assert.equal(r.ok,false);assert.match(r.message,/本次新补充尚未提交/);assert.doesNotMatch(r.message,/过期/);const current=await store.getJob(job.id);assert.doesNotMatch(current.instruction,/另一份新补充/);assert.equal(current.events.filter(e=>e.type==='clarification_received').length,1);
+});
+test('simultaneous clarification clicks commit once and legacy receipts still acknowledge the exact old version',async t=>{
+ const {context,create,store}=await setup(t);const {job,event}=await create('awaiting_clarification','analysis');
+ const submit=()=>event('clarify',{action_name:`clarify_${jobActionVersion(job)}`,form_value:JSON.stringify({clarification:'继续原问题'})});
+ const r=await Promise.all([handleCardAction(context,submit()),handleCardAction(context,submit())]);assert.ok(r.every(x=>x.ok));assert.equal((await store.getJob(job.id)).events.filter(e=>e.type==='clarification_received').length,1);
+ await store.transact(s=>{delete s.jobs.find(j=>j.id===job.id).events.find(e=>e.type==='clarification_received').cardSubmission;});
+ const legacy=await handleCardAction(context,submit());assert.equal(legacy.duplicate,true);
+ await store.transact(s=>{s.jobs.find(j=>j.id===job.id).status='awaiting_clarification';});
+ const done=await handleCardAction(context,submit());assert.match(done.message,/状态已更新.*最新卡片/);assert.doesNotMatch(done.message,/正在排队/);
+});
+
+test('accepted submission receipt survives reopening the store and cannot acknowledge another operator',async t=>{
+ const {context,create,store,directory,notices}=await setup(t);const {job,event}=await create('awaiting_clarification','analysis');
+ const submit=extra=>event('clarify',{action_name:`clarify_${jobActionVersion(job)}`,form_value:JSON.stringify({clarification:'保存的同一份补充'}),...extra});
+ await handleCardAction(context,submit());await store.leaseNext('runner');
+ const reopened=new JsonStore(path.join(directory,'store.json'));context.store=reopened;
+ const retry=await handleCardAction(context,submit());assert.equal(retry.duplicate,true);assert.equal((await reopened.getJob(job.id)).status,'running');
+ const stranger=await handleCardAction(context,submit({operator_id:'stranger'}));assert.equal(stranger.ok,false);assert.doesNotMatch(stranger.message,/这份补充已提交/);
+ assert.equal((await reopened.getJob(job.id)).events.filter(e=>e.type==='clarification_received').length,1);assert.equal(notices.filter(x=>x[1].includes('这份补充已提交')).length,1);
+});

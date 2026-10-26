@@ -650,7 +650,7 @@ export class JsonStore {
       job.status = 'queued';
       job.result = null;
       job.lease = null;
-      job.events.push({ id: createId('EVT'), at: now, type: 'clarification_received', message: input.instruction });
+      job.events.push({ id: createId('EVT'), at: now, type: 'clarification_received', message: input.instruction, ...(input.cardSubmission?{cardSubmission:structuredClone(input.cardSubmission)}:{}) });
       job.updatedAt = now;
       if (input.sourceMessageId) state.processedMessages[input.sourceMessageId] = job.id;
       return structuredClone(job);
