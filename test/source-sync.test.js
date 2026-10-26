@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, readdir, access, realpath } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -15,7 +15,7 @@ async function commit(cwd, value) {
   await git(cwd, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', value);
 }
 async function fixture(t, name = 'business', branch = 'business-main') {
-  const base = await mkdtemp(path.join(os.tmpdir(), 'agentos-source-sync-'));
+  const base = await realpath(await mkdtemp(path.join(os.tmpdir(), 'agentos-source-sync-')));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'workspace'), origin = path.join(base, 'origin.git'), writer = path.join(base, 'writer');
   await mkdir(root); await mkdir(writer);
@@ -154,4 +154,125 @@ test('isolated root plus child repositories work and reject changed manifest, es
   await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},{...project,analysisSnapshotRoot:path.join(f.root,'snapshots')}),/分开/);
   project.analysisEnvironments.uat.repositories[1].branch='missing';
   await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),/business.*missing/);
+});
+
+test('immutable cache deduplicates concurrent questions, refreshes tips, preserves live versions and removes obsolete clean versions',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');
+ const f=await fixture(t),project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const question=()=>prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ const [a,b]=await Promise.all([question(),question()]);assert.equal(a.workspace,b.workspace);
+ assert.equal((await readdir(project.analysisSnapshotRoot)).filter(x=>x.startsWith('analysis-')).length,1);
+ await commit(f.writer,'version two');await git(f.writer,'push');const c=await question();assert.notEqual(a.workspace,c.workspace);
+ assert.equal(await readFile(path.join(a.workspace,'business/source.txt'),'utf8'),'old');
+ let state={jobs:[{projectId:'demo',status:'awaiting_clarification',questionId:'q',context:[{result:{sourceSync:a}}]}]};
+ const gc=(apply=false)=>pruneSourceSnapshots(project,{getState:async()=>state,apply});
+ let result=await gc(true);assert.equal(result.removed.length,0);assert.ok(result.kept.some(x=>x.reason==='active-or-delivery-reference'));
+ state.jobs[0].status='completed';state.conversations=[{status:'sent',setupPending:true,questionId:'q'}];result=await gc();assert.equal(result.removed.length,1);await access(a.workspace);
+ await writeFile(path.join(a.workspace,'business/source.txt'),'valuable edit');result=await gc(true);assert.equal(result.removed.length,0);assert.equal(result.unknown.length,1);
+ await git(path.join(a.workspace,'business'),'checkout','--','source.txt');
+ state.jobs.push({projectId:'demo',status:'running'});assert.equal((await gc(true)).skipped,'project-busy');state.jobs.pop();
+ result=await gc(true);assert.equal(result.removed.length,1);await assert.rejects(access(a.workspace));await access(c.workspace);
+ await git(f.repo,'remote','set-url','origin','/unavailable');await assert.rejects(question(),/未回退/);await access(c.workspace);
+});
+
+test('remote rollback selects an existing cache without mutating it; GC follows latest selection, and never follows symlinks',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');const f=await fixture(t);
+ const project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const q=()=>prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ await symlink('source.txt',path.join(f.writer,'tracked-link'));await git(f.writer,'add','.');await git(f.writer,'-c','user.name=Test','-c','user.email=test@example.invalid','commit','-m','tracked symlink');await git(f.writer,'push');
+ const a=await q(),old=await git(f.writer,'rev-parse','HEAD');await commit(f.writer,'second');await git(f.writer,'push');const b=await q();
+ await git(f.writer,'push','--force','origin',old+':refs/heads/'+f.branch);assert.equal((await q()).workspace,a.workspace);
+ const link=path.join(project.analysisSnapshotRoot,'analysis-external');await symlink(f.writer,link);
+ const r=await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),apply:true});assert.equal(r.removed.length,1);assert.ok(r.unknown.some(x=>x.name==='analysis-external'));await access(a.workspace);await assert.rejects(access(b.workspace));await access(f.writer);
+});
+
+
+test('snapshot locks serialize independent callers and release after an operation error',async t=>{
+ const {withSnapshotLock}=await import('../src/shared/snapshot-lock.js');const f=await fixture(t);const seen=[];
+ await Promise.all([withSnapshotLock(f.base,async()=>{seen.push('first-start');await new Promise(r=>setTimeout(r,30));seen.push('first-end');}),withSnapshotLock(f.base,async()=>{seen.push('second');})]);
+ assert.ok(seen.indexOf('first-end')===seen.indexOf('first-start')+1);
+ await assert.rejects(withSnapshotLock(f.base,async()=>{throw new Error('fixture failure');}),/fixture failure/);
+ assert.equal(await withSnapshotLock(f.base,async()=>42),42);
+});
+
+test('reclaimed continuation restores the exact historical commit, new questions still check remote and failures do not switch versions',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');const f=await fixture(t);
+ const project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const fresh=()=>prepareAnalysisSources({projectId:'demo',questionId:'new',stage:'developer',sourceEnvironment:'uat'},project);
+ const a=await fresh();await commit(f.writer,'later');await git(f.writer,'push');const b=await fresh();
+ const state={jobs:[]};let gc=await pruneSourceSnapshots(project,{getState:async()=>state,apply:true});assert.equal(gc.removed.length,1);
+ const resumed={projectId:'demo',questionId:'old',stage:'developer',sourceEnvironment:'uat',context:[{result:{sourceSync:a}}]};
+ assert.deepEqual(await prepareAnalysisSources(resumed,project),a);assert.equal(await readFile(path.join(a.workspace,'business/source.txt'),'utf8'),'old');assert.equal((await fresh()).workspace,b.workspace);
+ await pruneSourceSnapshots(project,{getState:async()=>state,apply:true});await git(f.repo,'remote','set-url','origin','/unavailable');
+ await assert.rejects(prepareAnalysisSources(resumed,project),/恢复失败/);await assert.rejects(fresh(),/未回退/);
+ await assert.rejects(prepareAnalysisSources({...resumed,sourceEnvironment:'prd'},project),/不混用/);
+});
+
+test('GC rechecks references inside state writer and protects pending delivery, dirty ignored files and unknown metadata',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');const f=await fixture(t);
+ const project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const a=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);await commit(f.writer,'later');await git(f.writer,'push');await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ let state={jobs:[]};let result=await pruneSourceSnapshots(project,{getState:async()=>state,apply:true,withState:async fn=>{state={jobs:[{projectId:'demo',status:'queued',analysisSourceSnapshot:a}]};return fn(state);}});
+ assert.equal(result.removed.length,0);assert.ok(result.kept.some(x=>x.reason==='became-active-before-delete'));await access(a.workspace);
+ state={jobs:[{id:'j',projectId:'demo',status:'completed',questionId:'q',result:{sourceSync:a}}],reportDeliveries:{x:{jobId:'j',questionId:'q',status:'queued'}}};result=await pruneSourceSnapshots(project,{getState:async()=>state,apply:true});assert.equal(result.removed.length,0);
+ state={jobs:[]};await writeFile(path.join(a.workspace,'business/.git/info/exclude'),'valuable.tmp\n');await writeFile(path.join(a.workspace,'business/valuable.tmp'),'untracked valuable content');result=await pruneSourceSnapshots(project,{getState:async()=>state,apply:true});assert.equal(result.removed.length,0);assert.ok(result.unknown.some(x=>x.reason==='local-changes'));
+});
+
+test('separate Node processes reuse one published cache and release the lock after owner exits',async t=>{
+ const f=await fixture(t),project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const module=new URL('../src/runner/source-sync.js',import.meta.url).href,code=`import {prepareAnalysisSources} from ${JSON.stringify(module)};const r=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},JSON.parse(process.argv[1]));console.log(JSON.stringify(r));`;
+ const [x,y]=await Promise.all([exec(process.execPath,['--input-type=module','-e',code,JSON.stringify(project)]),exec(process.execPath,['--input-type=module','-e',code,JSON.stringify(project)])]);
+ assert.equal(JSON.parse(x.stdout).workspace,JSON.parse(y.stdout).workspace);assert.equal((await readdir(project.analysisSnapshotRoot)).filter(n=>n.startsWith('analysis-')).length,1);
+});
+
+test('recreating a reclaimed cache after remote rollback preserves the original immutable manifest',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');const f=await fixture(t),project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const fresh=()=>prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),a=await fresh(),old=await git(f.writer,'rev-parse','HEAD');await commit(f.writer,'later');await git(f.writer,'push');await fresh();
+ await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),apply:true});await git(f.writer,'push','--force','origin',old+':refs/heads/'+f.branch);const rebuilt=await fresh();assert.equal(rebuilt.workspace,a.workspace);assert.equal(rebuilt.checkedAt,a.checkedAt);await verifyAnalysisSources(project,a);
+});
+
+test('GC verifies ignored child repositories independently instead of treating managed children as local dirt',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');const f=await fixture(t);
+ await git(f.root,'init','-b','docs');await writeFile(path.join(f.root,'.gitignore'),'business/\n');await commit(f.root,'docs');const origin=path.join(f.base,'docs.git');await git(f.base,'clone','--bare',f.root,origin);await git(f.root,'remote','add','origin',origin);
+ const project={repoPath:f.root,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'.',branch:'docs'},{path:'business',branch:f.branch}]}}};
+ const a=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);await commit(f.writer,'next');await git(f.writer,'push');const b=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ const result=await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),apply:true});assert.equal(result.removed.length,1);assert.equal(result.unknown.length,0);await assert.rejects(access(a.workspace));await access(b.workspace);
+});
+
+test('live maintenance requires admin authentication and protects waiting references in the state writer',async t=>{
+ const {createControlPlane}=await import('../src/control-plane/server.js');const f=await fixture(t),project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const a=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);await commit(f.writer,'later');await git(f.writer,'push');await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ const app=await createControlPlane({dataDir:path.join(f.base,'state'),adminToken:'test-admin',runnerToken:'test-runner',retention:{enabled:false},projects:{projects:{demo:project}},agents:{agents:{}},feishuClient:{enabled:false},conversationResponder:async()=>({action:'reply',reply:'unused'})});
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));t.after(async()=>{await app.retention.close();app.server.closeAllConnections();await new Promise(r=>app.server.close(r));});
+ await app.store.transact(s=>s.jobs.push({id:'j',projectId:'demo',questionId:'q',status:'awaiting_clarification',analysisSourceSnapshot:a}));
+ const url='http://127.0.0.1:'+app.server.address().port+'/api/v1/admin/source-snapshots/prune';const headers={authorization:'Bearer test-admin','content-type':'application/json'};
+ const denied=await fetch(url,{method:'POST',body:'{}'});assert.equal(denied.status,401);await denied.json();
+ let r=await fetch(url,{method:'POST',headers,body:'{"apply":true}'});let x=await r.json();assert.equal(x.results[0].removed.length,0);await access(a.workspace);
+ await app.store.transact(s=>{s.jobs[0].status='completed';});r=await fetch(url,{method:'POST',headers,body:'{"apply":false}'});x=await r.json();assert.equal(x.results[0].removed.length,1);await access(a.workspace);
+ r=await fetch(url,{method:'POST',headers,body:'{"apply":true}'});x=await r.json();assert.equal(x.results[0].removed.length,1);await assert.rejects(access(a.workspace));
+});
+
+test('registered worktrees and anomalous manifests are retained instead of reclaimed',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');const f=await fixture(t),project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const a=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);await commit(f.writer,'later');await git(f.writer,'push');await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ const external=path.join(f.base,'personal-worktree');await git(path.join(a.workspace,'business'),'worktree','add','--detach',external,a.repositories[0].commit);
+ const unknown=path.join(project.analysisSnapshotRoot,'analysis-invalid');await mkdir(unknown);await writeFile(path.join(unknown,'source-manifest.json'),'{"policy":"unknown"}');
+ const r=await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),apply:true});assert.equal(r.removed.length,0);assert.ok(r.unknown.some(x=>x.reason==='registered-worktree'));assert.ok(r.unknown.some(x=>x.name==='analysis-invalid'));assert.equal(await readFile(path.join(external,'source.txt'),'utf8'),'old');
+});
+
+test('a new question ignores tagged historical context while same-question durable pins survive context compaction',async t=>{
+ const f=await fixture(t),project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const a=await prepareAnalysisSources({questionId:'old',stage:'developer',sourceEnvironment:'uat'},project);await commit(f.writer,'later');await git(f.writer,'push');
+ const b=await prepareAnalysisSources({questionId:'new',stage:'developer',sourceEnvironment:'uat',context:[{result:{sourceQuestionId:'old',sourceSync:a}}]},project);assert.notEqual(b.workspace,a.workspace);
+ await git(f.repo,'remote','set-url','origin','/unavailable');assert.deepEqual(await prepareAnalysisSources({questionId:'old',stage:'owner_report',sourceEnvironment:'uat',analysisSourceSnapshot:a,context:[]},project),a);
+ await assert.rejects(prepareAnalysisSources({questionId:'newer',stage:'developer',sourceEnvironment:'uat',context:[{result:{sourceQuestionId:'old',sourceSync:a}}]},project),/未回退/);
+});
+
+test('leased runner persists a fixed snapshot outside compacted evidence and rejects a replacement',async t=>{
+ const {JsonStore}=await import('../src/shared/store.js');const f=await fixture(t),store=new JsonStore(path.join(f.base,'state.json'));
+ const {job}=await store.createJob({projectId:'demo',stage:'developer',taskIntent:'analysis',workflow:'continuous_analysis',instruction:'read only'});const lease=await store.leaseNext('r');
+ const proof={policy:'isolated-environment-source-v1',environment:'uat',workspace:path.join(f.base,'fixed'),repositories:[{path:'business',branch:'uat',commit:'a'.repeat(40)}]};
+ const identity={runnerId:'r',leaseId:lease.lease.id};await store.appendEvent(job.id,{type:'progress',...identity,sourceSnapshot:proof});await store.transact(s=>{s.jobs[0].context=[];});
+ const reopened=new JsonStore(path.join(f.base,'state.json'));assert.deepEqual((await reopened.getJob(job.id)).analysisSourceSnapshot,proof);
+ await assert.rejects(reopened.appendEvent(job.id,{type:'progress',...identity,sourceSnapshot:{...proof,workspace:path.join(f.base,'other')}}),/不能替换提交/);
 });

@@ -83,7 +83,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 
 ## 环境源码快照
 
-可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。同一卡内的源码与工具步骤复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
+可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下按项目、环境、仓库来源与实际提交复用不可变源码缓存；新问题先核对远端分支，同题固定原提交。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。同一卡内的源码与工具步骤复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
 
 ## 按问题发现业务网站
 
@@ -108,3 +108,5 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 文件输入按消息资源列表接收并保留原名/格式/大小/SHA-256；Runner副本与file-only工作区位于attachments/JOB目录，沿现有30天策略保护活动引用。纯文件分析不自动进入团队知识，详见[file-input.md](file-input.md)。
 
 话题云文件及pending-export/receipt回执存于lark-cli-events/<profile>/messages/<消息>/cloud-files/，含来源URL、请求归属、摘要、导出标记和完成时间，不含访问令牌；沿既有30天消息资源规则清理，活动引用受保护。新提问重新核实，不以旧副本绕过权限。
+
+源码缓存见[source-sync.spec.md](source-sync.spec.md)：analysis-sources按项目/环境/来源/提交共享，不再每问完整复制；闲置版本单独按小时回收，活动与等待引用受保护，最近选用版本保留。.snapshot-audit只留提交清单和删除审计，不能作为完整源码备份；原提交不可获取时不能承诺自动恢复。该策略独立于30天问答历史，禁止整盘或按目录年龄清理。

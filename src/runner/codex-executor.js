@@ -36,9 +36,9 @@ export async function executeJob(job, config, emit) {
   const harness = await loadHarness(job);
   let sourceSync;
   if (job.taskIntent === 'analysis'&&job.analysisScope!=='attachments') {
-    const reusingSnapshot = (job.context ?? []).some(entry => entry.result?.sourceSync);
+    const reusingSnapshot = Boolean(job.analysisSourceSnapshot)||(job.context ?? []).some(entry => entry.result?.sourceSync);
     await emit({ type: 'progress', message: job.stage === 'owner_report' || reusingSnapshot ? '正在核对并复用本问题已同步的源码快照' : '正在同步配置仓库的 origin 分支，成功后进入只读分析' });
-    try { sourceSync = await prepareAnalysisSources(job, project); }
+    try { sourceSync = await prepareAnalysisSources(job, project); await emit({type:'progress',message:'已核实本问题固定源码缓存',sourceSnapshot:sourceSync}); }
     catch (error) { return sourceBlocked(error); }
   }
   const dataRoot=config.dataDir??path.dirname(config.worktreeRoot);
@@ -77,7 +77,7 @@ export async function executeJob(job, config, emit) {
   // Recheck final files after verification commands may have generated/changed artifacts.
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   const sourcePreparation=job.taskIntent==='analysis'&&job.analysisScope!=='attachments'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
-  return { sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { sourceQuestionId:job.questionId, sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate,
     timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };

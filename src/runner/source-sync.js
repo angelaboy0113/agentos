@@ -1,4 +1,4 @@
-import { syncSnapshot, verifySnapshot } from './source-snapshot.js';
+import { syncSnapshot, verifySnapshot, restoreSnapshot } from './source-snapshot.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { realpath, stat, access } from 'node:fs/promises';
@@ -84,13 +84,14 @@ export async function verifyAnalysisSources(project, report) {
 }
 
 export async function prepareAnalysisSources(job, project) {
-  const report = [...(job.context ?? [])].reverse().find((entry) => entry.result?.sourceSync)?.result.sourceSync;
+  const report = job.analysisSourceSnapshot??[...(job.context??[])].reverse().find(entry=>entry.result?.sourceSync&&(entry.result.sourceQuestionId===undefined||entry.result.sourceQuestionId===job.questionId))?.result.sourceSync;
+  if(report?.policy==='isolated-environment-source-v1'&&job.sourceEnvironment&&report.environment!==job.sourceEnvironment)throw new Error('本问题已固定其它源码环境；请新建问题明确目标环境，不混用测试与生产提交。');
   // A same-question investigation keeps one immutable source snapshot. Runtime
   // tools may add evidence between turns, but they must not trigger another
   // clone/fetch of the same 20+ repositories.
   if (report && (report.policy !== 'isolated-environment-source-v1' || !job.sourceEnvironment || report.environment === job.sourceEnvironment)) {
-    return verifyAnalysisSources(project, report);
+    try{return await verifyAnalysisSources(project, report);}catch(error){if(error.code==='ENOENT'&&report.policy==='isolated-environment-source-v1')return restoreSnapshot(project,report);throw error;}
   }
-  if (job.stage !== 'owner_report') return project.analysisSourceMode === 'isolated' ? syncSnapshot(project, job.sourceEnvironment) : syncAnalysisSources(project);
+  if (job.stage !== 'owner_report') return project.analysisSourceMode === 'isolated' ? syncSnapshot({...project,id:job.projectId??project.id}, job.sourceEnvironment) : syncAnalysisSources(project);
   return verifyAnalysisSources(project, report);
 }

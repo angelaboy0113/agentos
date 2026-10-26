@@ -464,6 +464,10 @@ export class JsonStore {
       if (event.type === 'heartbeat' && job.lease) {
         job.lease.expiresAt = new Date(Date.now() + 120_000).toISOString();
       }
+      if(event.type==='progress'&&event.sourceSnapshot?.policy==='isolated-environment-source-v1'){
+        if(job.analysisSourceSnapshot&&JSON.stringify(job.analysisSourceSnapshot)!==JSON.stringify(event.sourceSnapshot))throw new Error('本问题源码缓存已固定，不能替换提交');
+        job.analysisSourceSnapshot=structuredClone(event.sourceSnapshot);
+      }
       if (event.type === 'cancelled') {
         if (job.status !== 'cancelling' || !event.leaseId || !event.processesExited) throw new Error('Cancellation requires process-exit acknowledgement');
         job.status = 'cancelled';

@@ -1,3 +1,4 @@
+import {pruneSourceSnapshots} from '../shared/source-snapshot-gc.js';
 import {lstat,readdir,realpath,rm,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {pruneState} from '../shared/retention.js';
@@ -44,7 +45,7 @@ export async function cleanupRetentionFiles(store,dataDir,cutoff,{protectIds=[]}
 }
 export class RetentionService{
  constructor(context,{now=Date.now}={}){this.context=context;this.now=now;this.settings=context.config.retention;this.closed=false;}
- start({initial=true}={}){if(!this.settings?.enabled)return;if(initial)this.run().catch(()=>{});this.timer=setInterval(()=>this.run().catch(()=>{}),this.settings.intervalMs);this.timer.unref?.();}
+ start({initial=true}={}){if(!this.settings?.enabled&&!Object.values(this.context.projects?.projects??{}).some(p=>p.analysisSourceMode==='isolated'))return;if(initial&&this.settings?.enabled)this.run().catch(()=>{});this.timer=setInterval(()=>{this.run().catch(()=>{});this.collectSnapshots().catch(()=>{});},this.settings.intervalMs);this.timer.unref?.();}
  run(){if(this.running)return this.running;if(this.closed||!this.settings?.enabled)return Promise.resolve({disabled:true});this.running=this.sweep().catch(error=>{this.last={at:new Date(this.now()).toISOString(),ok:false,error:'RETENTION_FAILED'};console.error('[retention] cleanup incomplete; remaining data preserved');throw error;}).finally(()=>{this.running=null;});return this.running;}
  async sweep(){
   const c=this.context,now=this.now(),days=this.settings.days,cutoff=now-this.settings.maxAgeMs;
@@ -66,6 +67,14 @@ export class RetentionService{
   this.last={at:new Date(now).toISOString(),ok:true,days,cutoff:new Date(cutoff).toISOString(),counts:state.counts,protectedOld:state.protectedOld,files,memory,sessions,knowledge,contacts};
   await c.store.transact(s=>{s.retention.lastCleanup=this.last;});return this.last;
  }
- status(){return {enabled:this.settings?.enabled??false,days:this.settings?.days,intervalMs:this.settings?.intervalMs,last:this.last??null};}
- async close(){this.closed=true;clearInterval(this.timer);await this.running?.catch(()=>{});}
+ async collectSnapshots({apply=true}={}){
+  if(this.closed)return [];if(this.snapshotRunning){if(this.snapshotApply===apply)return this.snapshotRunning;await this.snapshotRunning;return this.collectSnapshots({apply});}this.snapshotApply=apply;
+  this.snapshotRunning=(async()=>{const out=[];for(const [id,project]of Object.entries(this.context.projects?.projects??{})){
+   const protectIds=[...this.context.cards?.workers?.keys?.()??[],...this.context.reports?.workers?.keys?.()??[]].map(k=>k.split(':')[1]);
+   const result=await pruneSourceSnapshots({...project,id},{getState:()=>this.context.store.read(),withState:fn=>this.context.store.transact(fn),apply,protectIds});out.push({projectId:id,...result});
+  }this.lastSnapshots={at:new Date().toISOString(),ok:true,apply,results:out};return out;})();
+  try{return await this.snapshotRunning;}catch(error){this.lastSnapshots={at:new Date().toISOString(),ok:false,error:'SOURCE_CACHE_GC_FAILED'};throw error;}finally{this.snapshotRunning=null;}
+ }
+ status(){return {enabled:this.settings?.enabled??false,days:this.settings?.days,intervalMs:this.settings?.intervalMs,last:this.last??null,sourceSnapshots:this.lastSnapshots??null};}
+ async close(){this.closed=true;clearInterval(this.timer);await Promise.allSettled([this.running,this.snapshotRunning].filter(Boolean));}
 }

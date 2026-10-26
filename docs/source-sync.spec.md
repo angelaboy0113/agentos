@@ -30,12 +30,20 @@
 
 1. 在 `config/projects.local.json` 的项目项配置来源根目录、环境与各仓分支。Windows 使用本机绝对路径（JSON 中反斜杠要转义）；根目录不是 Git 仓库时省略 `.`。配置后在空闲时备份并重启。
 2. 群成员发起只读源码问题；聊天决策写 `sourceEnvironment`，程序验证 ID 并持久化到 Job。环境不明确时返回可选项。数据库/Nacos 的访问审批与这里的源码环境选择分别处理。
-3. Runner 创建随机且唯一的任务目录，从来源仓只读获取 origin，在新目录 `git init/fetch --depth=1/checkout --detach`。个人项目不执行 fetch、checkout、stash 或 reset；未提交内容与未推送提交不复制进快照。每个任务使用独立快照，多次 UAT/PRD 分析不覆盖。
+3. 新问题先逐仓使用 ls-remote 核对配置 origin 的指定分支实际提交；按项目、环境、来源指纹与各仓提交计算内容键。同版本跨问题复用一份已核验的不可变源码缓存，缺失版本在 building 临时目录完整构建后原子发布。个人项目不执行 fetch、checkout、stash 或 reset；未提交内容与未推送提交不复制进快照。个人项目不切分支；UAT/PRD键独立，新版本另建，不覆盖已在调查的版本。
 4. 根仓及独立子仓保持相对布局；Codex 在快照目录中以 read-only/never 调查。原个人目录和其它环境不作为本次证据。这是工作目录与证据规则，不新增文件读取权限沙箱。
 5. `result.sourceSync` 记录 environment、sourceRoot、workspace、checkedAt、每仓 path/branch/commit；本机 `source-manifest.json` 校验清单。调查前后复核工作树与提交，负责人汇总复用同一快照、不重新拉取。回答应注明环境及相关仓库分支/提交；历史证据不代表现在的源码或实际部署。
 6. 健康检查新增 `analysisSnapshotPolicy=isolated-environment-source-v1`。旧 `analysisSourcePolicy` 保留表示兼容模式仍受支持。新发任务验证实际 workspace、分支与提交，不重跑旧任务，也不替换旧卡片。
 
-快照需要磁盘空间，不自动清理。失败可能留有不完整目录，不会复用；在无在途任务、已保留证据后可由维护者清理整个快照目录，之后旧链不能继续复核。浅克隆不含完整 Git 历史，不得把缺历史当成提交不存在。源文件同步不证明 UAT/PRD 服务已部署该版本。
+源码缓存按环境保留最近一次选用版本，并额外保留等待/执行任务、同问题交接和未完成投递引用。旧清单按checkedAt兼容选择最近版本；新缓存使用最近选用指针，因此远端回滚到已缓存提交也正确保留。仅可信、干净的独立克隆可回收；清单异常、未知目录、本地修改（包括ignored文件）、额外worktree、外部Git对象库或非预期链接均保留。不是按目录年龄删除。
+
+创建、复核、恢复、清理使用同一跨进程POSIX文件锁，删除再进入控制面的状态写入队列重验引用；尚未登记固定源码版本的在途任务会暂缓项目清理，已登记版本的活动任务只保护实际引用。现有30天问答历史策略不变；源码闲置版本按小时检查，不等待30天。清理只保存轻量提交清单、来源指纹、原因与审计，不复制源码备份。失败或异常目录不自动猜测删除。
+
+同问题继续及跨阶段使用持久的analysisSourceSnapshot；缓存已回收时依据.snapshot-audit清单恢复原仓库的原提交和原路径，不重新选择最新分支。新问题重新核对远端，sourceQuestionId防止跨问题复用历史取数。无法恢复原提交/来源已变/没有可信清单时明确阻塞并说明恢复原提交或另开新问题的方式，不静默换版本、不无限等待。源码缓存恢复不等于业务调查已完成。
+
+默认预演（不删除）：`node scripts/prune-source-snapshots.mjs --projects ./config/projects.local.json --state ./data/agentos.json`。在线清理由控制面统一执行，维护者通过已有AGENTOS_ADMIN_TOKEN认证：`node scripts/prune-source-snapshots.mjs --apply --server http://127.0.0.1:8787`；没有令牌或非本机服务不执行。接口POST /api/v1/admin/source-snapshots/prune的apply=false可取得在线预演，apply=true实际删除时仍重验。不要对运行中的状态文件副本直接离线删除。
+
+凭据、登录态、个人源码、开发worktree、配置和待投递内容不属于源码垃圾。浅克隆不含完整历史，恢复原提交仍依赖来源Git服务器可提供该提交；来源不可用必须如实报错。Mac/Linux需Python3与POSIX flock；Windows新缓存锁分支尚未实机验收，不支持时明确拒绝，不能绕过锁。源文件同步不证明UAT/PRD已经部署该版本。
 
 ![按环境隔离源码分析](images/agentos-environment-sources.svg)
 
