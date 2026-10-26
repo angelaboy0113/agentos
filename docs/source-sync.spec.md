@@ -41,7 +41,7 @@
 
 同问题继续及跨阶段使用持久的analysisSourceSnapshot；缓存已回收时依据.snapshot-audit清单恢复原仓库的原提交和原路径，不重新选择最新分支。新问题重新核对远端，sourceQuestionId防止跨问题复用历史取数。无法恢复原提交/来源已变/没有可信清单时明确阻塞并说明恢复原提交或另开新问题的方式，不静默换版本、不无限等待。源码缓存恢复不等于业务调查已完成。
 
-默认预演（不删除）：`node scripts/prune-source-snapshots.mjs --projects ./config/projects.local.json --state ./data/agentos.json`。在线清理由控制面统一执行，维护者通过已有AGENTOS_ADMIN_TOKEN认证：`node scripts/prune-source-snapshots.mjs --apply --server http://127.0.0.1:8787`；没有令牌或非本机服务不执行。接口POST /api/v1/admin/source-snapshots/prune的apply=false可取得在线预演，apply=true实际删除时仍重验。不要对运行中的状态文件副本直接离线删除。
+默认预演（不删除）：`node scripts/prune-source-snapshots.mjs --projects ./config/projects.local.json --state ./data/agentos.json`。在线清理由控制面统一执行，维护者使用现有AGENTOS_ADMIN_TOKEN，或在未设置固定令牌的本机部署中建立原控制台会话（同源与x-agentos-admin校验保留）：`node scripts/prune-source-snapshots.mjs --apply --server http://127.0.0.1:8787`；不能建立本机管理员会话且没有有效令牌，或目标不是本机服务时不执行。接口POST /api/v1/admin/source-snapshots/prune的apply=false可取得在线预演，apply=true实际删除时仍重验。不要对运行中的状态文件副本直接离线删除。
 
 凭据、登录态、个人源码、开发worktree、配置和待投递内容不属于源码垃圾。浅克隆不含完整历史，恢复原提交仍依赖来源Git服务器可提供该提交；来源不可用必须如实报错。Mac/Linux需Python3与POSIX flock；Windows新缓存锁分支尚未实机验收，不支持时明确拒绝，不能绕过锁。源文件同步不证明UAT/PRD已经部署该版本。
 

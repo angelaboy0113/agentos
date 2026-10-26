@@ -187,7 +187,7 @@ async function route(context) {
   }
 
   if(request.method==='POST' && url.pathname==='/api/v1/admin/source-snapshots/prune'){
-    requireBearer(request,config.adminToken,'admin');const body=await readJson(request);
+    if(request.headers.authorization)requireBearer(request,config.adminToken,'admin');else requireAdminSession(context,request,true);const body=await readJson(request);
     const results=await context.retention.collectSnapshots({apply:body.apply===true});return json(response,200,{ok:true,results});
   }
 

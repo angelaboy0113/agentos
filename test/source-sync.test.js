@@ -247,9 +247,11 @@ test('live maintenance requires admin authentication and protects waiting refere
  await app.store.transact(s=>s.jobs.push({id:'j',projectId:'demo',questionId:'q',status:'awaiting_clarification',analysisSourceSnapshot:a}));
  const url='http://127.0.0.1:'+app.server.address().port+'/api/v1/admin/source-snapshots/prune';const headers={authorization:'Bearer test-admin','content-type':'application/json'};
  const denied=await fetch(url,{method:'POST',body:'{}'});assert.equal(denied.status,401);await denied.json();
+ const session=await fetch(new URL('/admin',url));const cookie=session.headers.get('set-cookie').split(';')[0];await session.arrayBuffer();const origin=new URL(url).origin;let bad=await fetch(url,{method:'POST',headers:{cookie,origin:'https://foreign.invalid','x-agentos-admin':'1','content-type':'application/json'},body:'{}'});assert.equal(bad.status,401);await bad.json();const local=await fetch(url,{method:'POST',headers:{cookie,origin,'x-agentos-admin':'1','content-type':'application/json'},body:'{"apply":false}'});assert.equal(local.status,200);assert.equal((await local.json()).results[0].removed.length,0);
  let r=await fetch(url,{method:'POST',headers,body:'{"apply":true}'});let x=await r.json();assert.equal(x.results[0].removed.length,0);await access(a.workspace);
  await app.store.transact(s=>{s.jobs[0].status='completed';});r=await fetch(url,{method:'POST',headers,body:'{"apply":false}'});x=await r.json();assert.equal(x.results[0].removed.length,1);await access(a.workspace);
  r=await fetch(url,{method:'POST',headers,body:'{"apply":true}'});x=await r.json();assert.equal(x.results[0].removed.length,1);await assert.rejects(access(a.workspace));
+ const cli=new URL('../scripts/prune-source-snapshots.mjs',import.meta.url).pathname;const run=await exec(process.execPath,[cli,'--apply','--server',new URL(url).origin],{env:{...process.env,AGENTOS_ADMIN_TOKEN:''}});assert.equal(JSON.parse(run.stdout).ok,true);
 });
 
 test('registered worktrees and anomalous manifests are retained instead of reclaimed',async t=>{
