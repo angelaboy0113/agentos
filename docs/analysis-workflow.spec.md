@@ -37,7 +37,7 @@
 
 ## 源码同步与快照
 
-项目应配置 `analysisRepositories`。Runner 在首次源码分析前同步各仓 origin 对应分支；缺少清单或同步失败即阻塞。`analysisSourceMode=isolated` 时，每个调查使用独立快照，保留个人功能分支和未提交修改；环境不明时先询问，禁止回退到其它环境。后续环境步骤返回源码分析时复用首次快照和 thread，不重复 clone/fetch。
+项目应配置 `analysisRepositories`。Runner 在首次源码分析前同步各仓 origin 对应分支；缺少清单或同步失败即阻塞。`analysisSourceMode=isolated` 时，按项目、环境及所有仓库的实际提交共用不可变快照，保留个人功能分支和未提交修改；环境不明时先询问，禁止回退到其它环境。后续环境步骤返回源码分析时复用首次快照和 thread，不重复 clone/fetch。
 
 ## 部分结果与恢复
 

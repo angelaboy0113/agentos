@@ -619,6 +619,7 @@ async function createJobFromMessage(context, input) {
 }
 
 export async function notifyJobEvent(context, { job, event }) {
+  if(['completed','failed','cancelled'].includes(event.type))void context.retention?.collectSnapshots?.().catch(()=>{});
   if (!job.chatId && !job.replyToMessageId) return;
   if(event.type==='completed')await context.reports?.enqueue(await context.store.getJob(job.id));
   if (context.cards?.enabled) {

@@ -77,5 +77,5 @@ test('only expired source containers with valid ownership manifests are swept, p
  for(const dir of ['workspace',''])await utimes(path.join(full,dir),cutoff/1000-100,cutoff/1000-100);
  assert.equal(await sweepArtifacts({root,cutoff,manifest:true}),1);assert.equal(await exists(full),false);
  const s=state();assert.equal(pruneHistory(s,cutoff,{busyCards:new Set(['question:q'])}).removed.size,0);
- const disabled=new HistoryRetention({config:{retentionDays:0}});disabled.start();assert.equal(disabled.timer,undefined);assert.deepEqual(await disabled.run(now),{disabled:true});await disabled.stop();
+ const disabled=new HistoryRetention({config:{retentionDays:0}});disabled.start();assert.ok(disabled.timer);assert.deepEqual(await disabled.run(now),{disabled:true,snapshots:[]});await disabled.stop();
 });

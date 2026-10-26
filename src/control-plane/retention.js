@@ -1,3 +1,4 @@
+import {pruneSourceSnapshots} from '../shared/source-snapshot-gc.js';
 import path from 'node:path';
 import {readdir} from 'node:fs/promises';
 import {realDirectory} from '../shared/retention.js';
@@ -5,10 +6,15 @@ import {pruneHistory,retentionPolicy,sweepArtifacts} from '../shared/retention.j
 const DAY=86400000;
 export class HistoryRetention {
  constructor(context){this.context=context;this.policy=retentionPolicy(context.config.retentionDays);this.lastRun=null;this.running=null;}
- start(){if(!this.policy.enabled||this.timer)return;this.run().catch(()=>{});this.timer=setInterval(()=>this.run().catch(()=>{}),this.policy.intervalMs);this.timer.unref();}
- async stop(){clearInterval(this.timer);await this.running;}
+ start(){if(this.timer)return;this.run().catch(()=>{});this.timer=setInterval(()=>this.run().catch(()=>{}),this.policy.intervalMs);this.timer.unref();}
+ async stop(){this.closed=true;clearInterval(this.timer);await Promise.allSettled([this.running,this.snapshotRunning].filter(Boolean));}
+ async collectSnapshots(){
+  if(this.closed)return [];if(this.snapshotRunning)return this.snapshotRunning;
+  this.snapshotRunning=(async()=>{const results=[];for(const [id,project]of Object.entries(this.context.projects?.projects??{}))results.push(await pruneSourceSnapshots({...project,id},{getState:()=>this.context.store.read(),apply:true}));return results;})();
+  try{return await this.snapshotRunning;}finally{this.snapshotRunning=null;}
+ }
  async run(now=Date.now()){
-  if(!this.policy.enabled)return {disabled:true};
+  if(!this.policy.enabled)return {disabled:true,snapshots:await this.collectSnapshots()};
   if(this.running)return this.running;
   this.running=this.collect(now).catch(error=>{this.lastRun={at:new Date(now).toISOString(),ok:false,code:'RETENTION_FAILED'};console.error('[retention] 清理失败，未清理部分保留，下次重试');throw error;});
   try{return await this.running;}finally{this.running=null;}
@@ -41,13 +47,7 @@ export class HistoryRetention {
   // Receipt contents can carry old job results. Keep files for every remaining state receipt.
   files+=await scan(path.join(c.config.dataDir,'control-receipts'),{keptIds:projection.receipts,pattern:/^[a-f0-9-]+\.json$/});
   files+=await scan(c.config.dataDir,{pattern:/^(?:agentos.*(?:before|backup)|memory.*backup).*$/});
-  for(const project of Object.values(c.projects.projects??{}))if(project.analysisSourceMode==='isolated'&&project.analysisSnapshotRoot){
-   const source=path.resolve(project.repoPath),root=path.resolve(project.analysisSnapshotRoot);
-   // Refuse overlap with the program or source directories even under a bad local config.
-   const overlaps=(a,b)=>a===b||a.startsWith(b+path.sep)||b.startsWith(a+path.sep);
-   if(overlaps(source,root)||overlaps(process.cwd(),root))continue;
-   files+=await scan(root,{pattern:/^analysis-[A-Za-z0-9]+$/,manifest:true});
-  }
+  const snapshots=await this.collectSnapshots();files+=snapshots.reduce((n,r)=>n+r.removed.length,0);
   if(c.config.runtimeDir){
    files+=await scan(path.join(c.config.runtimeDir,'logs'));
    // Legacy development logs/state backups only; never config, scripts, auth or deployment records.

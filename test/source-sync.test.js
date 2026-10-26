@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, readdir, access, realpath } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -15,7 +15,7 @@ async function commit(cwd, value) {
   await git(cwd, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', value);
 }
 async function fixture(t, name = 'business', branch = 'business-main') {
-  const base = await mkdtemp(path.join(os.tmpdir(), 'agentos-source-sync-'));
+  const base = await realpath(await mkdtemp(path.join(os.tmpdir(), 'agentos-source-sync-')));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'workspace'), origin = path.join(base, 'origin.git'), writer = path.join(base, 'writer');
   await mkdir(root); await mkdir(writer);
@@ -154,4 +154,44 @@ test('isolated root plus child repositories work and reject changed manifest, es
   await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},{...project,analysisSnapshotRoot:path.join(f.root,'snapshots')}),/分开/);
   project.analysisEnvironments.uat.repositories[1].branch='missing';
   await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),/business.*missing/);
+});
+
+
+test('immutable cache deduplicates concurrent questions, refreshes tips, preserves live versions and removes obsolete clean versions',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');
+ const f=await fixture(t),project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const question=()=>prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ const [a,b]=await Promise.all([question(),question()]);assert.equal(a.workspace,b.workspace);
+ assert.equal((await readdir(project.analysisSnapshotRoot)).filter(x=>x.startsWith('analysis-')).length,1);
+ await commit(f.writer,'version two');await git(f.writer,'push');const c=await question();assert.notEqual(a.workspace,c.workspace);
+ assert.equal(await readFile(path.join(a.workspace,'business/source.txt'),'utf8'),'old');
+ let state={jobs:[{projectId:'demo',status:'awaiting_clarification',questionId:'q',context:[{result:{sourceSync:a}}]}]};
+ const gc=(apply=false)=>pruneSourceSnapshots(project,{getState:async()=>state,apply});
+ let result=await gc(true);assert.equal(result.removed.length,0);assert.ok(result.kept.some(x=>x.reason==='active-reference'));
+ state.jobs[0].status='completed';state.conversations=[{status:'sent',setupPending:true,questionId:'q'}];result=await gc();assert.equal(result.removed.length,1);await access(a.workspace);
+ await writeFile(path.join(a.workspace,'business/source.txt'),'valuable edit');result=await gc(true);assert.equal(result.removed.length,0);assert.equal(result.unknown.length,1);
+ await git(path.join(a.workspace,'business'),'checkout','--','source.txt');
+ state.jobs.push({projectId:'demo',status:'running'});assert.equal((await gc(true)).skipped,'project-busy');state.jobs.pop();
+ result=await gc(true);assert.equal(result.removed.length,1);await assert.rejects(access(a.workspace));await access(c.workspace);
+ await git(f.repo,'remote','set-url','origin','/unavailable');await assert.rejects(question(),/未回退/);await access(c.workspace);
+});
+
+test('remote rollback selects an existing cache without mutating it; GC follows latest selection, and never follows symlinks',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js');const f=await fixture(t);
+ const project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const q=()=>prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ await symlink('source.txt',path.join(f.writer,'tracked-link'));await git(f.writer,'add','.');await git(f.writer,'-c','user.name=Test','-c','user.email=test@example.invalid','commit','-m','tracked symlink');await git(f.writer,'push');
+ const a=await q(),old=await git(f.writer,'rev-parse','HEAD');await commit(f.writer,'second');await git(f.writer,'push');const b=await q();
+ await git(f.writer,'push','--force','origin',old+':refs/heads/'+f.branch);assert.equal((await q()).workspace,a.workspace);
+ const link=path.join(project.analysisSnapshotRoot,'analysis-external');await symlink(f.writer,link);
+ const r=await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),apply:true});assert.equal(r.removed.length,1);assert.ok(r.unknown.includes('analysis-external'));await access(a.workspace);await assert.rejects(access(b.workspace));await access(f.writer);
+});
+
+
+test('snapshot locks serialize independent callers and release after an operation error',async t=>{
+ const {withSnapshotLock}=await import('../src/shared/snapshot-lock.js');const f=await fixture(t);const seen=[];
+ await Promise.all([withSnapshotLock(f.base,async()=>{seen.push('first-start');await new Promise(r=>setTimeout(r,30));seen.push('first-end');}),withSnapshotLock(f.base,async()=>{seen.push('second');})]);
+ assert.ok(seen.indexOf('first-end')===seen.indexOf('first-start')+1);
+ await assert.rejects(withSnapshotLock(f.base,async()=>{throw new Error('fixture failure');}),/fixture failure/);
+ assert.equal(await withSnapshotLock(f.base,async()=>42),42);
 });

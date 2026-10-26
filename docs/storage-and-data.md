@@ -84,7 +84,7 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 
 ## 环境源码快照
 
-可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下创建独立同步快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。同一卡内的源码与工具步骤复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
+可选 `analysisSourceMode=isolated`：以配置的项目根目录为来源，根据问题选择 `analysisEnvironments`，在 `analysisSnapshotRoot` 下按项目、环境、仓库来源及实际提交复用不可变快照。保留个人功能分支与未提交修改；环境未指定且无默认值时先询问，禁止回退 PRD。上文原目录快进同步规则仅适用于未启用此选项的兼容模式。同一卡内的源码与工具步骤复用同一分支/提交证据，仍不能证明实际部署版本。配置、清理与验收见 [源码同步说明](source-sync.spec.md)。
 
 ## 按问题发现业务网站
 
@@ -109,3 +109,5 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 ## 可选历史保留策略
 
 独立多系统启动器默认保留30天；通用服务需设置 `AGENTOS_RETENTION_DAYS` 显式启用。启动及每日清理已结束且无在途交付依赖的过期问题、任务、索引、缓存和允许目录内的文件。活动/等待问题、配置凭据、源码和开发worktree不因达到30天被删除。并非整盘清理，飞书服务器与系统级Codex记录不受影响。完整目录、配置、失败与验收边界见[多系统说明：本地历史保留与自动释放](system-assistants.md#本地历史保留与自动释放)。
+
+源码缓存独立于30天问答历史保留：每个环境保留最近选用版本，活动及等待任务的依赖另行保留；结束任务不再永久占用完整源码副本，仍保留报告与提交证据。详见 [快照缓存与清理](source-sync.spec.md#不可变快照缓存与清理)。
