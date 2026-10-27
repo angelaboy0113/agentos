@@ -306,6 +306,13 @@ test('history fetch failures preserve current evidence; source identity changes 
  const f=await fixture(t);await commit(f.writer,'second');await git(f.writer,'push');
  const project={...f.project,id:'history',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{prd:{repositories:[{path:'business',branch:f.branch}]}}};
  const report=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'prd'},project),cwd=path.join(report.workspace,'business');
+ const sentinel=path.join(f.base,'sentinel');await writeFile(sentinel,'keep');
+ await rm(path.join(cwd,'.git','FETCH_HEAD'));await symlink(sentinel,path.join(cwd,'.git','FETCH_HEAD'));
+ assert.match((await prepareSnapshotHistory(project,report)).repositories[0].reason,/符号链接/);
+ assert.equal(await readFile(sentinel,'utf8'),'keep');await rm(path.join(cwd,'.git','FETCH_HEAD'));
+ await writeFile(path.join(cwd,'.git','objects','info','alternates'),path.join(f.repo,'.git','objects'));
+ assert.match((await prepareSnapshotHistory(project,report)).repositories[0].reason,/共享对象库/);
+ await rm(path.join(cwd,'.git','objects','info','alternates'));
  await rm(f.origin,{recursive:true,force:true});
  const failed=await prepareSnapshotHistory(project,report);
  assert.equal(failed.repositories[0].status,'unavailable');assert.match(failed.repositories[0].recovery,/不切换/);

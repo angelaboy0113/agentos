@@ -141,6 +141,20 @@ export async function restoreSnapshot(project,report){
 
 // Add ancestry only to Git metadata; never checkout a newer branch or rewrite proof.
 // The same lock is used by creation, verification and garbage collection.
+async function verifyHistoryMetadata(cwd) {
+ const root=path.join(cwd,'.git'),pending=[root];
+ while(pending.length){
+  const dir=pending.pop();
+  for(const entry of await readdir(dir,{withFileTypes:true})){
+   const file=path.join(dir,entry.name);
+   if(entry.isSymbolicLink())throw new Error('Git历史元数据包含符号链接，未写入');
+   if(entry.isDirectory())pending.push(file);
+  }
+ }
+ for(const relative of ['commondir','objects/info/alternates','objects/info/http-alternates','worktrees']){
+  if(await lstat(path.join(root,relative)).catch(e=>{if(e.code!=='ENOENT')throw e;return null;}))throw new Error('Git历史元数据包含共享对象库或worktree，未写入');
+ }
+}
 export async function prepareSnapshotHistory(project, report) {
  const prepared=await settings(project,report.environment);
  return withSnapshotLock(prepared.snapshotRoot,async()=>{
@@ -149,6 +163,7 @@ export async function prepareSnapshotHistory(project, report) {
   for(const proof of report.repositories){
    const cwd=path.resolve(report.workspace,proof.path);
    try {
+    await verifyHistoryMetadata(cwd);
     const configured=prepared.repos.find(r=>r.path===proof.path&&r.branch===proof.branch);
     const origin=await git(configured.cwd,['remote','get-url','origin']);
     const actual=await git(cwd,['remote','get-url','origin']);
