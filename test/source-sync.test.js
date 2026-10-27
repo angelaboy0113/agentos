@@ -195,3 +195,75 @@ test('snapshot locks serialize independent callers and release after an operatio
  await assert.rejects(withSnapshotLock(f.base,async()=>{throw new Error('fixture failure');}),/fixture failure/);
  assert.equal(await withSnapshotLock(f.base,async()=>42),42);
 });
+
+test('cold snapshots use remote commits and remain independent of unpublished local objects and edits',async t=>{
+ const f=await fixture(t);
+ await git(f.repo,'checkout','-b','private-work');await commit(f.repo,'unpublished personal commit');
+ const unpublished=await git(f.repo,'rev-parse','HEAD');
+ await git(f.repo,'rm','source.txt');await writeFile(path.join(f.repo,'unfinished.txt'),'keep local edit');
+ const before=await git(f.repo,'status','--porcelain');
+ await commit(f.writer,'new remote evidence');await git(f.writer,'push');
+ const project={...f.project,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const report=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),snapshot=path.join(report.workspace,'business');
+ assert.equal(report.repositories[0].commit,await git(f.writer,'rev-parse','HEAD'));
+ assert.equal(await readFile(path.join(snapshot,'source.txt'),'utf8'),'new remote evidence');
+ assert.equal(await git(f.repo,'rev-parse','HEAD'),unpublished);assert.equal(await git(f.repo,'status','--porcelain'),before);
+ await assert.rejects(git(snapshot,'cat-file','-e',unpublished));
+ await assert.rejects(access(path.join(snapshot,'.git/objects/info/alternates')));
+ await rm(f.repo,{recursive:true});
+ await git(snapshot,'fsck','--connectivity-only');
+ assert.equal(await git(snapshot,'show','HEAD:source.txt'),'new remote evidence');
+});
+
+test('snapshot verification rejects added external object dependencies',async t=>{
+ const f=await fixture(t),project={...f.project,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const report=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),info=path.join(report.workspace,'business/.git/objects/info');
+ await writeFile(path.join(info,'alternates'),path.join(f.repo,'.git/objects')+'\n');
+ await assert.rejects(verifyAnalysisSources(project,report),/依赖外部 Git 对象/);
+ await rm(path.join(info,'alternates'));
+ await writeFile(path.join(info,'http-alternates'),'https://example.invalid/objects\n');
+ await assert.rejects(verifyAnalysisSources(project,report),/依赖外部 Git 对象/);
+});
+
+test('shallow seeds preserve local work and publish only the fresh remote commit without object dependencies',async t=>{
+ const f=await fixture(t),shallow=path.join(f.root,'shallow');
+ await git(f.base,'clone','--no-local','--depth=1','--branch',f.branch,f.origin,shallow);
+ assert.equal(await git(shallow,'rev-parse','--is-shallow-repository'),'true');
+ await commit(shallow,'unpublished shallow commit');
+ const original=await git(shallow,'rev-parse','HEAD');
+ await git(shallow,'rm','source.txt');await writeFile(path.join(shallow,'local.txt'),'keep');
+ const before=await git(shallow,'status','--porcelain');
+ await commit(f.writer,'remote after shallow clone');await git(f.writer,'push');
+ const project={repoPath:f.root,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{prd:{repositories:[{path:'shallow',branch:f.branch}]}}};
+ const report=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'prd'},project);
+ assert.equal(await git(shallow,'rev-parse','HEAD'),original);
+ assert.equal(await git(shallow,'status','--porcelain'),before);
+ assert.equal(await readFile(path.join(report.workspace,'shallow/source.txt'),'utf8'),'remote after shallow clone');
+ await verifyAnalysisSources(project,report);
+ const snapshot=path.join(report.workspace,'shallow');
+ await assert.rejects(git(snapshot,'cat-file','-e',original));
+ await assert.rejects(access(path.join(snapshot,'.git/objects/info/alternates')));
+ await rm(shallow,{recursive:true});await git(snapshot,'fsck','--connectivity-only');
+});
+
+test('relocated deployments can seed objects from old caches but still publish fresh evidence and require the origin',async t=>{
+ const f=await fixture(t),snapshotRoot=path.join(f.base,'snapshots');
+ const original={...f.project,analysisSourceMode:'isolated',analysisSnapshotRoot:snapshotRoot,analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const first=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},original);
+ await writeFile(path.join(first.workspace,'business/source.txt'),'old cache worktree is never evidence');
+ await writeFile(path.join(first.workspace,'business/stray.txt'),'do not copy');
+ await git(f.writer,'checkout','--orphan','personal-base');await commit(f.writer,'separate personal branch');
+ await git(f.writer,'push','origin','personal-base');
+ const moved=path.join(f.base,'relocated');await mkdir(moved);
+ await git(f.base,'clone','--no-local','--depth=1','--branch','personal-base',f.origin,path.join(moved,'business'));
+ const local=path.join(moved,'business');await git(local,'checkout','-b','private');await commit(local,'private unfinished work');
+ await git(local,'rm','source.txt');const before=await git(local,'status','--porcelain');
+ const project={...original,repoPath:moved};
+ const report=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project);
+ assert.equal(report.sourceRoot,await realpath(moved));assert.notEqual(report.workspace,first.workspace);
+ assert.equal(await readFile(path.join(report.workspace,'business/source.txt'),'utf8'),'old');
+ await assert.rejects(access(path.join(report.workspace,'business/stray.txt')));
+ assert.equal(await git(local,'status','--porcelain'),before);await verifyAnalysisSources(project,report);
+ await rm(f.origin,{recursive:true});
+ await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),/远端分支不可用/);
+});

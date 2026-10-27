@@ -9,6 +9,56 @@ function within(root, target) {
   const relative = path.relative(root, target);
   return relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
+async function independentObjects(cwd) {
+  for (const name of ['alternates', 'http-alternates']) {
+    const file = path.join(cwd, '.git', 'objects', 'info', name);
+    const exists = await lstat(file).then(() => true, error => {
+      if (error.code === 'ENOENT') return false;
+      throw error;
+    });
+    if (exists) throw new Error('源码快照仍依赖外部 Git 对象，未发布或复用');
+  }
+}
+async function discardSeedHistory(cwd) {
+  // Only the detached remote commit may remain reachable. Local-only refs,
+  // reflogs and objects used to seed the transfer never become evidence.
+  const refs = (await git(cwd, ['for-each-ref', '--format=%(refname)'])).split('\n').filter(Boolean);
+  for (const ref of refs) await git(cwd, ['update-ref', '--no-deref', '-d', ref]);
+  await git(cwd, ['reflog', 'expire', '--expire=now', '--all']);
+  await git(cwd, ['repack', '-a', '-d']);
+  await git(cwd, ['prune', '--expire=now']);
+}
+async function objectSeed(repo, snapshotRoot) {
+  // A previous immutable cache is an object-transfer seed, never evidence or
+  // an offline fallback. The real origin/branch has already been checked.
+  try {
+    await git(repo.cwd, ['cat-file', '-e', `${repo.commit}^{commit}`]);
+    return repo.cwd;
+  } catch { /* The requested environment may not exist in a shallow source. */ }
+  const fullSource = await git(repo.cwd, ['rev-parse', '--is-shallow-repository']) === 'false';
+  const candidates = [];
+  for (const name of await readdir(snapshotRoot)) {
+    if (!name.startsWith('analysis-')) continue;
+    const container = path.join(snapshotRoot, name);
+    try {
+      const info = await lstat(container);
+      if (!info.isDirectory() || info.isSymbolicLink()) continue;
+      const manifest = JSON.parse(await readFile(path.join(container, 'source-manifest.json'), 'utf8'));
+      const proof = manifest.repositories?.find(x => x.path === repo.path && x.branch === repo.branch);
+      if (!proof || manifest.policy !== policy || !/^[a-f0-9]{40,64}$/.test(proof.commit)) continue;
+      const workspace = path.join(container, 'workspace'), cwd = await realpath(path.resolve(workspace, repo.path));
+      if ((cwd !== workspace && !within(workspace, cwd)) || !within(container, cwd)) continue;
+      const gitDir = await lstat(path.join(cwd, '.git'));
+      if (!gitDir.isDirectory() || gitDir.isSymbolicLink()) continue;
+      await independentObjects(cwd);
+      if (await git(cwd, ['rev-parse', '--show-toplevel']) !== cwd || await git(cwd, ['rev-parse', 'HEAD']) !== proof.commit || await git(cwd, ['remote', 'get-url', 'origin']) !== repo.origin) continue;
+      candidates.push({ cwd, exact: proof.commit === repo.commit, modified: info.mtimeMs });
+    } catch { /* A damaged/unknown cache cannot seed another build. */ }
+  }
+  candidates.sort((a, b) => Number(b.exact) - Number(a.exact) || b.modified - a.modified);
+  if (!candidates[0]?.exact && fullSource) return repo.cwd;
+  return candidates[0]?.cwd ?? repo.cwd;
+}
 async function settings(project, environment) {
   if (project.analysisSourceMode !== 'isolated') throw new Error('独立分析配置已改变，请重新分析');
   const id = selectSourceEnvironment(project, environment);
@@ -59,10 +109,21 @@ export async function syncSnapshot(project, environment) {
      await mkdir(target,{recursive:true});
      if((target!==workspace&&!within(workspace,await realpath(target)))||(await readdir(target)).length)throw new Error(`快照路径冲突：${repo.path}`);
      try{
-      await git(target,['init']);await git(target,['remote','add','origin',repo.origin]);
+      // Independently copy local objects (including a shallow boundary), then
+      // let the real origin supply and select the requested environment tip.
+      // Never copy the personal index/worktree or depend on shared objects.
+      const seed=await objectSeed(repo,snapshotRoot);
+      await git(workspace,['clone','--local','--no-hardlinks','--dissociate','--no-checkout','--no-tags','--',seed,target]);
+      await git(target,['remote','set-url','origin',repo.origin]);
+      // Detached caches have no refs. Advertise their copied objects during
+      // fetch negotiation; discard this temporary ref before publication.
+      const seedHead=await git(target,['rev-parse','--verify','HEAD']).catch(()=>null);
+      if(seedHead)await git(target,['update-ref','refs/heads/agentos-object-seed',seedHead]);
       await git(target,['fetch','--depth=1','--no-tags','--no-recurse-submodules','origin',`refs/heads/${repo.branch}`]);
+      await independentObjects(target);
       if(await git(target,['rev-parse','FETCH_HEAD'])!==repo.commit)throw new Error();
       await git(target,['checkout','--detach',repo.commit]);
+      await discardSeedHistory(target);
       report.repositories.push({path:repo.path,branch:repo.branch,commit:repo.commit});
      }catch{throw new Error(`源码快照同步失败：${repo.path} 的 ${repo.branch}；远端可能在同步中变化，请重新核对。未覆盖旧快照或个人源码。`);}
     }
@@ -87,6 +148,7 @@ export async function verifySnapshot(project, report) {
   for (const repo of repos) {
     const cwd = await realpath(path.resolve(workspace, repo.path));
     if (cwd !== workspace && !within(workspace, cwd)) throw new Error('源码快照路径越界');
+    await independentObjects(cwd);
     const proof = report.repositories.find(x => x.path === repo.path && x.branch === repo.branch);
     if (!proof || await git(cwd, ['rev-parse', '--show-toplevel']) !== cwd || await git(cwd, ['rev-parse', 'HEAD']) !== proof.commit) throw new Error('源码已不同于本次分析快照');
     // Independently cloned child repositories are verified below, not untracked dirt in their parent.

@@ -10,7 +10,9 @@ const policy = 'origin-ff-before-analysis-v1';
 export async function git(cwd, args) {
   try {
     const { stdout } = await exec('git', ['-c', `core.hooksPath=${os.devNull}`, '-c', 'submodule.recurse=false', '-C', cwd, ...args], {
-      windowsHide: true, timeout: 120000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
+      // One large remote transfer may outlive the ordinary local Git command
+      // window. This is per request, never a limit on an investigation/job.
+      windowsHide: true, timeout: args[0] === 'fetch' ? 600000 : 120000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
     });
     return stdout.trim();
