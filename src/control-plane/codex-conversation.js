@@ -35,7 +35,7 @@ export class CodexConversationEngine {
     if (this.closed) throw new Error('Conversation engine stopped');
     this.app = new CodexAppServer({ cwd: this.cwd, codexBin: await resolveCodexBinary(this.options.codexBin), env, args: conversationServerArgs() });
     await this.app.start();
-    const account = await this.app.request('account/read', { refreshToken: false });
+    const account = await this.app.readAccount();
     if (account.account?.type !== 'chatgpt') {
       await this.app.close();
       throw new Error('AgentOS 需要本机 Codex 的 ChatGPT 订阅登录态，请先 codex login');

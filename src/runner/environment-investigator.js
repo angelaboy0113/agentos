@@ -48,7 +48,7 @@ export async function createToolPlanner({ onProgress = async () => {} } = {}) {
     await onProgress('正在启动本机 Codex 服务');
     await app.start();
     await onProgress('正在核对 Codex 登录状态');
-    const account = await app.request('account/read', { refreshToken: false }); if (account.account?.type !== 'chatgpt') throw new Error('本机需要 ChatGPT 登录');
+    const account = await app.readAccount({onRetry:({attempt})=>onProgress(`Codex 登录状态检查暂时超时，正在自动恢复（第${attempt}次）；尚未执行环境查询`)}); if (account.account?.type !== 'chatgpt') throw new Error('本机需要 ChatGPT 登录');
     await onProgress('正在建立查询规划会话');
     const thread = await app.request('thread/start', { cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true,
       ...(runtime.model ? { model: runtime.model } : {}),

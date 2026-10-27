@@ -208,3 +208,29 @@ test('cancellation settles even while shared server initialization is still wait
  const rejected=assert.rejects(waiting,/aborted/);controller.abort();await rejected;
  assert.equal(requests.some(x=>x.method==='turn/start'),false);
 });
+
+test('upstream account timeouts retain method and retry safely without a task deadline',async t=>{
+ const {app,requests}=fakeServer({hold:['account/read']});t.after(()=>app.close());await app.start();
+ const progress=[];const pending=app.readAccount({retryDelayMs:1,onRetry:p=>progress.push(p)});
+ for(let i=0;i<3;i++){
+  while(requests.filter(r=>r.method==='account/read').length<=i)await new Promise(setImmediate);
+  const r=requests.filter(r=>r.method==='account/read')[i];app.receive({id:r.id,error:{code:-32000,message:'request timed out secret=do-not-display'}});
+ }
+ while(requests.filter(r=>r.method==='account/read').length<4)await new Promise(setImmediate);
+ app.receive({id:requests.filter(r=>r.method==='account/read').at(-1).id,result:{account:{type:'chatgpt'}}});
+ assert.equal((await pending).account.type,'chatgpt');assert.equal(progress.length,3);assert.ok(progress.every(p=>p.stage==='account/read'));assert.doesNotMatch(JSON.stringify(progress),/secret/);assert.equal(requests.filter(r=>r.method==='turn/start').length,0);
+});
+test('account recovery stops promptly on close and does not retry permanent errors',async t=>{
+ const first=fakeServer({hold:['account/read']});t.after(()=>first.app.close());await first.app.start();
+ const pending=first.app.readAccount({retryDelayMs:10000});const rejected=assert.rejects(pending,/stopped|disconnected/);
+ first.app.receive({id:first.requests.find(r=>r.method==='account/read').id,error:{message:'timeout'}});await new Promise(setImmediate);await first.app.close();await rejected;
+ assert.equal(first.requests.filter(r=>r.method==='account/read').length,1);
+ const second=fakeServer({hold:['account/read']});t.after(()=>second.app.close());await second.app.start();const read=second.app.readAccount({retryDelayMs:1});
+ second.app.receive({id:second.requests.find(r=>r.method==='account/read').id,error:{code:-32600,message:'Login required'}});
+ await assert.rejects(read,e=>e.code==='CODEX_RPC_ERROR'&&e.rpcMethod==='account/read');assert.equal(second.requests.filter(r=>r.method==='account/read').length,1);
+});
+test('other RPC timeouts are classified but not automatically replayed',async t=>{
+ const {app,requests}=fakeServer({hold:['thread/start']});t.after(()=>app.close());await app.start();const p=app.request('thread/start',{});
+ app.receive({id:requests.find(r=>r.method==='thread/start').id,error:{message:'timed out'}});
+ await assert.rejects(p,e=>e.code==='CODEX_RPC_TIMEOUT'&&e.rpcMethod==='thread/start');assert.equal(requests.filter(r=>r.method==='thread/start').length,1);
+});

@@ -1,4 +1,5 @@
 const stages = Object.freeze({
+  'account/read':'核对本机Codex登录状态','initialize':'启动本机Codex服务','thread/start':'建立Codex查询会话',
   'browser.launch': '启动后台浏览器', 'browser.open-login': '打开登录页面',
   'browser.login-form': '等待登录表单', 'browser.login-submit': '提交浏览器登录',
   'browser.login-result': '核验浏览器登录', 'browser.open-config': '打开配置列表',
@@ -12,7 +13,7 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
-  ['CODEX_RPC_TIMEOUT', /CODEX_RPC_TIMEOUT|Codex RPC timed out/, '本机Codex接口等待', '本机Codex接口未在调用方指定时间内返回；不能据此判断数据库或查询范围有问题。', '检查本机Codex进程与接口状态，保留原问题；无需缩小业务查询范围。'],
+  ['CODEX_RPC_TIMEOUT', /CODEX_RPC_TIMEOUT|Codex RPC timed out/, '本机Codex接口等待', '本机Codex接口返回超时，或未在显式请求等待期内返回；不能据此判断数据库或查询范围有问题。', '检查本机Codex进程与接口状态，保留原问题；无需缩小业务查询范围。'],
   ['CODEX_DISCONNECTED', /Codex app-server (disconnected|stopped|is not connected|could not start)/, '本机Codex连接', '本机Codex子进程退出或连接断开，当前调查尚未完成。', '检查本机Codex进程与启动配置，恢复后继续原问题；这不是已确认的业务故障。'],
  ['REPORT_INSPECTION', /REPORT_INSPECTION/, '文件审阅证据', '当前文件的登记、摘要或计算来源读取未通过；不代表业务公式已证实错误。', '按已登记fileId读取同一任务的核验资料，不索要本机已有CSV、不重复查库或生成文件。'],
   ['DATASET_CAPACITY', /DATASET_CAPACITY/, '任务数据存储', '本任务中间数据达到实际空间预算，已有成果仍保留；不是数据库故障。', '先复用已有完整数据并修正草稿；确需增加空间时由维护者评估，不重复查询或删除被引用证据。'],
@@ -41,6 +42,7 @@ const rules = [
   ['NETWORK', /ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|fetch failed|Operation not permitted/i, '网络连接', '执行环境未能建立网络连接。', '检查 AgentOS 所在电脑的内网连接、服务地址和网络权限。'],
   ['SCOPE_LIMIT', /超出范围|次数.*上限|超过次数|Write control|Redirect blocked|未开放|尚未批准|已过期|未通过|查询表或列|筛选条件/i, '授权与范围检查', '请求未通过当前只读范围、有效期或工具限额检查。', '补充具体查询目标；需要扩大范围时由管理员重新授权。'],
   ['PAGE_REFERENCE', /引用已失效|Not clickable|Invalid search|Unknown browser tool/i, '页面操作', '页面引用或操作参数已失效。', '重新打开页面并获取当前元素；不要复用旧引用。'],
+  ['CODEX_RPC_ERROR', /CODEX_RPC_ERROR/, '本机Codex接口', '本机Codex接口返回错误，当前步骤未完成。', '检查具体Codex接口与登录状态，保留原问题和已有证据；无需缩小业务查询范围。'],
   ['HTTP_RESPONSE', /HTTP [45][0-9]{2}|Read failed|环境接口未成功响应/i, '服务响应', '远端接口返回失败状态。', '检查服务状态和接口兼容性；未据此判断数据库是否可连接。'],
 ];
 export function failureDiagnostic(error) {

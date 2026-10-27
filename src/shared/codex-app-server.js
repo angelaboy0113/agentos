@@ -70,16 +70,38 @@ export class CodexAppServer extends EventEmitter {
         reject(Object.assign(new Error(`Codex RPC timed out: ${method}`), { code: "CODEX_RPC_TIMEOUT", rpcMethod: method }));
       }, timeoutMs) : null;
       const finish = (fn) => (value) => { clearTimeout(timer); this.pending.delete(id); fn(value); };
-      const entry = { resolve: finish(resolve), reject: finish(reject) };
+      const entry = { method, resolve: finish(resolve), reject: finish(reject) };
       this.pending.set(id, entry);
       try { this.write({ id, method, params }); } catch (error) { entry.reject(error); }
     });
   }
 
+  // Only account/read is idempotent and has no business action to replay.
+  // Upstream may return its own timeout even when our RPC has no deadline.
+  async readAccount({onRetry=async()=>{},retryDelayMs=1000}={}) {
+    const child=this.child;let failures=0;
+    for(;;){
+      if(!child||this.child!==child)throw new Error('Codex app-server disconnected');
+      try{return await this.request('account/read',{refreshToken:false});}
+      catch(error){
+        if(error.code!=='CODEX_RPC_TIMEOUT'||error.rpcMethod!=='account/read')throw error;
+        failures++;await onRetry({attempt:failures,stage:'account/read',code:error.code});
+        await new Promise((resolve,reject)=>{
+          const stop=()=>{clearTimeout(timer);this.removeListener('disconnected',stop);reject(new Error('Codex app-server stopped'));};
+          const timer=setTimeout(()=>{this.removeListener('disconnected',stop);resolve();},Math.min(retryDelayMs*failures,10000));
+          this.once('disconnected',stop);if(this.child!==child)stop();
+        });
+      }
+    }
+  }
+
   receive(message) {
     if (message.id !== undefined && !message.method) {
       const entry = this.pending.get(message.id);
-      if (message.error) entry?.reject(new Error(message.error.message ?? 'Codex RPC failed'));
+      if (message.error) {
+        const text=String(message.error.message??'Codex RPC failed');
+        entry?.reject(Object.assign(new Error(text),{code:/timeout|timed out|ETIMEDOUT/i.test(text)?'CODEX_RPC_TIMEOUT':'CODEX_RPC_ERROR',rpcMethod:entry.method,diagnosticStage:entry.method,upstreamCode:message.error.code}));
+      }
       else entry?.resolve(message.result);
     } else if (message.id !== undefined) {
       // Conversation process has no permission to approve tools or perform actions.
