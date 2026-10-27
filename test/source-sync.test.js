@@ -278,3 +278,48 @@ test('leased runner persists a fixed snapshot outside compacted evidence and rej
  const reopened=new JsonStore(path.join(f.base,'state.json'));assert.deepEqual((await reopened.getJob(job.id)).analysisSourceSnapshot,proof);
  await assert.rejects(reopened.appendEvent(job.id,{type:'progress',...identity,sourceSnapshot:{...proof,workspace:path.join(f.base,'other')}}),/不能替换提交/);
 });
+
+test('history upgrades shallow caches concurrently without changing pinned source or selecting newer remote',async t=>{
+ const {prepareSnapshotHistory}=await import('../src/runner/source-snapshot.js');
+ const f=await fixture(t);await commit(f.writer,'second');await git(f.writer,'push');
+ const project={...f.project,id:'history',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{prd:{repositories:[{path:'business',branch:f.branch}]}}};
+ const job={stage:'developer',sourceEnvironment:'prd'};
+ const report=await prepareAnalysisSources(job,project),cwd=path.join(report.workspace,'business');
+ const manifest=await readFile(path.join(path.dirname(report.workspace),'source-manifest.json'),'utf8');
+ assert.equal(await git(cwd,'rev-parse','--is-shallow-repository'),'true');
+ await commit(f.writer,'third');await git(f.writer,'push');
+ const outputs=await Promise.all([prepareSnapshotHistory(project,report),prepareSnapshotHistory(project,report)]);
+ assert.ok(outputs.every(o=>o.repositories[0].status==='complete'));
+ assert.equal(await git(cwd,'rev-list','--count','HEAD'),'2');
+ assert.equal(await git(cwd,'show','HEAD~1:source.txt'),'old');
+ assert.equal(await git(cwd,'rev-parse','HEAD'),report.repositories[0].commit);
+ assert.equal(await readFile(path.join(path.dirname(report.workspace),'source-manifest.json'),'utf8'),manifest);
+ assert.equal(await readFile(path.join(cwd,'source.txt'),'utf8'),'second');
+ await verifyAnalysisSources(project,report);
+ // Complete history remains usable offline, without contacting the remote again.
+ await rm(f.origin,{recursive:true,force:true});
+ assert.equal((await prepareSnapshotHistory(project,report)).repositories[0].status,'complete');
+});
+
+test('history fetch failures preserve current evidence; source identity changes and symlinks are rejected',async t=>{
+ const {prepareSnapshotHistory}=await import('../src/runner/source-snapshot.js');
+ const f=await fixture(t);await commit(f.writer,'second');await git(f.writer,'push');
+ const project={...f.project,id:'history',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{prd:{repositories:[{path:'business',branch:f.branch}]}}};
+ const report=await prepareAnalysisSources({stage:'developer',sourceEnvironment:'prd'},project),cwd=path.join(report.workspace,'business');
+ await rm(f.origin,{recursive:true,force:true});
+ const failed=await prepareSnapshotHistory(project,report);
+ assert.equal(failed.repositories[0].status,'unavailable');assert.match(failed.repositories[0].recovery,/不切换/);
+ await verifyAnalysisSources(project,report);
+ await git(cwd,'remote','set-url','origin',path.join(f.base,'other.git'));
+ assert.match((await prepareSnapshotHistory(project,report)).repositories[0].reason,/来源变化/);
+ await assert.rejects(prepareSnapshotHistory(project,{...report,workspace:f.root}),/路径|证据/);
+ await rm(path.join(cwd,'.git'),{recursive:true,force:true});await symlink(path.join(f.repo,'.git'),path.join(cwd,'.git'));
+ await assert.rejects(prepareSnapshotHistory(project,report),/独立克隆/);
+});
+
+test('history guidance covers resumed investigation and separates code dates from deployed evidence',async()=>{
+ const {sourceHistoryInstructions}=await import('../src/runner/codex-executor.js');
+ const text=sourceHistoryInstructions({repositories:[{status:'complete'}]});
+ assert.match(text,/git log --follow/);assert.match(text,/不是生产上线时间/);assert.match(text,/已有可用入口就继续取证/);
+ assert.equal(sourceHistoryInstructions(null),'');
+});

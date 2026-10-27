@@ -138,3 +138,31 @@ export async function restoreSnapshot(project,report){
   }catch{await rm(tmp,{recursive:true,force:true});throw new Error('历史源码缓存恢复失败：原提交或仓库来源不可用。请维护者恢复原提交后继续，或明确新建问题核对最新版本；没有改用旧缓存或其它提交。');}
  });
 }
+
+// Add ancestry only to Git metadata; never checkout a newer branch or rewrite proof.
+// The same lock is used by creation, verification and garbage collection.
+export async function prepareSnapshotHistory(project, report) {
+ const prepared=await settings(project,report.environment);
+ return withSnapshotLock(prepared.snapshotRoot,async()=>{
+  await verifySnapshotUnlocked(project,report);
+  const results=[];
+  for(const proof of report.repositories){
+   const cwd=path.resolve(report.workspace,proof.path);
+   try {
+    const configured=prepared.repos.find(r=>r.path===proof.path&&r.branch===proof.branch);
+    const origin=await git(configured.cwd,['remote','get-url','origin']);
+    const actual=await git(cwd,['remote','get-url','origin']);
+    const fingerprint=report.repositorySources?.find(r=>r.path===proof.path)?.originHash;
+    if(actual!==origin||(fingerprint&&fingerprint!==createHash('sha256').update(origin).digest('hex')))throw new Error('仓库来源变化，未读取其它来源的历史');
+    if(await git(cwd,['rev-parse','--is-shallow-repository'])==='true'){
+     await git(cwd,['fetch','--unshallow','--no-tags','--no-recurse-submodules','origin',proof.commit]);
+    }
+    if(await git(cwd,['rev-parse','--is-shallow-repository'])!=='false')throw new Error('上游仍是浅仓库，历史不完整');
+    await git(cwd,['rev-list','--count',proof.commit]);
+    results.push({...proof,status:'complete',scope:'fixed-commit-ancestors',checkedAt:new Date().toISOString()});
+   }catch(error){results.push({...proof,status:'unavailable',reason:error.message,recovery:'恢复原仓库的历史读取或认证后重试同一问题；不切换固定提交。'});}
+  }
+  await verifySnapshotUnlocked(project,report);
+  return {repositories:results,deploymentVerified:false};
+ });
+}
