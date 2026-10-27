@@ -19,6 +19,8 @@ export function deploymentTimestamp(value,{offset,timestampUnit}={}){
 // Consumes an existing scoped, complete dataset. It does not scrape a platform,
 // create a credential, query production, or turn Git times into deployments.
 export function deploymentEvidence(args,data,scope={}){
+ const offset=args.recordOffset??0,limit=args.limit??10;
+ if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>20)bad('发布记录展示分页recordOffset须为非负整数、limit为1至20；按nextOffset续读，不重新查询');
  if(!scope.projectId||!scope.environment)bad('部署取证缺少可信任务系统与环境绑定');
  if(!data?.complete||data.reportDraft||!queryEvidenceIdentity(data))bad('部署证据需要本任务已登记的完整原始发布记录数据集');
  const c=args.columns??{},needed=['system','environment','application','deployedAt','status'];
@@ -34,5 +36,6 @@ export function deploymentEvidence(args,data,scope={}){
   if(commit&&!/^[a-f0-9]{7,64}$/i.test(commit)||!commit&&!build)bad('实际成功发布记录缺少可用提交或构建号');
   records.push({sourceRow:index+1,system:scope.projectId,environment:scope.environment,application:args.application,commit:commit??null,build:build??null,deployedAt});
  }
- return {policy:'scoped-deployment-records-v1',deploymentVerified:records.length>0,records,source:{datasetRef:args.datasetRef,queryIdentity:queryEvidenceIdentity(data),readAt:data.readAt,snapshotId:data.snapshotId,evidence:args.evidence,...(args.timezoneEvidence?{timezoneEvidence:args.timezoneEvidence}:{})},audit:{inputRows:data.rows.length,otherScopeRows,otherApplicationRows,unsuccessfulRows},note:records.length?'实际发布记录与系统/环境/应用、提交或构建号及部署时间建立对应；不据此推断最新生产实例仍运行该版本。':'未取得匹配的成功发布记录；不能用提交时间、文件时间或其他环境记录替代上线时间。'};
+ const page=records.slice(offset,offset+limit);
+ return {policy:'scoped-deployment-records-v1',deploymentVerified:records.length>0,records:page,totalCount:records.length,nextOffset:offset+page.length<records.length?offset+page.length:null,source:{datasetRef:args.datasetRef,queryIdentity:queryEvidenceIdentity(data),readAt:data.readAt,snapshotId:data.snapshotId,evidence:args.evidence,...(args.timezoneEvidence?{timezoneEvidence:args.timezoneEvidence}:{})},audit:{inputRows:data.rows.length,otherScopeRows,otherApplicationRows,unsuccessfulRows},note:records.length?'实际发布记录与系统/环境/应用、提交或构建号及部署时间建立对应；按nextOffset读取剩余记录，不重新查库，不据此推断最新生产实例仍运行该版本。':'未取得匹配的成功发布记录；不能用提交时间、文件时间或其他环境记录替代上线时间。'};
 }

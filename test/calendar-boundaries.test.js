@@ -62,3 +62,10 @@ test('release evidence binds two systems and different environments, filters fai
  assert.equal(deploymentEvidence(a,d,{projectId:'ltx',environment:'prd'}).deploymentVerified,false);
  assert.throws(()=>deploymentEvidence(a,{...d,queryDefinition:null},{projectId:'tpm',environment:'prd'}),/原始发布记录/);
 });
+
+test('release record paging preserves the complete mapping and explicit timezone offset',()=>{
+ const d={...data(Array.from({length:35},(_,i)=>({system:'demo',env:'qa',app:'gateway',at:'2026-01-02 09:30:00',status:'ok',sha:'abcdef'+i.toString(16).padStart(2,'0')}))),queryHash:'original',queryDefinition:{sql:'SELECT releases',params:[]}};
+ const args={datasetRef:'saved',application:'gateway',columns:{system:'system',environment:'env',application:'app',deployedAt:'at',status:'status',commit:'sha'},successValues:['ok'],evidence:'release audit',offset:'+08:00',timezoneEvidence:'verified UTC+8'};
+ let offset=0,rows=[];do{const page=deploymentEvidence({...args,recordOffset:offset,limit:7},d,{projectId:'demo',environment:'qa'});assert.equal(page.totalCount,35);assert.ok(page.records.every(r=>r.deployedAt==='2026-01-02T01:30:00.000Z'));rows.push(...page.records);offset=page.nextOffset;}while(offset!==null);
+ assert.equal(new Set(rows.map(r=>r.sourceRow)).size,35);assert.throws(()=>deploymentEvidence({...args,recordOffset:-1},d,{projectId:'demo',environment:'qa'}),/分页/);
+});
