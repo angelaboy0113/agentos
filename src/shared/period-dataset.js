@@ -15,12 +15,25 @@ export function periodValues(period){
  const start=parse(period.start),end=parse(period.end);if(start>end)bad('期间起点晚于终点');const values=[];
  for(let d=new Date(start);d<=end;month?d.setUTCMonth(d.getUTCMonth()+1):d.setUTCDate(d.getUTCDate()+1))values.push(d.toISOString().slice(0,month?7:10));return values;
 }
-function sourcePeriod(row,source,period){
- if(source.yearColumn){if(period.unit!=='month'||!/^\d{4}$/.test(row[source.yearColumn])||!/^\d{1,2}$/.test(row[source.periodColumn]))bad('yearColumn模式需要四位年和1至12月');const m=Number(row[source.periodColumn]);if(m<1||m>12)bad('来源月份超出1至12');return row[source.yearColumn]+'-'+String(m).padStart(2,'0');}
- return row[source.periodColumn];
+export function normalizeCalendarPeriod(value,unit){
+ const text=typeof value==='string'?value.trim():Number.isSafeInteger(value)?String(value):'';
+ const match=unit==='month'?text.match(/^(\d{4})-?(\d{2})$/)??text.match(/^(\d{4})-(\d)$/):text.match(/^(\d{4})-?(\d{2})-?(\d{2})$/);
+ if(!match)bad('来源期间格式无效：月支持YYYYMM、YYYY-MM、YYYY-M；日支持YYYYMMDD或YYYY-MM-DD；不能当作无发生额补零');
+ const canonical=match.slice(1).map(v=>v.padStart(2,'0')).join('-');
+ const date=new Date(canonical+(unit==='month'?'-01':'')+'T00:00:00Z');
+ if(!Number.isFinite(+date)||date.toISOString().slice(0,unit==='month'?7:10)!==canonical)bad('来源期间日期不存在，不能按范围外排除或补零');
+ return canonical;
+}
+function sourcePeriod(row,source,period,normalization){
+ let value=row[source.periodColumn];
+ if(source.yearColumn){if(period.unit!=='month'||!/^\d{4}$/.test(row[source.yearColumn])||!/^\d{1,2}$/.test(value))bad('yearColumn模式需要四位年和1至12月');const m=Number(value);if(m<1||m>12)bad('来源月份超出1至12');value=row[source.yearColumn]+'-'+String(m).padStart(2,'0');}
+ return normalization==='calendar-v1'&&period.unit!=='values'?normalizeCalendarPeriod(value,period.unit):value;
 }
 // Pure, repeatable transformation: no SQL, paths, eval or arbitrary code.
-export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Number.MAX_SAFE_INTEGER}={}){
+export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Number.MAX_SAFE_INTEGER,legacy=false}={}){
+ const normalization=legacy?null:'calendar-v1';
+ if(args.periodNormalization&&args.periodNormalization!=='calendar-v1')bad('未知期间转换版本');
+ const effectiveArgs=legacy?structuredClone(args):{...structuredClone(args),periodNormalization:normalization};
  const population=await load(args.populationRef);if(!population?.complete||population.reportDraft)bad('期间全集须为完整的原始或维度数据集');keys(population,args.keyColumns);
  const periods=periodValues(args.period),periodSet=new Set(periods),rowKey=args.rowKey??'period_key';
  const columns=[...population.columns,args.period.column,rowKey];if(!field(rowKey)||new Set(columns).size!==columns.length)bad('期间或组合键输出列与原字段重复');
@@ -34,7 +47,7 @@ export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Nu
   if(s.outside==='exclude'&&!(typeof s.outsideEvidence==='string'&&s.outsideEvidence.trim().length>=3))bad('排除全集外记录必须说明依据');
   const index=new Map(),audit={datasetRef:s.datasetRef,inputRows:d.rows.length,matchedRows:0,outsideRows:0,duplicateRows:0,missingCells:0,nullCells:0,outsideEvidence:s.outsideEvidence??null};
   for(const m of s.metrics){if(!d.columns.includes(m.column)||!field(m.as)||!['zero','empty','error'].includes(m.missing)||!['zero','empty','error'].includes(m.nulls))bad('金额列须指定真实字段及missing/nulls处理规则');for(const c of [m.as,m.cumulativeAs].filter(x=>x!==undefined)){if(!field(c)||columns.includes(c))bad('金额输出列重复');columns.push(c);numericColumns.push(c);provenance[c]={datasetRef:s.datasetRef,column:m.column,cumulative:c===m.cumulativeAs};}}
-  for(const row of d.rows){const k=key(row,s.keyColumns),period=sourcePeriod(row,s,args.period);if(!populationMap.has(k)||!periodSet.has(period)){audit.outsideRows++;if(s.outside==='error')bad('来源包含全集或期间范围外记录；核对范围或明确exclude及依据');continue;}audit.matchedRows++;const cellKey=JSON.stringify([k,period]);let amounts=index.get(cellKey);if(amounts){audit.duplicateRows++;if(s.duplicates==='error')bad('同一对象同一期间存在重复金额记录；先核对粒度或明确sum');}else {amounts=s.metrics.map(()=>0n);index.set(cellKey,amounts);}
+  for(const row of d.rows){const k=key(row,s.keyColumns),period=sourcePeriod(row,s,args.period,normalization);if(!populationMap.has(k)||!periodSet.has(period)){audit.outsideRows++;if(s.outside==='error')bad('来源包含全集或期间范围外记录；核对范围或明确exclude及依据');continue;}audit.matchedRows++;const cellKey=JSON.stringify([k,period]);let amounts=index.get(cellKey);if(amounts){audit.duplicateRows++;if(s.duplicates==='error')bad('同一对象同一期间存在重复金额记录；先核对粒度或明确sum');}else {amounts=s.metrics.map(()=>0n);index.set(cellKey,amounts);}
    s.metrics.forEach((m,i)=>{const v=row[m.column];if(v===null||v===''){audit.nullCells++;if(m.nulls==='error')bad('实际金额为空；必须明确nulls规则');if(m.nulls==='empty')amounts[i]=null;}else {const amount=number(v);if(amounts[i]!==null)amounts[i]+=amount;}});
   }
   inputs.push(d);indexes.push({s,index,audit});audits.push(audit);
@@ -45,7 +58,7 @@ export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Nu
    indexes.forEach(({s,index,audit},j)=>{const values=index.get(JSON.stringify([k,period]));s.metrics.forEach((m,i)=>{let v=values?.[i];if(v===undefined){audit.missingCells++;if(m.missing==='error')bad('缺少对象期间金额记录；必须明确missing规则');v=m.missing==='zero'?0n:null;}row[m.as]=v===null?null:format(v);if(m.cumulativeAs){running[j][i]=running[j][i]===null||v===null?null:running[j][i]+v;row[m.cumulativeAs]=running[j][i]===null?null:format(running[j][i]);}});});rows.push(row);
   }
  }
- return {rows,columns,numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===inputs[0].snapshotId)?inputs[0].snapshotId:hash(inputs.map(d=>d.snapshotId).sort()),derivation:{kind:'period_grid',args:structuredClone(args),audit:{objects:populationMap.size,periods:periods.length,rowCount:rows.length,sources:audits},provenance}};
+ return {rows,columns,numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===inputs[0].snapshotId)?inputs[0].snapshotId:hash(inputs.map(d=>d.snapshotId).sort()),derivation:{kind:'period_grid',args:effectiveArgs,audit:{objects:populationMap.size,periods:periods.length,rowCount:rows.length,sources:audits},provenance}};
 }
 export async function verifyPeriodDataset(data,load,options={}){
  if(data?.derivation?.kind==='left_lookup'){
@@ -56,7 +69,12 @@ export async function verifyPeriodDataset(data,load,options={}){
  if(data?.derivation?.kind!=='period_grid')return;
  const visited=options.visited??new Set();if(visited.has(data))bad('期间数据依赖循环');visited.add(data);
  const dependencies=new Map();for(const ref of [data.derivation.args.populationRef,...data.derivation.args.sources.map(s=>s.datasetRef)]){const dep=await load(ref);await verifyPeriodDataset(dep,load,{...options,visited});dependencies.set(ref,dep);}
- const rebuilt=await buildPeriodDataset(data.derivation.args,ref=>dependencies.get(ref),options);
+ if(!data.derivation.args.periodNormalization&&data.derivation.args.period.unit!=='values'){
+  for(const source of data.derivation.args.sources)for(const row of dependencies.get(source.datasetRef).rows){
+   if(sourcePeriod(row,source,data.derivation.args.period,null)!==sourcePeriod(row,source,data.derivation.args.period,'calendar-v1'))bad('历史期间配方存在未统一月份；请用原始来源重新period_dataset并核验，不能沿用旧补零结果');
+  }
+ }
+ const rebuilt=await buildPeriodDataset(data.derivation.args,ref=>dependencies.get(ref),{...options,legacy:!data.derivation.args.periodNormalization});
  for(const k of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(JSON.stringify(data[k])!==JSON.stringify(rebuilt[k]))bad('期间派生数据与原来源重算不一致，不能核验或交付');
  visited.delete(data);
 }

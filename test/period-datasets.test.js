@@ -48,7 +48,7 @@ async function fixture(t){
  const root=await mkdtemp(path.join(os.tmpdir(),'agentos-period-'));t.after(()=>rm(root,{recursive:true,force:true}));const directory=path.join(root,'exports','JOB-period');
  const d=new ReportDatasets({directory,scope:'period-test',maxRows:'all'});const recipes=new Map();
  async function collect(name,rows){const statement={sql:'SELECT '+name,params:[],columns:Object.keys(rows[0]),numericColumns:name==='population'?[]:['amount'],recipe:{tool:'group_dataset',args:{name}}};recipes.set(name,{statement,rows});return d.collect(statement,pages(rows));}
- const p=await collect('population',[{id:'001'},{id:'002'}]);const movements=[{id:'001',period:'2025-12',amount:'0.1'},{id:'001',period:'2026-02',amount:'-0.02'}];const source=await collect('monthly',movements),reference=await collect('independent_detail',movements);
+ const p=await collect('population',[{id:'001'},{id:'002'}]);const movements=[{id:'001',period:'202512',amount:'0.1'},{id:'001',period:'202602',amount:'-0.02'}];const source=await collect('monthly',movements),reference=await collect('independent_detail',movements);
  const make=ref=>d.period({...args,populationRef:p.datasetRef,sources:ref?[{...args.sources[0],datasetRef:ref}]:[]});
  const grid=await make(),main=await make(source.datasetRef),baseline=await make(reference.datasetRef);
  const composeArgs={population:{datasetRef:grid.datasetRef,keyColumn:'period_key'},sources:[{name:'s1',datasetRef:main.datasetRef,keyColumn:'period_key'}],columns:['id','month','current','running'].map(column=>({label:column,value:{op:'field',source:'s1',column}}))};
@@ -84,4 +84,24 @@ test('independent period evidence with equal totals but different objects cannot
  const raw=await f.d.collect({sql:'SELECT independent_wrong_object',params:[],columns:['id','period','amount'],numericColumns:['amount']},pages([{id:'002',period:'2025-12',amount:'0.1'},{id:'002',period:'2026-02',amount:'-0.02'}]));
  const wrong=await f.d.period({...old.derivation.args,sources:[{...old.derivation.args.sources[0],datasetRef:raw.datasetRef}]});
  await assert.rejects(f.d.finalize({...f.finalArgs,checks:f.finalArgs.checks.map(c=>({...c,referenceRef:wrong.datasetRef}))}),/逐行核对/);
+});
+
+test('mixed compact, numeric, padded and separate months align without dropping occupancy',async()=>{
+ const rows=[{id:'001',period:'202512',amount:'10'},{id:'001',period:202601,amount:'-3'},{id:'001',period:' 2026-1 ',amount:'-2'},{id:'001',period:'2026-02',amount:'1'}];
+ const d=await build([{id:'001'}],rows);assert.deepEqual(d.rows.map(r=>r.running),['10','5','6']);assert.equal(d.derivation.audit.sources[0].matchedRows,4);assert.equal(d.derivation.audit.sources[0].outsideRows,0);assert.equal(d.derivation.args.periodNormalization,'calendar-v1');
+ await verifyPeriodDataset(d,ref=>ref==='p'?data([{id:'001'}]):data(rows));
+ await assert.rejects(build([{id:'001'}],rows,{...args,sources:[{...args.sources[0],duplicates:'error'}]}),/重复/);
+});
+test('invalid calendar values cannot be silently excluded and zero filled; valid outside periods remain auditable',async()=>{
+ const a={...args,sources:[{...args.sources[0],outside:'exclude',outsideEvidence:'仅指定期间'}]};
+ for(const period of ['202613','202600','2026-13','2026/01','',null,202601.5,'2026-01-01'])await assert.rejects(build([{id:'1'}],[{id:'1',period,amount:'1'}],a),/期间/);
+ const d=await build([{id:'1'}],[{id:'1',period:'202511',amount:'1'}],a);assert.equal(d.derivation.audit.sources[0].outsideRows,1);
+ const day={...args,period:{unit:'day',start:'2024-02-28',end:'2024-03-01',column:'day'}};
+ assert.equal((await build([{id:'1'}],[{id:'1',period:20240229,amount:'2'}],day)).rows[1].current,'2');
+ await assert.rejects(build([{id:'1'}],[{id:'1',period:'20250229',amount:'2'}],day),/日期不存在/);
+});
+test('old valid period proofs remain readable but compact months previously discarded require regeneration',async()=>{
+ const p=data([{id:'1'}]),standard=data([{id:'1',period:'2026-01',amount:'2'}]);const old=await buildPeriodDataset(args,r=>r==='p'?p:standard,{legacy:true});await verifyPeriodDataset(old,r=>r==='p'?p:standard);
+ const compact=data([{id:'1',period:'202601',amount:'2'}]);const a={...args,sources:[{...args.sources[0],outside:'exclude',outsideEvidence:'旧范围处理'}]};const broken=await buildPeriodDataset(a,r=>r==='p'?p:compact,{legacy:true});assert.equal(broken.rows[1].current,'0');await assert.rejects(verifyPeriodDataset(broken,r=>r==='p'?p:compact),/重新period_dataset/);
+ const fresh=await buildPeriodDataset(a,r=>r==='p'?p:compact);assert.equal(fresh.rows[1].current,'2');await verifyPeriodDataset(fresh,r=>r==='p'?p:compact);
 });
