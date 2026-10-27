@@ -1,3 +1,4 @@
+import {runWithSourceHistory} from './source-history-runner.js';
 import { assistantInstructions } from '../shared/project-scope.js';
 import {reportOutputPolicy} from '../shared/report-output-policy.js';
 import {reportReviewEvidence} from '../shared/report-inspection.js';
@@ -38,7 +39,7 @@ export async function executeJob(job, config, emit) {
   if (job.taskIntent === 'analysis') {
     const reusingSnapshot = (job.context ?? []).some(entry => entry.result?.sourceSync);
     await emit({ type: 'progress', message: job.stage === 'owner_report' || reusingSnapshot ? '正在核对并复用本问题已同步的源码快照' : '正在同步配置仓库的 origin 分支，成功后进入只读分析' });
-    try { sourceSync = await prepareAnalysisSources(job, project); }
+    try { sourceSync = await prepareAnalysisSources(job, project);await emit({type:'progress',message:'已核验并固定本问题源码提交',sourceSnapshot:sourceSync}); }
     catch (error) { return sourceBlocked(error); }
   }
   const workspace = sourceSync?.workspace ?? await prepareWorkspace(job, project, config.worktreeRoot);
@@ -47,11 +48,12 @@ export async function executeJob(job, config, emit) {
     job.taskIntent === 'analysis' ? path.join(config.worktreeRoot, 'analysis-resources') : workspace);
   const ledger = job.taskIntent === 'analysis'&&!resumingAnalysis ? await readProjectLedger(workspace, project, sourceSync) : [];
   if(job.reportFiles?.length)job={...job,reportEvidence:await reportReviewEvidence(config.dataDir??path.dirname(config.worktreeRoot),job)};
-  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace);
+  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace)+`
+固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标}，Runner按需补取并恢复同一会话。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
   let generated;
-  try { generated = await runCodexWithCapacityRetry({ job, config, workspace, attachmentPaths, prompt, emit }); }
+  try { generated = await runWithSourceHistory({ job, project, sourceSync, config, workspace, attachmentPaths, prompt, emit },{run:runCodexWithCapacityRetry}); }
   catch(error) {
     if(error.code!=='ANALYSIS_TURN_TIMEOUT'||job.taskIntent!=='analysis')throw error;
     generated=analysisTimeoutResult(job,error);
@@ -75,7 +77,7 @@ export async function executeJob(job, config, emit) {
   // Recheck final files after verification commands may have generated/changed artifacts.
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
-  return { sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({binding:e.binding,calculationAudit:e.calculationAudit})),
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate,
@@ -83,7 +85,7 @@ export async function executeJob(job, config, emit) {
 }
 
 function sourceBlocked(error) {
-  const summary = `源码版本检查未通过，本次没有形成有效分析结论。${error.message} 已同步的仓库可能保留更新，不自动回滚；请管理员在本机处理后重新发起分析。`;
+  const summary = `源码版本检查未通过，本次检查尚未完成。${error.message} 已有固定提交证据继续保留，不用旧缓存冒充最新，也不切换到其它提交；恢复来源或权限后可在原问题接续。`;
   return { outcome: 'blocked', sourceSyncBlocked: true, summary, finalMessage: summary, verification: [] };
 }
 
@@ -227,6 +229,7 @@ export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = fal
 
 export function analysisThreadId(job, workspace) {
   if (job.taskIntent !== 'analysis' || job.stage !== 'developer') return null;
+  if(job.analysisContinuation&&job.analysisContinuation.questionId===job.questionId&&job.analysisContinuation.workspace===workspace)return job.analysisContinuation.threadId;
   return [...(job.context ?? [])].reverse()
     .find((entry) => entry.stage === 'developer' && entry.result?.threadId
       && (!workspace || entry.result?.workspace === workspace))?.result.threadId ?? null;

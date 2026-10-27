@@ -472,6 +472,14 @@ export class JsonStore {
       if (event.type === 'heartbeat' && job.lease) {
         job.lease.expiresAt = new Date(Date.now() + 120_000).toISOString();
       }
+      if(event.type==='progress'&&event.sourceSnapshot?.policy==='isolated-environment-source-v1'){
+        if(job.analysisSourceSnapshot&&JSON.stringify(job.analysisSourceSnapshot)!==JSON.stringify(event.sourceSnapshot))throw new Error('本问题源码提交已经固定，不能替换');
+        job.analysisSourceSnapshot=structuredClone(event.sourceSnapshot);job.analysisSourceQuestionId=job.questionId;
+      }
+      if(event.type==='progress'&&event.sourceContinuation){
+        const c=event.sourceContinuation;if(c.questionId!==job.questionId||c.workspace!==job.analysisSourceSnapshot?.workspace||typeof c.threadId!=='string')throw new Error('源码历史接续身份不匹配');
+        job.analysisContinuation=structuredClone(c);
+      }
       if (event.type === 'cancelled') {
         if (job.status !== 'cancelling' || !event.leaseId || !event.processesExited) throw new Error('Cancellation requires process-exit acknowledgement');
         job.status = 'cancelled';

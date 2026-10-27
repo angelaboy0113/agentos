@@ -10,7 +10,8 @@
     "websiteQuery",
     "investigation",
     "environmentSetup",
-    "reportAssessment"
+    "reportAssessment",
+    "sourceHistoryQuery"
   ],
   "properties": {
     "outcome": {
@@ -578,6 +579,33 @@
                   }
                 }
               ]
+            }
+          }
+        }
+      ]
+    },
+    "sourceHistoryQuery": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositories",
+            "reason"
+          ],
+          "properties": {
+            "repositories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "reason": {
+              "type": "string"
             }
           }
         }

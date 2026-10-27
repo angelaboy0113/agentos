@@ -13,13 +13,13 @@ export class TaskDatasetStore {
    try{const d=await this.get(name.slice(0,-5));out.push({datasetRef:d.id,columns:d.data.columns,rowCount:d.data.rows.length,dataHash:d.dataHash,readAt:d.readAt,snapshotId:d.snapshotId,complete:true,kind:d.data.reportDraft?'report_draft':d.data.derivation?'derived':'query',queryHash:d.data.queryHash,queryDefinition:d.data.queryDefinition?{sql:d.data.queryDefinition.sql.slice(0,200),params:d.data.queryDefinition.params.slice(0,3).map(v=>v.slice(0,80)),limited:d.data.queryDefinition.sql.length>200||d.data.queryDefinition.params.length>3||d.data.queryDefinition.params.some(v=>v.length>80)}:undefined});}catch{/* Invalid/stale/different-scope artifacts are never usable. */}
   }return out;
  }
- async get(id){
+ async get(id,{allowPartial=false}={}){
   if(!valid(id))throw new Error('数据集引用无效');
   if((await lstat(this.root)).isSymbolicLink())throw new Error('数据集目录不能是符号链接');
   const file=path.join(this.root,id+'.json'),root=await realpath(this.root),actual=await realpath(file),info=await lstat(file);
   if(!actual.startsWith(root+path.sep)||!info.isFile()||info.isSymbolicLink())throw new Error('数据集文件校验未通过');
   const d=JSON.parse(await readFile(file,'utf8'));
-  if(d.id!==id||d.scope!==this.scope||!Number.isFinite(Date.parse(d.readAt))||Date.now()-Date.parse(d.readAt)>86400000||Date.parse(d.readAt)>Date.now()+1000||d.data?.complete!==true||!Array.isArray(d.data.columns)||!Array.isArray(d.data.rows)||hash(d.data)!==d.dataHash)throw new Error('数据集范围、完整性、有效期或摘要校验失败');
+  if(d.id!==id||d.scope!==this.scope||!Number.isFinite(Date.parse(d.readAt))||Date.now()-Date.parse(d.readAt)>86400000||Date.parse(d.readAt)>Date.now()+1000||d.data?.complete!==true&&!(allowPartial&&d.data?.complete===false)||!Array.isArray(d.data.columns)||!Array.isArray(d.data.rows)||hash(d.data)!==d.dataHash)throw new Error('数据集范围、完整性、有效期或摘要校验失败');
   return d;
  }
  async save(id,data,snapshotId,readAt=new Date().toISOString()){

@@ -25,7 +25,7 @@
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送、幂等记录及最近 200 项本机设置审计 | 是 | 否 |
 | `data/exports/<JOB>/` | 完整分组报表 CSV，含实时业务金额；通过文件校验后回复原提问。见[报表导出](report-exports.md) | 是 | 否 |
 | `data/exports/<JOB>/report-*.verification.json` | 最终文件的列/覆盖/分量核验及业务依据，与CSV绑定；不等于人工业务验收 | 是 | 否 |
-| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；不完整集不保存，不进入团队知识。24小时后不再复用；启用历史保留策略后随过期任务清理 | 是 | 否 |
+| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；普通查询长字段可保存为明确标记不完整的证据，不参与完整报表；不进入团队知识。24小时后不再复用；启用历史保留策略后随过期任务清理 | 是 | 否 |
 | `data/lark-cli/reports/` | CLI 文件回复副本，需与正式导出文件分别清理 | 是 | 否 |
 | `data/website-evidence/<JOB>/` | 用户要求的当前网页视口截图，等待接口/渲染稳定，仅凭据及显式敏感区灰色遮挡，未就绪时标记现场证据；摘要校验后通过原话题投递，待发送保存在websiteEvidenceDeliveries，随问题保留策略清理 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |
@@ -114,3 +114,5 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 
 
 首次构建隔离源码缓存时，先从origin/HEAD与清单一致的同仓同分支缓存或已配置来源仓独立复制Git对象与浅仓边界，再从真实origin拉取指定环境提交，减少重复下载；最终缓存不依赖来源仓objects。发布前清除临时仓中的其它refs/reflogs和不可达对象，不导入个人未推送分支或工作区改动。构建/复用拒绝外部对象依赖文件；来源仓不执行任何清理。该优化不改变环境分支选择、远端版本核验或清理保护，见[源码同步说明](source-sync.spec.md)。
+
+1.49.0新增固定提交历史状态、analysisContinuation与轻量`.snapshot-audit`；迁移备份时同状态、source-manifest及datasets成套保留。长字段证据、calendar-v2版本配方与查询完整性标记保存在任务datasets内。详见[通用能力与迁移验证](multi-system-capability-audit.md)。

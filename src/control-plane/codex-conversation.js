@@ -35,7 +35,7 @@ export class CodexConversationEngine {
     if (this.closed) throw new Error('Conversation engine stopped');
     this.app = new CodexAppServer({ cwd: this.cwd, codexBin: await resolveCodexBinary(this.options.codexBin), env, args: conversationServerArgs() });
     await this.app.start();
-    const account = await this.app.request('account/read', { refreshToken: false });
+    const account = await this.app.readAccount({onRetry:({attempt})=>{this.loginRecovery={stage:'account/read',attempt,code:'CODEX_RPC_TIMEOUT'};this.options.onProgress?.(this.loginRecovery);}});
     if (account.account?.type !== 'chatgpt') {
       await this.app.close();
       throw new Error('AgentOS 需要本机 Codex 的 ChatGPT 订阅登录态，请先 codex login');
@@ -81,7 +81,7 @@ export class CodexConversationEngine {
         input: [{ type: 'text', text: `本轮最新上下文（状态以此为准，历史里的操作不可重复执行）：\n${JSON.stringify(input)}` },
           ...(input.attachments ?? []).filter((item) => item.type === 'image').slice(-5).map((item) => ({ type: 'localImage', path: item.path }))],
         outputSchema: this.schema,
-      }, { signal: options.signal, timeoutMs: this.options.timeoutMs ?? 90_000, onEvent: options.onEvent });
+      }, { signal: options.signal, timeoutMs: this.options.timeoutMs ?? 0, onEvent: options.onEvent });
       session.count++;
       session.active = false;
       session.touched = Date.now();
@@ -129,7 +129,7 @@ export class CodexConversationEngine {
       const result = await decisionTurn(this.app, { threadId: session.id, effort: runtime.reasoningEffort ?? 'low', approvalPolicy: 'never',
         input: [{ type: 'text', text: `当前真实发起人、权限、问题与任务状态：\n${JSON.stringify(payload)}` },
           ...(input.attachments ?? []).filter((item) => item.type === 'image').slice(-5).map((item) => ({ type: 'localImage', path: item.path }))],
-        outputSchema: this.schema }, { signal: options.signal, timeoutMs: this.options.timeoutMs ?? 90_000, onEvent: options.onEvent });
+        outputSchema: this.schema }, { signal: options.signal, timeoutMs: this.options.timeoutMs ?? 0, onEvent: options.onEvent });
       const decision = { ...validateDecision(JSON.parse(result.text)), threadId: session.id,
         timing: { ...result.timing, aiMs: Date.now() - began, sessionReused: resumed, model: session.model,
           reasoningEffort: runtime.reasoningEffort ?? 'low', nativeSession: true } };

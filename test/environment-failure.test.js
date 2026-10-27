@@ -53,3 +53,21 @@ test('native Chrome object lookup failures are classified as a recoverable brows
  assert.match(diagnostic,/日常Chrome自动化通道未就绪/);
  assert.doesNotMatch(diagnostic,/EXECUTION_ERROR/);
 });
+
+
+test('local Codex wait/disconnect diagnostics do not blame query size or database',()=>{
+ assert.match(failureDiagnostic(new Error('Codex RPC timed out: thread/start')),/CODEX_RPC_TIMEOUT/);
+ assert.doesNotMatch(failureDiagnostic(new Error('Codex RPC timed out: thread/start')),/缩小查询范围后/);
+ assert.match(failureDiagnostic(new Error('Codex app-server disconnected')),/CODEX_DISCONNECTED/);
+});
+
+test('source findings survive a pre-query failure through the real store contract',async t=>{
+ const {preserveContinuousEnvironmentEvidence}=await import('../src/runner/index.js');
+ const dir=await mkdtemp(path.join(os.tmpdir(),'pre-query-failure-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new JsonStore(path.join(dir,'state.json'));
+ const plan={environmentId:'test',queryId:'investigate',scopeHash:'scope',approvedBy:'owner',startedAt:'2026-01-01T00:00:00Z'};
+ const prior={outcome:'needs_clarification',finalMessage:'已核实源码公式，实时数据尚未查询。',handoffGate:{passed:true},verifiedArtifacts:[{path:'example.js'}],handoff:{checks:[{status:'passed'}],risks:[]},investigation:{status:'continue'},environmentEvidence:{scopeHash:'historical'},exportFiles:[{id:'historical'}]};
+ const {job}=await store.createJob({projectId:'p',taskIntent:'analysis',workflow:'single_developer',stage:'developer',instruction:'report',environmentAccess:plan,context:[{kind:'analysis_turn',result:prior}]});const leased=await store.leaseNext('r');
+ const diagnostic=failureDiagnostic(Object.assign(new Error('request timed out secret-value'),{code:'CODEX_RPC_TIMEOUT',diagnosticStage:'account/read'}));
+ const result=preserveContinuousEnvironmentEvidence({...leased,context:[{kind:'analysis_turn',result:prior}]},{outcome:'blocked',finalMessage:diagnostic});
+ const done=await store.appendEvent(job.id,{type:'completed',runnerId:'r',leaseId:leased.lease.id,result});assert.equal(done.job.status,'blocked');assert.match(done.job.result.finalMessage,/已核实源码公式/);assert.match(done.job.result.finalMessage,/核对本机Codex登录状态/);assert.doesNotMatch(done.job.result.finalMessage,/secret-value|缩小查询范围后/);assert.equal(done.job.result.environmentEvidence,undefined);assert.deepEqual(done.job.result.exportFiles,[]);assert.equal(done.job.result.environmentFailure.code,'CODEX_RPC_TIMEOUT');
+});

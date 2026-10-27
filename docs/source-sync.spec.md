@@ -97,16 +97,18 @@ Runner 是本机执行进程，不是飞书机器人。管理员被提醒不是�
 
 自动清理在启动、每日维护、任务完成/失败/取消后触发。每个项目/环境保留最近选用版本（包括远端回滚后重新选用的旧提交），并额外保留活动/等待问题及待交付文件需要的版本。有排队或执行中的项目先跳过，下次重试。源码准备与清理使用同一 POSIX 文件锁，先加锁再读最新任务状态，不根据快照年龄删除正在使用的文件。进程结束由内核释放锁，无锁文件过期猜测。历史问答仍按 retentionDays 处理；已结束问题的源码目录可能先回收，报告、仓库路径、分支、提交及核验记录保留。需要调查当前版本时应发起新问题，不承诺被回收的旧工作目录仍能打开。
 
-只处理隔离缓存根目录内带有效所有权清单的 `analysis-*` 容器，以及有构建标记的孤立 `building-*` 临时目录。根目录或祖先符号链接、路径重叠、异常清单、Git worktree、HEAD不符、未提交修改及未知符号链接保守保留。仓库已跟踪的源码符号链接仅删除链接本身，不跟随其目标。系统业务仓、配置、账号凭据、历史报表均不属于此清理。保留的活动版本可能超过每环境一份；异常副本需人工检查，不能保证固定空间上限。
+只处理隔离缓存根目录内带有效所有权清单的 `analysis-*` 容器；未知或未完成的 `building-*` 临时目录保守保留。根目录或祖先符号链接、路径重叠、异常清单、Git worktree、HEAD不符、未提交修改及未知符号链接保守保留。仓库已跟踪的源码符号链接仅删除链接本身，不跟随其目标。系统业务仓、配置、账号凭据、历史报表均不属于此清理。保留的活动版本可能超过每环境一份；异常副本需人工检查，不能保证固定空间上限。
 
 macOS/POSIX 运行环境需可调用 Python3 和 fcntl；锁不可用时明确失败，不跳过保护。Windows isolated缓存的此锁方式尚不支持，不能直接照搬部署。
 
-离线维护先停止本实例的工作进程，再预演：
+维护先预演（只读状态，不执行删除）：
 
 ```sh
 node scripts/prune-source-snapshots.mjs --projects /your/agentos/config/projects.local.json --state /your/runtime/data/agentos.json
-# 核对 removed / kept / unknown 后应用：
-node scripts/prune-source-snapshots.mjs --projects /your/agentos/config/projects.local.json --state /your/runtime/data/agentos.json --apply
+# 核对 removed / kept / unknown 后，经当前本机实例鉴权及权威状态写锁应用：
+node scripts/prune-source-snapshots.mjs --apply --server http://127.0.0.1:YOUR_PORT
 ```
 
 默认预演不删除缓存；锁文件可能创建。apply 不改变任务状态、服务注册或凭据。运行态应由服务内维护器清理，避免手工读取正在改写的状态文件。删除数量和跳过原因由返回记录核对；保留清理记录供迁移验收。
+
+1.49.0补齐按需祖先历史、固定提交恢复、Git元数据边界及待投递引用复核；保留完整种子中固定提交可达祖先。具体工具、兼容、锁与迁移边界见[多系统通用能力](multi-system-capability-audit.md)。

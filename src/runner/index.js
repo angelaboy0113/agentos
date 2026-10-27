@@ -170,7 +170,8 @@ export class AgentRunner {
 }
 
 // A later supplementary environment read must not erase source-backed findings
-// that already passed the analysis handoff gate. Browser/database interruptions
+// that already passed the analysis handoff gate. A blocked read is not partial
+// environment evidence: keep its blocked outcome without weakening store validation. Browser/database interruptions
 // remain visible as an explicit gap; without useful prior evidence the original
 // blocked result is returned unchanged.
 export function preserveContinuousEnvironmentEvidence(job, environmentResult) {
@@ -193,7 +194,10 @@ export function preserveContinuousEnvironmentEvidence(job, environmentResult) {
   } : prior.investigation;
   return {
     ...prior,
-    outcome: 'partial',
+    outcome: 'blocked',
+    environmentEvidence: undefined,
+    environmentFailure: environmentResult.environmentFailure??{code:/^错误码：(\w+)/m.exec(diagnostic)?.[1]??'ENVIRONMENT_INTERRUPTED',diagnostic},
+    exportFiles: [],
     summary: `已保留前面查明的结论；最后一次补充环境核验未完成。${prior.summary ?? ''}`.slice(0, 1200),
     finalMessage: `${prior.finalMessage}\n\n尚未完成的补充核验\n${diagnostic}\n\n以上连接异常只影响补充核验，不推翻前面已经取得的源码或数据库证据。`,
     environmentSetup: null,

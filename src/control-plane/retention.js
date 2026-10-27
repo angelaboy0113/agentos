@@ -8,9 +8,14 @@ export class HistoryRetention {
  constructor(context){this.context=context;this.policy=retentionPolicy(context.config.retentionDays);this.lastRun=null;this.running=null;}
  start(){if(this.timer)return;this.run().catch(()=>{});this.timer=setInterval(()=>this.run().catch(()=>{}),this.policy.intervalMs);this.timer.unref();}
  async stop(){this.closed=true;clearInterval(this.timer);await Promise.allSettled([this.running,this.snapshotRunning].filter(Boolean));}
- async collectSnapshots(){
-  if(this.closed)return [];if(this.snapshotRunning)return this.snapshotRunning;
-  this.snapshotRunning=(async()=>{const results=[];for(const [id,project]of Object.entries(this.context.projects?.projects??{}))results.push(await pruneSourceSnapshots({...project,id},{getState:()=>this.context.store.read(),apply:true}));return results;})();
+ async collectSnapshots({apply=true}={}){
+  if(this.closed)return [];
+  if(this.snapshotRunning){if(this.snapshotApply===apply)return this.snapshotRunning;await this.snapshotRunning;return this.collectSnapshots({apply});}
+  this.snapshotApply=apply;
+  this.snapshotRunning=(async()=>{const results=[];for(const [id,project]of Object.entries(this.context.projects?.projects??{})){
+   const protectIds=[...(this.context.reports?.workers?.keys()??[])].map(k=>k.split(':')[0]);
+   const result=await pruneSourceSnapshots({...project,id},{getState:()=>this.context.store.read(),withState:fn=>this.context.store.transact(fn),apply,protectIds});results.push({projectId:id,...result});
+  }this.lastSnapshots={at:new Date().toISOString(),apply,results};return results;})();
   try{return await this.snapshotRunning;}finally{this.snapshotRunning=null;}
  }
  async run(now=Date.now()){

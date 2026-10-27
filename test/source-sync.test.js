@@ -166,8 +166,8 @@ test('immutable cache deduplicates concurrent questions, refreshes tips, preserv
  await commit(f.writer,'version two');await git(f.writer,'push');const c=await question();assert.notEqual(a.workspace,c.workspace);
  assert.equal(await readFile(path.join(a.workspace,'business/source.txt'),'utf8'),'old');
  let state={jobs:[{projectId:'demo',status:'awaiting_clarification',questionId:'q',context:[{result:{sourceSync:a}}]}]};
- const gc=(apply=false)=>pruneSourceSnapshots(project,{getState:async()=>state,apply});
- let result=await gc(true);assert.equal(result.removed.length,0);assert.ok(result.kept.some(x=>x.reason==='active-reference'));
+ const gc=(apply=false)=>pruneSourceSnapshots(project,{getState:async()=>state,withState:fn=>fn(state),apply});
+ let result=await gc(true);assert.equal(result.removed.length,0);assert.ok(result.kept.some(x=>x.reason==='active-or-delivery-reference'));
  state.jobs[0].status='completed';state.conversations=[{status:'sent',setupPending:true,questionId:'q'}];result=await gc();assert.equal(result.removed.length,1);await access(a.workspace);
  await writeFile(path.join(a.workspace,'business/source.txt'),'valuable edit');result=await gc(true);assert.equal(result.removed.length,0);assert.equal(result.unknown.length,1);
  await git(path.join(a.workspace,'business'),'checkout','--','source.txt');
@@ -184,7 +184,7 @@ test('remote rollback selects an existing cache without mutating it; GC follows 
  const a=await q(),old=await git(f.writer,'rev-parse','HEAD');await commit(f.writer,'second');await git(f.writer,'push');const b=await q();
  await git(f.writer,'push','--force','origin',old+':refs/heads/'+f.branch);assert.equal((await q()).workspace,a.workspace);
  const link=path.join(project.analysisSnapshotRoot,'analysis-external');await symlink(f.writer,link);
- const r=await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),apply:true});assert.equal(r.removed.length,1);assert.ok(r.unknown.includes('analysis-external'));await access(a.workspace);await assert.rejects(access(b.workspace));await access(f.writer);
+ const r=await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),withState:fn=>fn({jobs:[]}),apply:true});assert.equal(r.removed.length,1);assert.ok(r.unknown.some(x=>x.name==='analysis-external'));await access(a.workspace);await assert.rejects(access(b.workspace));await access(f.writer);
 });
 
 

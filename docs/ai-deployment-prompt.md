@@ -230,3 +230,5 @@ docs/maintenance-history.md 来推导当前配置。该文件只供维护者在�
 6. 批准 PRD 查询、首次环境接入及任何扩大权限的操作。
 
 除此之外，AI 应持续完成能够安全执行的步骤，并用实际检查结果说明完成程度。
+
+多系统1.49.0部署后运行`node scripts/verify-capability-package.mjs`，核对[通用能力手册](multi-system-capability-audit.md)，按实例维护流程空闲部署。它不代替私有配置、目标平台/发布入口与真实业务验收。

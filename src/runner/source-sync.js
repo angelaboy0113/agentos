@@ -1,4 +1,4 @@
-import { syncSnapshot, verifySnapshot } from './source-snapshot.js';
+import { syncSnapshot, verifySnapshot, restoreSnapshot } from './source-snapshot.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { realpath, stat, access } from 'node:fs/promises';
@@ -9,14 +9,19 @@ const exec = promisify(execFile);
 const policy = 'origin-ff-before-analysis-v1';
 export async function git(cwd, args) {
   try {
+    const env={...process.env,GIT_TERMINAL_PROMPT:'0',GCM_INTERACTIVE:'never'};
+    for(const key of ['GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_INDEX_FILE'])delete env[key];
     const { stdout } = await exec('git', ['-c', `core.hooksPath=${os.devNull}`, '-c', 'submodule.recurse=false', '-C', cwd, ...args], {
       // One large remote transfer may outlive the ordinary local Git command
       // window. This is per request, never a limit on an investigation/job.
       windowsHide: true, timeout: args[0] === 'fetch' ? 600000 : 120000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+      env,
     });
     return stdout.trim();
-  } catch { throw new Error('Git 操作失败或超时；请在本机检查 origin、分支、网络与登录。'); }
+  } catch(error) {
+    const diagnostic=String(error.stderr??'');const code=error.killed||error.signal==='SIGKILL'?'SOURCE_GIT_TIMEOUT':/authentication failed|could not read Username|terminal prompts disabled/i.test(diagnostic)?'SOURCE_GIT_AUTH':/not found|not our ref|couldn.t find remote ref/i.test(diagnostic)?'SOURCE_GIT_REMOTE_UNAVAILABLE':'SOURCE_GIT_UNAVAILABLE';
+    throw Object.assign(new Error('Git 操作失败：'+({SOURCE_GIT_TIMEOUT:'单次请求超时',SOURCE_GIT_AUTH:'认证不可用',SOURCE_GIT_REMOTE_UNAVAILABLE:'远端来源、分支或固定提交不可用',SOURCE_GIT_UNAVAILABLE:'网络或Git执行未完成'}[code])+'；请在本机检查，未输出认证信息。'),{code});
+  }
 }
 function stop(name, reason) { throw new Error(`源码同步受阻（${name}）：${reason}。`); }
 export async function repositories(project) {
@@ -86,12 +91,14 @@ export async function verifyAnalysisSources(project, report) {
 }
 
 export async function prepareAnalysisSources(job, project) {
-  const report = [...(job.context ?? [])].reverse().find((entry) => entry.result?.sourceSync)?.result.sourceSync;
+  const report = job.analysisSourceSnapshot ?? [...(job.context ?? [])].reverse().find((entry) => entry.result?.sourceSync)?.result.sourceSync;
+  if(job.analysisSourceQuestionId&&job.analysisSourceQuestionId!==job.questionId)throw new Error('源码固定记录不属于当前问题');
+  if(report?.policy==='isolated-environment-source-v1'&&job.sourceEnvironment&&report.environment!==job.sourceEnvironment)throw new Error('同一问题不能切换源码环境；请明确新建另一环境的问题');
   // A same-question investigation keeps one immutable source snapshot. Runtime
   // tools may add evidence between turns, but they must not trigger another
   // clone/fetch of the same 20+ repositories.
   if (report && (report.policy !== 'isolated-environment-source-v1' || !job.sourceEnvironment || report.environment === job.sourceEnvironment)) {
-    return verifyAnalysisSources(project, report);
+    return report.policy==='isolated-environment-source-v1'?restoreSnapshot(project,report):verifyAnalysisSources(project, report);
   }
   if (job.stage !== 'owner_report') return project.analysisSourceMode === 'isolated' ? syncSnapshot(project, job.sourceEnvironment) : syncAnalysisSources(project);
   return verifyAnalysisSources(project, report);

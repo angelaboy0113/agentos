@@ -1,0 +1,11 @@
+// Read-only verification of a checkout or an extracted code-only release.
+import {readFile,lstat} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const required=['src/shared/period-dataset.js','src/shared/deployment-evidence.js','src/shared/query-evidence.js','src/shared/git-metadata.js','src/shared/snapshot-lock.js','src/shared/source-snapshot-gc.js','src/runner/source-history-runner.js','src/runner/source-snapshot.js','src/runner/task-dataset-store.js','config/capabilities.example.json','config/task-result.schema.json','config/roles/common.md','docs/multi-system-capability-audit.md','docs/system-assistants.md','scripts/prune-source-snapshots.mjs','scripts/package-remote-mysql.py','src/runner/ssh-mysql-worker.cjs','package.json','package-lock.json'];
+for(const name of required){const info=await lstat(path.join(root,name));if(!info.isFile()||info.isSymbolicLink())throw new Error('Missing/unsafe package member: '+name);}
+for(const name of ['config/capabilities.example.json','config/task-result.schema.json','package.json','package-lock.json'])JSON.parse(await readFile(path.join(root,name),'utf8'));
+const pkg=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')),lock=JSON.parse(await readFile(path.join(root,'package-lock.json'),'utf8'));
+if(pkg.version!==lock.version||pkg.version!==lock.packages[''].version)throw new Error('Package versions differ');
+console.log(JSON.stringify({ok:true,version:pkg.version,requiredFiles:required.length,node:pkg.engines.node,dependencies:pkg.dependencies,copiesPrivateConfiguration:false,fullPrivateMigrationTested:false}));

@@ -1,19 +1,22 @@
 const stages = Object.freeze({
+  'account/read':'核对本机Codex登录状态','initialize':'启动本机Codex服务','thread/start':'建立Codex查询会话',
   'browser.launch': '启动后台浏览器', 'browser.open-login': '打开登录页面',
   'browser.login-form': '等待登录表单', 'browser.login-submit': '提交浏览器登录',
   'browser.login-result': '核验浏览器登录', 'browser.open-config': '打开配置列表',
   'browser.click': '点击页面控件', 'browser.search': '搜索页面', 'browser.snapshot': '读取页面', 'browser.operation': '浏览器操作',
   'browser.reuse-session': '复用已登录页面',
-  group_dataset:'分组查询与保存数据',linked_group_dataset:'关联分组查询与保存数据',inspect_dataset:'读取任务内数据集',list_datasets:'列出任务内数据集',enrich_dataset:'组合业务维度',compare_datasets:'核对数据集差异',inspect_report:'读取文件绑定审阅证据',refresh_report:'集中刷新与重算报表',compose_report:'生成清单草稿',finalize_report:'核验最终清单',read_source_evidence:'读取已核验源码',
+  period_dataset:'补齐期间并计算分组累计',group_dataset:'分组查询与保存数据',linked_group_dataset:'关联分组查询与保存数据',inspect_dataset:'读取任务内数据集',list_datasets:'列出任务内数据集',enrich_dataset:'组合业务维度',compare_datasets:'核对数据集差异',inspect_report:'读取文件绑定审阅证据',refresh_report:'集中刷新与重算报表',compose_report:'生成清单草稿',finalize_report:'核验最终清单',read_source_evidence:'读取已核验源码',
   connection: '环境连接检查', discover: '发现配置', read_config: '读取配置',
   browser_open: '打开后台浏览器页面', browser_click: '点击页面控件',
-  browser_snapshot: '读取页面', browser_search: '搜索页面',
+  browser_snapshot: '读取页面及字段状态', browser_search: '搜索页面', browser_navigate: '进入业务表单页面', browser_fill: '临时填写表单复现', browser_select: '选择页面选项',
   select: '数据库只读查询', schema: '读取表结构', tables: '发现数据表', planning: '规划下一步排查'
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
  ['SSH_EXECUTION', /SSH_(?:EXECUTION|STDIN|PROTOCOL|RESPONSE)/, 'SSH远程数据库通道', '跳板机远程执行通道未能完成，未回退本机数据库连接或转发。', '维护者核对跳板机网络、固定主机密钥、钥匙串凭据及远端运行时；不要重复提供数据库密码或建立隧道。'],
  ['SSH_REMOTE_POLICY', /REMOTE_READONLY_SQL/, '远端只读SQL校验', '远端拒绝了非固定只读语句，未执行写入或存储过程。', '仅使用已提供的受控基础表查询与报表工具，不提交任意SQL。'],
+  ['CODEX_RPC_TIMEOUT', /CODEX_RPC_TIMEOUT|Codex RPC timed out/, '本机Codex接口等待', '本机Codex接口返回超时，或未在显式请求等待期内返回；不能据此判断数据库或查询范围有问题。', '检查本机Codex进程与接口状态，保留原问题；无需缩小业务查询范围。'],
+  ['CODEX_DISCONNECTED', /Codex app-server (disconnected|stopped|is not connected|could not start)/, '本机Codex连接', '本机Codex子进程退出或连接断开，当前调查尚未完成。', '检查本机Codex进程与启动配置，恢复后继续原问题；这不是已确认的业务故障。'],
  ['REPORT_INSPECTION', /REPORT_INSPECTION/, '文件审阅证据', '当前文件的登记、摘要或计算来源读取未通过；不代表业务公式已证实错误。', '按已登记fileId读取同一任务的核验资料，不索要本机已有CSV、不重复查库或生成文件。'],
   ['DATASET_CAPACITY', /DATASET_CAPACITY/, '任务数据存储', '本任务中间数据达到实际空间预算，已有成果仍保留；不是数据库故障。', '先复用已有完整数据并修正草稿；确需增加空间时由维护者评估，不重复查询或删除被引用证据。'],
   ['REPORT_INPUT', /\[REPORT_INPUT\]/, '数据集与报表参数校验', '数据集引用、关联列或报表核验参数不符合要求；不是数据库连接故障。', '依据本轮工具返回的具体校验提示修正；使用list_datasets及实际字段，不重复取数或扩大权限。'],
@@ -37,20 +40,22 @@ const rules = [
   ['MODEL_CAPACITY', /Selected model is at capacity|model.{0,40}(at capacity|overloaded|temporarily unavailable)/i, 'Codex模型服务', '当前选择的Codex模型暂时没有可用容量，并非业务代码、数据或权限错误。', 'AgentOS已在同一只读调查会话中自动重试一次；仍失败时请稍后重发，或在本机管理后台选择当前可用的模型。'],
   ['AUTH_REQUIRED', /认证未成功|Invalid login|Login required|credential|本机凭据|ChatGPT 登录|Unapproved login/i, '登录与凭据', '登录未完成或本机凭据不可用。', '在 AgentOS 所在电脑重新登录对应服务或解锁钥匙串。'],
   ['READ_PERMISSION', /只读账号权限|数据库账号含写权限|无权限|ER_ACCESS_DENIED_ERROR|HTTP 40[13]/i, '读取权限检查', '服务拒绝读取，或账号未通过只读权限核验。', '请管理员核对读取权限；核对当前账号策略与授权，不要关闭只读事务。'],
-  ['TIMEOUT', /timeout|timed out|超时|ETIMEDOUT/i, '等待响应', '本次操作超过等待时限。', '检查本机网络与服务状态，缩小查询范围后重新发起。'],
+  ['TIMEOUT', /timeout|timed out|超时|ETIMEDOUT/i, '等待响应', '本次操作超过等待时限。', '检查具体超时环节、网络与服务，保留已有证据并在原问题恢复；不能据此判断业务异常或要求缩小整个问题范围。'],
   ['NETWORK', /ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|fetch failed|Operation not permitted/i, '网络连接', '执行环境未能建立网络连接。', '检查 AgentOS 所在电脑的内网连接、服务地址和网络权限。'],
   ['SCOPE_LIMIT', /超出范围|次数.*上限|超过次数|Write control|Redirect blocked|未开放|尚未批准|已过期|未通过|查询表或列|筛选条件/i, '授权与范围检查', '请求未通过当前只读范围、有效期或工具限额检查。', '补充具体查询目标；需要扩大范围时由管理员重新授权。'],
   ['PAGE_REFERENCE', /引用已失效|Not clickable|Invalid search|Unknown browser tool/i, '页面操作', '页面引用或操作参数已失效。', '重新打开页面并获取当前元素；不要复用旧引用。'],
+  ['CODEX_RPC_ERROR', /CODEX_RPC_ERROR/, '本机Codex接口', '本机Codex接口返回错误，当前步骤未完成。', '检查具体Codex接口与登录状态，保留原问题和已有证据；无需缩小业务查询范围。'],
   ['HTTP_RESPONSE', /HTTP [45][0-9]{2}|Read failed|环境接口未成功响应/i, '服务响应', '远端接口返回失败状态。', '检查服务状态和接口兼容性；未据此判断数据库是否可连接。'],
 ];
 export function failureDiagnostic(error) {
   const message = typeof error === 'string' ? error : `${String(error?.code ?? '')} ${String(error?.message ?? '')}`;
-  const matched = rules.find(([code, pattern]) => message.trimStart().startsWith(`[${code}]`) || pattern.test(message));
+  const explicit=typeof error==='object'?error?.code:/^\[([A-Z_]+)\]/.exec(message)?.[1];
+  const matched = rules.find(([code])=>code===explicit||message.trimStart().startsWith(`[${code}]`)) ?? rules.find(([,pattern])=>pattern.test(message));
   const [code, , phase, cause, next] = matched ?? ['EXECUTION_ERROR', null, '任务执行', '执行器遇到未分类错误，原因尚未确认。', '请维护者按任务编号检查本机日志；不要在群内发送原始日志或凭据。'];
   return `错误码：${code}\n失败环节：${Object.hasOwn(stages, error?.diagnosticStage) ? stages[error.diagnosticStage] : phase}\n原因：${cause}\n建议：${next}`;
 }
 export function safeExecutionError(error) {
   const message = failureDiagnostic(error);
   const code = /^错误码：(\w+)/.exec(message)[1];
-  return Object.assign(new Error(`[${code}] ${message}`), Object.hasOwn(stages, error?.diagnosticStage) ? { diagnosticStage: error.diagnosticStage } : {});
+  return Object.assign(new Error(`[${code}] ${message}`),{code}, Object.hasOwn(stages, error?.diagnosticStage) ? { diagnosticStage: error.diagnosticStage } : {});
 }

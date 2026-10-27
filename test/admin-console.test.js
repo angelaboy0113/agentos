@@ -54,6 +54,13 @@ test('local admin console serves task records and safely updates runtime setting
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   const cookie = page.headers.get('set-cookie').split(';')[0];
 
+  const prune=base+'/api/v1/admin/source-snapshots/prune';
+  assert.equal((await fetch(prune,{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'})).status,401);
+  for(const body of [{},{apply:true}]){
+    const response=await fetch(prune,{method:'POST',headers:{cookie,origin:base,'x-agentos-admin':'1','content-type':'application/json'},body:JSON.stringify(body)});
+    assert.equal(response.status,200);const result=await response.json();assert.equal(result.ok,true);assert.equal(result.results[0].projectId,'demo');
+  }
+
   const overview = await fetch(`${base}/api/v1/admin/overview`, { headers: { cookie } });
   assert.equal(overview.status, 200);
   const summary = await overview.json();

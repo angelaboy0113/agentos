@@ -191,6 +191,12 @@ async function route(context) {
       message: '已保存。新任务和新会话使用新设置，正在执行的任务不受影响。' }, { 'cache-control': 'no-store' });
   }
 
+  if(request.method==='POST'&&url.pathname==='/api/v1/admin/source-snapshots/prune'){
+    requireAdminSession(context,request,true);const body=await readJson(request);
+    const results=await context.retention.collectSnapshots({apply:body.apply===true});
+    return json(response,200,{ok:true,results},{'cache-control':'no-store'});
+  }
+
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',

@@ -57,7 +57,7 @@ test('continuous analysis can start with an environment query and return to the 
   assert.equal(calls[1].context, 1);
 });
 
-test('a failed supplementary environment read preserves verified source findings as an orange partial result', async () => {
+test('a failed supplementary environment read preserves verified source findings without claiming partial environment evidence', async () => {
   const root = { id: 'JOB-preserve', questionId: 'QST-preserve', projectId: 'demo', stage: 'developer', taskIntent: 'analysis',
     continuousInvestigation: true, lease: { id: 'LEASE-preserve', runnerId: 'runner-one' }, context: [] };
   const plan = { environmentId: 'uat-web', queryId: 'investigate', parameters: ['核对页面计算'], kind: 'website' };
@@ -80,7 +80,7 @@ test('a failed supplementary environment read preserves verified source findings
   };
   const result = await runner.executeContinuous(root, async () => {}, new AbortController().signal);
   assert.equal(calls, 2);
-  assert.equal(result.outcome, 'partial');
+  assert.equal(result.outcome, 'blocked');
   assert.match(result.finalMessage, /两个费比口径|公式已经从源码确认/);
   assert.match(result.finalMessage, /BROWSER_BRIDGE/);
   assert.equal(result.handoffGate.passed, true);

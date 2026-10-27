@@ -397,3 +397,5 @@ App Secret、密码、token 和生产凭据不要写入提示词、文档或 Git
 6. UAT/PRD、网页登录和数据库能力只在已配置且批准的范围内验证；未接入的能力明确标注。
 7. `data/`、`*.local.json`、`.env`、凭据和业务日志未进入 Git，备份与自启动方式已记录。
 8. 若启用团队知识，记录 SQLite 位置、范围、部署版本信号、跨成员同义命中、实时事实补查和纠错验收；停机备份包括整个 `data/knowledge/`。
+
+多系统1.49.0部署后运行`node scripts/verify-capability-package.mjs`，核对[通用能力手册](multi-system-capability-audit.md)，按实例维护流程空闲部署。它不代替私有配置、目标平台/发布入口与真实业务验收。
