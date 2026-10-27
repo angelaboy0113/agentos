@@ -1,4 +1,5 @@
 import {runWithSourceHistory} from './source-history-runner.js';
+import {failureDetails,failureDiagnostic} from '../shared/failure-diagnostic.js';
 import { assistantInstructions } from '../shared/project-scope.js';
 import {reportOutputPolicy} from '../shared/report-output-policy.js';
 import {reportReviewEvidence} from '../shared/report-inspection.js';
@@ -118,6 +119,7 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
     let threadId = resumeThreadId;
     let finalMessage = '';
     let failure = '';
+    let lastEventError = '';
     const began = Date.now();
     const activity = new ExecutionActivity();
     let outgoing = Promise.resolve();
@@ -145,11 +147,12 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
           if (projection) publish({ type: 'progress', phase: 'tool_activity', activity: projection });
           if (event.type === 'thread.started') threadId = event.thread_id;
           if (event.type === 'error') phase = 'connection_retry';
+          if (event.type === 'error') lastEventError = event.message ?? event.error?.message ?? '';
           if (event.type === 'item.started' || event.type === 'item.completed') phase = 'codex_working';
           if (event.type === 'turn.failed') failure = event.error?.message ?? 'Codex turn failed';
           if (event.type === 'item.completed' && event.item?.type === 'agent_message') finalMessage = event.item.text ?? finalMessage;
           if (['turn.started', 'turn.completed', 'turn.failed', 'error'].includes(event.type)) {
-            publish({ type: 'codex_event', event });
+            publish({ type: 'codex_event', event: publicCodexEvent(event) });
           }
         } catch {
           emit({ type: 'log', message: line.slice(0, 1000) }).catch(() => undefined);
@@ -157,8 +160,8 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
       }
     });
     child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-4000); });
-    child.once('error', (error) => { clearInterval(progress);reject(error); });
-    child.once('close', async (code) => {
+    child.once('error', (error) => { clearInterval(progress);reject(Object.assign(error,{diagnosticStage:'codex_start'})); });
+    child.once('close', async (code,exitSignal) => {
       clearInterval(progress);
       if (pending.trim()) {
         try {
@@ -167,11 +170,12 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
           if (projection) publish({ type: 'progress', phase: 'tool_activity', activity: projection });
           if (event.type === 'item.completed' && event.item?.type === 'agent_message') finalMessage = event.item.text;
           if (event.type === 'turn.failed') failure = event.error?.message ?? 'Codex turn failed';
+          if (event.type === 'error') lastEventError = event.message ?? event.error?.message ?? '';
         } catch { /* Incomplete diagnostics are not a successful result. */ }
       }
       await outgoing; // Complete event delivery before the runner publishes terminal status.
-      if (code !== 0 || failure) {
-        const error = new Error(failure || `Codex exited ${code}: ${stderr.slice(-4000)}`);
+      if (code !== 0 || failure || (!finalMessage&&lastEventError)) {
+        const error = codexExecutionError({failure,lastEventError,stderr,code,exitSignal});
         if (threadId) error.threadId = threadId;
         return reject(error);
       }
@@ -179,9 +183,20 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
         const result = JSON.parse(finalMessage);
         if (!['ready', 'needs_clarification', 'blocked', ...(job.taskIntent === 'analysis' ? ['partial'] : [])].includes(result.outcome) || !result.finalMessage?.trim()) throw new Error('Missing valid outcome');
         resolve({ threadId, model: runtime.model, reasoningEffort: runtime.reasoningEffort, ...result });
-      } catch (error) { reject(new Error(`Codex result invalid: ${error.message}`)); }
+      } catch (error) { reject(Object.assign(new Error(`Codex result invalid: ${error.message}`),{code:'CODEX_RESULT_INVALID',diagnosticStage:'codex_execution'})); }
     });
   });
+}
+
+export function codexExecutionError({failure='',lastEventError='',stderr='',code,exitSignal}){
+ const candidates=[failure,lastEventError].filter(Boolean);
+ const specific=candidates.find(text=>!['EXECUTION_ERROR','CODEX_TURN_FAILED','CODEX_PROCESS_EXIT'].includes(failureDetails(text).code));
+ return Object.assign(new Error(specific??candidates[0]??`Codex exited ${code}: ${stderr}`),{diagnosticStage:'codex_execution',...(Number.isInteger(code)?{exitCode:code}:{}),...(exitSignal?{exitSignal}:{})});
+}
+export function publicCodexEvent(event){
+ if(!['error','turn.failed'].includes(event.type))return event;
+ const d=failureDetails(new Error(event.error?.message??event.message??'Codex turn failed'),{stage:'codex_execution'});
+ return {type:event.type,diagnostic:d,message:failureDiagnostic(d)};
 }
 
 export function isModelCapacityError(error) {

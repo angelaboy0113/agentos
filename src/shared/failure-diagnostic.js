@@ -1,4 +1,7 @@
 const stages = Object.freeze({
+  source_analysis:'源码调查',environment_read:'环境只读核验',environment_claim:'领取环境执行范围',
+  codex_execution:'模型分析与结果返回',codex_start:'启动模型执行进程',task_worker:'任务执行子进程',task_worker_start:'启动任务执行子进程',
+  control_result:'保存任务结果与状态回执',attachment_read:'读取任务附件',
   'account/read':'核对本机Codex登录状态','initialize':'启动本机Codex服务','thread/start':'建立Codex查询会话',
   'browser.launch': '启动后台浏览器', 'browser.open-login': '打开登录页面',
   'browser.login-form': '等待登录表单', 'browser.login-submit': '提交浏览器登录',
@@ -13,6 +16,17 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+ ['LOCAL_CONTROL_TIMEOUT', /LOCAL_CONTROL_TIMEOUT/, '本机状态回执', '本机状态接口未及时返回，原请求可能已经受理；尚未确认本次状态是否保存。', '保留任务与成果，核对原请求回执后接续；不重复业务查询或写入。'],
+ ['LOCAL_CONTROL_UNCERTAIN', /LOCAL_CONTROL_UNCERTAIN/, '本机状态回执', '本机状态接口无法核实原请求的持久回执，未盲目重复提交。', '维护者核对控制面与回执记录，在原问题接续。'],
+ ['CODEX_STREAM_INTERRUPTED', /stream (?:disconnected|closed|ended) before completion|connection closed before message completed/i, '模型分析与结果返回', '模型回复流在完整结果返回前断开；现有记录不能区分本机网络、代理或上游服务原因。', '检查模型接口及网络，保留原会话和已有证据，恢复后从原问题接续。'],
+ ['NETWORK_RESET', /ECONNRESET|EPIPE|socket hang up|connection reset by peer/i, '网络连接', '连接在通信过程中被重置或关闭，本次请求未取得完整响应。', '检查对应服务及网络连接，恢复后核对原步骤状态，不盲目重复业务写入。'],
+ ['NETWORK_DNS', /ENOTFOUND|EAI_AGAIN/, '网络地址解析', '服务地址的域名解析失败，尚未建立目标连接。', '检查本机网络、DNS及配置地址，恢复后继续原问题。'],
+ ['NETWORK_REFUSED', /ECONNREFUSED/, '网络连接', '目标服务拒绝连接，本次未能建立连接。', '检查目标服务是否运行及访问路径；不能仅据此判断是本机断网。'],
+ ['TASK_WORKER_EXIT', /Task worker exited/, '任务执行子进程', '任务执行子进程提前退出，未返回完整结果；退出码或信号不能单独证明网络故障或内存不足。', '维护者按任务编号核对进程及本机日志，保留已有成果，不自动重跑整个任务。'],
+ ['CODEX_PROCESS_EXIT', /Codex exited/, '模型执行进程', '模型执行进程未正常返回结果，现有记录尚未确认更具体的中断原因。', '维护者核对模型进程及接口记录，保留已有会话和证据。'],
+ ['CODEX_TURN_FAILED', /Codex turn failed/, '模型分析与结果返回', '模型执行返回失败，但未提供可确认的更具体原因。', '维护者核对该轮模型接口记录，不把执行失败解释为业务故障。'],
+ ['CODEX_RESULT_INVALID', /Codex result invalid|Missing valid outcome/, '模型结果解析', '模型返回内容未通过结果格式校验，未将其记为完整结论。', '保留已有证据，维护者检查结果协议与模型返回；无需据此缩小业务查询范围。'],
+ ['LOCAL_FILE_UNAVAILABLE', /\bENOENT\b/, '本机文件或程序读取', '执行需要的本机文件或程序不存在，当前步骤未完成。', '维护者核对本机安装、配置与任务文件，保留现有成果。'],
  ['SSH_EXECUTION', /SSH_(?:EXECUTION|STDIN|PROTOCOL|RESPONSE)/, 'SSH远程数据库通道', '跳板机远程执行通道未能完成，未回退本机数据库连接或转发。', '维护者核对跳板机网络、固定主机密钥、钥匙串凭据及远端运行时；不要重复提供数据库密码或建立隧道。'],
  ['SSH_REMOTE_POLICY', /REMOTE_READONLY_SQL/, '远端只读SQL校验', '远端拒绝了非固定只读语句，未执行写入或存储过程。', '仅使用已提供的受控基础表查询与报表工具，不提交任意SQL。'],
   ['CODEX_RPC_TIMEOUT', /CODEX_RPC_TIMEOUT|Codex RPC timed out/, '本机Codex接口等待', '本机Codex接口返回超时，或未在显式请求等待期内返回；不能据此判断数据库或查询范围有问题。', '检查本机Codex进程与接口状态，保留原问题；无需缩小业务查询范围。'],
@@ -24,6 +38,7 @@ const rules = [
   ['SOURCE_CHANGED', /源码内容发生变化|源码范围、类型或大小发生变化/, '源码工件校验', '已核验源码工件已改变，未继续使用变化内容。', '回到源码阶段重新核验工件，不绕过摘要或路径校验。'],
   ['BROWSER_BRIDGE', /Chrome自动化|Apple.*JavaScript|通过 AppleScript|日常Google Chrome|Chrome窗口|日常Chrome接管|不能获取对象/, '日常浏览器接管', '日常Chrome自动化通道未就绪，并非业务账号无权限。', '在Mac打开Chrome，开启查看→开发者→允许Apple事件中的JavaScript，并确认系统自动化权限。'],
   ['BROWSER_SCOPE', /浏览器已离开本次批准|原Chrome标签页已关闭/, '浏览器页面范围', '原标签页已关闭或离开本次批准的应用，未读取其他页面。', '打开正确应用页面后重试；不要重复申请业务账号权限。'],
+ ['LOCAL_PERMISSION', /\bEPERM\b|\bEACCES\b|Operation not permitted/i, '本机执行权限', '本机系统权限拒绝了当前操作，尚不能据此判断网络是否中断。', '维护者核对对应程序或文件的系统授权，不关闭业务权限校验。'],
   ['QUERY_ALREADY_STARTED', /QUERY_ALREADY_STARTED/, '任务接续校验', '任务已启动，但本次领取没有有效的登录接续凭证；未继续访问网站。', '请维护者检查登录接续状态，不需要用户补充查询范围。'],
   ['LEASE_EXPIRED', /查询租约已失效/, '任务领取校验', '当前执行器的任务租约已失效，未继续查询。', '检查任务恢复与执行器状态，不能通过重复批准解决。'],
   ['COLUMN_LIMIT', /\[COLUMN_LIMIT\]/, '查询字段校验', '单次查询字段超过12个，查询未执行；不是授权不足。', '减少为相关字段后继续，可按相同筛选条件分次查询。'],
@@ -45,17 +60,27 @@ const rules = [
   ['SCOPE_LIMIT', /超出范围|次数.*上限|超过次数|Write control|Redirect blocked|未开放|尚未批准|已过期|未通过|查询表或列|筛选条件/i, '授权与范围检查', '请求未通过当前只读范围、有效期或工具限额检查。', '补充具体查询目标；需要扩大范围时由管理员重新授权。'],
   ['PAGE_REFERENCE', /引用已失效|Not clickable|Invalid search|Unknown browser tool/i, '页面操作', '页面引用或操作参数已失效。', '重新打开页面并获取当前元素；不要复用旧引用。'],
   ['CODEX_RPC_ERROR', /CODEX_RPC_ERROR/, '本机Codex接口', '本机Codex接口返回错误，当前步骤未完成。', '检查具体Codex接口与登录状态，保留原问题和已有证据；无需缩小业务查询范围。'],
-  ['HTTP_RESPONSE', /HTTP [45][0-9]{2}|Read failed|环境接口未成功响应/i, '服务响应', '远端接口返回失败状态。', '检查服务状态和接口兼容性；未据此判断数据库是否可连接。'],
+  ['HTTP_RESPONSE', /HTTP [45][0-9]{2}|Read failed|环境接口未成功响应/i, '服务响应', '服务接口返回失败状态，未据此确认业务查询是否完成。', '检查服务状态和接口兼容性；未据此判断数据库是否可连接。'],
 ];
-export function failureDiagnostic(error) {
-  const message = typeof error === 'string' ? error : `${String(error?.code ?? '')} ${String(error?.message ?? '')}`;
+const observedCodes=new Set(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','EAI_AGAIN','EPIPE','EHOSTUNREACH','ENETUNREACH','EACCES','EPERM','ENOENT']);
+const exitSignals=new Set(['SIGTERM','SIGKILL','SIGSEGV','SIGABRT','SIGBUS','SIGILL','SIGINT']);
+export function failureDetails(error,{stage}={}) {
+  const chain=[],seen=new Set();for(let item=error;item&&typeof item==='object'&&!seen.has(item)&&chain.length<5;item=item.cause){chain.push(item);seen.add(item);}
+  const httpStatus=[error?.httpStatus,error?.statusCode].find(n=>Number.isInteger(n)&&n>=100&&n<=599);
+  const message = typeof error === 'string' ? error : chain.map(e=>`${String(e.code??'')} ${String(e.message??'')}`).join(' ')+(httpStatus?' HTTP '+httpStatus:'');
   const explicit=typeof error==='object'?error?.code:/^\[([A-Z_]+)\]/.exec(message)?.[1];
   const matched = rules.find(([code])=>code===explicit||message.trimStart().startsWith(`[${code}]`)) ?? rules.find(([,pattern])=>pattern.test(message));
   const [code, , phase, cause, next] = matched ?? ['EXECUTION_ERROR', null, '任务执行', '执行器遇到未分类错误，原因尚未确认。', '请维护者按任务编号检查本机日志；不要在群内发送原始日志或凭据。'];
-  return `错误码：${code}\n失败环节：${Object.hasOwn(stages, error?.diagnosticStage) ? stages[error.diagnosticStage] : phase}\n原因：${cause}\n建议：${next}`;
+  const diagnosticStage=[error?.diagnosticStage,error?.rpcMethod,error?.stage,stage].find(s=>Object.hasOwn(stages,s));
+  const observedCode=[error?.observedCode,...chain.map(e=>e.code)].find(c=>observedCodes.has(c))??[...observedCodes].find(c=>new RegExp('\\b'+c+'\\b').test(message));
+  return {code,stage:diagnosticStage??null,phase:diagnosticStage?stages[diagnosticStage]:phase,cause,next,
+    ...(observedCode?{observedCode}:{}),...(httpStatus?{httpStatus}:{}),...(Number.isInteger(error?.exitCode)&&Math.abs(error.exitCode)<256?{exitCode:error.exitCode}:{}),...(exitSignals.has(error?.exitSignal)?{exitSignal:error.exitSignal}:{})};
+}
+export function failureDiagnostic(error) {
+  const d=failureDetails(error);
+  return `错误码：${d.code}\n失败环节：${d.phase}\n原因：${d.cause}${d.observedCode?'\n记录到：'+d.observedCode:''}${d.httpStatus?'\nHTTP状态：'+d.httpStatus:''}${d.exitCode!==undefined?'\n退出码：'+d.exitCode:''}${d.exitSignal?'\n退出信号：'+d.exitSignal:''}\n建议：${d.next}`;
 }
 export function safeExecutionError(error) {
-  const message = failureDiagnostic(error);
-  const code = /^错误码：(\w+)/.exec(message)[1];
-  return Object.assign(new Error(`[${code}] ${message}`),{code}, Object.hasOwn(stages, error?.diagnosticStage) ? { diagnosticStage: error.diagnosticStage } : {});
+  const d=failureDetails(error);
+  return Object.assign(new Error(`[${d.code}] ${failureDiagnostic(d)}`),{code:d.code,...(d.stage?{diagnosticStage:d.stage}:{}),...(d.observedCode?{observedCode:d.observedCode}:{}),...(d.httpStatus?{httpStatus:d.httpStatus}:{}),...(d.exitCode!==undefined?{exitCode:d.exitCode}:{}),...(d.exitSignal?{exitSignal:d.exitSignal}:{})});
 }

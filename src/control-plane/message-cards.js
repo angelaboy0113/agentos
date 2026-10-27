@@ -106,7 +106,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   const answerBlocks = analysisElements.length ? analysisElements.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(`**${active ? '当前操作' : '结论'}**`), ...summaryParagraphs(active ? publicText(clip(operation, 120))
     : summary || (job.status === 'awaiting_approval' ? '请真人管理员查看阶段结论，再点击下方按钮确认进入下一阶段。'
     : job.status === 'awaiting_clarification' ? '需要补充信息，尚未通过当前阶段。'
-    : job.status === 'failed' ? failureDiagnostic(job.result?.error) : label)).map(part => md(part))], color)];
+    : job.status === 'failed' ? failureDiagnostic(job.result?.executionFailure??job.result?.error) : label)).map(part => md(part))], color)];
   if (!answerBlocks.some((element) => element.tag === 'column_set')) answerBlocks.push(block([], color));
   const metadataBlock = [...answerBlocks].reverse().find((element) => element.tag === 'column_set');
   const metadata = metadataBlock?.columns?.[0]?.elements;

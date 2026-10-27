@@ -1,3 +1,4 @@
+import {failureDetails,failureDiagnostic} from '../shared/failure-diagnostic.js';
 import {controlPost} from './control-client.js';
 import {recordReportFiles,recordReportReview} from '../shared/report-acceptance.js';
 import {interruptedInvestigation} from '../shared/investigation-budget.js';
@@ -100,7 +101,7 @@ export class AgentRunner {
       }
       if (!lostLease) await emit(controller.signal.aborted && error.processesExited
         ? { type: 'cancelled', processesExited: true }
-        : { type:'failed',message:job.continuousInvestigation?'连续调查执行或状态回传中断，已保留现有成果':error.message,result:job.continuousInvestigation?interruptedInvestigation({...job,context:[...(job.context??[]),...(executionResult?[{kind:'environment_result',result:executionResult}]:[])]},error.code==='LOCAL_CONTROL_TIMEOUT'?'本机状态接口等待超时；请求可能已受理，未重复提交':'执行步骤中断，不能据此判断业务故障',error.code??'EXECUTION_INTERRUPTED'):{error:error.message} });
+        : { type:'failed',message:failureDiagnostic(error),result:job.continuousInvestigation?executionInterruption({...job,context:[...(job.context??[]),...(executionResult?[{kind:'environment_result',result:executionResult}]:[])]},error,executionResult?'control_result':'task_worker'):{error:failureDiagnostic(error),executionFailure:failureDetails(error,{stage:executionResult?'control_result':'task_worker'})} });
     } finally {
       clearInterval(controlTimer);
       clearInterval(heartbeatTimer);
@@ -115,8 +116,7 @@ export class AgentRunner {
     try{return await this.continueInvestigation(job,emit,signal,current=>{checkpoint=current;});}
     catch(error){
       if(signal.aborted||error.processesExited===false)throw error;
-      const reason=error.code==='LOCAL_CONTROL_TIMEOUT'?'本机任务状态接口等待超时，不能确认该次请求是否已受理；未自动重试修改请求':'本轮执行中断，已有结果已保留：'+(/timeout|超时/i.test(error.message)?'等待响应超时':'执行器未完成后续步骤');
-      return interruptedInvestigation(checkpoint,reason,error.code??'EXECUTION_INTERRUPTED');
+      return executionInterruption(checkpoint,error,checkpoint.environmentAccess?'environment_read':'source_analysis');
     }
   }
 
@@ -125,7 +125,7 @@ export class AgentRunner {
     let current = job;
     if (current.environmentAccess) {
       save(current);const environmentResult = await this.execute(current, this.config, emit, signal);
-      if(environmentResult?.investigationStopped)return interruptedInvestigation(current,environmentResult.investigationStopped.reason,environmentResult.investigationStopped.code);
+      if(environmentResult?.investigationStopped)return interruptedInvestigation(current,environmentResult.investigationStopped.reason,environmentResult.investigationStopped.code,environmentResult.executionFailure??environmentResult.environmentFailure);
       if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
         return preserveContinuousEnvironmentEvidence(current, environmentResult);
       }
@@ -153,7 +153,7 @@ export class AgentRunner {
       if (prepared.terminalResult) return prepared.terminalResult;
       if (!prepared.planned) continue;
       save(current);const environmentResult = await this.execute(current, this.config, emit, signal);
-      if(environmentResult?.investigationStopped)return interruptedInvestigation(current,environmentResult.investigationStopped.reason,environmentResult.investigationStopped.code);
+      if(environmentResult?.investigationStopped)return interruptedInvestigation(current,environmentResult.investigationStopped.reason,environmentResult.investigationStopped.code,environmentResult.executionFailure??environmentResult.environmentFailure);
       if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
         return preserveContinuousEnvironmentEvidence(current, environmentResult);
       }
@@ -165,8 +165,15 @@ export class AgentRunner {
   }
 
   async post(path, body, options={}) {
-    return controlPost(this.config,path,body,{...options,onRecovery:()=>console.warn('[runner] 本机请求响应暂缓，正在核对持久回执并等待原步骤完成')});
+    try{return await controlPost(this.config,path,body,{...options,onRecovery:()=>console.warn('[runner] 本机请求响应暂缓，正在核对持久回执并等待原步骤完成')});}
+    catch(error){error.diagnosticStage??='control_result';throw error;}
   }
+}
+
+export function executionInterruption(job,error,stage){
+ const details=failureDetails(error,{stage});
+ const reason=details.code==='LOCAL_CONTROL_TIMEOUT'?'本机任务状态接口等待超时，不能确认该次请求是否已受理；未自动重试修改请求':'本轮执行中断，已有结果已保留';
+ return interruptedInvestigation(job,reason,details.code,details);
 }
 
 // A later supplementary environment read must not erase source-backed findings

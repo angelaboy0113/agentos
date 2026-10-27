@@ -116,3 +116,5 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 首次构建隔离源码缓存时，先从origin/HEAD与清单一致的同仓同分支缓存或已配置来源仓独立复制Git对象与浅仓边界，再从真实origin拉取指定环境提交，减少重复下载；最终缓存不依赖来源仓objects。发布前清除临时仓中的其它refs/reflogs和不可达对象，不导入个人未推送分支或工作区改动。构建/复用拒绝外部对象依赖文件；来源仓不执行任何清理。该优化不改变环境分支选择、远端版本核验或清理保护，见[源码同步说明](source-sync.spec.md)。
 
 1.49.0新增固定提交历史状态、analysisContinuation与轻量`.snapshot-audit`；迁移备份时同状态、source-manifest及datasets成套保留。长字段证据、calendar-v2版本配方与查询完整性标记保存在任务datasets内。详见[通用能力与迁移验证](multi-system-capability-audit.md)。
+
+1.49.2中断结果的executionFailure保存固定诊断分类、环节及安全错误码/HTTP状态/退出信息，随任务状态备份；不保存新的原始错误正文或凭据副本。旧卡缺少原始错误时不能反推根因。见[中断卡片诊断](multi-system-capability-audit.md#中断卡片的诊断信息)。

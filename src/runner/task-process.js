@@ -1,6 +1,7 @@
 import {registerLocalExecution} from './local-executions.js';
 import { fork, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {safeExecutionError} from '../shared/failure-diagnostic.js';
 
 const workerFile = fileURLToPath(new URL('./task-worker.js', import.meta.url));
 
@@ -27,10 +28,10 @@ export function executeTaskProcess(job, config, emit, signal, worker = workerFil
     child.on('message', (message) => {
       if (message.type === 'event') outgoing = outgoing.then(() => emit(message.event)).catch(() => undefined);
       if (message.type === 'result') result = message.result;
-      if (message.type === 'failure') failure = new Error(message.message);
+      if (message.type === 'failure') failure = safeExecutionError(message.failure??new Error(message.message));
     });
-    child.once('error', (error) => { failure = error; });
-    child.once('close', async (code) => {
+    child.once('error', (error) => { failure = safeExecutionError(Object.assign(error,{diagnosticStage:'task_worker_start'})); });
+    child.once('close', async (code,exitSignal) => {
       signal.removeEventListener('abort', abort);
       await termination;
       await outgoing;
@@ -39,7 +40,7 @@ export function executeTaskProcess(job, config, emit, signal, worker = workerFil
         error.processesExited = !terminationFailure;
         return reject(error);
       }
-      if (failure || code !== 0 || !result) return reject(failure ?? new Error(`Task worker exited ${code} without result`));
+      if (failure || code !== 0 || !result) return reject(failure ?? safeExecutionError({code:'TASK_WORKER_EXIT',exitCode:code,exitSignal,diagnosticStage:'task_worker'}));
       resolve(result);
     });
     registerLocalExecution(config.localExecutionRegistry,job,child.pid).then(()=>{if(!signal.aborted&&child.connected)child.send({job,config});}).catch(error=>{failure=error;abort();});
