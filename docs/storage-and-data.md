@@ -1,5 +1,7 @@
 # AgentOS 文件、数据与日志位置
 
+1.51.0数据集信封新增createdAt，仅表示工件创建，原readAt不变；旧工件缺少时不补造。calendar-v3统计配方与civil_day/month筛选随原任务datasets完整备份，旧程序不能重放新配方。目录及预览展示改进、回退兼容边界见[报表效率与接续](report-efficiency.md)。
+
 本页回答“AgentOS 生成的东西都在哪里”。默认程序目录以下用 `<agentos>` 表示；默认运行数据根目录是 `<agentos>/data`，可用 `AGENTOS_DATA_DIR` 改到其他绝对路径。
 
 快速查看本机实际路径和占用大小：

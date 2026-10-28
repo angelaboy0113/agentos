@@ -1,3 +1,5 @@
+import {normalizeCalendarPeriod} from './calendar-period.js';
+export {normalizeCalendarPeriod} from './calendar-period.js';
 import {summarizeDataset} from './dataset-summary.js';
 import {transformDataset} from './dataset-transform.js';
 import {createHash} from 'node:crypto';
@@ -17,26 +19,19 @@ export function periodValues(period){
  const start=parse(period.start),end=parse(period.end);if(start>end)bad('期间起点晚于终点');const values=[];
  for(let d=new Date(start);d<=end;month?d.setUTCMonth(d.getUTCMonth()+1):d.setUTCDate(d.getUTCDate()+1))values.push(d.toISOString().slice(0,month?7:10));return values;
 }
-export function normalizeCalendarPeriod(value,unit){
- const text=typeof value==='string'?value.trim():Number.isSafeInteger(value)?String(value):'';
- if(!['month','day'].includes(unit))bad('日历规范化必须明确month或day粒度');
- const match=unit==='month'?text.match(/^(\d{4})(\d{2})$/)??text.match(/^(\d{4})-(\d{1,2})$/):text.match(/^(\d{4})(\d{2})(\d{2})$/)??text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
- if(!match||Number(match[1])<1)bad('来源期间格式无效：月支持YYYYMM、YYYY-MM、YYYY-M；日支持YYYYMMDD或YYYY-MM-DD；不能当作无发生额补零');
- const canonical=match.slice(1).map(v=>v.padStart(2,'0')).join('-');
- const date=new Date(canonical+(unit==='month'?'-01':'')+'T00:00:00Z');
- if(!Number.isFinite(+date)||date.toISOString().slice(0,unit==='month'?7:10)!==canonical)bad('来源期间日期不存在，不能按范围外排除或补零');
- return canonical;
-}
 function sourcePeriod(row,source,period,normalization){
  let value=row[source.periodColumn];
+ if(source.periodUnit!==undefined){if(!['month','day'].includes(source.periodUnit)||period.unit==='values'||source.yearColumn||source.periodUnit==='month'&&period.unit==='day')bad('periodUnit须明确日/月粒度，仅允许同粒度或日归月；不能猜测时间戳、自定义期间或月内日期');const civil=normalizeCalendarPeriod(value,source.periodUnit);return period.unit==='month'?civil.slice(0,7):civil;}
  if(period.unit==='values'&&(typeof value!=='string'||!value))bad('自定义期间来源必须为显式非空字符串，不猜测空值或数值语义');
  if(source.yearColumn){if(period.unit!=='month'||!/^\d{4}$/.test(row[source.yearColumn])||!/^\d{1,2}$/.test(value))bad('yearColumn模式需要四位年和1至12月');const m=Number(value);if(m<1||m>12)bad('来源月份超出1至12');value=row[source.yearColumn]+'-'+String(m).padStart(2,'0');}
- return ['calendar-v1','calendar-v2'].includes(normalization)&&period.unit!=='values'?normalizeCalendarPeriod(value,period.unit):value;
+ return ['calendar-v1','calendar-v2','calendar-v3'].includes(normalization)&&period.unit!=='values'?normalizeCalendarPeriod(value,period.unit):value;
 }
 // Pure, repeatable transformation: no SQL, paths, eval or arbitrary code.
 export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Number.MAX_SAFE_INTEGER,legacy=false}={}){
- const normalization=legacy?null:(args.periodNormalization??'calendar-v2');
- if(args.periodNormalization&&!['calendar-v1','calendar-v2'].includes(args.periodNormalization))bad('未知期间转换版本');
+ const statistical=args.sources?.some(s=>s.periodUnit!==undefined||s.metrics?.some(m=>m.op!==undefined&&m.op!=='sum'));
+ const normalization=legacy?null:(args.periodNormalization??(statistical?'calendar-v3':'calendar-v2'));
+ if(args.periodNormalization&&!['calendar-v1','calendar-v2','calendar-v3'].includes(args.periodNormalization))bad('未知期间转换版本');
+ if(statistical&&normalization!=='calendar-v3')bad('期间统计及显式日/月转换需要calendar-v3配方');
  const effectiveArgs=legacy?structuredClone(args):{...structuredClone(args),periodNormalization:normalization};
  const population=await load(args.populationRef);if(!population?.complete||population.reportDraft)bad('期间全集须为完整的原始或维度数据集');keys(population,args.keyColumns);
  const periods=periodValues(args.period),periodSet=new Set(periods),rowKey=args.rowKey??'period_key';
@@ -49,17 +44,38 @@ export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Nu
   await check();const d=await load(s.datasetRef);if(!d?.complete||d.reportDraft)bad('金额来源必须是完整数据集');keys(d,s.keyColumns);if(s.keyColumns.length!==args.keyColumns.length||!d.columns.includes(s.periodColumn)||s.yearColumn&&!d.columns.includes(s.yearColumn))bad('期间来源关联列不匹配');
   if(!['error','sum'].includes(s.duplicates)||!['error','exclude'].includes(s.outside)||!Array.isArray(s.metrics)||!s.metrics.length)bad('明确duplicates=error/sum、outside=error/exclude及金额列');
   if(s.outside==='exclude'&&!(typeof s.outsideEvidence==='string'&&s.outsideEvidence.trim().length>=3))bad('排除全集外记录必须说明依据');
-  const index=new Map(),audit={datasetRef:s.datasetRef,inputRows:d.rows.length,matchedRows:0,...(normalization==='calendar-v2'?{outsidePopulationRows:0,outsidePeriodRows:0}:{}),outsideRows:0,duplicateRows:0,missingCells:0,nullCells:0,outsideEvidence:s.outsideEvidence??null};
-  for(const m of s.metrics){if(!d.columns.includes(m.column)||!field(m.as)||!['zero','empty','error'].includes(m.missing)||!['zero','empty','error'].includes(m.nulls))bad('金额列须指定真实字段及missing/nulls处理规则');for(const c of [m.as,m.cumulativeAs,m.statusAs].filter(x=>x!==undefined)){if(!field(c)||columns.includes(c))bad('金额输出列重复');columns.push(c);if(c!==m.statusAs)numericColumns.push(c);provenance[c]={datasetRef:s.datasetRef,column:m.column,cumulative:c===m.cumulativeAs};}}
-  for(const row of d.rows){const k=key(row,s.keyColumns),period=sourcePeriod(row,s,args.period,normalization);if(!populationMap.has(k)||!periodSet.has(period)){audit.outsideRows++;if(Object.hasOwn(audit,'outsidePopulationRows')){if(!populationMap.has(k))audit.outsidePopulationRows++;if(!periodSet.has(period))audit.outsidePeriodRows++;}if(s.outside==='error')bad('来源包含全集或期间范围外记录；核对范围或明确exclude及依据');continue;}audit.matchedRows++;const cellKey=JSON.stringify([k,period]);let amounts=index.get(cellKey);if(amounts){audit.duplicateRows++;if(s.duplicates==='error')bad('同一对象同一期间存在重复金额记录；先核对粒度或明确sum');}else {amounts=s.metrics.map(()=>0n);index.set(cellKey,amounts);}
-   s.metrics.forEach((m,i)=>{const v=row[m.column];if(v===null||v===''){audit.nullCells++;if(m.nulls==='error')bad('实际金额为空；必须明确nulls规则');if(m.nulls==='empty')amounts[i]=null;}else {const amount=number(v);if(amounts[i]!==null)amounts[i]+=amount;}});
+  const index=new Map(),audit={datasetRef:s.datasetRef,inputRows:d.rows.length,matchedRows:0,...(['calendar-v2','calendar-v3'].includes(normalization)?{outsidePopulationRows:0,outsidePeriodRows:0}:{}),outsideRows:0,duplicateRows:0,missingCells:0,nullCells:0,outsideEvidence:s.outsideEvidence??null};
+  for(const m of s.metrics){if(!['sum','count','count_distinct'].includes(m.op??'sum')||((m.op??'sum')!=='count'&&!d.columns.includes(m.column))||!field(m.as)||!['zero','empty','error'].includes(m.missing)||!['zero','empty','error'].includes(m.nulls))bad('金额列须指定真实字段及missing/nulls处理规则');for(const c of [m.as,m.cumulativeAs,m.statusAs].filter(x=>x!==undefined)){if(!field(c)||columns.includes(c))bad('金额输出列重复');columns.push(c);if(c!==m.statusAs)numericColumns.push(c);provenance[c]={datasetRef:s.datasetRef,column:m.column,cumulative:c===m.cumulativeAs};}}
+  for(const row of d.rows){const k=key(row,s.keyColumns),period=sourcePeriod(row,s,args.period,normalization);if(!populationMap.has(k)||!periodSet.has(period)){audit.outsideRows++;if(Object.hasOwn(audit,'outsidePopulationRows')){if(!populationMap.has(k))audit.outsidePopulationRows++;if(!periodSet.has(period))audit.outsidePeriodRows++;}if(s.outside==='error')bad('来源包含全集或期间范围外记录；核对范围或明确exclude及依据');continue;}audit.matchedRows++;const cellKey=JSON.stringify([k,period]);let amounts=index.get(cellKey);if(amounts){audit.duplicateRows++;if(s.duplicates==='error')bad('同一对象同一期间存在重复金额记录；先核对粒度或明确sum');}else {amounts=s.metrics.map(m=>m.op==='count_distinct'?new Set():0n);index.set(cellKey,amounts);}
+   s.metrics.forEach((m,i)=>{
+    const op=m.op??'sum',v=op==='count'?'1':row[m.column];
+    if(v===null||v===undefined||v===''){
+     audit.nullCells++;if(m.nulls==='error')bad('统计字段存在真实空值，须明确nulls规则，不能猜零');if(m.nulls==='empty')amounts[i]=null;
+    }else if(op==='count_distinct'){
+     if(typeof v!=='string'&&!(typeof v==='number'&&Number.isSafeInteger(v)))bad('去重标识须为文本或安全整数，不能猜测对象或不精确数值');
+     if(amounts[i]!==null)amounts[i].add(String(v));
+    }else{const value=op==='count'?scale:number(v);if(amounts[i]!==null)amounts[i]+=value;}
+   });
   }
   inputs.push(d);indexes.push({s,index,audit});audits.push(audit);
  }
  const rows=[];
- for(const [k,base] of [...populationMap].sort(([a],[b])=>a.localeCompare(b))){const running=indexes.map(({s})=>s.metrics.map(()=>0n));
+ for(const [k,base] of [...populationMap].sort(([a],[b])=>a.localeCompare(b))){const running=indexes.map(({s})=>s.metrics.map(m=>m.op==='count_distinct'?new Set():0n));
   for(const period of periods){if(rows.length%500===0)await check();const row={...base,[args.period.column]:period,[rowKey]:hash([...JSON.parse(k),period])};
-   indexes.forEach(({s,index,audit},j)=>{const values=index.get(JSON.stringify([k,period]));s.metrics.forEach((m,i)=>{let v=values?.[i];if(m.statusAs)row[m.statusAs]=v===undefined?'no_occurrence':v===null?'unknown':'known';if(v===undefined){audit.missingCells++;if(m.missing==='error')bad('缺少对象期间金额记录；必须明确missing规则');v=m.missing==='zero'?0n:null;}row[m.as]=v===null?null:format(v);if(m.cumulativeAs){running[j][i]=running[j][i]===null||v===null?null:running[j][i]+v;row[m.cumulativeAs]=running[j][i]===null?null:format(running[j][i]);}});});rows.push(row);
+   indexes.forEach(({s,index,audit},j)=>{
+    const values=index.get(JSON.stringify([k,period]));
+    s.metrics.forEach((m,i)=>{
+     const distinct=m.op==='count_distinct';let v=values?.[i];
+     if(m.statusAs)row[m.statusAs]=v===undefined?'no_occurrence':v===null?'unknown':'known';
+     if(v===undefined){audit.missingCells++;if(m.missing==='error')bad('缺少对象期间记录；须明确missing规则，不能猜零');v=m.missing==='zero'?(distinct?new Set():0n):null;}
+     row[m.as]=v===null?null:distinct?String(v.size):format(v);
+     if(m.cumulativeAs){
+      if(running[j][i]===null||v===null)running[j][i]=null;
+      else if(distinct){for(const value of v)running[j][i].add(value);}else running[j][i]+=v;
+      row[m.cumulativeAs]=running[j][i]===null?null:distinct?String(running[j][i].size):format(running[j][i]);
+     }
+    });
+   });rows.push(row);
   }
  }
  return {rows,columns,numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===inputs[0].snapshotId)?inputs[0].snapshotId:hash(inputs.map(d=>d.snapshotId).sort()),derivation:{kind:'period_grid',args:effectiveArgs,audit:{objects:populationMap.size,periods:periods.length,rowCount:rows.length,sources:audits},provenance}};

@@ -10,7 +10,7 @@ export class TaskDatasetStore {
  async list(){
   let names;try{names=await readdir(this.root);}catch(e){if(e.code==='ENOENT')return [];throw e;}
   const out=[];for(const name of names.filter(n=>n.endsWith('.json')&&valid(n.slice(0,-5)))){
-   try{const d=await this.get(name.slice(0,-5));out.push({datasetRef:d.id,columns:d.data.columns,rowCount:d.data.rows.length,dataHash:d.dataHash,readAt:d.readAt,snapshotId:d.snapshotId,complete:true,kind:d.data.reportDraft?'report_draft':d.data.derivation?'derived':'query',queryHash:d.data.queryHash,queryDefinition:d.data.queryDefinition?{sql:d.data.queryDefinition.sql.slice(0,200),params:d.data.queryDefinition.params.slice(0,3).map(v=>v.slice(0,80)),limited:d.data.queryDefinition.sql.length>200||d.data.queryDefinition.params.length>3||d.data.queryDefinition.params.some(v=>v.length>80)}:undefined});}catch{/* Invalid/stale/different-scope artifacts are never usable. */}
+   try{const d=await this.get(name.slice(0,-5));out.push({datasetRef:d.id,columns:d.data.columns,rowCount:d.data.rows.length,dataHash:d.dataHash,readAt:d.readAt,createdAt:d.createdAt??null,snapshotId:d.snapshotId,complete:true,kind:d.data.reportDraft?'report_draft':d.data.derivation?'derived':'query',derivationKind:d.data.derivation?.kind??null,dependencies:datasetDependencies(d.data),queryHash:d.data.queryHash,queryDefinition:d.data.queryDefinition?{sql:d.data.queryDefinition.sql.slice(0,200),params:d.data.queryDefinition.params.slice(0,3).map(v=>v.slice(0,80)),limited:d.data.queryDefinition.sql.length>200||d.data.queryDefinition.params.length>3||d.data.queryDefinition.params.some(v=>v.length>80)}:undefined});}catch{/* Invalid/stale/different-scope artifacts are never usable. */}
   }return out;
  }
  async get(id,{allowPartial=false}={}){
@@ -27,11 +27,16 @@ export class TaskDatasetStore {
   if((await lstat(this.root)).isSymbolicLink())throw new Error('数据集目录不能是符号链接');
   // Count actual disk bytes, including stale/invalid artifacts; never evict referenced evidence.
   const names=await readdir(this.root);let used=0;for(const name of names){const info=await lstat(path.join(this.root,name));if(info.isFile())used+=info.size;}
-  const d={id,scope:this.scope,readAt,snapshotId,dataHash:hash(data),data};
+  const d={id,scope:this.scope,readAt,createdAt:new Date().toISOString(),snapshotId,dataHash:hash(data),data};
   const text=JSON.stringify(d);
   if(used+Buffer.byteLength(text)>this.maxBytes)throw new DatasetCapacityError('任务数据集实际磁盘容量不足；已有成果保留。先list_datasets复用并修正已有草稿，不重复全量取数；确需更多数据时由维护者评估容量。');
   const temp=path.join(this.root,id+'.tmp'),file=path.join(this.root,id+'.json');
   try{await writeFile(temp,text,{flag:'wx',mode:0o600});await rename(temp,file);}catch(e){await rm(temp,{force:true});throw e;}
   return d;
  }
+}
+
+export function datasetDependencies(data){
+ const d=data.derivation;
+ return [...new Set([...(data.reportDraft?.sources??[]).map(s=>s.datasetRef),...(d?.kind==='period_grid'?[d.args.populationRef,...d.args.sources.map(s=>s.datasetRef)]:d?.kind==='left_lookup'?[d.datasetRef,...d.lookups.map(s=>s.datasetRef)]:['dataset_summary','dataset_transform'].includes(d?.kind)?[d.args.datasetRef]:[])])];
 }

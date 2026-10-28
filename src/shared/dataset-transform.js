@@ -1,4 +1,5 @@
 import {compareExact} from './dataset-summary.js';
+import {normalizeCalendarPeriod} from './calendar-period.js';
 // Declarative task-local transformations; no SQL, eval, filesystem paths or business rules.
 export function transformDataset(args, base) {
  const bad=m=>{throw Object.assign(new Error('数据集整理：'+m),{code:'REPORT_INPUT'});};
@@ -13,8 +14,12 @@ export function transformDataset(args, base) {
    if(['in','not_in'].includes(f.op)?!Array.isArray(f.values)||!f.values.every(scalar):!['is_null','is_not_null'].includes(f.op)&&!scalar(f.value))bad('筛选值必须为文本、安全整数或null');
    const norm=v=>v===null?null:String(v),values=f.values?.map(norm),value=norm(f.value);
    if(['gt','gte','lt','lte'].includes(f.op)){
-    if(!['date','decimal','string'].includes(f.type)||f.nulls!==undefined&&!['error','exclude'].includes(f.nulls))bad('范围比较须明确date/decimal/string类型及空值规则');
+    if(!['date','civil_day','civil_month','decimal','string'].includes(f.type)||f.nulls!==undefined&&!['error','exclude'].includes(f.nulls))bad('范围比较须明确date/civil_day/civil_month/decimal/string类型及空值规则');
     const date=x=>{if(typeof x!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(x)||!Number.isFinite(Date.parse(x)))bad('日期比较必须为有效且含时区的ISO时间；不能猜测或把错误格式当范围外');const [y,m,d,h,min,sec]=x.slice(0,19).split(/[-T:]/).map(Number),v=new Date(Date.UTC(y,m-1,d,h,min,sec));if(v.getUTCFullYear()!==y||v.getUTCMonth()!==m-1||v.getUTCDate()!==d||h>23||min>59||sec>59)bad('日期比较包含无效日期');return Date.parse(x);};
+    if(f.type==='civil_day'||f.type==='civil_month'){
+     const unit=f.type==='civil_day'?'day':'month',boundary=normalizeCalendarPeriod(f.value,unit);
+     return row=>{const x=row[f.column];if(x===null&&f.nulls==='exclude')return false;const civil=normalizeCalendarPeriod(x,unit),comparison=civil<boundary?-1:civil>boundary?1:0;return f.op==='gt'?comparison>0:f.op==='gte'?comparison>=0:f.op==='lt'?comparison<0:comparison<=0;};
+    }
     if(f.type==='date')date(value);if(f.type==='decimal')compareExact(value,'0');
     return row=>{const x=row[f.column];if(x===undefined)bad('行缺少实际字段');if(x===null){if(f.nulls==='exclude')return false;bad('范围比较含真实空值，不能补零或静默排除');}const comparison=f.type==='date'?Math.sign(date(String(x))-date(value)):f.type==='decimal'?compareExact(String(x),value):Buffer.compare(Buffer.from(String(x)),Buffer.from(value));return f.op==='gt'?comparison>0:f.op==='gte'?comparison>=0:f.op==='lt'?comparison<0:comparison<=0;};
    }

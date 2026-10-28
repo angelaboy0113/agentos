@@ -11,6 +11,21 @@ import path from 'node:path';
 const schema = { type: 'object', additionalProperties: false, required: ['tool','arguments','summary','complete'], properties: { tool: { type: 'string' }, arguments: { type: 'string' }, summary: { type: 'string' }, complete: { type: 'boolean' } } };
 const TOOL_RESULT_LIMIT = 24000;
 
+// Carry artifact locations and current validation failures beyond the recent tool window.
+// No business rows, credentials, execution quotas or automatic completion decisions.
+export function reportPlannerState(results){
+ const datasets=new Map(),errors=new Map();let latestDraft=null;
+ for(const item of results){
+  if(item.error)errors.set(item.tool,{tool:item.tool,code:item.error.code,message:String(item.error.message??'').slice(0,1200)});
+  else if(item.result){
+   errors.delete(item.tool);const r=item.result;
+   if(r.datasetRef)datasets.set(r.datasetRef,{datasetRef:r.datasetRef,columns:r.columns?.slice(0,8),columnsLimited:r.columns?.length>8,rowCount:r.rowCount,readAt:r.readAt});
+   if(r.draftFile||r.reportDraft)latestDraft={datasetRef:r.datasetRef};
+  }
+ }
+ return {latestDraft,datasets:[...datasets.values()].slice(-20),unresolvedInputs:[...errors.values()],guidance:'Reuse saved datasets. Locate report_draft via list_datasets kind filter, then inspect_dataset batch preview and populationPlans. For period counts/distinct use one period_dataset with explicit periodUnit and metrics, not a model round-trip for each cell/month. Correct the stated validation input; keep independent raw checks.'};
+}
+
 
 // Browser pages can expose many safe read controls alongside a long rendered body.
 // Keep the useful prefix and live references, tell the planner that the view was
@@ -81,7 +96,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       // Recheck scope/expiry before every tool, not just at job claim.
       try { cfg = await load(); e = verifyApprovedPlan(cfg, plan); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
-      const choice = i === 0 ? { tool: 'connection', arguments: '{}' } : i===1&&tools.spec.some(x=>x.tool==='list_datasets')?{tool:'list_datasets',arguments:'{}'}:await planner.next({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: tools.spec, results: results.slice(-12), progress: { toolCount: results.length, consecutiveNoProgress: stalled }, instruction: '优先修正investigationContext.corrections中的未解决校验原因；inspect_dataset会返回草稿所需检查项。不因为REPORT_INPUT重查整套数据。list_datasets有nextOffset时继续分页找已有成果。优先用一次聚合或重复组合查询关闭核心缺口；表结构定向读取并按真实证据推进。先前结果仍在本会话历史中。' });
+      const choice = i === 0 ? { tool: 'connection', arguments: '{}' } : i===1&&tools.spec.some(x=>x.tool==='list_datasets')?{tool:'list_datasets',arguments:'{}'}:await planner.next({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: tools.spec, results: results.slice(-12), reportState: reportPlannerState(results), progress: { toolCount: results.length, consecutiveNoProgress: stalled }, instruction: '优先修正investigationContext.corrections中的未解决校验原因；inspect_dataset会返回草稿所需检查项。不因为REPORT_INPUT重查整套数据。list_datasets有nextOffset时继续分页找已有成果。优先用一次聚合或重复组合查询关闭核心缺口；表结构定向读取并按真实证据推进。先前结果仍在本会话历史中。' });
       if (choice.tool === 'finish') {
         const mysqlEvidence = results.some(item => item.result && ['collections','tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
         const mysqlQueryTools = ['mysql','mongodb'].includes(e.kind) && tools.spec.some(item => ['collections','tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));

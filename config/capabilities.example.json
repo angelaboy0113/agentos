@@ -41,5 +41,59 @@
       ],
       "separator": " / "
     }
+  },
+  "period_statistics": {
+    "populationRef": "REPLACE_WITH_COMPLETE_OBJECT_DATASET_REF",
+    "keyColumns": [
+      "object_id"
+    ],
+    "period": {
+      "unit": "month",
+      "start": "2025-12",
+      "end": "2026-05",
+      "column": "period"
+    },
+    "sources": [
+      {
+        "datasetRef": "REPLACE_WITH_COMPLETE_EVENT_DATASET_REF",
+        "keyColumns": [
+          "object_id"
+        ],
+        "periodColumn": "event_day",
+        "periodUnit": "day",
+        "duplicates": "sum",
+        "outside": "error",
+        "metrics": [
+          {
+            "op": "count",
+            "as": "events",
+            "missing": "zero",
+            "nulls": "error"
+          },
+          {
+            "op": "count_distinct",
+            "column": "member_id",
+            "as": "members",
+            "cumulativeAs": "window_unique_members",
+            "missing": "zero",
+            "nulls": "error"
+          }
+        ]
+      }
+    ]
+  },
+  "inspect_dataset": {
+    "datasetRef": "REPLACE_WITH_SAVED_DATASET_REF",
+    "offset": 0,
+    "limit": 20,
+    "columns": [
+      "object_id",
+      "period"
+    ]
+  },
+  "list_datasets": {
+    "kind": "report_draft",
+    "offset": 0,
+    "limit": 20
   }
 }
