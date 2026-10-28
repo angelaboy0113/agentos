@@ -118,3 +118,5 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 1.49.0新增固定提交历史状态、analysisContinuation与轻量`.snapshot-audit`；迁移备份时同状态、source-manifest及datasets成套保留。长字段证据、calendar-v2版本配方与查询完整性标记保存在任务datasets内。详见[通用能力与迁移验证](multi-system-capability-audit.md)。
 
 1.49.2中断结果的executionFailure保存固定诊断分类、环节及安全错误码/HTTP状态/退出信息，随任务状态备份；不保存新的原始错误正文或凭据副本。旧卡缺少原始错误时不能反推根因。见[中断卡片诊断](multi-system-capability-audit.md#中断卡片的诊断信息)。
+
+1.49.3：完整数据集的树/筛选派生规则由 `dataset_transform/tree-filter-v1` 保存，复用原始来源引用、取数时点和作用域；恢复及定稿从来源重算，集中刷新重建依赖。迁移须保留整个任务 datasets 目录及配方依赖，不只复制输出CSV。卡片拒绝回调仅入私有审计和回调返回，不在群话题广播；审计新增操作人和白名单动作，旧事件的缺失字段不回填猜测值。

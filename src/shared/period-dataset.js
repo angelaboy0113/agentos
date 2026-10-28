@@ -1,3 +1,4 @@
+import {transformDataset} from './dataset-transform.js';
 import {createHash} from 'node:crypto';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const bad=m=>{throw Object.assign(new Error(m),{code:'REPORT_INPUT'});};
@@ -63,13 +64,17 @@ export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Nu
  return {rows,columns,numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===inputs[0].snapshotId)?inputs[0].snapshotId:hash(inputs.map(d=>d.snapshotId).sort()),derivation:{kind:'period_grid',args:effectiveArgs,audit:{objects:populationMap.size,periods:periods.length,rowCount:rows.length,sources:audits},provenance}};
 }
 export async function verifyPeriodDataset(data,load,options={}){
- const kind=data?.derivation?.kind;if(!['left_lookup','period_grid'].includes(kind))return;
+ const kind=data?.derivation?.kind;if(!['left_lookup','period_grid','dataset_transform'].includes(kind))return;
  const state=options.state??(options.state={visiting:new Set(),done:new Set()}),token=options.ref??data;
  if(state.visiting.has(token))bad('期间数据依赖循环');if(state.done.has(token))return;
  state.visiting.add(token);
  try{
   const dependencies=new Map(),read=async ref=>{if(dependencies.has(ref))return dependencies.get(ref);const d=await load(ref);if(!d?.complete)bad('期间依赖缺失或不完整');await verifyPeriodDataset(d,load,{...options,state,ref});dependencies.set(ref,d);return d;};
-  if(kind==='left_lookup'){await read(data.derivation.datasetRef);for(const l of data.derivation.lookups)await read(l.datasetRef);}
+  if(kind==='dataset_transform'){
+   if(data.derivation.version!=='tree-filter-v1')bad('不支持的数据整理配方版本');
+   const base=await read(data.derivation.args.datasetRef),rebuilt=transformDataset(data.derivation.args,base);
+   for(const key of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(JSON.stringify(data[key])!==JSON.stringify(rebuilt[key]))bad('整理数据与完整来源重算不一致');
+  }else if(kind==='left_lookup'){await read(data.derivation.datasetRef);for(const l of data.derivation.lookups)await read(l.datasetRef);}
   else {
    const args=data.derivation.args;
    for(const ref of [args.populationRef,...args.sources.map(s=>s.datasetRef)])await read(ref);

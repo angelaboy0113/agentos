@@ -187,3 +187,15 @@ test('legacy expired approval renewal is idempotent and resumes under read-only 
 
  assert.equal((await handleCardAction(context,event('approve_environment',{card_content:'',action_value:JSON.stringify({action:'approve_environment',version:jobActionVersion(current)})}))).ok,false);
 });
+
+test('stale refresh repairs presentation without mutation; stale mutations and foreign actors never broadcast',async t=>{
+ const {context,create,store,notices}=await setup(t);const {job,event}=await create('running','analysis');
+ const before=await store.getJob(job.id),stale=JSON.stringify({action:'refresh',version:'old-version'});
+ assert.equal((await handleCardAction(context,event('refresh',{action_value:stale}))).ok,true);
+ assert.deepEqual(await store.getJob(job.id),before);
+ assert.equal((await handleCardAction(context,event('cancel',{action_value:JSON.stringify({action:'cancel',version:'old-version'})}))).ok,false);
+ const denied=event('refresh',{operator_id:'someone-else'});assert.equal((await handleCardAction(context,denied)).ok,false);
+ assert.equal((await handleCardAction(context,denied)).ok,false);assert.equal(notices.length,0);
+ const audit=(await store.read()).cardCallbackAudit.at(-1);assert.equal(audit.operatorId,'someone-else');assert.equal(audit.action,'refresh');
+ assert.deepEqual(await store.getJob(job.id),before);
+});

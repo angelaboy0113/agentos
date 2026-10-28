@@ -12,5 +12,34 @@
     "columns": {"system": "system_id", "environment": "environment_id", "application": "application_id", "deployedAt": "deployment_time_with_offset", "status": "release_status", "commit": "git_commit"},
     "successValues": ["REPLACE_WITH_VERIFIED_SUCCESS_VALUE"],
     "evidence": "REPLACE_WITH_REAL_RELEASE_SOURCE_AND_FIELD_SEMANTICS"
+  },
+  "transform_dataset": {
+    "datasetRef": "REPLACE_WITH_COMPLETE_DATASET_REF",
+    "keyColumn": "object_id",
+    "scopeEvidence": "REPLACE_WITH_VERIFIED_SCOPE_RULE",
+    "filters": [
+      {
+        "column": "category",
+        "op": "in",
+        "values": [
+          "REPLACE_WITH_VERIFIED_CATEGORY"
+        ]
+      }
+    ],
+    "hierarchy": {
+      "parentColumn": "parent_id",
+      "rootIds": [
+        "REPLACE_WITH_VERIFIED_ROOT_ID"
+      ],
+      "includeRoots": false,
+      "nodeFilters": [],
+      "pathColumns": [
+        {
+          "column": "name",
+          "as": "full_path"
+        }
+      ],
+      "separator": " / "
+    }
   }
 }

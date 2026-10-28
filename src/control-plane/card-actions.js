@@ -40,7 +40,8 @@ export async function handleCardAction(context, event) {
     await context.store.transact(state=>{
       state.cardCallbackAudit??=[];
       state.cardCallbackAudit.push({at:new Date().toISOString(),profile:event.agent_profile??null,eventId:event.event_id??null,
-        messageId:event.message_id??null,cardContentPresent:!!event.card_content,
+        messageId:event.message_id??null,operatorId:typeof event.operator_id==='string'?event.operator_id:null,
+        action:(()=>{try{const a=parse(event.action_value).action;return ['cancel','approve','approve_environment','renew_environment','clarify','refresh','result_page','enrollment_refresh','enrollment_cancel'].includes(a)?a:event.action_name?.startsWith('clarify_')?'clarify':'unknown';}catch{return 'invalid';}})(),cardContentPresent:!!event.card_content,
         outcome:result?.ok?'accepted':result?.ignored?'ignored':result?'rejected':'delivery_failed',
         reason:result?.reason??result?.message??'处理未完成，可按同一事件重试'});
       state.cardCallbackAudit=state.cardCallbackAudit.slice(-200);
@@ -89,7 +90,7 @@ async function applyCardAction(context, event) {
       if (freshCard?.messageId !== event.message_id || freshCard.destination.profile !== profile
         || current.chatId !== cardActionChat(freshCard,event) || (questionId ? freshState.questions?.[questionId]?.profile : current.agentProfile) !== profile
         || (questionId && questionJob(freshState, questionId)?.id !== current.id)
-        || jobActionVersion(current) !== version || !hasAction(freshCard.card, action, version)) {
+        || (action !== 'refresh' && (jobActionVersion(current) !== version || !hasAction(freshCard.card, action, version)))) {
         throw new Error('这张卡片已过期，请操作最新任务卡片。');
       }
     };
@@ -133,16 +134,10 @@ async function applyCardAction(context, event) {
   } catch (error) {
     // Do not echo arbitrary callback input, tokens or raw errors into the group.
     const known = /^(只有|这张卡片|请填写|不支持|当前任务|查询授权|查询申请)/.test(error.message) ? error.message : '操作未完成：任务状态可能已变化，请刷新后重试。';
-    // Refresh the known owned card even when an approval has expired; no grant is renewed here.
-    await refreshActionCard(context, { questionId, key, job, savedCard, event });
-    const noticeKey = `${effectKey}:notice`;
-    const accepted = await store.transactEffect(noticeKey, () => ({ message: known }));
-    const delivered = (await store.read()).cardActionNotices?.[noticeKey];
-    if (!delivered && savedCard.destination.visibility!=='requester') {
-      await context.feishu.reply(event.message_id, accepted.message, { profile, replyInThread: savedCard.destination.replyInThread, idempotencyKey: noticeKey });
-      await store.transact((fresh) => { fresh.cardActionNotices ??= {}; fresh.cardActionNotices[noticeKey] = true; });
-    }
-    return { ok: false, message: accepted.message };
+    // Rejected callbacks are not business results: never broadcast them into the task thread.
+    // Only an authorised actor may request presentation repair. Mutation guards stay strict.
+    if(admin||creator)await refreshActionCard(context, { questionId, key, job, savedCard, event });
+    return { ok: false, message: known, notification: 'callback_only' };
   }
 }
 
