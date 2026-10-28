@@ -78,7 +78,7 @@ function filterClause(filters=[], tables, table, q, valueSets = new Map(), alias
   }).join(' AND ');
   return { where, params };
 }
-export function selectStatement(args, tables, q) {
+export function selectStatement(args, tables, q, valueSets=new Map()) {
   const { table, columns, filters } = args;
   const known = tableColumns(tables, table, q);
   if (!Array.isArray(columns) || !columns.length) throw new QueryInputError('QUERY_INPUT', 'columns必须是非空字段数组。');
@@ -86,24 +86,24 @@ export function selectStatement(args, tables, q) {
   if (columns.some(c => typeof c === 'string' && secretName.test(c))) throw new Error('查询列超出范围');
   if (columns.some(c => !ident(c))) throw new QueryInputError('QUERY_INPUT', 'columns仅接受schema返回的普通字段名，不能使用*、函数或表达式。');
   if (columns.some(c => !known.includes(c))) throw new QueryInputError('SCHEMA_FIELDS', '字段未在已读取结构中；重新读取目标表schema或继续分页，仅使用返回的字段。');
-  const {where,params}=filterClause(filters,tables,table,q,new Map(),'',6);
+  const {where,params}=filterClause(filters,tables,table,q,valueSets,'',6);
   return { sql: `SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`${table}\` WHERE ${where} LIMIT ${q.maxRows + 1}`, params, columns };
 }
 // Count only validated base-table fields and filters; no model-provided SQL.
-export function countStatement(args, tables, q) {
+export function countStatement(args, tables, q, valueSets=new Map()) {
   const distinct = args.distinctColumns ?? [];
   if (!Array.isArray(distinct) || distinct.length > 12) throw new QueryInputError('QUERY_INPUT', 'distinctColumns应为最多12个字段的数组。');
   const columns = distinct.length ? distinct : (tables.get(args.table) ?? []).slice(0, 1);
-  const base = selectStatement({ table: args.table, columns, filters: args.filters }, tables, q);
+  const base = selectStatement({ table: args.table, columns, filters: args.filters }, tables, q,valueSets);
   const from = base.sql.slice(base.sql.indexOf(' FROM ')).replace(/ LIMIT \d+$/, '');
   return { sql: `SELECT COUNT(${distinct.length ? 'DISTINCT ' + distinct.map(c => '`' + c + '`').join(', ') : '*'}) AS total${from}`, params: base.params };
 }
 
-export function groupCountStatement(args,tables,q){
+export function groupCountStatement(args,tables,q,valueSets=new Map()){
   const groupColumns=args.groupColumns??[],minCount=args.minCount??2;
   if(!Array.isArray(groupColumns)||!groupColumns.length||groupColumns.length>8)throw new QueryInputError('QUERY_INPUT','groupColumns必须是1至8个字段。');
   if(!Number.isInteger(minCount)||minCount<2||minCount>100000)throw new QueryInputError('QUERY_INPUT','minCount必须是2至100000的整数。');
-  const base=selectStatement({table:args.table,columns:groupColumns,filters:args.filters},tables,q);
+  const base=selectStatement({table:args.table,columns:groupColumns,filters:args.filters},tables,q,valueSets);
   const from=base.sql.slice(base.sql.indexOf(' FROM ')).replace(/ LIMIT \d+$/,'');
   const quoted=groupColumns.map(column=>`\`${column}\``).join(', ');
   return {sql:`SELECT ${quoted}, COUNT(*) AS duplicate_count${from} GROUP BY ${quoted} HAVING COUNT(*) >= ? ORDER BY duplicate_count DESC LIMIT ${q.maxRows+1}`,
@@ -135,11 +135,11 @@ export function aggregateStatement(args,tables,types,q,valueSets=new Map()){
   const filter=filterClause(args.filters,tables,args.table,q,valueSets);
   return {sql:`SELECT ${metrics.map(x=>`${x.expression} AS \`${x.name}\``).join(', ')} FROM \`${args.table}\` WHERE ${filter.where}`,params:filter.params,columns:metrics.map(x=>x.name)};
 }
-export function collectValuesStatement(args,tables,q){
+export function collectValuesStatement(args,tables,q,valueSets=new Map()){
   const columns=args.columns??[];
   if(!Array.isArray(columns)||!columns.length||columns.length>8)throw new QueryInputError('QUERY_INPUT','columns必须是1至8个字段。');
   for(const column of columns)checkedColumn(tables,args.table,column,q);
-  const filter=filterClause(args.filters,tables,args.table,q);
+  const filter=filterClause(args.filters,tables,args.table,q,valueSets);
   return {sql:`SELECT DISTINCT ${columns.map(c=>`\`${c}\``).join(', ')} FROM \`${args.table}\` WHERE ${filter.where} LIMIT 1001`,params:filter.params,columns};
 }
 export function linkedAggregateStatement(args,tables,types,q,valueSets=new Map()){
@@ -332,7 +332,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         });
         if(tool==='indexes'){tableColumns(tables,args.table,q);const c=await mysql();const [rows]=await c.execute({sql:'SHOW INDEX FROM `'+args.table+'`',timeout:q.timeoutMs},[]);return {rows,stage:'只读索引元数据；用于选择查询条件，不证明业务结果'};}
         if(tool==='explain_query'){
-          const builders={select:a=>selectStatement(a,tables,q),aggregate:a=>aggregateStatement(a,tables,columnTypes,q,valueSets),group_dataset:a=>groupedDatasetStatement(a,tables,columnTypes,q,valueSets,primaryKeys)};
+          const builders={select:a=>selectStatement(a,tables,q,valueSets),aggregate:a=>aggregateStatement(a,tables,columnTypes,q,valueSets),group_dataset:a=>groupedDatasetStatement(a,tables,columnTypes,q,valueSets,primaryKeys)};
           if(!builders[args.tool])throw new QueryInputError('QUERY_INPUT','执行计划仅支持select/aggregate/group_dataset的固定参数');
           const statement=builders[args.tool](args.arguments),c=await mysql();const [rows]=await c.execute({sql:'EXPLAIN '+statement.sql,timeout:q.timeoutMs},statement.params);return {rows,stage:'只读执行计划；不是业务数据，不执行ANALYZE或模型SQL'};
         }
@@ -373,19 +373,19 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           return result;
         }
         if (tool === 'count') {
-          const statement = countStatement(args, tables, q);
+          const statement = countStatement(args, tables, q,valueSets);
           const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
           return { table: args.table, rows: [{ total: String(rows[0].total), countMode: args.distinctColumns?.length ? 'distinct' : 'rows', distinctColumns: (args.distinctColumns ?? []).join(',') }], truncated: false };
         }
         if(tool==='group_count'){
-          const statement=groupCountStatement(args,tables,q);
+          const statement=groupCountStatement(args,tables,q,valueSets);
           const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
           const result={table:args.table,rows:rows.slice(0,q.maxRows).map(row=>Object.fromEntries([...statement.groupColumns,'duplicate_count'].map(key=>[key,bounded(row[key],secrets)]))),truncated:rows.length>q.maxRows,groupColumns:statement.groupColumns};
           if(Buffer.byteLength(JSON.stringify(result))>12000)return {table:args.table,...await datasets.captureRows(result.rows,[...statement.groupColumns,'duplicate_count'],{complete:!result.truncated,queryDefinition:{sql:statement.sql,params:statement.params}}),truncated:result.truncated};
           return result;
         }
         if(tool==='collect_values'){
-          const statement=collectValuesStatement(args,tables,q);const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
+          const statement=collectValuesStatement(args,tables,q,valueSets);const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
           const values=[...new Set(rows.slice(0,1000).flatMap(row=>statement.columns.map(column=>row[column])).filter(value=>value!==null&&value!==undefined&&['string','number','bigint'].includes(typeof value)).map(String))];
           const setRef=`set-${valueSets.size+1}`;valueSets.set(setRef,{values,truncated:rows.length>1000});
           return {table:args.table,setRef,valueCount:values.length,sample:values.slice(0,Math.min(q.maxRows,20)),truncated:rows.length>1000,stage:`已收集 ${values.length} 个去重值供本轮关联汇总`};
@@ -395,7 +395,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           const [rows]=await read(c,{sql:statement.sql,timeout:q.timeoutMs},statement.params);
           return {rows:rows.slice(0,1).map(row=>Object.fromEntries(statement.columns.map(key=>[key,bounded(row[key],secrets)]))),truncated:false,stage:tool==='aggregate'?'已完成单表汇总':'已完成受控关联汇总'};
         }
-        const statement = selectStatement(args, tables, q);
+        const statement = selectStatement(args, tables, q,valueSets);
         const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         const result={ table: args.table, rows: rows.slice(0,q.maxRows).map(r=>Object.fromEntries(statement.columns.map(k=>[k,bounded(r[k],secrets)]))),truncated:rows.length>q.maxRows };
         if(Buffer.byteLength(JSON.stringify(result))>12000)return {table:args.table,...await datasets.captureRows(result.rows,statement.columns,{complete:!result.truncated,queryDefinition:{sql:statement.sql,params:statement.params}}),truncated:result.truncated};

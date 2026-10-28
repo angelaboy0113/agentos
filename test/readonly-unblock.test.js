@@ -5,7 +5,11 @@ import {TaskDatasetStore} from '../src/runner/task-dataset-store.js';
 import {ReportDatasets} from '../src/runner/report-datasets.js';
 import {queryTimeout,fingerprint} from '../src/shared/environment-access.js';
 import {assessReportDelivery} from '../src/shared/report-acceptance.js';
-import {createEnvironmentTools} from '../src/runner/environment-tools.js';
+import {createEnvironmentTools,selectStatement,countStatement,groupCountStatement,collectValuesStatement} from '../src/runner/environment-tools.js';
+test('all advertised cohort filters bind complete authorized sets in select, count and duplicate checks',()=>{
+ const tables=new Map([['items',['id']]]),q={tables:['items'],maxRows:5},sets=new Map([['set-1',{values:Array.from({length:3198},(_,i)=>String(i)),truncated:false}]]),args={table:'items',columns:['id'],groupColumns:['id'],filters:[{column:'id',op:'in_set',value:'set-1'}]};
+ for(const build of [selectStatement,countStatement,groupCountStatement,collectValuesStatement]){const result=build(args,tables,q,sets);assert.equal(result.params[0],'0');assert.equal(result.params[3197],'3197');assert.throws(()=>build(args,tables,q,new Map()),/in_set/);}
+});
 import {failureDetails} from '../src/shared/failure-diagnostic.js';
 test('a changed task harness retains an actionable review diagnostic across process boundaries',()=>{
  const d=failureDetails(new Error('Harness版本在任务链中发生变化；请先由管理员复核，不自动沿用旧批准。'));
