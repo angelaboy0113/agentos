@@ -3,7 +3,7 @@ const readline=require('node:readline');
 const mysql=require('mysql2/promise');
 let conn,initialized=false,queue=Promise.resolve();
 function allowed(sql){
- if(typeof sql!=='string'||sql.length>100000||/;|--|\/\*|\b(?:INTO|OUTFILE|DUMPFILE|FOR\s+UPDATE|LOCK|SLEEP|BENCHMARK|LOAD_FILE|GET_LOCK)\b/i.test(sql))return false;
+ if(typeof sql!=='string'||/;|--|\/\*|\b(?:INTO|OUTFILE|DUMPFILE|FOR\s+UPDATE|LOCK|SLEEP|BENCHMARK|LOAD_FILE|GET_LOCK)\b/i.test(sql))return false;
  return /^(?:SELECT\s|EXPLAIN\s+SELECT\s|SHOW\s(?:GRANTS|TABLES|COLUMNS|DATABASES|INDEX|SESSION\s+(?:VARIABLES|STATUS))\b|SET SESSION MAX_EXECUTION_TIME=\d+$|SET TRANSACTION ISOLATION LEVEL REPEATABLE READ$|START TRANSACTION READ ONLY$|ROLLBACK$)/i.test(sql);
 }
 const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});

@@ -254,6 +254,12 @@ async function route(context) {
     return json(response,200,result);
   }
 
+  const renewEnvironmentMatch=url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/environment-renew$/);
+  if(request.method==='POST'&&renewEnvironmentMatch){
+    requireBearer(request,config.runnerToken,'runner');
+    const body=await readJson(request),result=await commitControl(context,async()=>({ok:true,plan:await store.renewActiveEnvironment(decodeURIComponent(renewEnvironmentMatch[1]),body)}));
+    return json(response,200,result);
+  }
   const controlMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/control$/);
   if (request.method === 'POST' && controlMatch) {
     requireBearer(request, config.runnerToken, 'runner');
@@ -785,7 +791,7 @@ async function receiptAllowed(context,meta,body){
  if(!saved?.executable)return;
  const id=saved.jobId??body.job?.id;if(!id)return;const current=await context.store.getJob(id),lease=saved.leaseId??body.job?.lease?.id;
  if(current?.status!=='running'||current.lease?.id!==lease||current.lease?.runnerId!==meta.runnerId||!(Date.parse(current.lease?.expiresAt)>Date.now()))throw Object.assign(new Error('Recovered execution receipt has a stale or cancelled lease'),{statusCode:409});
- if(saved.route.endsWith('/environment-claim')){if(current.environmentAccess?.scopeHash!==body.plan?.scopeHash||current.environmentAccess?.startedAt!==body.plan?.startedAt)throw Object.assign(new Error('Recovered grant is no longer the current environment step'),{statusCode:409});try{verifyApprovedPlan(await loadEnvironments(),body.plan);}catch{throw Object.assign(new Error('Recovered environment authorization is no longer valid'),{statusCode:403});}}
+ if(saved.route.endsWith('/environment-claim')||saved.route.endsWith('/environment-renew')){if(current.environmentAccess?.scopeHash!==body.plan?.scopeHash||current.environmentAccess?.startedAt!==body.plan?.startedAt)throw Object.assign(new Error('Recovered grant is no longer the current environment step'),{statusCode:409});try{verifyApprovedPlan(await loadEnvironments(),body.plan);}catch{throw Object.assign(new Error('Recovered environment authorization is no longer valid'),{statusCode:403});}}
 }
 async function durableControl(context,request,response){
  const pathname=new URL(request.url,'http://localhost').pathname,receipts=context.controlReceipts;
@@ -799,7 +805,7 @@ async function durableControl(context,request,response){
  const id=request.headers['x-agentos-request-id'];if(!id)return false;
  requireBearer(request,context.config.runnerToken,'runner');if(request.method!=='POST'||!validRequestId(id))throw Object.assign(new Error('Invalid control request ID'),{statusCode:400});
  const body=await readJson(request);if(!criticalControl(pathname,body)||typeof body.runnerId!=='string')throw Object.assign(new Error('Unsupported durable control operation'),{statusCode:400});
- const meta={id,runnerId:body.runnerId,leaseId:body.leaseId,jobId:pathname.match(/^\/api\/v1\/jobs\/([^/]+)\//)?.[1],route:pathname,digest:controlDigest(pathname,body),executable:pathname.endsWith('/environment-claim')||pathname==='/api/v1/jobs/lease'||pathname.endsWith('/events')&&body.type==='started'};
+ const meta={id,runnerId:body.runnerId,leaseId:body.leaseId,jobId:pathname.match(/^\/api\/v1\/jobs\/([^/]+)\//)?.[1],route:pathname,digest:controlDigest(pathname,body),executable:pathname.endsWith('/environment-claim')||pathname.endsWith('/environment-renew')||pathname==='/api/v1/jobs/lease'||pathname.endsWith('/events')&&body.type==='started'};
  request.controlBody=body;request.controlMeta=meta;
  let pending=receipts.pending.get(id);
  if(pending)receipts.check(pending,meta);

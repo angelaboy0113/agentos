@@ -19,7 +19,7 @@ test('long-field evidence survives restart, nulls and paging without upgrading a
 test('ordinary non-export queries expose durable field paging, with no repeat database query',async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'long-query-'));t.after(()=>rm(root,{recursive:true,force:true}));let businessReads=0;
  const text='完整规则'.repeat(7000);
- const mysql={createConnection:async()=>({query:async sql=>sql.startsWith('SHOW GRANTS')?[[{Grants:'GRANT SELECT ON `demo`.* TO test'}]]:[[]],execute:async s=>{
+ const mysql={createConnection:async()=>({query:async sql=>(typeof sql==='string'?sql:sql.sql).startsWith('SHOW GRANTS')?[[{Grants:'GRANT SELECT ON `demo`.* TO test'}]]:[[]],execute:async s=>{
  if(s.sql.includes('information_schema.COLUMNS'))return [[{table_name:'rules',column_name:'id',data_type:'varchar',engine:'InnoDB'},{table_name:'rules',column_name:'text',data_type:'text',engine:'InnoDB'}]];
  businessReads++;return [[{id:'one',text}]];
  },rollback:async()=>{},destroy(){}})};

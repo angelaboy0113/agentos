@@ -62,7 +62,7 @@ export function acceptedReportResult(job){
 }
 
 function validDeliverables(job,requested,primary){
- if(!Array.isArray(requested)||!requested.length||requested.length>20||!requested.some(x=>x.fileId===primary)||new Set(requested.map(x=>x.fileId)).size!==requested.length)return false;
+ if(!Array.isArray(requested)||!requested.length||!requested.some(x=>x.fileId===primary)||new Set(requested.map(x=>x.fileId)).size!==requested.length)return false;
  const evidence=[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])];
  return requested.every(x=>typeof x.evidence==='string'&&x.evidence.trim()&&job.reportFiles?.some(f=>f.id===x.fileId&&proof(f)&&evidence.some(e=>e?.status==='verified'&&e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&e.calculationAudit?.status==='passed')));
 }

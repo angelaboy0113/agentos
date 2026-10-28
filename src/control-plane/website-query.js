@@ -13,7 +13,7 @@ export function prepareWebsiteQuery(context,job,request){
  const pending=updates.then(async()=>{
   if(!request||!['uat','prd'].includes(request.tier))throw Object.assign(new Error('网页排查运行分级无效'),{queryDiagnostic:{code:'WEBSITE_TIER_INVALID',reason:'网页排查未指定有效的测试/生产运行分级。',correction:'按协议使用 uat（测试）或 prd（生产），源码环境ID保持本项目配置。'}});
   const purpose=request.purpose;
-  const issue=typeof purpose!=='string'?'type':!purpose.trim()?'empty':/[\u0000-\u001f\u007f]/.test(purpose)?'control_characters':purpose.length>200?'length':null;
+  const issue=typeof purpose!=='string'?'type':!purpose.trim()?'empty':/[\u0000-\u001f\u007f]/.test(purpose)?'control_characters':null;
   if(issue)throw Object.assign(new Error('Invalid website purpose'),{queryDiagnostic:{code:'TEXT_PARAMETER',index:0,reason:issue,length:typeof purpose==='string'?purpose.length:null,maxLength:200}});
   assertSourceRuntimeTier(context.projects.projects?.[job.projectId],job.sourceEnvironment,request.tier);
   const cfg=await loadEnvironments();

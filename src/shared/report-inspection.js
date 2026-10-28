@@ -63,7 +63,7 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  const checks=receipt.totals??[];
  const binding={fileId:item.id,sourceJobId,datasetRef:bound.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:item.rowCount};
  const audit={status:'passed',checkedRows:rows.length,checkedCells:rows.length*columns.length,note:'实际CSV逐行等于绑定固定公式的计算结果；业务口径仍需对照原问题和来源依据审阅。'};
- if(section!=='summary'){const all=section==='columns'?columns:section==='sources'?sourceList:section==='scope'?comparisons:checks;const items=all.slice(offset,offset+limit);const result={binding,section,items,totalCount:all.length,nextOffset:offset+items.length<all.length?offset+items.length:null,calculationAudit:audit};if(Buffer.byteLength(JSON.stringify(result))>22000)fail('详情过长，请将limit缩小后继续分页');return result;}
+ if(section!=='summary'){const all=section==='columns'?columns:section==='sources'?sourceList:section==='scope'?comparisons:checks;const items=all.slice(offset,offset+limit);const result={binding,section,items,totalCount:all.length,nextOffset:offset+items.length<all.length?offset+items.length:null,calculationAudit:audit};return result;}
  const result={binding,status:'verified',delivery:{owner:'AgentOS outbox',requiresModelDownloadUrl:false,trigger:'final accepted review and completed ready job',deliveryReceiptProvided:false,note:'这是实际文件核验资料；发送回执由系统单独记录，不能要求先出现下载URL才接受文件。'},headers:data.columns,columns:columns.map(c=>({...c,definition:c.definition.slice(0,240),evidence:c.evidence.slice(0,200)})),sources:sourceList.map(d=>({...d,queryDefinition:d.queryDefinition?{sql:d.queryDefinition.sql.slice(0,1000),params:d.queryDefinition.params.slice(0,20)}:null,derivation:d.derivation?{kind:d.derivation.kind,lookupChecks:d.derivation.lookupChecks,audit:d.derivation.audit,args:d.derivation.args}:null})),coverage:receipt.coverage,populationAudit,checks,readWindow:receipt.readWindow,calculationAudit:audit,preview:rows.slice(0,3),limited:true,note:'按文件ID绑定的实际配方与CSV审阅资料，不是新的数据库查询。文本和来源为有界摘要；细节可用inspect_report的columns/sources/checks分页读取。不因未查询数据库把已有文件说成无记录。'};
  if(Buffer.byteLength(JSON.stringify(result))>22000){result.preview=[];result.populationAudit.comparisons=result.populationAudit.comparisons.map(c=>({...c,queryDefinition:c.queryDefinition?{sql:c.queryDefinition.sql.slice(0,300),params:c.queryDefinition.params.slice(0,3)}:null}));result.sources=result.sources.map(s=>({...s,queryDefinition:s.queryDefinition?{sql:s.queryDefinition.sql.slice(0,200),params:s.queryDefinition.params.slice(0,3)}:null}));}
  if(Buffer.byteLength(JSON.stringify(result))>22000){result.populationAudit.comparisons=result.populationAudit.comparisons.map(c=>({...c,queryDefinition:null,onlyReferencePreview:[],onlyFilePreview:[],detailsPaged:true}));}
@@ -76,7 +76,7 @@ export async function reportReviewEvidence(dataDir,job){
  try{
   const primary=await inspectReport(dataDir,job,{fileId:item.id});
   primary.relatedReports=[];
-  for(const file of (job.reportFiles??[]).filter(f=>f.verificationHash&&f.id!==item.id).slice(-19)){
+  for(const file of (job.reportFiles??[]).filter(f=>f.verificationHash&&f.id!==item.id)){
    try{const r=await inspectReport(dataDir,job,{fileId:file.id});primary.relatedReports.push({status:r.status,binding:r.binding,headers:r.headers,calculationAudit:r.calculationAudit,populationAudit:r.populationAudit});}
    catch{primary.relatedReports.push({status:'unavailable',binding:{fileId:file.id}});}
   }

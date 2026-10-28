@@ -1,5 +1,7 @@
 # AgentOS 文件、数据与日志位置
 
+1.52.0长任务与查询规则见[完整查询与大结果接续](long-query-continuity.md)：原范围自动复核续期、无整批查询截止、历史数据不按24小时失效、大结果保存续读；不改变只读权限及完整文件核验。
+
 1.51.0数据集信封新增createdAt，仅表示工件创建，原readAt不变；旧工件缺少时不补造。calendar-v3统计配方与civil_day/month筛选随原任务datasets完整备份，旧程序不能重放新配方。目录及预览展示改进、回退兼容边界见[报表效率与接续](report-efficiency.md)。
 
 本页回答“AgentOS 生成的东西都在哪里”。默认程序目录以下用 `<agentos>` 表示；默认运行数据根目录是 `<agentos>/data`，可用 `AGENTOS_DATA_DIR` 改到其他绝对路径。
@@ -27,7 +29,7 @@
 | `data/agentos.json` | Job、Mission、对话、AI 决策、状态、结果、发送、幂等记录及最近 200 项本机设置审计 | 是 | 否 |
 | `data/exports/<JOB>/` | 完整分组报表 CSV，含实时业务金额；通过文件校验后回复原提问。见[报表导出](report-exports.md) | 是 | 否 |
 | `data/exports/<JOB>/report-*.verification.json` | 最终文件的列/覆盖/分量核验及业务依据，与CSV绑定；不等于人工业务验收 | 是 | 否 |
-| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；普通查询长字段可保存为明确标记不完整的证据，不参与完整报表；不进入团队知识。24小时后不再复用；启用历史保留策略后随过期任务清理 | 是 | 否 |
+| `data/exports/<JOB>/datasets/` | 本任务完整数据集检查点，含范围指纹、取数时间和摘要；普通查询长字段可保存为明确标记不完整的证据，不参与完整报表；不进入团队知识。不按固定24小时失效；按当前授权复用并保留原始取数时间；启用历史保留策略后随过期任务清理 | 是 | 否 |
 | `data/lark-cli/reports/` | CLI 文件回复副本，需与正式导出文件分别清理 | 是 | 否 |
 | `data/website-evidence/<JOB>/` | 用户要求的当前网页视口截图，等待接口/渲染稳定，仅凭据及显式敏感区灰色遮挡，未就绪时标记现场证据；摘要校验后通过原话题投递，待发送保存在websiteEvidenceDeliveries，随问题保留策略清理 | 是 | 否 |
 | `data/attachments/<JOB>/` | HTTPS/OpenAPI 接入下载的任务附件 | 是 | 否 |

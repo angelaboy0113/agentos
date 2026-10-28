@@ -9,11 +9,11 @@ test('business account requires explicit admin authorization and restricts SQL t
  assert.throws(()=>checkAccountGrants(business(),[]));
 });
 test('business mode still starts readonly transaction before bound query and rolls back',async()=>{
- const calls=[];const connection={query:async sql=>{calls.push(sql);return [grants];},execute:async(q,p)=>{calls.push(q.sql);return [[{database_name:'demo'}]];},rollback:async()=>calls.push('rollback'),destroy:()=>calls.push('destroy')};
+ const calls=[];const connection={query:async sql=>{sql=typeof sql==='string'?sql:sql.sql;calls.push(sql);return [grants];},execute:async(q,p)=>{calls.push(q.sql);return [[{database_name:'demo'}]];},rollback:async()=>calls.push('rollback'),destroy:()=>calls.push('destroy')};
  await mysqlRead(business(),{sql:CONNECTION_SQL,parameters:[],outputColumns:['database_name'],timeoutMs:1000,maxRows:1},[],{username:'fake',password:'fake'},{mysql:{createConnection:async options=>{assert.equal(options.multipleStatements,false);assert.equal(options.supportBigNumbers,true);assert.equal(options.bigNumberStrings,true);return connection;}}});
  assert.ok(calls.indexOf('START TRANSACTION READ ONLY')<calls.findIndex(x=>x.startsWith('SELECT *')));assert.deepEqual(calls.slice(-2),['rollback','destroy']);
 });
 test('readonly transaction failure stops business account before executing data query',async()=>{
  let executed=false,destroyed=false;
- await assert.rejects(mysqlRead(business(),{sql:CONNECTION_SQL,outputColumns:[],timeoutMs:1000,maxRows:1},[],{}, {mysql:{createConnection:async()=>({query:async sql=>{if(sql==='START TRANSACTION READ ONLY')throw new Error('denied');return [grants];},execute:async()=>{executed=true;return [[]];},rollback:async()=>{},destroy:()=>{destroyed=true;}})}}));assert.equal(executed,false);assert.equal(destroyed,true);
+ await assert.rejects(mysqlRead(business(),{sql:CONNECTION_SQL,outputColumns:[],timeoutMs:1000,maxRows:1},[],{}, {mysql:{createConnection:async()=>({query:async sql=>{sql=typeof sql==='string'?sql:sql.sql;if(sql==='START TRANSACTION READ ONLY')throw new Error('denied');return [grants];},execute:async()=>{executed=true;return [[]];},rollback:async()=>{},destroy:()=>{destroyed=true;}})}}));assert.equal(executed,false);assert.equal(destroyed,true);
 });

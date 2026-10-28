@@ -195,8 +195,7 @@
               ]
             },
             "purpose": {
-              "type": "string",
-              "maxLength": 200
+              "type": "string"
             }
           }
         }
@@ -558,7 +557,6 @@
                 {
                   "type": "array",
                   "minItems": 1,
-                  "maxItems": 20,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,

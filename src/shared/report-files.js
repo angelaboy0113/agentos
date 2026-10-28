@@ -20,7 +20,7 @@ export async function reportFile(dataDir,jobId,item,{includeContent=true}={}){
 }
 export async function validateReportFiles(dataDir,jobId,files){
  if(files===undefined)return [];
- if(!Array.isArray(files)||files.length>4)throw new Error('单次最多登记4个报表文件');
+ if(!Array.isArray(files))throw new Error('报表文件登记必须为数组');
  for(const item of files)await reportFile(dataDir,jobId,item,{includeContent:false});
  return files.map(({id,filename,bytes,sha256,rowCount,complete,verificationHash})=>({id,filename,bytes,sha256,rowCount,complete,verificationHash}));
 }

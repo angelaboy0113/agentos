@@ -71,7 +71,7 @@ test('wide reports and repeated draft correction no longer stop at twelve column
 
 test('tool catalog exposes period expansion and reports correctable input errors',async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'agentos-period-tools-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const mysql={createConnection:async()=>({query:async sql=>sql.startsWith('SHOW GRANTS')?[[{grants:'GRANT SELECT ON `demo`.* TO test'}]]:[[]],execute:async s=>s.sql.includes('information_schema.COLUMNS')?[[{table_name:'objects',column_name:'id',data_type:'varchar',engine:'InnoDB'}]]:pages([{id:'001',count:'1'}])(s),rollback:async()=>{},destroy:()=>{}})};
+ const mysql={createConnection:async()=>({query:async sql=>(typeof sql==='string'?sql:sql.sql).startsWith('SHOW GRANTS')?[[{grants:'GRANT SELECT ON `demo`.* TO test'}]]:[[]],execute:async s=>s.sql.includes('information_schema.COLUMNS')?[[{table_name:'objects',column_name:'id',data_type:'varchar',engine:'InnoDB'}]]:pages([{id:'001',count:'1'}])(s),rollback:async()=>{},destroy:()=>{}})};
  const tools=await createEnvironmentTools({kind:'mysql',host:'db',database:'demo'},{tables:['objects'],maxRows:5,timeoutMs:1000,exportMaxRows:'all',exportTimeoutMs:3000},{username:'fake',password:'fake'},{mysql,exportDirectory:root});t.after(()=>tools.close());
  assert.ok(tools.spec.some(s=>s.tool==='period_dataset'));
  await tools.run('schema',{table:'objects'});

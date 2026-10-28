@@ -33,6 +33,6 @@
     }
   },
   "executionPolicy": {
-    "mysqlQueryTimeoutMs": 120000
+    "mysqlQueryTimeoutMs": 600000
   }
 }

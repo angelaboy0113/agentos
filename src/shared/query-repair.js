@@ -3,8 +3,8 @@ export function queryRejection(error, job) {
  const d=error.queryDiagnostic;
  let code,reason,correction,recoverable=false;
  if(d?.code==='TEXT_PARAMETER'){
-  code=d.code;reason=`第${d.index+1}个查询文本参数不合格（${{type:'类型错误',empty:'为空',control_characters:'含换行或控制字符',length:'长度超限'}[d.reason]}；长度${d.length??'非文本'}，上限${d.maxLength}）。`;
-  correction=`保留原业务目标，将第${d.index+1}个参数改为非空单行文本，最多${d.maxLength}字符；复杂目标可分解为明确的只读步骤，不能删掉原目标。`;recoverable=true;
+  code=d.code;reason=`第${d.index+1}个查询文本参数不合格（${{type:'类型错误',empty:'为空',control_characters:'含换行或控制字符',length:'长度超限'}[d.reason]}；长度${d.length??'非文本'}，${d.maxLength==null?'无固定目的文本长度上限':'上限'+d.maxLength}）。`;
+  correction=`保留原业务目标，将第${d.index+1}个参数改为非空单行文本，${d.maxLength==null?'保留完整目标，不设固定目的文本长度上限':'最多'+d.maxLength+'字符'}；复杂目标可分解为明确的只读步骤，不能删掉原目标。`;recoverable=true;
  }else if(d?.code==='PARAMETER_COUNT'){
   code=d.code;reason=`查询参数数量不符，需要${d.expected}个，收到${d.actual??'非数组'}。`;correction='按当前环境目录的模板参数定义重新生成申请。';recoverable=true;
  }else if(d?.code==='INTEGER_PARAMETER'){

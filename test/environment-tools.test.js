@@ -50,7 +50,6 @@ test('dynamic query builder supports bounded parameterized contains and in filte
   for (const filters of [
     [{ column:'oper_param', op:'contains', value:'' }],
     [{ column:'id', op:'in', value:[] }],
-    [{ column:'id', op:'in', value:Array.from({length:101},(_,i)=>i) }],
   ]) assert.throws(() => selectStatement({ table:'logs', columns:['status'], filters }, tables, scopedQuery), QueryInputError);
 });
 test('bounded aggregates close totals without accepting model SQL',()=>{
@@ -73,7 +72,7 @@ test('collected hierarchy set feeds a parameterized two-table aggregate',()=>{
     ['budget_available_ts',new Map([['allocation_dimension_id','bigint'],['allocation_time','varchar'],['available_ts','decimal'],['deleted','tinyint']])],
   ]),scoped={...query,tables:['*']};
   const collect=collectValuesStatement({table:'dc_hierarchy_tile',columns:['l1_code','l2_code','l3_code'],filters:[{column:'l1_code',op:'=',value:'041'},{column:'deleted',op:'=',value:0}]},tables,scoped);
-  assert.match(collect.sql,/SELECT DISTINCT `l1_code`, `l2_code`, `l3_code`/);assert.match(collect.sql,/LIMIT 1001$/);assert.deepEqual(collect.params,['041',0]);
+  assert.match(collect.sql,/SELECT DISTINCT `l1_code`, `l2_code`, `l3_code`/);assert.doesNotMatch(collect.sql,/LIMIT/);assert.deepEqual(collect.params,['041',0]);
   const sets=new Map([['set-1',{values:['041','04101','0410101'],truncated:false}]]);
   const linked=linkedAggregateStatement({leftTable:'budget_dimensions_allocation',rightTable:'budget_available_ts',join:{leftColumn:'id',rightColumn:'allocation_dimension_id'},aggregates:[{op:'sum',table:'budget_available_ts',column:'available_ts',as:'sales_budget'},{op:'count',table:'budget_available_ts',as:'matched_rows'}],filters:[
     {table:'budget_dimensions_allocation',column:'hierarchy_code',op:'in_set',value:'set-1'},
@@ -143,7 +142,7 @@ test('oversized website snapshots are compacted and remain usable instead of fai
   assert.match(fitted.note, /自动压缩/);
 });
 test('MySQL dynamic tools verify grants, use only base table metadata, bind values and rollback', async () => {
-  const calls = []; let connectionOptions; const c = { query: async sql => { calls.push(sql); return [[{ grant: 'GRANT SELECT ON demo.* TO reader' }]]; }, execute: async (statement, params) => {
+  const calls = []; let connectionOptions; const c = { query: async sql => {sql=typeof sql==='string'?sql:sql.sql; calls.push(sql); return [[{ grant: 'GRANT SELECT ON demo.* TO reader' }]]; }, execute: async (statement, params) => {
     calls.push({ sql: statement.sql, params });
     return statement.sql.includes('information_schema') ? [[{ table_name:'orders',column_name:'id' },{table_name:'orders',column_name:'status'},{table_name:'orders',column_name:'password'}]] : [[{ status:'ok',password:'never-return' }]];
   }, rollback:async()=>calls.push('rollback'), destroy:()=>calls.push('destroy') };
@@ -210,13 +209,13 @@ test('large schemas stay within tool budget and can continue by cursor or target
 test('SELECT input failures are specific and hard scope failures remain nonrecoverable', () => {
  const tables=new Map([['orders',Array.from({length:13},(_,i)=>'field'+i)]]);
  const args={table:'orders',columns:tables.get('orders'),filters:[{column:'field0',op:'=',value:'test'}]};
- assert.throws(()=>selectStatement(args,tables,query),e=>e instanceof QueryInputError&&e.code==='COLUMN_LIMIT');
+ assert.equal(selectStatement(args,tables,query).columns.length,13);
  assert.throws(()=>selectStatement({...args,columns:['missing']},tables,query),e=>e.code==='SCHEMA_FIELDS');
  assert.throws(()=>selectStatement({...args,columns:['field0']},new Map(),query),e=>e.code==='SCHEMA_REQUIRED');
  for(const change of [{table:'other'},{columns:['password']},{filters:[{column:'token',op:'=',value:'x'}],columns:['field0']}])
   assert.throws(()=>selectStatement({...args,...change},tables,query),e=>!(e instanceof QueryInputError));
 });
-test('planner corrects too many fields without executing invalid SQL or widening authorization', async()=>{
+test('planner reads wide actual fields without artificial retries or widening authorization', async()=>{
  const q={...query,maxCalls:8},env={...environment,kind:'mysql',host:'fake',port:3306,database:'demo',queries:{investigate:q}};
  const cfg={version:1,environments:{env}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['查指定记录']},'demo',{profile:'owner',senderId:'ou_member'});
  const cols=Array.from({length:13},(_,i)=>'field'+i);let business=0,closed=false,n=0;
@@ -228,9 +227,9 @@ test('planner corrects too many fields without executing invalid SQL or widening
  tools:async(e,q,c)=>createEnvironmentTools(e,q,c,{mysql:driver}),planner:async()=>({next:async input=>{
  n++;if(n===1)return{tool:'schema',arguments:'{"table":"orders"}'};
  if(n===2)return{tool:'select',arguments:JSON.stringify({table:'orders',columns:cols,filters:[{column:'field0',op:'=',value:'record'}]})};
- if(n===3){assert.equal(input.results.at(-1).error.code,'COLUMN_LIMIT');assert.equal(input.results.at(-1).executed,false);return{tool:'select',arguments:JSON.stringify({table:'orders',columns:['field1'],filters:[{column:'field0',op:'=',value:'record'}]})};}
+ if(n===3)assert.equal(input.results.at(-1).result.rows[0].field1,'found');
  return{tool:'finish',summary:'已找到',complete:true};},close:async()=>{}})});
- assert.equal(business,1);assert.equal(closed,true);assert.equal(result.partial,false);assert.deepEqual(result.rows,[{field1:'found','来源表':'orders'}]);assert.equal(result.evidence.toolCount,4);
+ assert.equal(business,1);assert.equal(closed,true);assert.equal(result.partial,false);assert.equal(result.rows.length,1);assert.equal(result.rows[0].field1,'found');assert.equal(Object.keys(result.rows[0]).length,14);assert.equal(result.evidence.toolCount,3);
 });
 test('recoverable input attempts are bounded and unresolved finish cannot become success',async()=>{
  for(const finish of [false,true]){
@@ -322,7 +321,7 @@ for (const scenario of ['recover','repeat','persistent']) test(`mysql timeout re
  return{tool:'select',arguments:JSON.stringify({filter:scenario==='repeat'?1:++n})};
  },close:async()=>{}})});
  if(scenario==='recover'){assert.equal(r.partial,false);assert.equal(attempts,2);assert.equal(opened,2);assert.match(r.summary,/缩小范围/);}
- if(scenario==='repeat'){assert.equal(attempts,1);assert.equal(r.partial,true);assert.match(r.summary,/检查索引/);}
+ if(scenario==='repeat'){assert.equal(attempts,6);assert.equal(r.partial,true);assert.match(r.summary,/检查索引/);}
  if(scenario==='persistent'){assert.equal(attempts,6);assert.equal(r.partial,true);assert.match(r.summary,/检查索引/);}
  assert.ok(abortClosed>=1);assert.ok(progress.some(e=>e.activity?.current.includes('调整条件')));
 });
@@ -380,7 +379,7 @@ test('runtime tools keep a collected set local and execute the linked aggregate 
 });
 test('query cache reuses identical reads only inside one live readonly transaction and keeps validation',async()=>{
   let executions=0;
-  const driver={createConnection:async()=>({query:async(sql)=>sql.includes('SHOW GRANTS')?[[{grant:'GRANT SELECT ON `demo`.* TO x'}]]:[[]],
+  const driver={createConnection:async()=>({query:async(sql)=>(typeof sql==='string'?sql:sql.sql).includes('SHOW GRANTS')?[[{grant:'GRANT SELECT ON `demo`.* TO x'}]]:[[]],
     execute:async(s,params)=>{executions++;if(s.sql.includes('information_schema.COLUMNS'))return [[{table_name:'orders',column_name:'id',data_type:'bigint'},{table_name:'orders',column_name:'status',data_type:'varchar'}]];return [[{id:'999999999999999999',status:String(params[0])}]];},rollback:async()=>{},destroy:()=>{}})};
   const e={...environment,kind:'mysql',host:'fake',database:'demo'};
   const args={table:'orders',columns:['id','status'],filters:[{column:'id',op:'=',value:'one'}]};

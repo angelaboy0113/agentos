@@ -2,15 +2,51 @@
   "description": "工具参数示例；不是私有连接配置，不可直接充当真实数据/发布证明",
   "period_dataset": {
     "populationRef": "REPLACE_WITH_COMPLETE_DATASET_REF",
-    "keyColumns": ["object_id"],
-    "period": {"unit": "month", "start": "2025-12", "end": "2026-02", "column": "period"},
-    "sources": [{"datasetRef": "REPLACE_WITH_COMPLETE_SOURCE_REF", "keyColumns": ["object_id"], "periodColumn": "month", "duplicates": "error", "outside": "error", "metrics": [{"column": "amount", "as": "current_amount", "cumulativeAs": "running_amount", "statusAs": "amount_status", "missing": "error", "nulls": "error"}]}]
+    "keyColumns": [
+      "object_id"
+    ],
+    "period": {
+      "unit": "month",
+      "start": "2025-12",
+      "end": "2026-02",
+      "column": "period"
+    },
+    "sources": [
+      {
+        "datasetRef": "REPLACE_WITH_COMPLETE_SOURCE_REF",
+        "keyColumns": [
+          "object_id"
+        ],
+        "periodColumn": "month",
+        "duplicates": "error",
+        "outside": "error",
+        "metrics": [
+          {
+            "column": "amount",
+            "as": "current_amount",
+            "cumulativeAs": "running_amount",
+            "statusAs": "amount_status",
+            "missing": "error",
+            "nulls": "error"
+          }
+        ]
+      }
+    ]
   },
   "deployment_evidence": {
     "datasetRef": "REPLACE_WITH_AUTHORIZED_RELEASE_DATASET_REF",
     "application": "REPLACE_WITH_VERIFIED_APP_ID",
-    "columns": {"system": "system_id", "environment": "environment_id", "application": "application_id", "deployedAt": "deployment_time_with_offset", "status": "release_status", "commit": "git_commit"},
-    "successValues": ["REPLACE_WITH_VERIFIED_SUCCESS_VALUE"],
+    "columns": {
+      "system": "system_id",
+      "environment": "environment_id",
+      "application": "application_id",
+      "deployedAt": "deployment_time_with_offset",
+      "status": "release_status",
+      "commit": "git_commit"
+    },
+    "successValues": [
+      "REPLACE_WITH_VERIFIED_SUCCESS_VALUE"
+    ],
     "evidence": "REPLACE_WITH_REAL_RELEASE_SOURCE_AND_FIELD_SEMANTICS"
   },
   "transform_dataset": {
@@ -95,5 +131,14 @@
     "kind": "report_draft",
     "offset": 0,
     "limit": 20
+  },
+  "list_tool_results": {
+    "offset": 0,
+    "limit": 20
+  },
+  "read_tool_result": {
+    "resultRef": "REPLACE_WITH_CURRENT_JOB_RESULT_REF",
+    "offset": 0,
+    "limit": 4000
   }
 }

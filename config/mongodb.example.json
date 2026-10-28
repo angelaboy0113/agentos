@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "executionPolicy": { "mongodbQueryTimeoutMs": 120000 },
+  "executionPolicy": { "mongodbQueryTimeoutMs": 600000 },
   "environments": {
     "example_prd_mongo": {
       "projectId": "example",

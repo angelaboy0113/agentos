@@ -38,7 +38,7 @@ test('website registration works for SIT and custom test IDs, preserving project
  assert.equal(await readFile(process.env.AGENTOS_ENVIRONMENTS_FILE,'utf8'),original);
 });
 test('website malformed parameters have actionable bounded diagnostics, not an unclassified plan failure',async()=>{
- for(const purpose of ['', 'x'.repeat(201), 'line\nbreak'])await assert.rejects(()=>prepareWebsiteQuery({projects:{}},{sourceEnvironment:'sit'},{tier:'uat',purpose}),e=>{const d=queryRejection(e,{});assert.equal(d.code,'TEXT_PARAMETER');assert.equal(d.retry,true);assert.doesNotMatch(JSON.stringify(d),/line|break|xxxx/);return true;});
+ for(const purpose of ['', 'line\nbreak'])await assert.rejects(()=>prepareWebsiteQuery({projects:{}},{sourceEnvironment:'sit'},{tier:'uat',purpose}),e=>{const d=queryRejection(e,{});assert.equal(d.code,'TEXT_PARAMETER');assert.equal(d.retry,true);assert.doesNotMatch(JSON.stringify(d),/line|break|xxxx/);return true;});
 });
 test('continuous HTTP planning accepts mapped SIT web access but rejects PRD DB access for SIT',async t=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'env-map-http-')),prev=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(dir,'env.json');

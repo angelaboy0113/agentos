@@ -18,7 +18,7 @@ test('legacy SQL without structured recipe cannot be replayed and old artifacts 
 });
 test('real environment tool refresh starts a second readonly transaction and revalidates table scope',async t=>{
  const {createEnvironmentTools}=await import('../src/runner/environment-tools.js');const root=await mkdtemp(path.join(os.tmpdir(),'report-refresh-tools-'));t.after(()=>rm(root,{recursive:true,force:true}));let starts=0,rollbacks=0;
- const mysql={createConnection:async()=>({query:async sql=>{if(sql==='START TRANSACTION READ ONLY')starts++;return sql.startsWith('SHOW GRANTS')?[[{Grants:'GRANT SELECT ON `demo`.* TO tester'}]]:[[]];},execute:async(s,p)=>{
+ const mysql={createConnection:async()=>({query:async sql=>{sql=typeof sql==='string'?sql:sql.sql;if(sql==='START TRANSACTION READ ONLY')starts++;return sql.startsWith('SHOW GRANTS')?[[{Grants:'GRANT SELECT ON `demo`.* TO tester'}]]:[[]];},execute:async(s,p)=>{
   if(s.sql.includes('information_schema.COLUMNS'))return [[...['id','amount','year'].map(column_name=>({table_name:p[1],column_name,data_type:column_name==='amount'?'decimal':'varchar',engine:'InnoDB'}))]];
   return [s.sql.includes('`baseline`')?[{year:'2026',amount:'3'}]:s.sql.includes('`amounts`')?[{id:'1',amount:'1'},{id:'2',amount:'2'}]:[{id:'1',count:'1'},{id:'2',count:'1'}]];
  },rollback:async()=>{rollbacks++;},destroy:()=>{}})};

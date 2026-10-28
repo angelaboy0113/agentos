@@ -3,6 +3,7 @@ import {recordReportFiles,recordReportReview} from './report-acceptance.js';
 import {interruptedInvestigation} from './investigation-budget.js';
 import { continuousReviewDecision, reviewDecision } from './investigation-review.js';
 import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint } from './environment-access.js';
+import {renewReadPlan} from './read-plan-renewal.js';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import { mkdir, readFile, rename, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -247,11 +248,31 @@ export class JsonStore {
     });
   }
 
+  async renewActiveEnvironment(id,identity){
+    const config=await loadEnvironments();
+    return this.transact(state=>{
+      const job=requireJob(state,id);try{requireActiveLease(job,identity);}catch(error){throw Object.assign(error,{statusCode:409});}
+      const old=job.environmentAccess;
+      if(job.taskIntent!=='analysis'||!old?.startedAt)throw Object.assign(new Error('当前任务没有可接续的只读环境步骤'),{statusCode:403});
+      if(old.scopeHash!==identity.scopeHash){
+        if(old.previousScopeHash===identity.scopeHash){verifyApprovedPlan(config,old);return structuredClone(old);}
+        throw Object.assign(new Error('只读续期请求不属于当前查询范围'),{statusCode:409});
+      }
+      let plan;try{plan=renewReadPlan(config,old,{projectId:job.projectId,profile:job.originProfile??job.agentProfile,senderId:job.senderId});}catch(error){throw Object.assign(error,{statusCode:403});}
+      job.environmentAccess=plan;job.updatedAt=plan.renewedAt;
+      job.events.push({id:createId('EVT'),type:'environment_scope_renewed',at:plan.renewedAt,scopeHash:plan.scopeHash,previousScopeHash:old.scopeHash,leaseId:job.lease.id});
+      return structuredClone(plan);
+    });
+  }
+
   async claimEnvironment(id, identity) {
     const config = await loadEnvironments();
     return this.transact((state) => {
       const job = requireJob(state, id);
       if (job.status !== 'running' || job.lease?.id !== identity.leaseId || job.lease?.runnerId !== identity.runnerId || !(Date.parse(job.lease?.expiresAt) > Date.now())) throw new Error('查询租约已失效');
+      if(job.environmentAccess&&!job.environmentAccess.startedAt&&Date.parse(job.environmentAccess.expiresAt)<=Date.now()){
+        job.environmentAccess=renewReadPlan(config,job.environmentAccess,{projectId:job.projectId,profile:job.originProfile??job.agentProfile,senderId:job.senderId,starting:true});
+      }
       verifyApprovedPlan(config, job.environmentAccess ?? {});
       const plan = job.environmentAccess, resume = job.browserResumeClaim;
       if (!plan.approvedBy) throw new Error('查询尚未批准');
