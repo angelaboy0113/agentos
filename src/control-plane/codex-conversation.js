@@ -18,6 +18,7 @@ export class CodexConversationEngine {
     this.sessions = new Map();
     this.registry = new SessionRegistry(options.dataDir ?? './data');
     this.closed = false;
+    this.startupListeners = new Set();
   }
 
   async start() {
@@ -35,7 +36,7 @@ export class CodexConversationEngine {
     if (this.closed) throw new Error('Conversation engine stopped');
     this.app = new CodexAppServer({ cwd: this.cwd, codexBin: await resolveCodexBinary(this.options.codexBin), env, args: conversationServerArgs() });
     await this.app.start();
-    const account = await this.app.readAccount();
+    const account = await this.app.readAccount({onRetry:info=>{for(const listener of this.startupListeners)listener('error',{willRetry:true,...info});}});
     if (account.account?.type !== 'chatgpt') {
       await this.app.close();
       throw new Error('AgentOS 需要本机 Codex 的 ChatGPT 订阅登录态，请先 codex login');
@@ -48,7 +49,8 @@ export class CodexConversationEngine {
 
   async decide(input, options = {}) {
     const began = Date.now();
-    await this.start();
+    if(options.onEvent)this.startupListeners.add(options.onEvent);
+    try{await this.start();}finally{if(options.onEvent)this.startupListeners.delete(options.onEvent);}
     await this.app.start();
     if (options.signal?.aborted || this.closed) throw new Error('Conversation stopped');
     const runtime = await loadCodexRuntimeSettings(this.options);
@@ -165,18 +167,35 @@ export async function decideWithCodex(input, options = {}) {
 
 export class DecisionProtocolError extends Error { constructor(message) { super(message); this.code = 'DECISION_PROTOCOL'; } }
 export async function decisionTurn(app, params, options) {
-  let result = await app.turn(params, options);
+  let result = await routingDecisionTurn(app, params, options);
   for (let attempt = 0; ; attempt++) {
     try { validateDecision(JSON.parse(result.text)); return { ...result, timing: { ...result.timing, decisionRepairs: attempt } }; }
     catch (error) {
       if (!(error instanceof DecisionProtocolError) && !(error instanceof SyntaxError)) throw error;
       if (attempt === 1) throw new DecisionProtocolError('AI返回的任务决策仍不符合协议，尚未创建或推进任务');
-      result = await app.turn({ ...params, input: [{ type:'text', text:
+      result = await routingDecisionTurn(app, { ...params, input: [{ type:'text', text:
         '上一轮决策字段不兼容，请修正并重新返回完整JSON。源码检查与environmentQuery不能同时请求；确认业务实现逻辑应先创建analysis源码任务并选择原问题的sourceEnvironment，environmentQuery=null。需要实时环境数据时单独请求已配置范围，requiresSourceInspection=false。只修正决策，不执行工具、不扩大原意或权限；不确定先回复询问。所有管理员和环境审批仍由程序验证。' }] }, options);
     }
   }
 }
+// A routing failure happens before a valid decision. This conversation has no tools
+// or side effects; retry the read-only model turn, never apply a decision twice.
+async function routingDecisionTurn(app,params,options={}){
+ let retries=0;
+ for(;;){
+  if(options.signal?.aborted)throw new Error('Conversation stopped');
+  try{const result=await app.turn(params,options);return {...result,timing:{...result.timing,routingRetries:retries}};}
+  catch(error){
+   if(!/workspace routing discovery failed/i.test(String(error?.message))||options.signal?.aborted)throw error;
+   retries++;options.onEvent?.('error',{willRetry:true,reason:'workspace_routing',attempt:retries});
+   const delay=Math.min(retries*1000,10000);
+   if(options.waitForRoutingRetry)await options.waitForRoutingRetry(delay);
+   else await new Promise((resolve,reject)=>{const signal=options.signal;let timer;const done=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);resolve();};const abort=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);reject(new Error('Conversation stopped'));};if(signal?.aborted)return abort();timer=setTimeout(done,delay);signal?.addEventListener('abort',abort,{once:true});});
+  }
+ }
+}
 export function conversationFailure(error) {
+  if (/workspace routing discovery failed/i.test(String(error?.message))) return 'Codex模型服务的工作区路由发现失败，自动重试后仍未取得有效决策。本次尚未执行通讯录或业务查询，也未创建或推进任务；这是模型服务连接阶段错误，不是通讯录读取权限被拒绝。请保留原问题稍后重试，维护者可按请求编号核对模型服务状态。';
   if (error?.code === 'DECISION_PROTOCOL') return 'AI返回的任务安排有冲突，自动修正后仍未通过校验。本次没有创建或推进任务；这不是网络或登录错误，请维护者检查决策协议。';
   if (/timeout|timed out|超时/i.test(String(error?.message))) return '等待AI响应超时，本次没有创建或推进任务，请稍后重新 @ 发起。';
   return 'AI 调用失败，本次没有创建或推进任务。请维护者检查本机诊断记录，确认具体原因后重试；尚不能判断是网络还是登录问题。';
@@ -200,7 +219,7 @@ function validateDecisionValue(value) {
   if(value.requiresFileInspection){if(!value.attachmentIds.length||!value.instruction.trim()||!['reply','create_task'].includes(value.action)||!['none','analysis'].includes(value.intent)||value.environmentSetup)throw new Error('File inspection requires a scoped readonly task and attached files');value={...value,action:'create_task',intent:'analysis',jobId:''};}
   if(value.action==='lookup_contact'){
     const q=value.contactLookup;
-    if(!q||!['name','employee_no'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.query.length>100||typeof q.candidateId!=='string'||q.candidateId.length>200
+    if(!q||!['name','employee_no','department'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.type!=='department'&&q.query.length>100||typeof q.candidateId!=='string'||q.candidateId.length>200
       ||value.intent!=='none'||value.jobId||value.environmentQuery||value.environmentSetup||value.knowledgeMatch||value.requiresSourceInspection||value.attachmentIds.length)throw new Error('Invalid contact lookup');
   }else if(value.contactLookup!=null)throw new Error('Unexpected contact lookup');
   if (value.knowledgeMatch != null) {

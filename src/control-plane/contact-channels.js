@@ -24,6 +24,7 @@ export class ContactChannels{
   if(destination.sourceTurnId&&latestId!==destination.sourceTurnId)throw new Error('已有新的查人补充，旧群主副本不再发送');
   if(!current||current.ownerId!==c.ownerId||current.projectId!==c.projectId||![c.requesterId,current.ownerId].includes(destination.openId))throw new Error('查人群配置、群主或收件范围已变化，未发送旧结果');
   const turn=state.conversations?.find(t=>t.id===(destination.sourceTurnId??latestId));
+  if(entry?.terminal!==false&&turn?.outcome?.departmentSummary)await this.context.contacts.validateDepartmentSummary(turn,turn.outcome.departmentSummary);
   if(entry?.terminal!==false&&turn?.outcome?.contactImage)await this.context.contacts.validateImage(turn,turn.outcome.contactImage);
  }
  async progress(turn,{allowReady=false}={}){
@@ -45,6 +46,7 @@ export class ContactChannels{
  async deliver(turn){
   const current=await this.resolve(turn.chatId,turn.profile,turn.senderId);
   if(!current||current.ownerId!==turn.directoryChannel.ownerId)throw new Error('群主已变化，请重新发起查人问题');
+  if(turn.outcome?.departmentSummary)await this.context.contacts.validateDepartmentSummary(turn,turn.outcome.departmentSummary);
   let imageKey=turn.contactImageKey;
   if(turn.outcome?.contactImage){const file=await this.context.contacts.validateImage(turn,turn.outcome.contactImage);
    if(!imageKey){await this.context.contacts.report?.(turn,'uploading');await this.progress(turn,{allowReady:true});const result=await this.context.feishu.uploadImage(file,{profile:turn.profile});imageKey=imageKeyOf(result);if(!imageKey)throw new Error('联系人图片上传未返回资源编号');await this.context.store.transact(s=>{s.conversations.find(t=>t.id===turn.id).contactImageKey=imageKey;});}

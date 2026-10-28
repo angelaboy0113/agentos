@@ -52,7 +52,7 @@ function mention(replyTo, profile, userId, message) {
 // A deliberately public acknowledgement: never include lookup text or personnel fields.
 export function directoryTerminalMention(turn) {
   if (!turn.directoryChannel || turn.setupPending || turn.outcome?.contactCandidates?.length) return null;
-  const result = mention(turn.messageId, turn.profile, turn.senderId, turn.outcome?.contactImage
+  const result = mention(turn.messageId, turn.profile, turn.senderId, (turn.outcome?.contactImage||turn.outcome?.departmentSummary)
     ? '查询已完成，请查看私有结果。' : '本次回复已结束，请查看私有结果。');
   return result ? { ...result, kind: 'directory_completion' } : null;
 }

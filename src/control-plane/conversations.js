@@ -222,10 +222,10 @@ export class ConversationService {
           const input = await this.buildInput(turn);
           let decision = validateDecision(await this.decide(input, this.abort.signal, { sessionKey: key,
             onEvent: (event, info) => {
-              if (event === 'error') this.update(turn.id, { connectionRetryAt: new Date().toISOString(), connectionWillRetry: info.willRetry }).catch(() => {});
+              if (event === 'error') this.update(turn.id, { connectionRetryAt: new Date().toISOString(), connectionWillRetry: info.willRetry, connectionRetryReason:info.reason??null, connectionRetryStage:info.stage??null }).catch(() => {});
             } }));
           if (this.context.knowledge) decision = await this.context.knowledge.reuse(turn, input.project?.id, decision, input);
-          await this.update(turn.id, { status: 'decided', decision, timing: decision.timing ?? { aiMs: Date.now() - aiStarted },
+          await this.update(turn.id, { status: 'decided', decision, connectionWillRetry:false, timing: decision.timing ?? { aiMs: Date.now() - aiStarted },
             attachmentPool: input.attachments, aiCompletedAt: new Date().toISOString() });
         } catch (error) {
           if (this.stopped) { await this.update(turn.id, { status: 'queued' }); return; }
@@ -320,7 +320,7 @@ export class ConversationService {
       .map((item) => [item.id, item])).values()].slice(-20);
     const relatedMessages = new Set(preceding.flatMap(item => [item.id,item.messageId]).filter(Boolean));
     relatedMessages.add(turn.id); relatedMessages.add(turn.messageId);
-    if(turn.directoryChannel)return {requestId:turn.id,questionId:turn.questionId,role:turn.role,nativeSession:true,currentActor:{senderId:turn.senderId,profile:turn.profile},project:{id:projectId},message:turn.content,history:history.map(t=>({user:t.content,assistant:t.response})),attachments:[],currentAttachmentIds:[],contactDirectory:await this.context.contacts.catalog(turn),delivery:{visibility:'requester_and_owner'},channel:{kind:'contacts_only',allowedActions:['lookup_contact','reply'],rule:'只根据姓名或完整工号调用lookup_contact查询；联系人事实必须来自工具结果。需要补充姓名/工号时用reply，不得编造资料，不得创建开发、数据库或环境任务。结果在群内私有卡片中展示，仅提问者和群主可见。'}};
+    if(turn.directoryChannel)return {requestId:turn.id,questionId:turn.questionId,role:turn.role,nativeSession:true,currentActor:{senderId:turn.senderId,profile:turn.profile},project:{id:projectId},message:turn.content,history:history.map(t=>({user:t.content,assistant:t.response})),attachments:[],currentAttachmentIds:[],contactDirectory:await this.context.contacts.catalog(turn),delivery:{visibility:'requester_and_owner'},channel:{kind:'contacts_only',allowedActions:['lookup_contact','reply'],rule:'根据姓名、完整工号或部门名称/组织路径调用lookup_contact；部门人数使用type=department，程序分别统计直属和含下级人数；联系人事实必须来自工具结果。需要补充姓名/工号时用reply，不得编造资料，不得创建开发、数据库或环境任务。结果在群内私有卡片中展示，仅提问者和群主可见。'}};
     const explicitJob = job => !scoped && isAdministrator(projects,turn) && String(turn.content).split(/[^A-Za-z0-9_-]+/).includes(job.id);
     const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId && (!isPrivate(state,job)||turn.visibility==='requester'&&job.senderId===turn.senderId)
       && (explicitJob(job) || (job.originProfile ?? job.agentProfile ?? null) === (turn.profile ?? null))
@@ -365,11 +365,11 @@ export class ConversationService {
   }
 
   async apply(turn) {
-    if(turn.directoryChannel&&!['lookup_contact','reply'].includes(turn.decision.action))throw new Error('本群仅支持按姓名或工号查人，不执行开发、环境或数据库任务');
+    if(turn.directoryChannel&&!['lookup_contact','reply'].includes(turn.decision.action))throw new Error('本群仅支持按姓名或工号查人，以及按部门统计人数，不执行开发、环境或数据库任务');
     const { store, projects } = this.context;
     let decision = turn.decision;
     const projectId = projects.chatProjectMap[turn.chatId];
-    if(turn.directoryChannel){if(decision.action==='lookup_contact'){const result=await this.context.contacts.lookup(turn,decision.contactLookup);return result.contactImage?{...result,notice:'已核实联系人资料，图片结果仅本次提问者和群主可见。'}:result;}return {notice:'本群专用于查人，请提供同事姓名或完整工号；不执行开发、数据库或环境排查。'};}
+    if(turn.directoryChannel){if(decision.action==='lookup_contact'){const result=await this.context.contacts.lookup(turn,decision.contactLookup);return result.contactImage?{...result,notice:'已核实联系人资料，图片结果仅本次提问者和群主可见。'}:result;}return {notice:decision.reply||'请提供同事姓名、完整工号，或要统计人数的部门名称/完整组织路径。'};}
     if (decision.knowledgeReceipt && this.context.knowledge) {
       const teamKnowledge = await this.context.knowledge.candidates(turn, projectId);
       decision = await this.context.knowledge.reuse(turn, projectId, decision, {teamKnowledge,jobs:[]});

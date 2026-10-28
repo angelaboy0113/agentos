@@ -13,6 +13,7 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['CODEX_WORKSPACE_ROUTING', /workspace routing discovery failed/i, 'Codex工作区路由', 'Codex模型服务未能完成工作区路由发现，当前步骤未完成；不是业务或通讯录权限被拒绝。', '登录读取和只读决策会自动恢复；保持服务运行或主动停止等待，维护者核对上游模型服务状态。'],
   ['CODEX_RPC_TIMEOUT', /CODEX_RPC_TIMEOUT|Codex RPC timed out/, '本机Codex接口等待', '本机Codex接口返回超时，或未在显式请求等待期内返回；不能据此判断数据库或查询范围有问题。', '检查本机Codex进程与接口状态，保留原问题；无需缩小业务查询范围。'],
   ['CODEX_DISCONNECTED', /Codex app-server (disconnected|stopped|is not connected|could not start)/, '本机Codex连接', '本机Codex子进程退出或连接断开，当前调查尚未完成。', '检查本机Codex进程与启动配置，恢复后继续原问题；这不是已确认的业务故障。'],
  ['REPORT_INSPECTION', /REPORT_INSPECTION/, '文件审阅证据', '当前文件的登记、摘要或计算来源读取未通过；不代表业务公式已证实错误。', '按已登记fileId读取同一任务的核验资料，不索要本机已有CSV、不重复查库或生成文件。'],

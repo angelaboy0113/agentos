@@ -84,8 +84,9 @@ export class CodexAppServer extends EventEmitter {
       if(!child||this.child!==child)throw new Error('Codex app-server disconnected');
       try{return await this.request('account/read',{refreshToken:false});}
       catch(error){
-        if(error.code!=='CODEX_RPC_TIMEOUT'||error.rpcMethod!=='account/read')throw error;
-        failures++;await onRetry({attempt:failures,stage:'account/read',code:error.code});
+        const routing=error.code==='CODEX_RPC_ERROR'&&/workspace routing discovery failed/i.test(String(error.message));
+        if(error.rpcMethod!=='account/read'||error.code!=='CODEX_RPC_TIMEOUT'&&!routing)throw error;
+        failures++;await onRetry({attempt:failures,stage:'account/read',code:error.code,reason:routing?'workspace_routing':'timeout'});
         await new Promise((resolve,reject)=>{
           const stop=()=>{clearTimeout(timer);this.removeListener('disconnected',stop);reject(new Error('Codex app-server stopped'));};
           const timer=setTimeout(()=>{this.removeListener('disconnected',stop);resolve();},Math.min(retryDelayMs*failures,10000));

@@ -234,3 +234,10 @@ test('other RPC timeouts are classified but not automatically replayed',async t=
  app.receive({id:requests.find(r=>r.method==='thread/start').id,error:{message:'timed out'}});
  await assert.rejects(p,e=>e.code==='CODEX_RPC_TIMEOUT'&&e.rpcMethod==='thread/start');assert.equal(requests.filter(r=>r.method==='thread/start').length,1);
 });
+
+test('account workspace routing discovery errors recover without replaying any business or model turn',async t=>{
+ const {app,requests}=fakeServer({hold:['account/read']});t.after(()=>app.close());await app.start();const progress=[];const result=app.readAccount({retryDelayMs:1,onRetry:p=>progress.push(p)});
+ while(!requests.some(r=>r.method==='account/read'))await new Promise(setImmediate);app.receive({id:requests.find(r=>r.method==='account/read').id,error:{code:-32603,message:'workspace routing discovery failed'}});
+ while(requests.filter(r=>r.method==='account/read').length<2)await new Promise(setImmediate);app.receive({id:requests.filter(r=>r.method==='account/read').at(-1).id,result:{account:{type:'chatgpt'}}});
+ assert.equal((await result).account.type,'chatgpt');assert.equal(progress[0].reason,'workspace_routing');assert.equal(requests.filter(r=>r.method==='turn/start'||r.method==='thread/start').length,0);
+});

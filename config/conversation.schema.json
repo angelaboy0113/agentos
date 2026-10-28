@@ -230,7 +230,8 @@
               "type": "string",
               "enum": [
                 "name",
-                "employee_no"
+                "employee_no",
+                "department"
               ]
             },
             "query": {

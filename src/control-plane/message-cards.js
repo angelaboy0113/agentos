@@ -66,7 +66,7 @@ export function conversationCard(turn, now = Date.now()) {
     : turn.connectionWillRetry ? '连接重试中' : '正在处理';
   const color = failed ? 'red' : turn.cloudInputPending||turn.setupPending ? 'orange' : final ? 'green' : 'blue';
   const content = final ? '' : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
-    : turn.cloudFileProgress&&!['ready','partial'].includes(turn.cloudFileProgress.phase) ? cloudFileProgressText(turn.cloudFileProgress) : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
+    : turn.cloudFileProgress&&!['ready','partial'].includes(turn.cloudFileProgress.phase) ? cloudFileProgressText(turn.cloudFileProgress) : turn.connectionWillRetry ? (turn.connectionRetryReason==='workspace_routing'?'Codex工作区路由暂时不可用，正在自动恢复，尚未执行本次操作。':'连接暂时异常，Codex 正在重试，尚未得到结果。') : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));

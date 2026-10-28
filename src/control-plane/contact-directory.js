@@ -1,3 +1,4 @@
+import {lookupDepartment,validateDepartmentSummary} from './department-directory.js';
 import {readFile,mkdir,writeFile,realpath,lstat} from 'node:fs/promises';
 import path from 'node:path';import {createHash} from 'node:crypto';
 import {ContactIndex} from './contact-index.js';
@@ -26,7 +27,7 @@ export class ContactDirectory{
   const project=this.context.projects.chatProjectMap[turn.chatId];
   const scope=c.scopes.find(s=>s.projectId===project&&project===turn.projectId&&s.chatIds.includes(turn.chatId)&&s.profiles.includes(turn.profile)&&(!s.senderIds||s.senderIds.includes(turn.senderId)));
   if(!scope||!turn.senderId||turn.chatType==='p2p')throw new Error('当前提问不在已配置的联系人查询范围内。');return scope;}
- async catalog(turn){try{await this.policy(turn);return {enabled:true,identity:'bot',pending:await this.pending(turn),rule:'只查询机器人获准的通讯录；工号是字符串，保留前导零。不能操控桌面或借用部署者个人账号。'};}catch{return {enabled:false,pending:[]};}}
+ async catalog(turn){try{await this.policy(turn);return {enabled:true,identity:'bot',pending:await this.pending(turn),capabilities:['person_by_name','person_by_employee_no','department_headcount'],rule:'可按部门名称或组织路径统计直属及含下级人数；同名部门先确认。只查询机器人获准的通讯录；工号是字符串，保留前导零。不能操控桌面或借用部署者个人账号。'};}catch{return {enabled:false,pending:[]};}}
  async pending(turn){const s=await this.context.store.read();return (s.conversations??[]).filter(t=>t.status==='sent'&&t.chatId===turn.chatId&&t.senderId===turn.senderId&&t.profile===turn.profile&&t.projectId===turn.projectId
   &&(turn.questionId?t.questionId===turn.questionId:t.questionId==null)&&t.outcome?.contactCandidates?.length).slice(-1).map(t=>({query:t.outcome.contactQuery,candidates:t.outcome.contactCandidates}));}
  async request(route,params,turn){for(let attempt=0;;attempt++){try{if(typeof this.context.feishu.contactRequest!=='function')throw new Error();return await this.context.feishu.contactRequest(route,{user_id_type:'open_id',department_id_type:'open_department_id',...params},{profile:turn.profile});}catch(error){
@@ -37,7 +38,7 @@ export class ContactDirectory{
    if(transient&&attempt<2)continue;
    console.error('[contacts] request unavailable',JSON.stringify({stage,code}));throw new Error(`CONTACT_ACCESS：通讯录读取失败（${stage}/${code}），请管理员核对该机器人接口权限、数据范围或连接；未切换个人账号，也未发送资料图。`);
   }}}
- async pages(route,params,turn,visit){let token='';const seen=new Set();do{const d=await this.request(route,{...params,page_size:50,...(token?{page_token:token}:{})},turn);await visit(d);if(!d.has_more)break;if(typeof d.page_token!=='string'||!d.page_token||seen.has(d.page_token))throw new Error('CONTACT_PAGINATION：通讯录分页不完整，不能确认唯一人员。');token=d.page_token;seen.add(token);}while(true);}
+ async pages(route,params,turn,visit){let token='';const seen=new Set();do{const d=await this.request(route,{...params,page_size:50,...(token?{page_token:token}:{})},turn);await visit(d);if(!d.has_more)break;if(typeof d.page_token!=='string'||!d.page_token||seen.has(d.page_token))throw new Error('CONTACT_PAGINATION：通讯录分页不完整，不能确认完整查询结果。');token=d.page_token;seen.add(token);}while(true);}
  async report(turn,stage,values={}) {
   const now=Date.now(),previous=this.progressTimes.get(turn.id);
   if(previous?.stage===stage&&now-previous.at<(this.options.progressIntervalMs??3000))return;
@@ -75,7 +76,7 @@ export class ContactDirectory{
   const result=[...users.values()].filter(u=>!u.status?.is_resigned);let checkedAt=Date.now();try{checkedAt=await this.index.put(turn.profile,scopeFingerprint,result);}catch{}Object.assign(result,{indexAsOf:checkedAt,indexHit:false});await emit('directory_ready',{memberCount:result.length});return result;
   })();this.directoryFlights.set(flightKey,flight);try{return await flight.promise;}finally{this.directoryFlights.delete(flightKey);}
  }
- async lookup(turn,q){const policy=await this.policy(turn);if(!q||!['name','employee_no'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.query.length>100||typeof q.candidateId!=='string')throw new Error('联系人查询参数无效。');
+ async lookup(turn,q){if(q?.type==='department')return lookupDepartment(this,turn,q);const policy=await this.policy(turn);if(!q||!['name','employee_no'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.query.length>100||typeof q.candidateId!=='string')throw new Error('联系人查询参数无效。');
   if(q.candidateId){const pending=await this.pending(turn);if(!pending.some(p=>p.query?.query===q.query&&p.query?.type===q.type&&p.candidates.some(c=>c.id===q.candidateId)))throw new Error('请选择本问题已返回的候选人员，不能指定其他会话的候选。');}
   let users=await this.users(turn);const query=q.query.trim().normalize('NFKC').toLowerCase();
   const matching=list=>list.filter(u=>q.type==='employee_no'?clean(u.employee_no).normalize('NFKC')===q.query.trim().normalize('NFKC'):clean(u.name).normalize('NFKC').toLowerCase().includes(query));
@@ -98,6 +99,7 @@ export class ContactDirectory{
   const contactImage={relative,sha256:digest(body),bytes:body.length,binding:digest(bound(turn)),policyHash:digest(policy),personId:user.open_id,fieldsHash:digest(fields),presentationHash:digest(presentation),checkedAt,indexAsOf:users.indexAsOf,indexHit:users.indexHit};
   await writeFile(target+'.json',JSON.stringify(contactImage),{mode:0o600});await this.report(turn,'image_ready');return {notice:(turn.visibility==='requester'?'已生成联系人信息图，将通过机器人私聊发给你。':'已生成联系人信息图，将回复在本话题。')+'资料来自机器人当前获准的通讯录，不是飞书界面截图；未返回的字段标为未提供。',contactImage};
  }
+ async validateDepartmentSummary(turn,item){return validateDepartmentSummary(this,turn,item);}
  async departmentInfo(turn,ids){
   const paths=[],cache=new Map();
   for(const id of [...new Set(ids)]){
