@@ -99,3 +99,11 @@ test('missing environment branches are visible evidence gaps and cannot be silen
   assert.match(prompt, /shared-library/);
   assert.match(prompt, /不改读其它环境/);
 });
+
+test('edited message with own trusted application ID is accepted once and routed to its system',async t=>{
+ const f=await fixture(t,()=>({}));f.app.agents.agents.a.appId='cli_a';f.app.agents.agents.b.appId='cli_b';
+ await f.send(f.event('a','late-app',{mentions:[]}));
+ await f.send(f.event('a','late-app',{edited_mention:true,mentions:[{id:'cli_a'}]}));
+ await f.send(f.event('a','late-app',{edited_mention:true,mentions:[{id:'cli_a'}]}));
+ assert.equal(f.input.length,1);await f.send(f.event('b','foreign-app',{mentions:[{id:'cli_a'}]}));assert.equal(f.input.length,1);
+});

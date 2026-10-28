@@ -104,7 +104,7 @@ export class LarkEventSource {
     }
     if (event.type !== 'im.message.receive_v1' || event.sender_type === 'bot') return;
     if (this.config.groupOnly && event.chat_type === 'p2p') return;
-    if (!isForThisBot(event, this.config.botOpenId)) return;
+    if (!isForThisBot(event, this.config.botOpenId,this.config.botAppId)) return;
     if (this.config.allowedChatIds && event.chat_type !== 'p2p' && !this.config.allowedChatIds.includes(event.chat_id)) return;
     event.agent_profile = this.config.profile ?? null;
     event.agent_role = this.config.role ?? null;
@@ -188,7 +188,7 @@ export async function startLarkEventSource(config) {
   console.log(`[lark-event] starting ${config.role ?? 'default'} via profile ${config.profile ?? 'default'} in ${configDir}`);
   const running = source.start();
   if(config.eventKey!=='card.action.trigger' && config.editedMentions?.enabled && config.editedMentions.profiles.includes(config.profile) && config.botOpenId) {
-    source.editedWatcher=new EditedMentionWatcher(source,config.watchedChatIds ?? [],config.editedMentions);
+    source.editedWatcher=new EditedMentionWatcher(source,(config.watchedChatIds??[]).filter(chat=>!config.allowedChatIds||config.allowedChatIds.includes(chat)),config.editedMentions);
     source.editedWatcher.start();
   }
   return { source, running };
@@ -220,6 +220,7 @@ export function larkEventSourcePlans(config, agents = {}) {
       ...(agent.allowedChatIds ? { allowedChatIds: agent.allowedChatIds } : {}),
       profile: agent.profile || null,
       botOpenId: agent.openId,
+      botAppId: agent.appId,
     };
     plans.push(scoped);
     // Both subscriptions share this bot's bus and isolated auth, never another bot's profile.
@@ -229,11 +230,11 @@ export function larkEventSourcePlans(config, agents = {}) {
   return plans;
 }
 
-export function isForThisBot(event, botOpenId) {
+export function isForThisBot(event, botOpenId, botAppId) {
   if (!Array.isArray(event.mentions) || event.mentions.length === 0) return true;
   if (!botOpenId) return event.chat_type === 'p2p';
-  return event.mentions.some((mention) => [mention.id, mention.open_id, mention.user_id]
-    .filter(Boolean).includes(botOpenId));
+  return event.mentions.some((mention) => [typeof mention.id==='object'?mention.id.open_id??mention.id.app_id:mention.id, mention.open_id, mention.user_id]
+    .filter(Boolean).some(id=>id===botOpenId||botAppId&&id===botAppId));
 }
 
 async function listFiles(directory) {

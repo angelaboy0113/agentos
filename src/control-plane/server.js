@@ -530,8 +530,9 @@ export async function handleLarkCliEvent(context, event) {
   if (event.agent_role && context.agents.agents?.[role]?.profile
     && context.agents.agents[role].profile !== sourceProfile) throw new Error('Agent role/profile mismatch');
   const mentions = event.mentions ?? [];
-  const mentionIds = mentions.flatMap((item) => [item.id?.open_id ?? item.id, item.open_id, item.user_id]).filter(Boolean);
-  const addressed = event.chat_type === 'p2p' || (agent?.openId && mentionIds.includes(agent.openId));
+  const mentionIds = mentions.flatMap((item) => [item.id?.open_id ?? item.id?.app_id ?? item.id, item.open_id, item.user_id]).filter(Boolean);
+  const botIds=[agent?.openId,agent?.appId].filter(Boolean);
+  const addressed = event.chat_type === 'p2p' || botIds.some(id=>mentionIds.includes(id));
   const state = await context.store.read();
   const related = (state.conversations ?? []).some((turn) => turn.chatId === event.chat_id && turn.profile === sourceProfile
     && [event.reply_to, event.root_id].filter(Boolean).some((id) => turn.messageId === id || turn.feedbackMessageId === id || turn.responseIds?.includes(id)));
@@ -543,7 +544,7 @@ export async function handleLarkCliEvent(context, event) {
   // Older CLI events omit chat_type; their subscription is already bot-scoped.
   // Known group events require an actual mention or a recorded conversation reply.
   if (event.chat_type === 'group' && !addressed && !related && !jobReply && !cardReply) return { ignored: true };
-  if (mentionIds.length && agent?.openId && !mentionIds.includes(agent.openId)) return { ignored: true };
+  if (mentionIds.length && botIds.length && !botIds.some(id=>mentionIds.includes(id))) return { ignored: true };
   return context.conversations.enqueue({
     ...event, message_id: messageId, agent_role: role,
     content: stripMentions(event.content, mentions),
