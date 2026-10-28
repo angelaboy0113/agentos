@@ -25,3 +25,6 @@ export function summarizeDataset(args,base){
 
 export const percentage=(a,b,options={})=>ratio(a,b,options,100,'%');
 export const divide=(a,b,options={})=>ratio(a,b,{precision:12,...options},1,'');
+
+export const addExact=(a,b)=>format(amount(String(a))+amount(String(b)));
+export const compareExact=(a,b)=>amount(String(a))<amount(String(b))?-1:amount(String(a))>amount(String(b))?1:0;

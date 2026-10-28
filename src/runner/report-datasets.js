@@ -14,7 +14,7 @@ export class ReportInputError extends Error {constructor(message){super(message)
 // Task-scoped evidence can resume under renewed authorization; never shared as knowledge.
 export class ReportDatasets {
  constructor({maxRows,previewRows=20,directory,authorize=async()=>{},active=()=>true,secrets=[],scope,datasetScopes=[],originalQuestion='',cacheBytes=16_000_000,snapshotWindowMs=null,dataBudgetBytes=Number.MAX_SAFE_INTEGER,reuseQueries=false,deploymentScope={}}){
-  this.datasetScopes=[...new Set([scope,...datasetScopes].filter(Boolean))];this.deploymentScope=deploymentScope;this.reuseQueries=reuseQueries;this.cacheBytes=cacheBytes;this.snapshotWindowMs=snapshotWindowMs;this.originalQuestion=originalQuestion;this.snapshotId=randomUUID();this.storage=directory&&scope?new TaskDatasetStore(directory,scope,{maxBytes:dataBudgetBytes,additionalScopes:datasetScopes}):null;
+  this.scope=scope;this.sourceScopes=new Map();this.datasetScopes=[...new Set([scope,...datasetScopes].filter(Boolean))];this.deploymentScope=deploymentScope;this.reuseQueries=reuseQueries;this.cacheBytes=cacheBytes;this.snapshotWindowMs=snapshotWindowMs;this.originalQuestion=originalQuestion;this.snapshotId=randomUUID();this.storage=directory&&scope?new TaskDatasetStore(directory,scope,{maxBytes:dataBudgetBytes,additionalScopes:datasetScopes}):null;
   this.secrets=secrets.filter(Boolean);this.maxRows=maxRows==='all'?Number.MAX_SAFE_INTEGER:maxRows;this.previewRows=Math.min(previewRows,20);this.directory=directory;this.authorize=authorize;this.active=active;this.collected=new Map();this.datasets=new Map();this.bytes=0;this.files=0;
  }
  async check(){if(!this.active())throw new ReportInputError('报表查询已结束');await this.authorize();if(!this.active())throw new ReportInputError('报表查询已结束');}
@@ -56,13 +56,13 @@ export class ReportDatasets {
   if(complete&&this.reuseQueries)this.collected.set(signature,result);return result;
  }
  async list({offset=0,limit=20}={}){await this.check();if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>20)throw new ReportInputError('数据集目录offset须为非负整数，limit为1至20');const all=this.storage?await this.storage.list():[];await this.check();const candidates=all.sort((a,b)=>b.readAt.localeCompare(a.readAt)||a.datasetRef.localeCompare(b.datasetRef)).slice(offset,offset+limit),datasets=[];let bytes=0;for(const item of candidates){const size=Buffer.byteLength(JSON.stringify(item));if(datasets.length&&bytes+size>16000)break;datasets.push(item);bytes+=size;}return {datasets,totalCount:all.length,nextOffset:offset+datasets.length<all.length?offset+datasets.length:null,note:'仅当前任务、相同环境配置且24小时内的完整数据集；目录分页，历史取数不是当前实时状态，多轮快照不是同一个事务。'};}
- async inspect(args){await this.check();const data=await this.restore(args.datasetRef);if(!data)throw new ReportInputError('数据集引用无效');const q=data.queryDefinition;return {datasetRef:args.datasetRef,columns:data.columns,rowCount:data.rows.length,readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns,finalization:{expectedColumns:data.columns,requiredChecks:requiredChecks(data),snapshotWindowMs:this.snapshotWindowMs,note:'每个requiredChecks项需另一原始查询的完整独立基准；范围population必须为独立原始对象集合。'}}:undefined};}
+ async inspect(args){await this.check();const data=await this.restore(args.datasetRef);if(!data)throw new ReportInputError('数据集引用无效');const q=data.queryDefinition;return {datasetRef:args.datasetRef,columns:data.columns,rowCount:data.rows.length,readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,sourceRead:data.sourceRead,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns,finalization:{expectedColumns:data.columns,requiredChecks:requiredChecks(data),snapshotWindowMs:this.snapshotWindowMs,note:'每个requiredChecks项需另一原始查询的完整独立基准；范围population必须为独立原始对象集合。'}}:undefined};}
  async restore(ref){
   if(this.datasets.has(ref)){const data=this.datasets.get(ref);this.datasets.delete(ref);this.datasets.set(ref,data);return data;}
   await this.check();if(!this.storage)return null;
   let saved;try{saved=await this.storage.get(ref);}catch{throw new ReportInputError('数据集范围、有效期、文件或摘要校验失败；先调用list_datasets核对本任务已有成果，必要时重新取数。');}await this.check();const bytes=Buffer.byteLength(JSON.stringify(saved.data));
   if(saved.data.rows.length>this.maxRows)throw new ReportInputError('恢复数据集超过当前授权行数上限');
-  const data={...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};this.remember(ref,data);return data;
+  this.sourceScopes.set(ref,saved.scope);const data={...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};this.remember(ref,data);return data;
  }
  // Only evict memory copies backed by validated task storage; disk references stay immutable.
  remember(ref,data){
@@ -82,12 +82,12 @@ export class ReportDatasets {
   return {leftCount:l.size,rightCount:r.size,matchedCount:l.size-onlyLeft.length,onlyLeftCount:onlyLeft.length,onlyRightCount:onlyRight.length,onlyLeft:preview(onlyLeft,this.previewRows),onlyRight:preview(onlyRight,this.previewRows),dataHash,previewLimited:onlyLeft.length>this.previewRows||onlyRight.length>this.previewRows,note:'差异按真实主键比较；两份数据的业务范围和取数时间仍需核对，不能仅凭行数推断缺少谁。'};
  }
  async deployment(args){await this.check();const data=await this.restore(args.datasetRef);const result=deploymentEvidence(args,data,this.deploymentScope);await this.check();return result;}
- async captureRows(rows,columns,{complete,queryDefinition}){
+ async captureRows(rows,columns,{complete,queryDefinition,numericColumns=[],recipe,sourceRead}){
   await this.check();if(!this.storage)throw new ReportInputError('长字段已读取但未配置任务证据存储；需要维护者配置本任务输出目录，不能截断后冒充完整字段');
-  queryDefinition={sql:queryDefinition.sql,params:queryDefinition.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))};
-  const ref='dataset-'+randomUUID(),data={rows,columns,complete,numericColumns:[],queryDefinition,queryHash:hash(queryDefinition)};
+  queryDefinition={...queryDefinition,sql:queryDefinition.sql,params:queryDefinition.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))};
+  const ref='dataset-'+randomUUID(),data={rows,columns,complete,numericColumns,queryDefinition,queryHash:hash(queryDefinition),...(recipe?{recipe:{...structuredClone(recipe),replayable:true}}:{}),...(sourceRead?{sourceRead:structuredClone(sourceRead)}:{})};
   const saved=await this.storage.save(ref,data,this.snapshotId);await this.check();
-  return {evidenceRef:ref,rowCount:rows.length,columns,readAt:saved.readAt,complete,partial:!complete,rows:[],resultLimited:true,stage:'完整字段已保存到本任务证据；用read_dataset按行/列与textOffset读取，未重新查询，有限行样本不能当完整对象范围'};
+  this.sourceScopes.set(ref,this.scope);return {datasetRef:ref,evidenceRef:ref,queryHash:data.queryHash,rowCount:rows.length,columns,readAt:saved.readAt,complete,partial:!complete,rows:[],resultLimited:true,stage:'完整字段已保存到本任务证据；用read_dataset按行/列与textOffset读取，未重新查询，有限行样本不能当完整对象范围'};
  }
  async readDataset({datasetRef,offset=0,column,textOffset=0,limit=1024}){
   await this.check();if(!Number.isInteger(offset)||offset<0||!Number.isInteger(textOffset)||textOffset<0||!Number.isInteger(limit)||limit<1||limit>4000)throw new ReportInputError('证据分页位置须为非负整数，limit为1至4000字符；按nextTextOffset续读');
@@ -213,7 +213,8 @@ export class ReportDatasets {
    else{
     const recipe=d.recipe;
     const temporary=value=>value&&typeof value==='object'&&(value.op==='in_set'||Object.values(value).some(temporary));
-    if(!recipe||recipe.replayable===false||!['group_dataset','linked_group_dataset'].includes(recipe.tool)||!recipe.args||temporary(recipe.args))throw new ReportInputError('来源缺少可重放的固定工具recipe，或依赖临时in_set集合；先在当前授权下补齐来源，不执行保存的SQL');
+    if(!recipe||recipe.replayable===false||!['group_dataset','linked_group_dataset','mongo_dataset'].includes(recipe.tool)||!recipe.args||temporary(recipe.args))throw new ReportInputError('来源缺少可重放的固定工具recipe，或依赖临时in_set集合；先在当前授权下补齐来源，不执行保存的SQL');
+    if(recipe.tool==='mongo_dataset'&&recipe.args.cohort)await visit(recipe.args.cohort.datasetRef,depth+1);
    }
    visiting.delete(ref);graph.set(ref,d);
   };
@@ -226,12 +227,12 @@ export class ReportDatasets {
    else if(['dataset_summary','dataset_transform'].includes(d.derivation?.kind))output=await this[d.derivation.kind==='dataset_summary'?'summarize':'transform']({...d.derivation.args,datasetRef:mapped.get(d.derivation.args.datasetRef)});
    else if(d.derivation?.kind==='period_grid')output=await this.period({...d.derivation.args,populationRef:mapped.get(d.derivation.args.populationRef),sources:d.derivation.args.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
    else if(d.derivation?.kind==='left_lookup')output=await this.enrich({...d.derivation,datasetRef:mapped.get(d.derivation.datasetRef),lookups:d.derivation.lookups.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
-   else {output=await reload(d.recipe);rawCount++;if(!output?.complete)throw new ReportInputError('集中刷新返回不完整来源，不能定稿');}
+   else {const recipe=structuredClone(d.recipe);if(recipe.tool==='mongo_dataset'&&recipe.args.cohort)recipe.args.cohort.datasetRef=mapped.get(recipe.args.cohort.datasetRef);output=await reload(recipe,{scope:this.sourceScopes.get(ref)??this.scope});rawCount++;if(!output?.complete)throw new ReportInputError('集中刷新返回不完整来源，不能定稿');}
    mapped.set(ref,output.datasetRef);
   }
   const refreshedDatasetRef=mapped.get(args.datasetRef);
   const final=await this.finalize({...args,datasetRef:refreshedDatasetRef,populationRef:mapped.get(args.populationRef),checks:args.checks.map(c=>({...c,referenceRef:mapped.get(c.referenceRef)}))});
-  return {...final,refreshedDatasetRef,refresh:{sourceCount:rawCount,mode:'new_readonly_transaction',previousDatasetRef:args.datasetRef},stage:'在新只读事务内集中刷新、重算并通过程序核验；仍需按原问题审阅'};
+  return {...final,refreshedDatasetRef,refresh:{sourceCount:rawCount,mode:graph.size&&[...graph.values()].some(x=>x.recipe?.tool==='mongo_dataset')?'renewed_authorized_sources_with_read_times':'new_readonly_transaction',previousDatasetRef:args.datasetRef},stage:'已按各授权来源集中刷新、重算并通过程序核验；跨来源不是同一事务，仍需按原问题审阅'};
  }
  async finalize(args){
   const validation={};

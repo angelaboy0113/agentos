@@ -1,0 +1,12 @@
+import {sshRemoteConnection} from './ssh-mysql.js';
+import {readFile} from 'node:fs/promises';import {spawn} from 'node:child_process';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';import path from 'node:path';
+const require=createRequire(import.meta.url);let packed;
+export async function mongoDriverArchive(){
+ if(!packed)packed=(async()=>{const found=new Map();async function add(name,req){if(found.has(name))return;let entry;try{entry=req.resolve(name+'/package.json');}catch{entry=req.resolve(name);}let directory=path.dirname(entry);for(;;){try{const p=JSON.parse(await readFile(path.join(directory,'package.json'),'utf8'));if(p.name===name){found.set(name,directory);const next=createRequire(path.join(directory,'package.json'));for(const dep of Object.keys(p.dependencies??{}))await add(dep,next);return;}}catch(e){if(e.code!=='ENOENT')throw e;}if(path.dirname(directory)===directory)throw new Error('Remote driver dependency unavailable: '+name);directory=path.dirname(directory);}}await add('mongodb',require);
+ const p=spawn('python3',[fileURLToPath(new URL('../../scripts/package-remote-mysql.py',import.meta.url))],{stdio:['pipe','pipe','pipe']});const chunks=[];let size=0;p.stdout.on('data',x=>{size+=x.length;chunks.push(x);});p.stderr.resume();p.stdin.end(JSON.stringify({packages:[...found].map(([name,directory])=>({name,path:directory})),worker:fileURLToPath(new URL('./ssh-mongo-worker.cjs',import.meta.url))}));const code=await new Promise((resolve,reject)=>{p.once('error',reject);p.once('close',resolve);});if(code||size>16000000)throw new Error('Remote Mongo driver package unavailable');return Buffer.concat(chunks);})().catch(e=>{packed=null;throw e;});return packed;
+}
+export async function sshMongoConnection(e,q,cred,adapters={}){
+ if(!e.transport)throw new Error('MongoDB requires approved SSH remote execution; no local connection or fallback');
+ const connection=await sshRemoteConnection(e,q,cred,{...adapters,archive:adapters.archive??mongoDriverArchive,connectionPayload:{host:e.host,port:e.port,database:e.database,authSource:e.authSource??e.database,username:cred.username,password:cred.password,tls:e.tls===true,readConcern:e.readConcern??'local',timeoutMs:q.timeoutMs,collections:q.collections,accountPolicy:e.accountPolicy??'strict-readonly'}});
+ return {request:async(op,args={})=>(await connection.request({op,args,timeout:q.timeoutMs},q.timeoutMs))[0],destroy:connection.destroy};
+}

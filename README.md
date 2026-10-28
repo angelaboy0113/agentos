@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.49.7** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.50.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 多系统知识助手专用分支的部署与迁移见 [多系统助手说明](docs/system-assistants.md)。
 
@@ -327,3 +327,4 @@ Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地
 按姓名或工号查找机器人获准访问的人员，后台生成PNG并回复原话题；重名先确认，不操作桌面。需配置允许范围并由管理员批准通讯录字段和人员范围。见[配置与测试](docs/contact-images.md)。
 
 调查历史、期间规范化、恢复与清理的当前能力及验证边界见[多系统通用能力](docs/multi-system-capability-audit.md)。
+MongoDB文档来源、旧协议兼容、SSH远程只读、跨月完整数据集及恢复说明见[MongoDB受控只读来源](docs/mongodb-readonly.md)。配置示例使用凭据引用，不包含真实账号密码。

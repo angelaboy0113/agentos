@@ -16,6 +16,10 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+ ['MONGO_SERVER_VERSION', /MONGO_SERVER_VERSION/, 'MongoDB协议兼容检查', '驱动与目标MongoDB协议版本不兼容，尚未查询业务数据。', '维护者选用已核验的兼容驱动；不升级或重启生产数据库，不把版本问题解释为密码错误。'],
+ ['MONGO_DATE_TYPE_AMBIGUOUS', /MONGO_DATE_TYPE_AMBIGUOUS/, 'MongoDB日期完整性核验', '候选范围的日期字段存在非日期、空值或缺失；不能把它当范围外数据再补零。', '核对实际字段、业务口径及数据类型，保留已有证据；不能猜测时区或未知金额。'],
+ ['MONGO_READ_PERMISSION', /MONGO_READ_PERMISSION|MONGO_ACCOUNT_UNVERIFIED|MONGO_ACCOUNT_HAS_WRITE_PRIVILEGES/, 'MongoDB读取权限检查', '账号未通过当前读取权限或账号模式核验，未绕过权限执行。', '核对管理员登记的账号策略和实际授权；程序只读工具不等于账号自身只读。'],
+ ['MONGO_COLLECTION_SCOPE', /MONGO_COLLECTION_SCOPE|MONGO_COLLECTION_MISSING/, 'MongoDB集合覆盖检查', '请求集合超出当前范围或集合未实际存在，不能按无发生额处理。', '先列出已授权实际集合，核对完整月份范围；缺失来源应保留缺口，不能补零。'],
  ['HARNESS_REVIEW_REQUIRED', /Harness版本在任务链中发生变化/, '执行规范复核', '任务保存的执行规范与当前版本不同，已暂停以等待维护复核。', '维护者核对规范差异及原授权，保留已有证据后在原任务恢复；这不是业务数据或网络故障。'],
  ['LOCAL_CONTROL_TIMEOUT', /LOCAL_CONTROL_TIMEOUT/, '本机状态回执', '本机状态接口未及时返回，原请求可能已经受理；尚未确认本次状态是否保存。', '保留任务与成果，核对原请求回执后接续；不重复业务查询或写入。'],
  ['LOCAL_CONTROL_UNCERTAIN', /LOCAL_CONTROL_UNCERTAIN/, '本机状态回执', '本机状态接口无法核实原请求的持久回执，未盲目重复提交。', '维护者核对控制面与回执记录，在原问题接续。'],

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "executionPolicy": { "mongodbQueryTimeoutMs": 120000 },
+  "environments": {
+    "example_prd_mongo": {
+      "projectId": "example",
+      "tier": "prd",
+      "kind": "mongodb",
+      "credentialRef": "example_mongo",
+      "host": "db.internal",
+      "port": 27017,
+      "database": "Example-PRD",
+      "authSource": "admin",
+      "readConcern": "local",
+      "accountPolicy": "strict-readonly",
+      "ownerOpenIdsByProfile": { "your-profile": ["ou_replace_with_trusted_owner"] },
+      "membersRead": true,
+      "transport": {
+        "mode": "ssh-remote-execution",
+        "host": "jump.internal",
+        "port": 22,
+        "credentialRef": "example_ssh",
+        "knownHostsFile": "/absolute/path/to/known_hosts"
+      },
+      "queries": {
+        "investigate": {
+          "mode": "investigate",
+          "reviewed": true,
+          "description": "Reviewed MongoDB collection read tools",
+          "collections": ["Evidence*"],
+          "parameters": [{ "name": "purpose", "type": "string", "maxLength": 200 }],
+          "maxRows": 20,
+          "timeoutMs": 10000,
+          "exportMaxRows": "all"
+        }
+      }
+    }
+  }
+}

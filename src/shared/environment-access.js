@@ -10,22 +10,25 @@ export const environmentFile = () => path.resolve(process.env.AGENTOS_ENVIRONMEN
 const id = (s) => typeof s === 'string' && /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(s);
 const sensitive = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
 export const fingerprint = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export function queryTimeout(config,e,q){return e.kind==='mysql'&&q.mode==='investigate' ? config.executionPolicy?.mysqlQueryTimeoutMs??q.timeoutMs : q.timeoutMs;}
+export function queryTimeout(config,e,q){return q.mode==='investigate'&&['mysql','mongodb'].includes(e.kind) ? (e.kind==='mongodb'?config.executionPolicy?.mongodbQueryTimeoutMs:config.executionPolicy?.mysqlQueryTimeoutMs)??q.timeoutMs : q.timeoutMs;}
 export async function loadEnvironments(file = environmentFile()) {
   let v;
   try { v = JSON.parse(await readFile(file, 'utf8')); }
   catch (e) { if (e.code === 'ENOENT') return { version: 1, environments: {} }; throw new Error('环境配置无法读取或解析；未执行查询'); }
   if (v.version !== 1 || !v.environments || typeof v.environments !== 'object' || Array.isArray(v.environments)) throw new Error('环境配置版本错误');
   if(v.executionPolicy?.mysqlQueryTimeoutMs!==undefined&&(!Number.isSafeInteger(v.executionPolicy.mysqlQueryTimeoutMs)||v.executionPolicy.mysqlQueryTimeoutMs<100))throw new Error('查询执行时限须为有效毫秒数');
+  if(v.executionPolicy?.mongodbQueryTimeoutMs!==undefined&&(!Number.isSafeInteger(v.executionPolicy.mongodbQueryTimeoutMs)||v.executionPolicy.mongodbQueryTimeoutMs<100))throw new Error('MongoDB单次查询时限须为有效毫秒数');
   validateWebsiteAliases(v);
   for (const [key, e] of Object.entries(v.environments)) {
-    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization','transport','applicationRoot'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'nacos', 'website'].includes(e.kind)
+    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization','transport','applicationRoot','authSource','readConcern'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'mongodb', 'nacos', 'website'].includes(e.kind)
       || !id(e.credentialRef) || typeof e.membersRead !== 'boolean' || !e.ownerOpenIdsByProfile || !e.queries) throw new Error('环境配置字段无效');
     if(e.applicationRoot!==undefined&&(e.kind!=='website'||typeof e.applicationRoot!=='boolean'))throw new Error('applicationRoot仅能用于网站应用入口且必须为布尔值');
+    if(e.readConcern!==undefined&&(e.kind!=='mongodb'||!['local','majority'].includes(e.readConcern)))throw new Error('readConcern仅支持MongoDB的local/majority');
     validateAccountPolicy(e);
-    if(e.transport){if(e.kind!=='mysql')throw new Error('SSH传输仅支持MySQL');validateSshTransport(e.transport);}
+    if(e.transport){if(!['mysql','mongodb'].includes(e.kind))throw new Error('SSH传输仅支持已登记数据库');validateSshTransport(e.transport);}
     if(e.kind==='website')websiteUrl(e.baseUrl);
     if (Object.values(e.ownerOpenIdsByProfile).some((ids) => !Array.isArray(ids) || ids.some((x) => !/^ou_[A-Za-z0-9]+$/.test(x)))) throw new Error('环境审批人配置无效');
+    if(e.kind==='mongodb'&&(!e.transport||!/^[a-zA-Z0-9.:-]+$/.test(e.host)||!Number.isInteger(e.port)||e.port<1||e.port>65535||!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(e.database)||!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(e.authSource??e.database)))throw new Error('MongoDB必须指定固定数据库、认证库及SSH远程执行，不支持本机连接');
     if (e.kind === 'mysql' && (!/^[a-zA-Z0-9.:-]+$/.test(e.host) || !Number.isInteger(e.port) || e.port < 1 || e.port > 65535 || !id(e.database))) throw new Error('数据库目标配置无效');
     if (e.kind === 'nacos') { const u = new URL(e.baseUrl); if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.search || u.hash || u.pathname.replace(/\/$/, '') !== '/nacos') throw new Error('Nacos 地址必须是固定 /nacos 根路径'); }
     for (const [qid, q] of Object.entries(e.queries)) {
@@ -45,7 +48,7 @@ export async function loadEnvironments(file = environmentFile()) {
 export function isEnvironmentOwner(e, actor) { return (e.ownerOpenIdsByProfile?.[actor.profile] ?? []).includes(actor.senderId); }
 export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId && (e.kind !== 'website' || canonicalWebsite(config, projectId, e.tier, e.baseUrl) === websiteUrl(e.baseUrl))).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
-    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind==='mysql'&&q.mode==='investigate'?{capabilities:['database_clock：固定只读查询核对数据库会话时间、UTC、偏移和时区，业务字段时区另按源码核实','filters支持is_null/is_not_null固定空值判断，value省略或null，仍须真实schema字段','group_dataset与linked_group_dataset支持至多128个分组字段，按实际唯一主键和全部所需字段分组可保留完整原始记录；compose_report支持128列，宽表自动小页读取，不删列' ]}:{}), ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据'] } : {}), ...(q.exportMaxRows?{exportMaxRows:q.exportMaxRows,exportTimeoutMs:q.exportTimeoutMs??30000,exportSnapshotWindowMs:q.exportSnapshotWindowMs??null,exportDataBudgetBytes:q.exportDataBudgetBytes??null}:{}), parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin,entryUrl:e.baseUrl} : e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
+    queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind==='mysql'&&q.mode==='investigate'?{capabilities:['database_clock：固定只读查询核对数据库会话时间、UTC、偏移和时区，业务字段时区另按源码核实','filters支持is_null/is_not_null固定空值判断，value省略或null，仍须真实schema字段','group_dataset与linked_group_dataset支持至多128个分组字段，按实际唯一主键和全部所需字段分组可保留完整原始记录；compose_report支持128列，宽表自动小页读取，不删列' ]}:{}), ...(e.kind==='mongodb'?{capabilities:['MongoDB fixed read tools via SSH; collections/schema/indexes, typed date/string/int64/objectId filters; complete group_dataset across explicitly named month collections; same-job datasets and independent verification; no raw pipelines or writes']}:{ }), ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据'] } : {}), ...(q.exportMaxRows?{exportMaxRows:q.exportMaxRows,exportTimeoutMs:q.exportTimeoutMs??30000,exportSnapshotWindowMs:q.exportSnapshotWindowMs??null,exportDataBudgetBytes:q.exportDataBudgetBytes??null}:{}), parameters: q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin,entryUrl:e.baseUrl} : e.kind === 'mysql' ? { tables: q.tables } : e.kind==='mongodb'?{collections:q.collections}:{ namespaces: q.namespaces } } : {}) })) }));
 }
 // Repeated capability contracts are shared, while every authorized endpoint stays visible.
 export function compactCatalog(entries) {
@@ -92,7 +95,7 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
   });
   const scope = { expiresAt: new Date(now + 15 * 60000).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: queryTimeout(config,e,q) };
   const approvalRequired = false;
-  return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'website' ? new URL(e.baseUrl).origin : e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；按证据推进，无固定调用次数上限；失败按具体原因调整工具与查询，不按固定轮次截停` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
+  return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'website' ? new URL(e.baseUrl).origin : e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : (e.kind==='mongodb'?q.collections:q.tables).join(', ')}；按证据推进，无固定调用次数上限；失败按具体原因调整工具与查询，不按固定轮次截停` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
     approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: 'policy:read-only', approvedAt: new Date(now).toISOString() };
 }
 export function verifyPlan(config, plan, now = Date.now()) {
