@@ -255,7 +255,7 @@ export class JsonStore {
       const old=job.environmentAccess;
       if(job.taskIntent!=='analysis'||!old?.startedAt)throw Object.assign(new Error('当前任务没有可接续的只读环境步骤'),{statusCode:403});
       if(old.scopeHash!==identity.scopeHash){
-        if(old.previousScopeHash===identity.scopeHash){verifyApprovedPlan(config,old);return structuredClone(old);}
+        if(old.previousScopeHash===identity.scopeHash){try{verifyApprovedPlan(config,old);}catch(error){throw Object.assign(error,{statusCode:403});}return structuredClone(old);}
         throw Object.assign(new Error('只读续期请求不属于当前查询范围'),{statusCode:409});
       }
       let plan;try{plan=renewReadPlan(config,old,{projectId:job.projectId,profile:job.originProfile??job.agentProfile,senderId:job.senderId});}catch(error){throw Object.assign(error,{statusCode:403});}

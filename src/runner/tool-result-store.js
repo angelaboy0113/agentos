@@ -21,7 +21,7 @@ export class ToolResultStore{
   await this.authorize();const ref='tool-result-'+randomUUID(),saved={ref,scope:this.scope,tool,createdAt:new Date().toISOString(),sha256:hash(text),text};
   if(this.directory){const root=await this.root();await writeFile(path.join(root,ref+'.json'),JSON.stringify(saved),{mode:0o600,flag:'wx'});}else this.memory.set(ref,saved);
   await this.authorize();
-  const out={resultStored:true,resultRef:ref,resultLimited:true,totalCharacters:text.length,bytes:Buffer.byteLength(text),sha256:saved.sha256,omittedFields:[],note:'完整工具结果已保存；不是查询不完整。read_tool_result按resultRef和offset续读，保留原始partial/complete。不要重查或重算已完成步骤。'};
+  const out={resultStored:true,resultRef:ref,resultLimited:true,totalCharacters:text.length,bytes:Buffer.byteLength(text),sha256:saved.sha256,omittedFields:[],note:'本次工具返回已完整保存；展示分页不改变原查询完整性，仍须遵循原始partial/complete。read_tool_result按resultRef和offset续读，不重查或重算已完成步骤。'};
   for(const [key,value]of Object.entries(result)){
    if(value===undefined)continue;
    if(Buffer.byteLength(JSON.stringify(value))<=3000&&Buffer.byteLength(JSON.stringify(out))+Buffer.byteLength(JSON.stringify({[key]:value}))<16000)out[key]=JSON.parse(JSON.stringify(value,(_k,v)=>typeof v==='string'?this.secrets.reduce((x,s)=>x.split(s).join('[已隐藏]'),v):v));

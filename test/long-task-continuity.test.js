@@ -46,6 +46,7 @@ test('active renewal HTTP is durable and idempotent; a cancelled or foreign leas
  const first=await request();assert.equal(first.status,200);const one=await first.json(),second=await request();assert.equal(second.status,200);assert.equal((await second.json()).plan.scopeHash,one.plan.scopeHash);
  assert.equal((await app.store.getJob('job')).events.filter(x=>x.type==='environment_scope_renewed').length,1);
  await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify({version:1,environments:{db:{...e,tier:'prd'}}}));
+ const oldDuplicate=await fetch(url+route,{method:'POST',headers:{...headers,'x-agentos-request-id':randomUUID()},body:JSON.stringify(body)});assert.equal(oldDuplicate.status,403);
  await assert.rejects(controlPost({serverUrl:url,runnerToken:'synthetic'},route,{...body,scopeHash:one.plan.scopeHash}),error=>error.statusCode===403);
  await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(cfg));
  await assert.rejects(controlPost({serverUrl:url,runnerToken:'synthetic'},route,{...body,leaseId:'foreign'}),error=>error.statusCode===409);
