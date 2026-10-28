@@ -11,18 +11,28 @@
       "tls": true,
       "credentialRef": "prd_mysql_readonly",
       "membersRead": false,
-      "ownerOpenIdsByProfile": { "agentos-owner": ["ou_REPLACEWITHENVOWNER"] },
+      "ownerOpenIdsByProfile": {
+        "agentos-owner": [
+          "ou_REPLACEWITHENVOWNER"
+        ]
+      },
       "queries": {
         "connection_check": {
           "reviewed": true,
           "description": "核对当前库名和数据库时间",
           "sql": "SELECT DATABASE() AS database_name, CURRENT_TIMESTAMP() AS checked_at",
           "parameters": [],
-          "outputColumns": ["database_name", "checked_at"],
+          "outputColumns": [
+            "database_name",
+            "checked_at"
+          ],
           "maxRows": 1,
           "timeoutMs": 5000
         }
       }
     }
+  },
+  "executionPolicy": {
+    "mysqlQueryTimeoutMs": 120000
   }
 }

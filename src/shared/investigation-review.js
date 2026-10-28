@@ -158,20 +158,12 @@ export function reviewDecision(job,result){
  if(r?.status==='wait'&&['login','approval','user_input','unavailable'].includes(b?.kind)
    &&nonempty(b.needed)&&nonempty(b.evidence)&&r.attempts?.some(nonempty))
   return {continue:false,reason:`等待外部配合：${b.needed}；已核实的阻碍：${b.evidence}`};
- const prior=(job.context??[]).filter(x=>x.stage==='owner_report'&&x.result?.outcome==='partial').map(x=>x.result);
- const hash=signature(result);
- if(prior.filter(x=>signature(x)===hash).length>=2)
-  return {continue:false,reason:'自动自查后仍未取得新证据，已暂停重复排查；请查看详情中的已尝试路径与剩余目标。'};
  return {continue:true};
 }
 
 export function continuousReviewDecision(job,result){
  const r=result?.investigation,b=r?.blocker;
  if(result?.outcome!=='partial'||r?.status!=='continue'||b)return {continue:false};
- const prior=(job.context??[]).filter(entry=>entry.kind==='analysis_turn'&&entry.result?.outcome==='partial').map(entry=>entry.result);
- if(prior.length>=2)return {continue:false,reason:'同一会话已完成两轮自动补查，仍有缺口，停止重复空转。'};
- const hash=signature(result);
- if(prior.some(item=>signature(item)===hash))return {continue:false,reason:'自动补查没有新增证据，停止重复空转。'};
  return {continue:true};
 }
 
@@ -218,25 +210,9 @@ export function environmentContinuation(state,job,request,currentResult){
  const correction=toolCorrectionProgress(jobs,job,request,currentResult);
  const preparation=sourcePreparationProgress({...job,investigationProgress:{...job.investigationProgress,preparationSeen:jobs.flatMap(j=>j.investigationProgress?.preparationSeen??[]),preparationRecoveries:jobs.reduce((n,j)=>n+(j.investigationProgress?.preparationRecoveries??0),0)}},currentResult,request);
  if(correction)return {continue:true,metadata:correction};
- if((job.investigationProgress?.stagnant??0)>=limits.maxStagnant&&!preparation)return {continue:false,terminal:true,reason:'连续多轮没有新增业务数据或已核实目标；停止重复调查，保留已有成果。'};
  const contexts=jobs.flatMap(item=>item.context??[]).map(entry=>entry.result).filter(Boolean);
  const targeted=continuationMetadata(request,currentResult);
  if(!targeted.ok)return {continue:false,reason:targeted.reason};
  if(preparation)return {continue:true,metadata:{...targeted.metadata,...preparation}};
- const current=verifiedGoals(currentResult);
- let priorBest=new Set();
- for(const result of [...jobs.map(item=>item.result),...contexts]){const found=verifiedGoals(result);if(found.size>priorBest.size)priorBest=found;}
- if([...current].some(id=>!priorBest.has(id)))return {continue:true,metadata:targeted.metadata};
- const priorResults=contexts.filter(result=>targetKey(result.environmentEvidence)===targetKey(request));
- const emptyPartial=priorResults.some(result=>result.outcome==='partial'&&result.environmentEvidence?.rowCount===0);
- if(request?.kind==='website'&&emptyPartial)return {continue:false,reason:'该业务网站目标上一轮未取得记录且调查未完成。请改用已登记数据库、源码或另一条有依据的证据路径，不要换一种描述重复打开同一网站。'};
- const sameTarget=[...jobs.filter(item=>item.environmentAccess&&targetKey(item.environmentAccess)===targetKey(request)),...priorResults];
- if(sameTarget.length<2)return {continue:true,metadata:targeted.metadata};
- if(targeted.metadata){
-  const used=jobs.some(item=>(item.continuousContinuationKeys??[]).includes(targeted.metadata.continuationKey)
-    ||item.environmentAccess?.continuationKey===targeted.metadata.continuationKey);
-  if(!used)return {continue:true,metadata:targeted.metadata};
-  return {continue:false,reason:'该剩余目标已经按当前证据完成过一次定向补查；证据没有变化，不能通过改写查询重复执行。'};
- }
- return {continue:false,reason:'同一环境调查目标已经完成两轮独立执行，但原问题的已核实目标没有增加。继续重启任务只会重复已有路径。'};
+ return {continue:true,metadata:targeted.metadata};
 }

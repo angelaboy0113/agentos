@@ -189,6 +189,7 @@ export function validateDecision(value) {
   catch (error) { throw new DecisionProtocolError(error.message); }
 }
 function validateDecisionValue(value) {
+  if(value.requiresTabularDelivery!==undefined&&typeof value.requiresTabularDelivery!=='boolean')throw new Error('Invalid tabular delivery decision');
   const actions = ['lookup_contact', 'reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];
   const intents = ['none', 'implementation', 'planning', 'analysis', 'verification', 'audit'];
   if (!value || !actions.includes(value.action) || !intents.includes(value.intent)) throw new Error('Unknown action or intent');

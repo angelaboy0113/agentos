@@ -28,8 +28,8 @@ test('new verified source preparation can recover a stalled data step once; pros
  const request={environmentId:'db',queryId:'investigate',parameters:['get data'],goalIds:['original-question']};
  const decision=environmentContinuation({jobs:[job]},job,request,current);assert.equal(decision.continue,true);assert.equal(decision.metadata.sourcePreparationRecovery,true);
  job.investigationProgress.preparationSeen=decision.metadata.sourcePreparationKeys;
- assert.equal(environmentContinuation({jobs:[job]},job,{...request,parameters:['reword']},{...current,finalMessage:'new words'}).terminal,true);
- job.investigationProgress.preparationSeen=[];job.investigationProgress.preparationRecoveries=2;assert.equal(environmentContinuation({jobs:[job]},job,request,current).terminal,true);
+ assert.equal(environmentContinuation({jobs:[job]},job,{...request,parameters:['reword']},{...current,finalMessage:'new words'}).continue,true);
+ job.investigationProgress.preparationSeen=[];job.investigationProgress.preparationRecoveries=2;assert.equal(environmentContinuation({jobs:[job]},job,request,current).continue,true);
  job.investigationProgress.preparationRecoveries=0;job.events=Array.from({length:20},()=>({type:'continuous_environment_started'}));assert.equal(environmentContinuation({jobs:[job]},job,request,current).continue,true);
 });
 test('source pages redact connection credentials, remain bounded and recheck authorization',async t=>{
@@ -52,14 +52,14 @@ test('preparation recovery is durable and identical purpose can run once with ne
  const updated=await store.beginContinuousEnvironment(job.id,identity,{...plan,...decision.metadata},source);
  assert.equal(updated.investigationProgress.stagnant,0);assert.equal(updated.investigationProgress.preparationRecoveries,1);assert.equal(updated.investigationProgress.preparationSeen.length,1);
  const restarted=new JsonStore(path.join(f.root,'state.json'));const saved=await restarted.getJob(job.id);saved.investigationProgress.stagnant=2;
- assert.equal(environmentContinuation({jobs:[saved]},saved,{...plan,goalIds:['original-question']},source).terminal,true);
+ assert.equal(environmentContinuation({jobs:[saved]},saved,{...plan,goalIds:['original-question']},source).continue,true);
 });
 test('same source on another question job and website retries cannot bypass the recovery bound',async t=>{
  const f=await fixture(t),context=await buildSourceQueryContext(f.result),source={...f.result,sourcePreparation:context.preparation,investigation:{goals:[{id:'original-question',required:true,status:'open',evidence:'known source'}]}};
  const job={id:'new',questionId:'q',taskIntent:'analysis',investigationProgress:{stagnant:2}},request={environmentId:'db',queryId:'investigate',goalIds:['original-question']};
  const old={id:'old',questionId:'q',taskIntent:'analysis',investigationProgress:{preparationRecoveries:2}};
- assert.equal(environmentContinuation({jobs:[old,job]},job,request,source).terminal,true);
- assert.equal(environmentContinuation({jobs:[job]},job,{...request,kind:'website'},source).terminal,true);
+ assert.equal(environmentContinuation({jobs:[old,job]},job,request,source).continue,true);
+ assert.equal(environmentContinuation({jobs:[job]},job,{...request,kind:'website'},source).continue,true);
 });
 
 test('metadata-only rounds do not present zero records as a business query finding',async()=>{

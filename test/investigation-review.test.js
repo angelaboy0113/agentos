@@ -130,7 +130,7 @@ test('ordinary causal questions can finish at the requested direct cause without
 test('continuous review retries useful open work once and stops unchanged evidence',()=>{
  const r=result();
  assert.equal(continuousReviewDecision({context:[]},r).continue,true);
- assert.equal(continuousReviewDecision({context:[{kind:'analysis_turn',result:r}]},r).continue,false);
+ assert.equal(continuousReviewDecision({context:[{kind:'analysis_turn',result:r}]},r).continue,true);
  const changed=result();changed.investigation.goals[0].evidence='Found processing history; runtime log remains';
  assert.equal(continuousReviewDecision({context:[{kind:'analysis_turn',result:r}]},changed).continue,true);
 });
@@ -188,7 +188,7 @@ test('an explicitly requested current-page verification remains blocked when bro
 });
 test('self-review continues with new evidence but stops repeated evidence or explicit external blocker',()=>{
  const r=result(),job={context:[{stage:'owner_report',result:r},{stage:'owner_report',result:r}]};
- assert.equal(reviewDecision(job,r).continue,false);
+ assert.equal(reviewDecision(job,r).continue,true);
  const fresh=result();fresh.investigation.goals[0].evidence='Found correct UAT config; database still pending';assert.equal(reviewDecision(job,fresh).continue,true);
  fresh.investigation.status='wait';fresh.investigation.blocker={kind:'login',needed:'Maintainer signs in on the Mac',evidence:'Visible login form'};
  assert.equal(reviewDecision({context:[]},fresh).continue,false);

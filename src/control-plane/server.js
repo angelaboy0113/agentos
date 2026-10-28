@@ -394,7 +394,7 @@ async function route(context) {
           || body.result.outcome !== 'needs_clarification') throw new Error('当前阶段不允许申请环境查询');
         if(job.convergenceFinal)throw new Error('最终汇总阶段不能再申请环境查询');
         const snapshot = await store.read();
-        const earlier = snapshot.jobs.filter(j => j.questionId === job.questionId && j.environmentAccess);
+        const earlier = snapshot.jobs.filter(j => j.id!==job.id && j.questionId === job.questionId && j.environmentAccess && ['running','queued','awaiting_environment_approval'].includes(j.status));
         const request = body.result.environmentQuery;
         const continuation=environmentContinuation(snapshot,job,request,body.result);
         if(!continuation.continue){const error=new Error('自动调查未产生新增证据');error.queryDiagnostic={code:'CONVERGENCE_STALLED',reason:continuation.reason};throw error;}
@@ -534,16 +534,7 @@ export async function handleLarkCliEvent(context, event) {
   const botIds=[agent?.openId,agent?.appId].filter(Boolean);
   const addressed = event.chat_type === 'p2p' || botIds.some(id=>mentionIds.includes(id));
   const state = await context.store.read();
-  const related = (state.conversations ?? []).some((turn) => turn.chatId === event.chat_id && turn.profile === sourceProfile
-    && [event.reply_to, event.root_id].filter(Boolean).some((id) => turn.messageId === id || turn.feedbackMessageId === id || turn.responseIds?.includes(id)));
-  const jobReply = state.jobs.some((job) => job.chatId === event.chat_id
-    && job.agentProfile === sourceProfile && job.notificationIds?.includes(event.reply_to));
-  const cardReply = Object.values(state.cardMessages ?? {}).some((card) => card.messageId && card.messageId === event.reply_to
-    && card.destination.profile === sourceProfile && (card.destination.chatId === event.chat_id
-      || (state.conversations ?? []).some((turn) => turn.chatId === event.chat_id && turn.messageId === card.destination.replyTo)));
-  // Older CLI events omit chat_type; their subscription is already bot-scoped.
-  // Known group events require an actual mention or a recorded conversation reply.
-  if (event.chat_type === 'group' && !addressed && !related && !jobReply && !cardReply) return { ignored: true };
+  if (event.chat_type === 'group' && !addressed) return { ignored: true, reason: 'mention_required' };
   if (mentionIds.length && botIds.length && !botIds.some(id=>mentionIds.includes(id))) return { ignored: true };
   return context.conversations.enqueue({
     ...event, message_id: messageId, agent_role: role,

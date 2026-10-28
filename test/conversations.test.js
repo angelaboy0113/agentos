@@ -122,14 +122,14 @@ test('context remains on disk and is restored after service reconstruction', asy
   assert.equal(restored.history[0].user, '这次只改登录，不改注册');
 });
 
-test('reply without @ follows recorded bot message, other group messages and bots are ignored', async (t) => {
+test('replies without @ are ignored even in an existing bot thread', async (t) => {
   const { send, inputs } = await setup(t, () => decision());
   await send(message('first', '你好'));
   await send(message('second', '你在哪个项目', { mentions: [], reply_to: 'bot-reply-1' }));
   const unrelated = await send(message('third', '普通群聊', { mentions: [] }));
   await send(message('fourth', '机器人回话', { sender_type: 'bot' }));
   await send(message('fifth', '@测试', { mentions: [{ id: 'bot-qa' }] }));
-  assert.equal(inputs.length, 2);
+  assert.equal(inputs.length, 1);
   assert.equal(unrelated.ignored, true);
   assert.equal(isForThisBot(message('m', '', { mentions: [{ id: 'bot-qa' }] }), ''), false);
 });

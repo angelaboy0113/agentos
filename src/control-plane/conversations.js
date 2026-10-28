@@ -484,6 +484,7 @@ export class ConversationService {
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction,
+        tabularDelivery:decision.requiresTabularDelivery===true,
         originalQuestion: turn.questionId ? questionRequest(await store.read(), turn.questionId) : turn.content,
         attachments: [...(turn.resumeAttachments??[]),...attachments],
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,

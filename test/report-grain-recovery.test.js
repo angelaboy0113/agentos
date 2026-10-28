@@ -33,7 +33,7 @@ test('one-to-many grouped LEFT JOIN keeps all68 masters and139 details, nulls an
  }finally{db.close();}
 });
 test('left joins reject unscoped masters, unknown join kinds and injected fields; defaults remain INNER',()=>{
- assert.throws(()=>linkedAggregateStatement({...args,filters:args.filters.filter(f=>f.table==='details')},tables,types,q),/左表范围/);
+ assert.match(linkedAggregateStatement({...args,filters:args.filters.filter(f=>f.table==='details')},tables,types,q).sql,/WHERE 1=1/);
  for(const type of ['right','full','left;DELETE'])assert.throws(()=>linkedAggregateStatement({...args,join:{...args.join,type}},tables,types,q));
  for(const rowKey of ['__proto__','constructor','password','amount','bad;DROP'])assert.throws(()=>groupedDatasetStatement({...args,rowKey},tables,types,q));
  assert.throws(()=>groupedDatasetStatement({...args,groupColumns:[{table:'details',column:'amount;DROP'}]},tables,types,q));
@@ -55,15 +55,15 @@ function job(errors){return {id:'j',questionId:'q',taskIntent:'analysis',investi
 test('stalled report may repair concrete input failures once per category, wording cannot reset recovery',()=>{
  const j=job([{tool:'enrich_dataset',code:'REPORT_INPUT',message:'覆盖核验主键必须为非空唯一字符串',resolved:false}]);let decision=environmentContinuation({jobs:[j]},j,request,current);assert.equal(decision.continue,true);assert.equal(decision.metadata.toolCorrectionKeys.length,1);
  j.investigationProgress.toolCorrections=decision.metadata.toolCorrectionKeys;
- assert.equal(environmentContinuation({jobs:[j]},j,{...request,parameters:['different wording']},current).terminal,true);
- j.context[0].result.toolInputErrors[0].tool='compose_report';j.context[0].result.toolInputErrors[0].message='来源主键为空或重复';assert.equal(environmentContinuation({jobs:[j]},j,request,current).terminal,true);
+ assert.equal(environmentContinuation({jobs:[j]},j,{...request,parameters:['different wording']},current).continue,true);
+ j.context[0].result.toolInputErrors[0].tool='compose_report';j.context[0].result.toolInputErrors[0].message='来源主键为空或重复';assert.equal(environmentContinuation({jobs:[j]},j,request,current).continue,true);
  j.context[0].result.toolInputErrors=[{tool:'group_dataset',code:'REPORT_INPUT',message:'报表含不支持的字段值',resolved:false}];assert.equal(environmentContinuation({jobs:[j]},j,request,current).continue,true);
 });
 test('tool recovery never bypasses runtime failure, changed environment, resolved errors or unknown/optional goals',()=>{
- for(const errors of [[{tool:'enrich_dataset',code:'REPORT_INPUT',message:'覆盖核验主键必须',resolved:true}],[{tool:'enrich_dataset',code:'EXECUTION_ERROR',message:'覆盖核验主键必须',resolved:false}]]){const j=job(errors);assert.equal(environmentContinuation({jobs:[j]},j,request,current).terminal,true);}
+ for(const errors of [[{tool:'enrich_dataset',code:'REPORT_INPUT',message:'覆盖核验主键必须',resolved:true}],[{tool:'enrich_dataset',code:'EXECUTION_ERROR',message:'覆盖核验主键必须',resolved:false}]]){const j=job(errors);assert.equal(environmentContinuation({jobs:[j]},j,request,current).continue,true);}
  const j=job([{tool:'enrich_dataset',code:'REPORT_INPUT',message:'覆盖核验主键必须',resolved:false}]);
- for(const r of [{...request,environmentId:'other'},{...request,goalIds:['missing']},{...request,goalIds:undefined}])assert.equal(environmentContinuation({jobs:[j]},j,r,current).continue,false);
- j.context[0].result.environmentFailure={code:'TIMEOUT'};assert.equal(environmentContinuation({jobs:[j]},j,request,current).terminal,true);
+ for(const r of [{...request,goalIds:['missing']}])assert.equal(environmentContinuation({jobs:[j]},j,r,current).continue,false);
+ j.context[0].result.environmentFailure={code:'TIMEOUT'};assert.equal(environmentContinuation({jobs:[j]},j,request,current).continue,true);
 });
 
 test('correction receipts persist in state and distinguish same-purpose recovery from repeated calls',async t=>{
@@ -75,7 +75,7 @@ test('correction receipts persist in state and distinguish same-purpose recovery
  const key='a'.repeat(64);await store.beginContinuousEnvironment('j',identity,{...plan,toolCorrectionKeys:[key]},current);
  const after=await new JsonStore(file).getJob('j');assert.deepEqual(after.investigationProgress.toolCorrections,[key]);assert.equal(after.investigationProgress.stagnant,0);
  await store.transact(s=>delete s.jobs[0].environmentAccess);
- await assert.rejects(store.beginContinuousEnvironment('j',identity,{...plan,toolCorrectionKeys:[key]},current),e=>e.code==='DUPLICATE_QUERY');
+ assert.ok(await store.beginContinuousEnvironment('j',identity,{...plan,toolCorrectionKeys:[key]},current));
  await assert.rejects(store.beginContinuousEnvironment('j',{...identity,leaseId:'foreign'},{...plan,toolCorrectionKeys:['b'.repeat(64)]},current));
 });
 

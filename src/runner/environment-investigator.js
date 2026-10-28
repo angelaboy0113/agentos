@@ -1,7 +1,7 @@
 import {sourceQueryTools,publicSourceQueryContext,SourceEvidenceInputError} from './source-query-context.js';
 import { CodexAppServer } from '../shared/codex-app-server.js';
 import { codexEnvironment, loadCodexRuntimeSettings, resolveCodexBinary, conversationServerArgs } from '../shared/codex-runtime.js';
-import { loadEnvironments, verifyApprovedPlan, fingerprint } from '../shared/environment-access.js';
+import { loadEnvironments, queryTimeout, fingerprint, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
 import { failureDiagnostic } from '../shared/failure-diagnostic.js';
 import { credential } from './environment-connector.js';
 import { createEnvironmentTools, QueryInputError } from './environment-tools.js';
@@ -57,10 +57,15 @@ export async function createToolPlanner({onProgress=async()=>{}}={}) {
 }
 export async function investigateEnvironment(plan, emit = async () => {}, adapters = {}) {
   const load = adapters.load ?? loadEnvironments;
-  let cfg = await load(), e = verifyApprovedPlan(cfg, plan), q = e.queries[plan.queryId];
+  let cfg = await load(), e = verifyApprovedPlan(cfg, plan), q = {...e.queries[plan.queryId],timeoutMs:queryTimeout(cfg,e,e.queries[plan.queryId]),exportTimeoutMs:Math.max(e.queries[plan.queryId].exportTimeoutMs??30000,queryTimeout(cfg,e,e.queries[plan.queryId]))};
   if (q.mode !== 'investigate') throw new Error('未批准工具排查范围');
   const cred = e.kind==='website' ? {} : await (adapters.credential ?? credential)(e.credentialRef);
-  const makeTools=async()=>{const authorize=async()=>verifyApprovedPlan(await load(),plan),base=await (adapters.tools??createEnvironmentTools)(e,q,cred,{reportJob:adapters.reportJob,dataDir:adapters.dataDir,exportDirectory:adapters.exportDirectory,originalQuestion:adapters.investigationContext?.originalQuestion,authorize});
+  const datasetScopes=[];
+  if(adapters.reportJob?.projectId===e.projectId){for(const [environmentId,entry] of Object.entries(cfg.environments)){
+    if(entry.projectId!==e.projectId||entry.tier!==e.tier||entry.kind!=='mysql'||!entry.queries?.[plan.queryId])continue;
+    try{const grant=planQuery(cfg,{environmentId,queryId:plan.queryId,parameters:plan.parameters},e.projectId,{profile:adapters.reportJob.originProfile??adapters.reportJob.agentProfile,senderId:adapters.reportJob.senderId});if(!grant.approvalRequired)datasetScopes.push(fingerprint(entry));}catch{}
+  }}
+  const makeTools=async()=>{const authorize=async()=>verifyApprovedPlan(await load(),plan),base=await (adapters.tools??createEnvironmentTools)(e,q,cred,{datasetScopes,reportJob:adapters.reportJob,dataDir:adapters.dataDir,exportDirectory:adapters.exportDirectory,originalQuestion:adapters.investigationContext?.originalQuestion,authorize});
     const source=sourceQueryTools(adapters.sourceQueryContext,{authorize,secrets:[cred.username,cred.password]});return {...base,spec:[...base.spec,...source.spec],run:async(tool,args)=>{try{return await (source.spec.some(s=>s.tool===tool)?source.run(tool,args):base.run(tool,args));}catch(error){if(error instanceof SourceEvidenceInputError)throw new QueryInputError(error.code,error.message);throw error;}}};};
   let tools=await makeTools();
   let planner; const steps = [...(adapters.checkpoint?.steps??[])], results = [...(adapters.checkpoint?.results??[])]; let summary = '', complete = false, unresolvedInput = false, stalled = 0, stopReason = '';
@@ -78,12 +83,12 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
       const choice = i === 0 ? { tool: 'connection', arguments: '{}' } : i===1&&tools.spec.some(x=>x.tool==='list_datasets')?{tool:'list_datasets',arguments:'{}'}:await planner.next({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: tools.spec, results: results.slice(-12), progress: { toolCount: results.length, consecutiveNoProgress: stalled }, instruction: '优先修正investigationContext.corrections中的未解决校验原因；inspect_dataset会返回草稿所需检查项。不因为REPORT_INPUT重查整套数据。list_datasets有nextOffset时继续分页找已有成果。优先用一次聚合或重复组合查询关闭核心缺口；表结构定向读取并按真实证据推进。先前结果仍在本会话历史中。' });
       if (choice.tool === 'finish') {
-        const mysqlEvidence = results.some(item => item.result && ['tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
-        const mysqlQueryTools = e.kind === 'mysql' && tools.spec.some(item => ['tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
-        if (mysqlQueryTools && !mysqlEvidence) {
+        const mysqlEvidence = results.some(item => item.result && ['tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
+        const mysqlQueryTools = e.kind === 'mysql' && tools.spec.some(item => ['tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
+        if (mysqlQueryTools && !mysqlEvidence && !results.some(item=>item.error&&item.tool!=='finish')) {
           results.push({ tool: 'finish', error: { code: 'PREMATURE_FINISH', message: '数据库查询工具已提供；仅完成连接检查不能判断记录或声称查询工具不可用。请使用结构、明细或受控汇总工具取得与原问题相关的证据。' }, executed: false });
           steps.push('finish：仅完成连接检查，继续执行已提供的只读查询工具');
-          if (++stalled >= 3) { stopReason = '规划器连续3次仅完成连接检查，未执行已提供的只读查询工具；本轮保留连接证据并暂停。'; break; }
+          stalled++;
           continue;
         }
         summary = String(choice.summary ?? '').slice(0, 6000); complete = choice.complete === true; break;
@@ -98,34 +103,34 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       diagnosticStage = choice.tool;
       let result;
       const queryKey = fingerprint({ tool: choice.tool, args });
-      if (e.kind === 'mysql' && ['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(choice.tool) && timedOutQueries.has(queryKey)) {
+      if (e.kind === 'mysql' && ['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(choice.tool) && timedOutQueries.has(queryKey)) {
         results.push({ tool: choice.tool, error: { code: 'TIMEOUT_REPEAT', message: '此查询已超时，未重复执行。请缩小时间范围、增加单号条件或换用其他证据路径。' }, executed: false });
-        if (++stalled >= 3) { stopReason = '连续3次未调整已超时查询，排查暂停；需要更具体的筛选条件。'; break; }
+        stalled++;
         continue;
       }
       try { result = await tools.run(choice.tool, args); }
       catch (error) {
-        if (e.kind === 'mysql' && ['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(choice.tool) && /^错误码：TIMEOUT\b/m.test(failureDiagnostic(error))) {
+        if (e.kind === 'mysql' && ['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(choice.tool) && /^错误码：TIMEOUT\b/m.test(failureDiagnostic(error))) {
           unresolvedTimeout = true; timedOutQueries.add(queryKey);
           results.push({ tool: choice.tool, error: { code: 'TIMEOUT', message: '本次查询超时，连接已关闭；不是业务故障根因。重新读取目标表结构，缩小时间范围、增加单号等条件或选择其他证据路径。保持原授权和单次等待上限。' }, completed: false });
           steps.push('select：查询超时，保留已有证据，正在调整查询');
           await tools.close({ abort: true });
-          if (++timeoutStreak >= 3) { stopReason = '连续3次业务查询超时且未取得新的业务查询结果，排查暂停；建议核对索引、数据库负载或补充精确单号。'; break; }
+          timeoutStreak++;
           verifyApprovedPlan(await load(), plan);
           tools=await makeTools();
           await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '查询超时，正在调整条件继续排查', total: i + 1, completed: i, recent: [] } });
           continue;
         }
         // Fixed local query/browser input errors can be corrected. Scope/auth failures still stop.
-        if (!(error instanceof QueryInputError) || !['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','list_datasets','read_source_evidence','compare_datasets','browser_click','browser_search','browser_select','browser_snapshot','browser_open','browser_screenshot','browser_key','browser_scroll'].includes(choice.tool)) throw error;
+        if (!(error instanceof QueryInputError) || !['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','list_datasets','read_source_evidence','compare_datasets','browser_click','browser_search','browser_select','browser_snapshot','browser_open','browser_screenshot','browser_key','browser_scroll'].includes(choice.tool)) throw error;
         pendingInputs.add(choice.tool);unresolvedInput = true;
         results.push({ tool: choice.tool, error: { code: error.code, message: error.message }, executed: false });
         steps.push(`${choice.tool}：${error.code}，本步骤未完成，已有成果保留`);
         if(error.code==='DATASET_CAPACITY'){stopReason=failureDiagnostic(error);break;}
-        if (++stalled >= 3) { stopReason = error.message + '；连续3次未取得新增证据，已暂停。'; break; }
+        stalled++;
         continue;
       }
-      if (['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','list_datasets','read_source_evidence','compare_datasets','browser_click','browser_search','browser_select','browser_snapshot','browser_open','browser_screenshot','browser_key','browser_scroll'].includes(choice.tool)) { pendingInputs.delete(choice.tool);unresolvedInput=pendingInputs.size>0;if(['select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset'].includes(choice.tool)){unresolvedTimeout=false;timeoutStreak=0;} }
+      if (['select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','list_datasets','read_source_evidence','compare_datasets','browser_click','browser_search','browser_select','browser_snapshot','browser_open','browser_screenshot','browser_key','browser_scroll'].includes(choice.tool)) { pendingInputs.delete(choice.tool);unresolvedInput=pendingInputs.size>0;if(['select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset'].includes(choice.tool)){unresolvedTimeout=false;timeoutStreak=0;} }
       if(choice.tool==='browser_snapshot'){for(const name of [...pendingInputs])if(name.startsWith('browser_'))pendingInputs.delete(name);unresolvedInput=pendingInputs.size>0;}
       if(result.loginRequired) return {loginRequired:true,summary:result.message??result.stage,checkpoint:{steps,results,lastAuthorizedAt},rows:[],partial:true};
       result = fitToolResult(result);
@@ -134,7 +139,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       if(result.websiteMismatch){summary='网站入口不匹配，尚未核实目标业务数据。请结合本环境源码、部署配置和原问题重新发现正确入口，不复用此错误入口，不要求用户扩大权限。';complete=false;break;}
       const hash = fingerprint({ tool: choice.tool, result });
       stalled = seen.has(hash) ? stalled + 1 : 0; seen.add(hash);
-      if (stalled >= 3) { stopReason = '连续3次工具调用未取得新增证据，已暂停重复排查；需要调整查询思路或补充线索。'; break; }
+
     }
     } catch (error) {
       const caughtFailure = Object.assign(new Error(String(error?.message ?? error)), {
@@ -162,7 +167,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     const serialized = JSON.stringify(results);
     for (const secret of [cred.username, cred.password].filter(Boolean)) summary = summary.split(secret).join('[已隐藏]');
     const uniqueResults = [...new Map(results.filter(x => x.result).map(x => [fingerprint(x), x])).values()];
-    const business=uniqueResults.filter(x=>['select','count','group_count','aggregate','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets'].includes(x.tool)).map(x=>({tool:x.tool,table:x.result.table,rows:Array.isArray(x.result.rows)?x.result.rows.map(row=>JSON.stringify(row)).sort():undefined,dataHash:x.result.dataHash,columns:x.result.columns,totals:x.result.totals}));
+    const business=uniqueResults.filter(x=>['select','count','group_count','aggregate','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets'].includes(x.tool)).map(x=>({tool:x.tool,table:x.result.table,rows:Array.isArray(x.result.rows)?x.result.rows.map(row=>JSON.stringify(row)).sort():undefined,dataHash:x.result.dataHash,columns:x.result.columns,totals:x.result.totals}));
     if(e.kind==='website')business.push(...uniqueResults.filter(x=>x.result?.url&&typeof x.result.pageText==='string').map(x=>({url:x.result.url,pageText:x.result.pageText,fields:x.result.fields??[]})));
     return { fileInspections:uniqueResults.filter(x=>x.tool==='inspect_report').map(x=>x.result).slice(-1),failure,toolInputErrors:results.filter(x=>x.error&&x.executed===false).map(x=>({tool:x.tool,code:x.error.code,message:[cred.username,cred.password].filter(Boolean).reduce((m,secret)=>m.split(secret).join('[已隐藏]'),String(x.error.message??'')).slice(0,1200),resolved:!pendingInputs.has(x.tool)})).slice(-12),datasetCatalog:uniqueResults.flatMap(x=>x.result?.datasets??[]), websiteScreenshots:[...new Map(uniqueResults.flatMap(x=>[...(x.result?.screenshot?[x.result.screenshot]:[]),...(x.result?.screenshotDeliveries??[])]).map(item=>[item.sha256,item])).values()], exportFiles: uniqueResults.flatMap(x=>x.result?.exportFile?[x.result.exportFile]:[]), websiteMismatch: results.some(x => x.result?.websiteMismatch === true), runtimeDiscoveries: uniqueResults.filter(x => x.result?.runtimeDiscovery).map(x => x.result.runtimeDiscovery), rows: uniqueResults.filter(x => x.result?.rows).flatMap(x => x.result.rows.map(row => x.result.table ? { ...row, '来源表': x.result.table } : row)), steps, summary, partial: !complete,
       note: e.kind === 'website' ? '本次读取业务网页，未执行修改。' : e.kind === 'nacos' ? 'Nacos 读取与数据库连接是两步；本次未连接数据库。' : '仅本次范围内的数据库只读工具。',

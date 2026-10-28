@@ -1,3 +1,4 @@
+import {percentage,divide} from './dataset-summary.js';
 import {verifyPeriodDataset} from './period-dataset.js';
 import {readFile,readdir,lstat} from 'node:fs/promises';
 import path from 'node:path';
@@ -28,7 +29,7 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
   if(!/^dataset-[a-f0-9-]{36}\.json$/.test(name))fail('核验记录数据集引用无效');
   const file=path.join(datasetRoot,name),info=await lstat(file);if(!info.isFile()||info.isSymbolicLink())continue;
   const candidate=JSON.parse(await readFile(file,'utf8'));if(candidate.data?.reportDraft?.file?.id!==item.id)continue;
-  const store=new TaskDatasetStore(directory,candidate.scope),saved=await store.get(candidate.id),draft=saved.data.reportDraft;
+  const store=new TaskDatasetStore(directory,candidate.scope,{additionalScopes:candidate.data.authorizedDatasetScopes??[]}),saved=await store.get(candidate.id),draft=saved.data.reportDraft;
   if(draft.file.sha256!==item.sha256||draft.file.rowCount!==item.rowCount||draft.file.bytes!==item.bytes)fail('文件与计算配方绑定不一致');
   if(bound)fail('同一文件出现多个计算配方，不能猜选');bound=saved;storage=store;
  }
@@ -36,8 +37,8 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  const data=bound.data,draft=data.reportDraft;
  if(JSON.stringify(data.columns)!==JSON.stringify(receipt.columnRules.map(c=>c.label))||data.rows.length!==item.rowCount||draft.keys.length!==item.rowCount)fail('文件列或对象数量与核验记录不一致');
  const sources=new Map();for(const s of draft.sources){const saved=await storage.get(s.datasetRef);const d=saved.data,index=new Map();for(const row of d.rows){const key=row[s.keyColumn];if(typeof key!=='string'||!key||index.has(key))fail('计算来源主键为空或重复');index.set(key,row);}sources.set(s.name,{...d,index,readAt:saved.readAt,keyColumn:s.keyColumn,datasetRef:s.datasetRef});}
- const validate=(v,depth=0)=>{if(!v||typeof v!=='object')fail('计算配方超出固定表达式范围');if(v.op==='key')return;if(v.op==='field'){if(!sources.get(v.source)?.columns.includes(v.column))fail('计算配方字段不存在');return;}if(!['add','subtract','min'].includes(v.op)||!Array.isArray(v.args)||v.args.length<2)fail('计算配方包含不支持的表达式');v.args.forEach(c=>validate(c,depth+1));};draft.columns.forEach(c=>validate(c.value));
- const evaluate=(e,key)=>{if(e.op==='key')return key;if(e.op==='field'){const v=sources.get(e.source).index.get(key)?.[e.column];if(v===undefined||v===null){if(e.missing==='zero')return '0';if(e.missing==='empty')return '';fail('计算缺失值没有明确规则');}return v;}const values=e.args.map(x=>decimal(evaluate(x,key)));return format(values.slice(1).reduce((a,b)=>e.op==='add'?a+b:e.op==='subtract'?a-b:a<b?a:b,values[0]));};
+ const validate=(v,depth=0)=>{if(!v||typeof v!=='object')fail('计算配方超出固定表达式范围');if(v.op==='constant'){decimal(v.value);return;}if(v.op==='key')return;if(v.op==='field'){if(!sources.get(v.source)?.columns.includes(v.column))fail('计算配方字段不存在');return;}if(!['add','subtract','min','percentage','divide'].includes(v.op)||!Array.isArray(v.args)||v.args.length<2)fail('计算配方包含不支持的表达式');v.args.forEach(c=>validate(c,depth+1));};draft.columns.forEach(c=>validate(c.value));
+ const evaluate=(e,key)=>{if(e.op==='key')return key;if(e.op==='field'){const v=sources.get(e.source).index.get(key)?.[e.column];if(v===undefined||v===null){if(e.missing==='zero')return '0';if(e.missing==='empty')return '';fail('计算缺失值没有明确规则');}return v;}if(e.op==='constant')return String(e.value);if(e.op==='divide'){if(e.args.length!==2)throw new Error('divide requires two operands');return divide(evaluate(e.args[0],key),evaluate(e.args[1],key),e);}if(e.op==='percentage'){if(e.args.length!==2)fail('percentage requires two operands');return percentage(evaluate(e.args[0],key),evaluate(e.args[1],key),e);}const values=e.args.map(x=>decimal(evaluate(x,key)));return format(values.slice(1).reduce((a,b)=>e.op==='add'?a+b:e.op==='subtract'?a-b:a<b?a:b,values[0]));};
  const rows=draft.keys.map(key=>draft.columns.map(c=>evaluate(c.value,key)));
  const csv='\uFEFF'+[data.columns,...rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n';
  if(csv!==verified.content.toString('utf8'))fail('实际CSV与绑定配方的逐行重算不一致，不能认定已修正');

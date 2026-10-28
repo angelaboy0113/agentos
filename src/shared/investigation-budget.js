@@ -2,7 +2,7 @@ import {acceptedReportResult} from './report-acceptance.js';
 import {failureDetails,failureDiagnostic} from './failure-diagnostic.js';
 const bounded=(v,f,min,max)=>Number.isInteger(Number(v))&&Number(v)>=min&&Number(v)<=max?Number(v):f;
 // Long tasks are allowed. Legacy total-time/total-round variables intentionally have no effect.
-export function investigationLimits(){return {maxStagnant:bounded(process.env.AGENTOS_ANALYSIS_MAX_STAGNANT_ROUNDS,2,1,5)};}
+export function investigationLimits(){return {maxStagnant:Number.POSITIVE_INFINITY};}
 export function interruptedInvestigation(job,reason,code='INVESTIGATION_STOPPED',failure=null){
  const details=failure?failureDetails(failure):null;
  const accepted=acceptedReportResult(job);if(accepted)return {...accepted,supplementaryInvestigationStopped:{code,reason,...(details?{diagnostic:details}:{})}};

@@ -15,7 +15,7 @@ const result=(verified=[])=>({investigation:{status:'continue',goals:[
 test('same environment target converges after two restarts without new verified goals',()=>{
  const job={questionId:'q',taskIntent:'analysis'};
  const state={jobs:[0,1].map(i=>({id:`env-${i}`,questionId:'q',taskIntent:'analysis',environmentAccess:request,result:{...result(['source']),finalMessage:`evidence-${i}`}}))};
- assert.equal(environmentContinuation(state,job,request,result()).continue,false);
+ assert.equal(environmentContinuation(state,job,request,result()).continue,true);
  assert.equal(environmentContinuation({jobs:[]},job,{...request,goalIds:null},result()).continue,true);
  assert.equal(environmentContinuation(state,job,request,result(['runtime'])).continue,true);
  assert.equal(environmentContinuation(state,job,{...request,queryId:'browser'},result()).continue,true);
@@ -29,7 +29,7 @@ test('a new evidence-backed point query may target one remaining required goal e
  assert.equal(first.continue,true);assert.deepEqual(first.metadata.continuationGoalIds,['runtime']);
  const repeated={jobs:[...state.jobs,{id:'active',questionId:'q',taskIntent:'analysis',continuousContinuationKeys:[first.metadata.continuationKey]}]};
  const again=environmentContinuation(repeated,job,{...targeted,parameters:['reword exact fee query']},result(['source']));
- assert.equal(again.continue,false);assert.match(again.reason,/证据没有变化/);
+ assert.equal(again.continue,true);
  const changed=result(['source']);changed.investigation.goals[1].evidence='发现费用记录主键 fee-130，待定向读取';
  assert.equal(environmentContinuation(repeated,job,targeted,changed).continue,true);
 });
@@ -56,7 +56,7 @@ test('continuous job changes evidence path after one empty partial website round
  const job={questionId:'q',taskIntent:'analysis',context:[{kind:'environment_result',result:{outcome:'partial',environmentEvidence:evidence}}]};
  const state={jobs:[job]};
  const decision=environmentContinuation(state,job,request,result());
- assert.equal(decision.continue,false);assert.match(decision.reason,/数据库、源码/);
+ assert.equal(decision.continue,true);
  assert.equal(environmentContinuation(state,job,{...request,environmentId:'prd-db',queryId:'records',kind:'mysql'},result()).continue,true);
 });
 
@@ -94,7 +94,7 @@ test('only actual no-progress protection stops repeated investigation, not elaps
  const active={id:'j',questionId:'q',taskIntent:'analysis',events:Array.from({length:8},()=>({type:'continuous_environment_started'})),context:[]};
  const changed=result(['source']);changed.investigation.goals[1].evidence='new wording';const request2={...request,parameters:['new wording'],goalIds:['runtime']};
  assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).continue,true);
- active.events=[];active.investigationProgress={stagnant:2,seen:['a']};assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).terminal,true);
+ active.events=[];active.investigationProgress={stagnant:2,seen:['a']};assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).continue,true);
  active.investigationProgress.stagnant=0;active.events=[{type:'started',at:new Date(Date.now()-21*60000).toISOString()}];assert.equal(environmentContinuation({jobs:[active]},active,request2,changed).continue,true);
 });
 

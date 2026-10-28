@@ -183,7 +183,7 @@ test('store checkpoints one partial analysis turn on the same lease and rejects 
   const first = await store.continueContinuousAnalysis(job.id, identity, partial);
   assert.equal(first.continued, true);assert.equal(first.job.context.length, 1);assert.equal(first.job.status, 'running');
   const repeated = await store.continueContinuousAnalysis(job.id, identity, partial);
-  assert.equal(repeated.continued, false);assert.equal(repeated.terminalResult.finalMessage, partial.finalMessage);
+  assert.equal(repeated.continued, true);assert.equal(repeated.job.status,'running');
   assert.equal((await store.getJob(job.id)).context.length, 1);
 });
 

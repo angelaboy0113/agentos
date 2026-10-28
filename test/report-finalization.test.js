@@ -8,7 +8,7 @@ import {reportFile,validateReportFiles} from '../src/shared/report-files.js';
 const field=(source,column)=>({op:'field',source,column,missing:'zero'});
 async function fixture(t,kind='customer'){
  const root=await mkdtemp(path.join(os.tmpdir(),'agentos-final-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const directory=path.join(root,'exports','JOB-test'),d=new ReportDatasets({maxRows:100,directory,scope:'same-env'});
+ const directory=path.join(root,'exports','JOB-test'),d=new ReportDatasets({maxRows:100,directory,scope:'same-env',snapshotWindowMs:300000});
  const collect=(sql,rows,columns=['id','amount'],numericColumns=['amount'])=>d.collect({sql,params:[],columns,numericColumns},async()=>[rows]);
  const population=await collect('SELECT id,name FROM '+kind,[{id:'1',name:'甲'},{id:'2',name:'乙'}],['id','name'],[]);
  const amounts=await collect('SELECT id,SUM(amount) FROM '+kind,[{id:'1',amount:'0.1'},{id:'2',amount:'0.2'}]);

@@ -14,6 +14,8 @@ export function recordReportFiles(job,files,generation){
  for(const f of files){if(!job.reportFiles.some(x=>x.id===f.id))job.reportFiles.push({...structuredClone(f),sourceJobId:job.id,questionGeneration:generation??null});job.reportReviews[f.id]??={status:proof(f)?'awaiting_review':'draft',verificationHash:f.verificationHash};}
 }
 export function assessReportDelivery(job,result){
+ if(job.tabularDelivery&&result?.outcome==='ready'&&!job.reportFiles?.some(f=>proof(f)))return {...result,outcome:'partial',reportReviewRequired:true,investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'本请求需要可复用统计表文件，尚未生成核验文件'}],nextStep:'复用已保存数据整理完整表格，compose_report/finalize_report核验后交付；不因用户没写Excel而省略文件'}};
+
  result=normalizeReportFormatReview(job,result);
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.reportReviews||!job.reportFiles?.length||result?.sourceSyncBlocked)return result;
  const reviewed=assessment(job,result);

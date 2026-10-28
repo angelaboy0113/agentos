@@ -194,7 +194,7 @@ test('full group conversation updates receipt, preserves AI output and ends with
   assert.equal(calls[2].id, 'm1'); assert.equal(calls[2].options.profile, 'owner');
   assert.equal(calls[2].text, '<at user_id="ou_human1"></at> 本次回复已完成，请查看上方结果。');
   assert.equal((await app.store.read()).jobs.length, 0);
-  await handleLarkCliEvent(context, { ...event, message_id: 'm2', mentions: [], reply_to: 'om_card', content: '继续' });
+  await handleLarkCliEvent(context, { ...event, message_id: 'm2', reply_to: 'om_card', content: '继续' });
   await app.conversations.idle(); assert.equal(aiCalls, 2);
 });
 

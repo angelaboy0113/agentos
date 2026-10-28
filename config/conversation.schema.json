@@ -14,7 +14,8 @@
     "environmentSetup",
     "sourceEnvironment",
     "knowledgeMatch",
-    "contactLookup"
+    "contactLookup",
+    "requiresTabularDelivery"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -241,6 +242,10 @@
           }
         }
       ]
+    },
+    "requiresTabularDelivery": {
+      "type": "boolean",
+      "description": "多对象、多指标、清单或可复用统计结果默认需要表格文件，即使用户未写Excel/导出；纯解释讨论false。不代替环境与数据权限判断。"
     }
   }
 }

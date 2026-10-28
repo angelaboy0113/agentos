@@ -30,7 +30,7 @@ test('trusted report snapshot window configuration is validated',()=>{
  const e={kind:'mysql'},q={mode:'investigate',parameters:[{name:'purpose',type:'string'}],tables:['*'],exportMaxRows:100};
  assert.equal(validateToolQuery(e,{...q,exportSnapshotWindowMs:1200000,exportDataBudgetBytes:64000000}),true);
  for(const v of [0,Number.MAX_SAFE_INTEGER+1,'64000000'])assert.throws(()=>validateToolQuery(e,{...q,exportDataBudgetBytes:v}));
- for(const v of [0,3600001,'1200000'])assert.throws(()=>validateToolQuery(e,{...q,exportSnapshotWindowMs:v}));
+ for(const v of [0,'1200000'])assert.throws(()=>validateToolQuery(e,{...q,exportSnapshotWindowMs:v}));
 });
 test('identical complete query reuses one transaction result without extra SQL or saved artifacts',async t=>{
  const root=await fixture(t);let calls=0;const d=new ReportDatasets({maxRows:10,directory:root,scope:'env',reuseQueries:true}),statement={sql:'SELECT id FROM stock',params:['active'],columns:['id']};

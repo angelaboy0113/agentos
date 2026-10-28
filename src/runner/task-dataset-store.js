@@ -6,7 +6,7 @@ const valid=id=>/^dataset-[a-f0-9-]{36}$/.test(id);
 export class DatasetCapacityError extends Error {constructor(message){super(message);this.code='DATASET_CAPACITY';}}
 // Scope is fixed by the authorised environment, and root by the leased job. No model paths.
 export class TaskDatasetStore {
- constructor(root,scope,{maxBytes=Number.MAX_SAFE_INTEGER}={}){this.root=path.join(root,'datasets');this.scope=scope;this.maxBytes=maxBytes;}
+ constructor(root,scope,{maxBytes=Number.MAX_SAFE_INTEGER,additionalScopes=[]}={}){this.root=path.join(root,'datasets');this.scope=scope;this.scopes=new Set([scope,...additionalScopes]);this.maxBytes=maxBytes;}
  async list(){
   let names;try{names=await readdir(this.root);}catch(e){if(e.code==='ENOENT')return [];throw e;}
   const out=[];for(const name of names.filter(n=>n.endsWith('.json')&&valid(n.slice(0,-5)))){
@@ -19,7 +19,7 @@ export class TaskDatasetStore {
   const file=path.join(this.root,id+'.json'),root=await realpath(this.root),actual=await realpath(file),info=await lstat(file);
   if(!actual.startsWith(root+path.sep)||!info.isFile()||info.isSymbolicLink())throw new Error('数据集文件校验未通过');
   const d=JSON.parse(await readFile(file,'utf8'));
-  if(d.id!==id||d.scope!==this.scope||!Number.isFinite(Date.parse(d.readAt))||Date.now()-Date.parse(d.readAt)>86400000||Date.parse(d.readAt)>Date.now()+1000||d.data?.complete!==true&&!(allowPartial&&d.data?.complete===false)||!Array.isArray(d.data.columns)||!Array.isArray(d.data.rows)||hash(d.data)!==d.dataHash)throw new Error('数据集范围、完整性、有效期或摘要校验失败');
+  if(d.id!==id||!this.scopes.has(d.scope)||!Number.isFinite(Date.parse(d.readAt))||Date.now()-Date.parse(d.readAt)>86400000||Date.parse(d.readAt)>Date.now()+1000||d.data?.complete!==true&&!(allowPartial&&d.data?.complete===false)||!Array.isArray(d.data.columns)||!Array.isArray(d.data.rows)||hash(d.data)!==d.dataHash)throw new Error('数据集范围、完整性、有效期或摘要校验失败');
   return d;
  }
  async save(id,data,snapshotId,readAt=new Date().toISOString()){

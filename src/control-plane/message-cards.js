@@ -70,7 +70,7 @@ export function conversationCard(turn, now = Date.now()) {
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));
-  elements.push(md(final ? '可以继续回复这条卡片；详情翻页只更新展示，不执行任务。'
+  elements.push(md(final ? '补充或追问请在话题中@对应助手；详情翻页只更新展示，不执行任务。'
     : `已等待 ${elapsed(turn.createdAt, now)} · 本卡持续更新`, true));
   return card(`${stageLabel(turn.role)} · ${state}`, 'AgentOS / Codex', color, elements);
 }

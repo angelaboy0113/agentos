@@ -1,5 +1,11 @@
 # 完整分组报表与文件交付
 
+1.49.5补充：多对象、多指标统计可由语义决策requiresTabularDelivery识别为表格交付，不要求用户先说Excel。文件完整性、原问题完整性、实际投递分别判断；阶段性文件不能关闭尚缺拜访、费用等指标的原任务。
+
+同任务、同项目、同tier的现有数据可通过当前只读授权映射复用各业务库数据；不读取其它任务目录，不借SIT替代PRD。summarize_dataset对完整数据做分组count/count_distinct/sum，明确真实null的error/empty/zero规则；生成稳定行键及可重放配方。percentage与divide使用精确整数运算，明确precision和零分母处理；计算中的constant须为十进制参数、写入公式和业务依据，不能代替未查询的真实金额。每个来源计数/金额仍须独立原始查询基准，实际CSV须逐行复算。
+
+root executionPolicy.mysqlQueryTimeoutMs是操作人设置的单次MySQL等待时间；不设置整任务耗时、轮次或调用截止。慢查询先用indexes及explain_query看真实计划，再选择有依据的筛选/分页；EXPLAIN只接受固定工具参数，不接收SQL。原始授权表内的完整汇总可明确filters=[]，不再要求为了通过而编造条件。未显式设置exportSnapshotWindowMs时记录所有真实取数时点，不强制五分钟内跨库完成；配置了业务窗口仍核验。跨来源不是同一事务，不能声称实时一致快照。
+
 用于“每家经销商分别是多少，并给出完整清单”等查询。实时金额不使用团队知识缓存；知识只能帮助找到已核实的计算方法。此能力不支持任意 SQL 或模型编写脚本查询数据库。
 
 ## 配置与使用

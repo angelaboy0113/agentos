@@ -125,6 +125,7 @@ export class JsonStore {
         ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
         ...(input.continuousInvestigation ? { continuousInvestigation: true } : {}),
         missionId: input.missionId ?? createId('MISSION'),
+        tabularDelivery:input.tabularDelivery===true,
         projectId: input.projectId,
         projectName: input.projectName ?? input.projectId,
         chatId: input.chatId ?? null,
@@ -271,8 +272,7 @@ export class JsonStore {
       if (job.environmentAccess) throw new Error('当前调查已有正在执行的环境步骤');
       const queryKey = fingerprint({ environmentId: plan.environmentId, queryId: plan.queryId, parameters: plan.parameters, ...(plan.toolCorrectionKeys?.length?{toolCorrectionKeys:[...plan.toolCorrectionKeys].sort()}:{}), ...(plan.sourcePreparationRecovery?{sourcePreparationKeys:[...plan.sourcePreparationKeys].sort()}: {}) });
       job.continuousQueryKeys ??= [];
-      if (job.continuousQueryKeys.includes(queryKey)) throw Object.assign(new Error('重复环境查询，需要调整范围或补充新证据'), { code: 'DUPLICATE_QUERY' });
-      job.continuousQueryKeys.push(queryKey);
+      if(!job.continuousQueryKeys.includes(queryKey))job.continuousQueryKeys.push(queryKey);
       if(plan.continuationKey){job.continuousContinuationKeys??=[];job.continuousContinuationKeys.push(plan.continuationKey);}
       recordReportReview(job,sourceResult);
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(sourceResult) }]);

@@ -26,9 +26,9 @@ test('remote worker rejects writes, stored procedures and SQL file access even w
  const dir=await mkdtemp(path.join(os.tmpdir(),'ssh-worker-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const hook=path.join(dir,'driver.cjs');await writeFile(hook,`const Module=require('module'),load=Module._load;Module._load=function(name,...args){return name==='mysql2/promise'?{createConnection:async()=>({query:async()=>[[{safe:true}]],execute:async()=>[[{amount:'0.10'}]],rollback:async()=>{},destroy:()=>{}})}:load.call(this,name,...args)};`);
  const child=spawn(process.execPath,['--require',hook,path.resolve('src/runner/ssh-mysql-worker.cjs')],{stdio:['pipe','pipe','pipe']});let text='';child.stdout.on('data',b=>text+=b);child.stderr.resume();
- const sqls=['START TRANSACTION READ ONLY','SELECT amount FROM orders WHERE id=?','UPDATE orders SET amount=1','CALL change_order()','SELECT 1 INTO OUTFILE \'/tmp/x\'','START TRANSACTION','SELECT SLEEP(1)'];
+ const sqls=['START TRANSACTION READ ONLY','SELECT amount FROM orders WHERE id=?','SHOW INDEX FROM orders','EXPLAIN SELECT amount FROM orders WHERE id=?','EXPLAIN DELETE FROM orders','EXPLAIN ANALYZE SELECT amount FROM orders','UPDATE orders SET amount=1','CALL change_order()','SELECT 1 INTO OUTFILE \'/tmp/x\'','START TRANSACTION','SELECT SLEEP(1)'];
  child.stdin.end([JSON.stringify({id:0,connection:{}}),...sqls.map((sql,i)=>JSON.stringify({id:i+1,method:'query',sql,params:[],timeout:1000}))].join('\n')+'\n');
- await new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',resolve);});const out=text.trim().split('\n').map(x=>JSON.parse(x));assert.equal(out.length,8);assert.ok(out.slice(0,3).every(x=>x.ok));assert.ok(out.slice(3).every(x=>!x.ok&&x.code==='REMOTE_READONLY_SQL'));
+ await new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',resolve);});const out=text.trim().split('\n').map(x=>JSON.parse(x));assert.equal(out.length,12);assert.ok(out.slice(0,5).every(x=>x.ok));assert.ok(out.slice(5).every(x=>!x.ok&&x.code==='REMOTE_READONLY_SQL'));
 });
 
 test('SSH authentication/host failure rejects controlled tools and never invokes the local MySQL driver',async t=>{
