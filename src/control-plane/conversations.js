@@ -1,3 +1,4 @@
+import {departmentCommand} from './contact-commands.js';
 import {cloudFileLinks} from '../shared/cloud-file-links.js';
 import {stateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
@@ -33,6 +34,7 @@ export function sourceEvidence(job, sourceDirectory) {
 
 // Persistence is shared with jobs. Language decisions come exclusively from AI;
 // the switches below enforce the typed action protocol, not keyword matching.
+// The dedicated directory channel additionally accepts the explicit /部门人数 command.
 export class ConversationService {
   constructor(context, options = {}) {
     this.context = context;
@@ -220,11 +222,12 @@ export class ConversationService {
             Object.assign(turn,fields);await this.update(turn.id,fields);
           }
           const input = await this.buildInput(turn);
-          let decision = validateDecision(await this.decide(input, this.abort.signal, { sessionKey: key,
+          const command=turn.directoryChannel?departmentCommand(turn.content):null;
+          let decision = validateDecision(command??await this.decide(input, this.abort.signal, { sessionKey: key,
             onEvent: (event, info) => {
               if (event === 'error') this.update(turn.id, { connectionRetryAt: new Date().toISOString(), connectionWillRetry: info.willRetry, connectionRetryReason:info.reason??null, connectionRetryStage:info.stage??null }).catch(() => {});
             } }));
-          if (this.context.knowledge) decision = await this.context.knowledge.reuse(turn, input.project?.id, decision, input);
+          if (this.context.knowledge&&!command) decision = await this.context.knowledge.reuse(turn, input.project?.id, decision, input);
           await this.update(turn.id, { status: 'decided', decision, connectionWillRetry:false, timing: decision.timing ?? { aiMs: Date.now() - aiStarted },
             attachmentPool: input.attachments, aiCompletedAt: new Date().toISOString() });
         } catch (error) {

@@ -30,3 +30,5 @@ test('model routing recovery and measured department counts have accurate privat
  const card=conversationCard({status:'thinking',role:'owner_intake',connectionWillRetry:true,connectionRetryReason:'workspace_routing',createdAt:new Date().toISOString()});assert.match(JSON.stringify(card),/工作区路由暂时不可用/);
  assert.match(contactProgressText({contactProgress:{stage:'department_count',updatedAt:new Date().toISOString(),completedDepartments:2,totalDepartments:4,memberCount:7,pagesRead:3}}),/2 \/ 4.*7 人/);
 });
+
+test('only the exact explicit department command bypasses language interpretation',async()=>{const {departmentCommand}=await import('../src/control-plane/contact-commands.js');assert.equal(departmentCommand('帮我查部门人数'),null);assert.equal(departmentCommand('/部署 prod'),null);assert.equal(departmentCommand('/部门人数').action,'reply');assert.equal(validateDecision(departmentCommand('/部门人数 公司--部门')).contactLookup.query,'公司--部门');});
