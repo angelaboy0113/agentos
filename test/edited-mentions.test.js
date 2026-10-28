@@ -31,3 +31,6 @@ test('a checkpoint belonging to another bot is never reused; overlapping scans s
 test('thread rows preserve root and partial thread expansion fails closed',async()=>{
  const {editedMessageRows}=await import('../src/control-plane/edited-mentions.js');const rows=editedMessageRows({messages:[{message_id:'root',thread_replies:[{message_id:'reply'}]}]});assert.equal(rows[1].root_id,'root');assert.throws(()=>editedMessageRows({messages:[{message_id:'root',thread_replies_error:'denied'}]}),/incomplete/);
 });
+test('shutdown during initial read does not persist an empty baseline that would replay old edited messages',async()=>{
+ let saved,w;w=new EditedMentionWatcher({config:{botOpenId:'ou_bot'}},['configured'],{},{load:async()=>null,list:async()=>{w.stop();return [{...message,updated:true,mentions:[{id:'ou_bot'}]}];},save:async s=>{saved=s;},deliver:async()=>{throw Error('must not dispatch');}});await w.scan();assert.deepEqual(saved.checkpoint.chats,[]);
+});
