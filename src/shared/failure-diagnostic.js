@@ -16,6 +16,7 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+ ['HARNESS_REVIEW_REQUIRED', /Harness版本在任务链中发生变化/, '执行规范复核', '任务保存的执行规范与当前版本不同，已暂停以等待维护复核。', '维护者核对规范差异及原授权，保留已有证据后在原任务恢复；这不是业务数据或网络故障。'],
  ['LOCAL_CONTROL_TIMEOUT', /LOCAL_CONTROL_TIMEOUT/, '本机状态回执', '本机状态接口未及时返回，原请求可能已经受理；尚未确认本次状态是否保存。', '保留任务与成果，核对原请求回执后接续；不重复业务查询或写入。'],
  ['LOCAL_CONTROL_UNCERTAIN', /LOCAL_CONTROL_UNCERTAIN/, '本机状态回执', '本机状态接口无法核实原请求的持久回执，未盲目重复提交。', '维护者核对控制面与回执记录，在原问题接续。'],
  ['CODEX_STREAM_INTERRUPTED', /stream (?:disconnected|closed|ended) before completion|connection closed before message completed/i, '模型分析与结果返回', '模型回复流在完整结果返回前断开；现有记录不能区分本机网络、代理或上游服务原因。', '检查模型接口及网络，保留原会话和已有证据，恢复后从原问题接续。'],

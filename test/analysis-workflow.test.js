@@ -69,12 +69,12 @@ test('same developer investigation resumes its Codex thread instead of starting 
 });
 
 test('resumed analysis sends only new evidence and does not repeat the full harness or attachment',async()=>{
- const job={...input,originalQuestion:'很长的原始问题和请求体',context:[
+ const job={...input,originalQuestion:'很长的原始问题和请求体',instruction:'恢复后继续原请求并核验完整表格',context:[
   {stage:'developer',kind:'analysis_turn',result:{threadId:'thread-current',workspace:'/snapshot/current',finalMessage:'旧分析全文'}},
   {stage:'developer',kind:'environment_result',result:{outcome:'partial',summary:'新数据库证据',evidenceRecords:[{total:'504',distinct:'252'}],environmentEvidence:{resultHash:'a'.repeat(64)}}},
  ]};
  const prompt=await buildPrompt(job,{}, {instruction:'完整角色规则不应重复',metadata:{version:'test'}},{workspace:'/snapshot/current'},[], '/snapshot/current');
- assert.match(prompt,/新数据库证据/);assert.match(prompt,/504/);assert.doesNotMatch(prompt,/完整角色规则不应重复|很长的原始问题和请求体|旧分析全文/);
+ assert.match(prompt,/新数据库证据/);assert.match(prompt,/504/);assert.match(prompt,/很长的原始问题和请求体/);assert.match(prompt,/恢复后继续原请求并核验完整表格/);assert.doesNotMatch(prompt,/完整角色规则不应重复|旧分析全文/);
  const args=buildCodexArgs('/snapshot/current',[{type:'image',path:'/tmp/repeated.png'}],{readOnly:true,resumeThreadId:'thread-current'});
  assert.equal(args.includes('/tmp/repeated.png'),false);
 });

@@ -6,6 +6,11 @@ import {ReportDatasets} from '../src/runner/report-datasets.js';
 import {queryTimeout,fingerprint} from '../src/shared/environment-access.js';
 import {assessReportDelivery} from '../src/shared/report-acceptance.js';
 import {createEnvironmentTools} from '../src/runner/environment-tools.js';
+import {failureDetails} from '../src/shared/failure-diagnostic.js';
+test('a changed task harness retains an actionable review diagnostic across process boundaries',()=>{
+ const d=failureDetails(new Error('Harness版本在任务链中发生变化；请先由管理员复核，不自动沿用旧批准。'));
+ assert.equal(d.code,'HARNESS_REVIEW_REQUIRED');assert.equal(failureDetails({code:d.code,message:'sanitized'}).code,d.code);
+});
 test('saved population value sets retain more than a thousand keys without a database read',async t=>{
  const directory=await mkdtemp(path.join(os.tmpdir(),'cohort-'));t.after(()=>rm(directory,{recursive:true,force:true}));const e={kind:'mysql',projectId:'demo',tier:'prd'},ref='dataset-22222222-2222-2222-2222-222222222222';
  await new TaskDatasetStore(directory,fingerprint(e)).save(ref,{rows:Array.from({length:3198},(_,id)=>({id:String(id)})),columns:['id'],complete:true,numericColumns:[],readAt:new Date().toISOString()},'cohort');
