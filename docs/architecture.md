@@ -141,3 +141,14 @@ Runner关键交接使用durable-control-v1：同号请求合并，状态变更�
 后台高频读取先通过内部选择器提取记录再复制，冷读按实例合并；本机启动器的实际工作进程登记及退出恢复不绕过租约或自动重跑。见[空值与本机异常退出恢复](local-executor-recovery.md)。
 
 固定提交历史由Runner类型化操作后恢复同一只读会话；期间变换、实际文件审阅、发布记录取证及缓存维护边界见[多系统通用能力](multi-system-capability-audit.md)。
+
+
+## 公开话题追问的环境与操作权限（1.52.2）
+
+同一群、机器人profile、项目及明确回复/话题关联中的公开问题，可由另一成员引用其历史背景。attachQuestion仍创建属于当前成员的新问题和新卡；只有原发起人或可信管理员才能复用原活动任务。私有结果、通讯录专用通道、其它群/项目/profile不因同一个root_id开放。
+
+questionSourceContext沿经边界核验的问题父链取得已登记的源码环境ID；buildInput提供环境与历史源码定位信息，create_task在本轮没有另选环境时用它补齐sourceEnvironment。当前用户明确选择其它已登记环境时新建对应环境调查，不更改旧任务的固定提交。新无关话题仍需独立选择，不能取群里最新任务的环境。环境上下文不含原租约、凭据或查询授权，planQuery和原任务控制权限照常核验。
+
+continuous_analysis的固定快照在sourceRoot匹配时可作为历史定位线索保留答案；requiresRecheckForCurrentSource仍为true，不能把它作为当前源码/部署事实。源码字段和结构说明可直接以文字或Markdown表格交付；用户未要求文件或完整线上普查时不自动增加CSV、validator等完成门。明确要求文件及业务统计报表的完整性和文件核验保持。规则在config/conversation.md、conversation.schema.json和roles/analysis.md同步，提示词仍不是环境权限。
+
+部署无需新增通用配置或依赖，更新主控/Runner后按空闲维护流程重启。已有错误关联历史不会自动重写，需要维护者针对原问题核对修复；不批量重放群消息。迁移代码包包含上述文件，实际生产元数据、群交付、平台/跨机验收另由部署实例保存。

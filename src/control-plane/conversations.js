@@ -8,7 +8,7 @@ import { connectionCandidates } from '../shared/connection-endpoints.js';
 import { pollWebsiteLogins } from './website-query.js';
 import { enrollmentTarget, requestEnrollment, approveEnrollment, pollEnrollments } from './environment-enrollment.js';
 import { loadEnvironments, catalog, routingCatalog, planQuery, verifyPlan, isEnvironmentOwner } from '../shared/environment-access.js';
-import { attachQuestion, publishQuestion, questionJob, activeQuestionJob } from './questions.js';
+import { attachQuestion, publishQuestion, questionJob, activeQuestionJob, questionSourceContext } from './questions.js';
 import { createId, workflowForStage, nextStage, stageLabel } from '../shared/protocol.js';
 import { CodexConversationEngine, validateDecision, conversationFailure } from './codex-conversation.js';
 import { saveProjects } from './config.js';
@@ -26,7 +26,7 @@ export function sourceEvidence(job, sourceDirectory) {
     : path.resolve(value);
   const sameDirectory = Boolean(workspace && sourceDirectory && normalize(job.result?.sourceSync?.sourceRoot ?? workspace) === normalize(sourceDirectory));
   const compatible = sameDirectory && job.taskIntent === 'analysis'
-    && (job.workflow === 'analysis_review' || ['single_qa', 'single_owner_audit'].includes(job.workflow));
+    && (job.result?.sourceSync?.policy === 'isolated-environment-source-v1' || job.workflow === 'analysis_review' || ['single_qa', 'single_owner_audit'].includes(job.workflow));
   return { workspace, sourceEnvironment: job.result?.sourceSync?.environment ?? job.sourceEnvironment ?? null, repositories: job.result?.sourceSync?.repositories ?? [], recordedAt: job.updatedAt ?? job.createdAt ?? null, workflow: job.workflow,
     applicability: compatible ? 'historical_snapshot_not_current_check' : 'not_evidence_for_current_source_directory',
     requiresRecheckForCurrentSource: true };
@@ -295,6 +295,7 @@ export class ConversationService {
     const state = await store.read();
     const projectId = resolveProjectId(projects, turn.chatId, turn.profile);
     const scoped = Boolean(turn.questionId);
+    const sourceContext=questionSourceContext(state,{...turn,projectId},projects.projects[projectId]);
     const questionIds = new Set();
     let q = state.questions?.[turn.questionId];
     while (q && !questionIds.has(q.id) && q.chatId === turn.chatId && q.profile === turn.profile && q.projectId === projectId && (q.visibility!=='requester'||turn.visibility==='requester'&&q.senderId===turn.senderId)) {
@@ -321,7 +322,7 @@ export class ConversationService {
       && (explicitJob(job) || (job.originProfile ?? job.agentProfile ?? null) === (turn.profile ?? null))
       && (scoped ? questionIds.has(job.questionId) : relatedMessages.has(job.originMessageId) || relatedMessages.has(job.sourceMessageId) || explicitJob(job))
       && !suppressed.has(`job:${job.id}`) && !suppressed.has(`conversation:${job.sourceMessageId}`) && !suppressedMessages.has(job.originMessageId)).slice(-20).map((job) => ({
-      id: job.id, projectId: job.projectId, stage: job.stage, status: job.status,
+      id: job.id, projectId: job.projectId, stage: job.stage, status: job.status, sourceEnvironment:job.sourceEnvironment??job.result?.sourceSync?.environment??null,
       instruction: job.instruction.slice(0, 4000),
       evidence: sourceEvidence(job, projects.projects[projectId]?.repoPath),
       finalMessage: job.environmentAccess ? '环境查询的明细不注入共享记忆；需要当前数据请重新发起受控查询。' : sourceEvidence(job, projects.projects[projectId]?.repoPath).applicability === 'not_evidence_for_current_source_directory'
@@ -342,6 +343,7 @@ export class ConversationService {
       memory, nativeSession: scoped, contextIsolation: { policy: 'question-v2', questionIds: [...questionIds], rule: '只回答当前问题；关联问题历史不是其他任务的授权。不得引入无关话题。' }, requestId: turn.id, questionId: turn.questionId ?? null,
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
       environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
+      questionSourceContext: sourceContext,
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       questionOriginalRequest: turn.questionId ? questionRequest(state, turn.questionId) : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
@@ -352,7 +354,7 @@ export class ConversationService {
       project: projectId ? { id: projectId, name: projects.projects[projectId]?.displayName ?? projectId,
         sourceDirectory: projects.projects[projectId]?.repoPath ?? null,
         sourceEnvironments: sourceEnvironmentCatalog(projects.projects[projectId]),
-        sourceEnvironmentRule: 'sourceEnvironments.id 是源码环境名，runtimeTier 是运行分级；例如 sit 对应 uat（测试），二者不能直接当成同一个ID。源码任务必须选择 sourceEnvironments 中匹配本问题的 id，不能从其它问题借用环境。没有明确环境且未配置默认值时先询问用户；不能将 PRD 当 UAT，也不能用历史快照证明当前源码。',
+        sourceEnvironmentRule: 'sourceEnvironments.id 是源码环境名，runtimeTier 是运行分级；例如 sit 对应 uat（测试），二者不能直接当成同一个ID。源码任务必须选择 sourceEnvironments 中匹配本问题的 id，不能从其它问题借用环境。本问题链questionSourceContext已有环境时直接沿用，不重复询问；用户明确切换时选择新环境的新调查。没有当前或关联问题的明确环境且未配置默认值时才询问用户；不能将 PRD 当 UAT，也不能用历史快照证明当前源码。',
         analysisWorkspace: 'Runner 先同步 analysisRepositories 各仓 origin 分支，再只读分析；缺配置或同步失败则阻塞',
         implementationWorkspace: 'Runner 创建的隔离 Git worktree；不自动包含独立子仓' } : null,
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
@@ -460,7 +462,7 @@ export class ConversationService {
         // tier through this project's explicit/standard mapping, never as a branch ID.
         try { sourceEnvironment = environmentAccess
           ? sourceEnvironmentForTier(projects.projects[projectId],environmentAccess.tier,decision.sourceEnvironment)
-          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment); }
+          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment || questionSourceContext(await store.read(),{...turn,projectId},projects.projects[projectId])?.id);  }
         catch (error) { return { notice: error.message }; }
       }
       // Every newly created analysis uses the same persistent developer job,

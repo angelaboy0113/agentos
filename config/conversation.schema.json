@@ -134,7 +134,7 @@
     },
     "sourceEnvironment": {
       "type": "string",
-      "description": "源码分析选择 project.sourceEnvironments 中的 id；无环境或非源码任务用空字符串。环境不明且无默认值先询问，禁止猜测分支或路径。"
+      "description": "源码分析选择 project.sourceEnvironments 中的 id；本问题链已有questionSourceContext时沿用，无需重复问环境。用户明确切换才改选；没有当前或关联环境且无默认值时才询问。禁止猜测分支或路径。"
     },
     "knowledgeMatch": {
       "anyOf": [
@@ -245,7 +245,7 @@
     },
     "requiresTabularDelivery": {
       "type": "boolean",
-      "description": "多对象、多指标、清单或可复用统计结果默认需要表格文件，即使用户未写Excel/导出；纯解释讨论false。不代替环境与数据权限判断。"
+      "description": "多对象、多指标的业务数据清单或可复用统计结果默认需要表格文件，即使未写Excel/导出。源码字段/接口/结构说明可直接用文字或Markdown表格，未要求文件时false；明确要求CSV/XLSX/文件时true。不代替数据权限或完整业务报表核验。"
     }
   }
 }

@@ -347,3 +347,9 @@ test('contact intent generates one image and retries delivery without repeating 
  await send(message('contact-message','工号00110036是谁，发张资料图'));let turn=(await app.store.read()).conversations[0];assert.equal(turn.status,'ready');assert.equal(lookups,1);assert.equal(inputs.length,1);
  await app.store.transact(s=>{s.conversations[0].retryAt=new Date(0).toISOString();});await app.conversations.idle();turn=(await app.store.read()).conversations[0];assert.equal(turn.status,'sent');assert.equal(turn.contactImageMessageId,'image-result');assert.equal(lookups,1);assert.equal(inputs.length,1);assert.equal(out[0].id,'contact-message');assert.equal(out[0].options.profile,'owner');assert.equal(out[0].options.idempotencyKey,out[1].options.idempotencyKey);assert.equal((await app.store.read()).jobs.length,0);
 });
+
+test('continuous source snapshot answers remain historical context only for the same project source',()=>{
+ const job={taskIntent:'analysis',workflow:'continuous_analysis',result:{workspace:'/snapshots/fixed/workspace',sourceSync:{policy:'isolated-environment-source-v1',sourceRoot:'/project-one',environment:'prd',repositories:[]}}};
+ const a=sourceEvidence(job,'/project-one');assert.equal(a.applicability,'historical_snapshot_not_current_check');assert.equal(a.requiresRecheckForCurrentSource,true);
+ assert.equal(sourceEvidence(job,'/project-two').applicability,'not_evidence_for_current_source_directory');job.taskIntent='implementation';assert.equal(sourceEvidence(job,'/project-one').applicability,'not_evidence_for_current_source_directory');
+});

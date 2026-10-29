@@ -16,7 +16,7 @@ export const activeQuestionJob = (job) => ['queued', 'running', 'cancelling', 'a
 export function attachQuestion(state, turn, event, projects) {
   state.questions ??= {};
   const candidates = Object.values(state.questions).reverse().filter(item => item.chatId === turn.chatId && item.profile === turn.profile
-    && item.projectId === turn.projectId && (item.directoryChannel?.ownerId??null)===(turn.directoryChannel?.ownerId??null) && (item.visibility??'public')===(turn.visibility??'public') && (item.visibility!=='requester'||item.senderId===turn.senderId) && (isTaskCreator(projects, item, turn) || isAdministrator(projects, turn)));
+    && item.projectId === turn.projectId && (item.directoryChannel?.ownerId??null)===(turn.directoryChannel?.ownerId??null) && (item.visibility??'public')===(turn.visibility??'public') && (item.visibility!=='requester'||item.senderId===turn.senderId));
   const direct = (item, id) => Boolean(id && (item.messageId === id || state.cardMessages?.[`question:${item.id}`]?.messageId === id
     || state.conversations.some(other => other.questionId === item.id && other.messageId === id)));
   const explicit = candidates.find(item => direct(item, event.reply_to));
@@ -27,9 +27,19 @@ export function attachQuestion(state, turn, event, projects) {
   const broadTopicRoot = Boolean(explicit && event.root_id && event.reply_to === event.root_id
     && (explicit.messageId === event.root_id || explicit.threadRootId === event.root_id));
   const related = broadTopicRoot ? (threadLatest ?? explicit) : (explicit ?? threadLatest);
-  const pendingSetup = related && Object.values(state.environmentEnrollments ?? {}).some(e => e.questionId === related.id && isPendingEnrollment(e));
-  const relatedTurn = related && state.conversations.find(t => t.id === related.latestTurnId);
-  const q = related && (activeQuestionJob(questionJob(state, related.id)) || pendingSetup || (relatedTurn && (pending(relatedTurn)||relatedTurn.setupPending||relatedTurn.outcome?.contactCandidates?.length))) ? related : null;
+  // Select execution continuation from the original authorized set. A newer
+  // public follow-up must not displace its creator's still-active task.
+  const owned=candidates.filter(item=>isTaskCreator(projects,item,turn)||isAdministrator(projects,turn));
+  const ownedExplicit=owned.find(item=>direct(item,event.reply_to));
+  const ownedLatest=owned.find(item=>event.root_id&&(item.threadRootId===event.root_id||direct(item,event.root_id)));
+  const ownedBroad=Boolean(ownedExplicit&&event.root_id&&event.reply_to===event.root_id
+    &&(ownedExplicit.messageId===event.root_id||ownedExplicit.threadRootId===event.root_id));
+  const ownedRelated=ownedBroad?(ownedLatest??ownedExplicit):(ownedExplicit??ownedLatest);
+  const continuation=(!explicit||broadTopicRoot)?ownedRelated:related;
+  const mayContinue=continuation&&(isTaskCreator(projects,continuation,turn)||isAdministrator(projects,turn));
+  const pendingSetup=mayContinue&&Object.values(state.environmentEnrollments??{}).some(e=>e.questionId===continuation.id&&isPendingEnrollment(e));
+  const relatedTurn=mayContinue&&state.conversations.find(t=>t.id===continuation.latestTurnId);
+  const q=mayContinue&&(activeQuestionJob(questionJob(state,continuation.id))||pendingSetup||(relatedTurn&&(pending(relatedTurn)||relatedTurn.setupPending||relatedTurn.outcome?.contactCandidates?.length)))?continuation:null;
   const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
     ...(turn.directoryChannel?{directoryChannel:structuredClone(turn.directoryChannel)}:{}), ...(turn.visibility?{visibility:turn.visibility}:{}), threadRootId: event.root_id ?? turn.messageId, projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
     ...(turn.replyInThread ? { replyInThread: true } : {}),
@@ -39,6 +49,26 @@ export function attachQuestion(state, turn, event, projects) {
   question.latestTurnId = turn.id;
   state.questions[question.id] = question;
   turn.questionId = question.id;
+}
+// Structured environment context follows only this explicit, visibility-checked
+// question chain. It carries no environment grant, lease, credentials or task control.
+export function questionSourceContext(state, turn, project) {
+ const allowed = new Set(Object.keys(project?.analysisEnvironments ?? {})), seen = new Set();
+ let q = state.questions?.[turn.questionId];
+ while(q && !seen.has(q.id) && q.chatId===turn.chatId && q.profile===turn.profile && q.projectId===turn.projectId
+   && (q.visibility??'public')===(turn.visibility??'public') && (q.visibility!=='requester'||q.senderId===turn.senderId)) {
+  seen.add(q.id);
+  const jobs=(state.jobs??[]).filter(j=>j.questionId===q.id && j.chatId===turn.chatId && j.projectId===turn.projectId
+   && (j.originProfile??j.agentProfile??q.profile)===turn.profile);
+  for(const job of jobs.reverse()) {
+   const id=job.sourceEnvironment??job.result?.sourceSync?.environment;
+   if(allowed.has(id))return {id,questionId:q.id,jobId:job.id,policy:'topic_environment_context_not_authorization'};
+  }
+  const root=state.conversations?.find(t=>t.id===q.rootTurnId),id=root?.decision?.sourceEnvironment;
+  if(allowed.has(id))return {id,questionId:q.id,jobId:null,policy:'topic_environment_context_not_authorization'};
+  q=state.questions?.[q.parentQuestionId];
+ }
+ return null;
 }
 export function questionJob(state, questionId) {
   // Stages are appended in transition order. A completed predecessor never replaces its successor.

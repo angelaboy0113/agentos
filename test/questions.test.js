@@ -321,3 +321,49 @@ test('setup blocked before enrollment shows actionable wait and mentions asker a
  const v=questionView(await app.store.read(),qid,app.projects);assert.equal(v.job,null);assert.equal(v.terminal,false);assert.match(JSON.stringify(v.card),/PRD source missing/);assert.doesNotMatch(JSON.stringify(v.card),/当前阶段已完成/);
  const reminders=calls.filter(c=>c.type==='mention');assert.equal(reminders.length,1);assert.match(reminders[0].text,/ou_asker/);assert.match(reminders[0].text,/ou_admin/);assert.match(reminders[0].text,/尚未完成/);
 });
+
+test('another member follows public topic context and PRD but cannot take over its waiting task',async t=>{
+ const {app,send,inputs}=await setup(t,input=>input.message==='ask-fields'?decision({action:'create_task',intent:'analysis',instruction:'explain fields',sourceEnvironment:''}):decision());
+ app.projects.projects.demo={displayName:'Demo',repoPath:'/project',analysisSourceMode:'isolated',analysisEnvironments:{prd:{repositories:[]},sit:{repositories:[]}}};
+ await send('root','ou_first',{content:'PRD original collection'});let s=await app.store.read();const root=s.conversations[0].questionId;
+ await app.store.transact(s=>s.jobs.push({id:'historical-prd',questionId:root,chatId:'group',projectId:'demo',originProfile:'owner',senderId:'ou_first',instruction:'PRD original collection',taskIntent:'analysis',workflow:'continuous_analysis',sourceEnvironment:'prd',stage:'developer',status:'awaiting_clarification',updatedAt:new Date().toISOString(),events:[],context:[],result:{workspace:'/snapshots/a/workspace',sourceSync:{policy:'isolated-environment-source-v1',sourceRoot:'/project',environment:'prd',repositories:[]},finalMessage:'The collection has full nested configuration fields'}}));
+ const original=structuredClone((await app.store.read()).jobs[0]);
+ await send('follow','ou_second',{content:'ask-fields',reply_to:'root',root_id:'root',thread_id:'topic'});s=await app.store.read();const child=s.conversations.at(-1).questionId;
+ assert.notEqual(child,root);assert.equal(s.questions[child].parentQuestionId,root);assert.equal(inputs.at(-1).questionSourceContext.id,'prd');assert.match(inputs.at(-1).questionOriginalRequest,/PRD original collection/);
+ assert.match(inputs.at(-1).jobs[0].finalMessage,/full nested/);assert.equal(inputs.at(-1).jobs[0].sourceEnvironment,'prd');
+ assert.equal(s.jobs.at(-1).sourceEnvironment,'prd');assert.equal(s.jobs.at(-1).senderId,'ou_second');assert.deepEqual(s.jobs[0],original);
+ assert.equal(inputs.at(-1).questionSourceContext.environmentAccess,undefined);
+});
+test('explicit SIT selection overrides inherited PRD in a new task without mutating the original',async t=>{
+ const {app,send,inputs}=await setup(t,input=>decision(input.message==='switch'?{action:'create_task',intent:'analysis',instruction:'read SIT structure',sourceEnvironment:'sit'}:{}));
+ app.projects.projects.demo={displayName:'Demo',repoPath:'/project',analysisSourceMode:'isolated',analysisEnvironments:{prd:{repositories:[]},sit:{repositories:[]}}};
+ await send('root','ou_first',{content:'PRD'});const root=(await app.store.read()).conversations[0].questionId;
+ await app.store.transact(s=>s.conversations[0].decision.sourceEnvironment='prd');
+ await send('switch','ou_second',{content:'switch',reply_to:'root',root_id:'root'});const s=await app.store.read();assert.equal(inputs.at(-1).questionSourceContext.id,'prd');assert.equal(s.jobs[0].sourceEnvironment,'sit');assert.equal(s.questions[s.jobs[0].questionId].parentQuestionId,root);
+});
+test('topic context never crosses a private requester, system profile, project or group',async()=>{
+ const {attachQuestion,questionSourceContext}=await import('../src/control-plane/questions.js');
+ const prior={id:'old',chatId:'group',profile:'a',projectId:'one',senderId:'first',messageId:'root',threadRootId:'root',latestTurnId:'old-turn'};
+ const project={analysisEnvironments:{prd:{repositories:[]}}};
+ for(const change of [{visibility:'requester'},{profile:'b'},{projectId:'two'},{chatId:'other'}]){
+  const s={questions:{old:{...prior,...change}},conversations:[],jobs:[{id:'j',questionId:'old',chatId:'group',projectId:'one',originProfile:'a',sourceEnvironment:'prd'}]};
+  const turn={id:'new',chatId:'group',profile:'a',projectId:'one',senderId:'second',messageId:'new-message',content:'fields',createdAt:new Date().toISOString()};attachQuestion(s,turn,{root_id:'root',reply_to:'root'},{});
+  assert.equal(s.questions[turn.questionId].parentQuestionId,undefined);assert.equal(questionSourceContext(s,turn,project),null);
+ }
+});
+test('public context linkage cannot authorize clarification or cancellation of another member task',async t=>{
+ const {app,send}=await setup(t,input=>input.message==='try-control'?decision({action:'clarify',jobId:'other-job',instruction:'continue'}):decision());
+ await send('root','ou_first');let s=await app.store.read();const root=s.conversations[0].questionId;
+ await app.store.transact(s=>s.jobs.push({id:'other-job',questionId:root,chatId:'group',projectId:'demo',originProfile:'owner',senderId:'ou_first',instruction:'read source',taskIntent:'analysis',stage:'developer',status:'awaiting_clarification',events:[],context:[],result:{}}));
+ await send('new','ou_second',{content:'try-control',reply_to:'root',root_id:'root'});s=await app.store.read();assert.equal(s.jobs[0].status,'awaiting_clarification');assert.equal(s.jobs[0].events.length,0);assert.match(s.conversations.at(-1).response,/不能在一个问题里推进另一个问题/);
+});
+
+test('a public follow-up by another member does not displace the original creator active continuation',async()=>{
+ const {attachQuestion}=await import('../src/control-plane/questions.js');
+ const root={id:'root-q',chatId:'group',profile:'bot',projectId:'p',senderId:'owner',messageId:'root',threadRootId:'root',latestTurnId:'t1'};
+ const child={...root,id:'child-q',senderId:'second',messageId:'child',latestTurnId:'t2',parentQuestionId:'root-q'};
+ const s={questions:{'root-q':root,'child-q':child},conversations:[{id:'t1',status:'sent'},{id:'t2',status:'sent'}],jobs:[{id:'j',questionId:'root-q',status:'awaiting_clarification'}]};
+ const turn={id:'new',chatId:'group',profile:'bot',projectId:'p',senderId:'owner',content:'resume',messageId:'new'};
+ attachQuestion(s,turn,{reply_to:'root',root_id:'root'},{});assert.equal(turn.questionId,'root-q');assert.equal(s.questions['child-q'].latestTurnId,'t2');
+ const explicit={...turn,id:'another',messageId:'later'};attachQuestion(s,explicit,{reply_to:'child',root_id:'root'},{});assert.notEqual(explicit.questionId,'root-q');assert.equal(s.questions[explicit.questionId].parentQuestionId,'child-q');
+});
