@@ -219,7 +219,7 @@ function validateDecisionValue(value) {
   if(value.requiresFileInspection){if(!value.attachmentIds.length||!value.instruction.trim()||!['reply','create_task'].includes(value.action)||!['none','analysis'].includes(value.intent)||value.environmentSetup)throw new Error('File inspection requires a scoped readonly task and attached files');value={...value,action:'create_task',intent:'analysis',jobId:''};}
   if(value.action==='lookup_contact'){
     const q=value.contactLookup;
-    if(!q||!['name','employee_no','department'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.type!=='department'&&q.query.length>100||typeof q.candidateId!=='string'||q.candidateId.length>200
+    if(!q||!['name','employee_no','department','department_of_name','department_of_employee_no'].includes(q.type)||typeof q.query!=='string'||!q.query.trim()||q.type!=='department'&&q.query.length>100||typeof q.candidateId!=='string'||q.candidateId.length>200
       ||value.intent!=='none'||value.jobId||value.environmentQuery||value.environmentSetup||value.knowledgeMatch||value.requiresSourceInspection||value.attachmentIds.length)throw new Error('Invalid contact lookup');
   }else if(value.contactLookup!=null)throw new Error('Unexpected contact lookup');
   if (value.knowledgeMatch != null) {

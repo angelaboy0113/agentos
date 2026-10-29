@@ -231,7 +231,9 @@
               "enum": [
                 "name",
                 "employee_no",
-                "department"
+                "department",
+                "department_of_name",
+                "department_of_employee_no"
               ]
             },
             "query": {

@@ -6,7 +6,7 @@ async function scopeIdentity(directory,turn){const value={user_ids:new Set(),dep
 const normalized=v=>String(v??'').normalize('NFKC').trim().toLowerCase();
 const parts=v=>normalized(v).split(/\s*(?:[-—–]+|[→>/])\s*/).filter(Boolean);
 const idOf=d=>typeof d?.open_department_id==='string'?d.open_department_id:null;
-export async function lookupDepartment(directory,turn,q){
+export async function lookupDepartment(directory,turn,q,source={}){
  const policy=await directory.policy(turn);
  if(!q||q.type!=='department'||typeof q.query!=='string'||!q.query.trim()||typeof q.candidateId!=='string')throw new Error('部门查询参数无效。');
  if(q.candidateId){const pending=await directory.pending(turn);if(!pending.some(p=>p.query?.type==='department'&&p.query.query===q.query&&p.candidates.some(c=>c.id===q.candidateId)))throw new Error('请选择本问题已返回的候选部门，不能使用其它问题的候选。');}
@@ -20,30 +20,42 @@ export async function lookupDepartment(directory,turn,q){
   await directory.pages('/open-apis/contact/v3/departments/'+encodeURIComponent(id)+'/children',{fetch_child:true},turn,d=>{for(const item of d.items??[])put(item);return directory.report(turn,'department_tree',{totalDepartments:nodes.size});});}
  const pathFor=id=>{const seen=new Set(),names=[];let current=id;while(current&&nodes.has(current)){if(seen.has(current))throw new Error('部门组织路径存在循环，无法确认统计范围。');seen.add(current);const d=nodes.get(current);if(d.name)names.unshift(d.name);if(current==='0')break;current=d.parent_department_id;}return names;};
  const query=normalized(q.query),queryParts=parts(q.query);
- let matches=[...nodes].filter(([,d])=>normalized(d.name)===query);
- if(!matches.length)matches=[...nodes].filter(([id])=>{const path=parts(pathFor(id).join('→'));return queryParts.length<=path.length&&queryParts.every((v,i)=>v===path[path.length-queryParts.length+i]);});
+ let matches=source.departmentId?[...nodes].filter(([id])=>id===source.departmentId):[...nodes].filter(([,d])=>normalized(d.name)===query);
+ if(!source.departmentId&&!matches.length)matches=[...nodes].filter(([id])=>{const path=parts(pathFor(id).join('→'));return queryParts.length<=path.length&&queryParts.every((v,i)=>v===path[path.length-queryParts.length+i]);});
  if(!matches.length)return {notice:'当前机器人获准的部门目录中没有匹配到该名称或组织路径，请补充完整部门路径；不代表公司不存在该部门。',contactQuery:q};
  if(matches.length>1&&!q.candidateId){await directory.report(turn,'department_candidates');const candidates=matches.map(([id,d])=>({id,name:d.name,department:pathFor(id).join(' → '),employeeNo:''}));return {notice:'匹配到多个同名部门，请回复对应序号或完整组织路径后再统计：\n'+candidates.map((c,i)=>`${i+1}. ${c.department}`).join('\n'),contactCandidates:candidates,contactQuery:{type:'department',query:q.query}};}
  const selected=q.candidateId?matches.find(([id])=>id===q.candidateId):matches[0];if(!selected)throw new Error('原候选部门已变化，请重新查询。');
  const [departmentId,department]=selected;
  const descendants=new Map([[departmentId,department]]);
  await directory.pages('/open-apis/contact/v3/departments/'+encodeURIComponent(departmentId)+'/children',{fetch_child:true},turn,d=>{for(const item of d.items??[]){const id=idOf(item);if(id)descendants.set(id,item);}});
- const all=new Set(),direct=new Set(),departmentCounts=[];let completedDepartments=0,pagesRead=0;
+ const all=new Set(),direct=new Set(),departmentCounts=[],roster=new Map();let completedDepartments=0,pagesRead=0;
  const readStartedAt=new Date().toISOString();
- for(const [id,node] of descendants){const members=new Set();await directory.pages('/open-apis/contact/v3/users/find_by_department',{department_id:id},turn,d=>{for(const u of d.items??[]){if(!u.open_id)throw new Error('成员唯一标识未返回，不能确认去重人数。');if(u.status?.is_resigned)continue;members.add(u.open_id);all.add(u.open_id);if(id===departmentId)direct.add(u.open_id);}pagesRead++;});departmentCounts.push({id,name:node.name??'',directCount:members.size});completedDepartments++;await directory.report(turn,'department_count',{completedDepartments,totalDepartments:descendants.size,memberCount:all.size,pagesRead});}
+ for(const [id,node] of descendants){const members=new Set();await directory.pages('/open-apis/contact/v3/users/find_by_department',{department_id:id},turn,d=>{for(const u of d.items??[]){if(!u.open_id)throw new Error('成员唯一标识未返回，不能确认去重人数。');if(u.status?.is_resigned)continue;members.add(u.open_id);all.add(u.open_id);const record=roster.get(u.open_id)??{id:u.open_id,name:field(u.name),employeeNo:field(u.employee_no),jobTitle:field(u.job_title),departmentIds:[]};if(!record.departmentIds.includes(id))record.departmentIds.push(id);roster.set(u.open_id,record);if(id===departmentId)direct.add(u.open_id);}pagesRead++;});departmentCounts.push({id,name:node.name??'',directCount:members.size});completedDepartments++;await directory.report(turn,'department_count',{completedDepartments,totalDepartments:descendants.size,memberCount:all.size,pagesRead});}
  // Recheck current authorization before releasing any result. It must equal the read's scope.
  if(hash(await scopeIdentity(directory,turn))!==hash(scope))throw new Error('查询期间通讯录授权范围发生变化，请重新查询，未发布旧范围人数。');
  if(hash(await directory.policy(turn))!==hash(policy))throw new Error('查询期间联系人配置已变化，请重新查询。');
  const current=(await directory.request('/open-apis/contact/v3/departments/'+encodeURIComponent(departmentId),{},turn)).department;
  if(!current||current.name!==department.name||current.parent_department_id!==department.parent_department_id)throw new Error('查询期间部门名称或组织归属发生变化，请重新查询。');
  const checkedAt=new Date().toISOString(),departmentPath=pathFor(departmentId).join(' → ');
- return {notice:`部门：${departmentPath}\n直属人数：${direct.size} 人\n包含下级部门：${all.size} 人（按成员唯一标识去重）\n统计部门数：${descendants.size}\n口径：机器人获准读取范围内、未标记离职的成员；兼属多个部门只计一次，冻结或未激活成员如未离职也纳入。不能将权限外成员视为0人。\n读取窗口：${readStartedAt} 至 ${checkedAt}（UTC），分别读取，不是同一时点的事务快照。`,contactQuery:q,departmentSummary:{departmentId,departmentPath,directCount:direct.size,totalCount:all.size,departmentCounts,readStartedAt,checkedAt,scope:'approved-bot-directory',authorization:{binding:binding(turn),policyHash:hash(policy),scopeHash:hash(scope),name:department.name,parentId:department.parent_department_id??null}}};
+ if(source.sourcePerson)await validateSourcePerson(directory,turn,source.sourcePerson);
+ const members=[...roster.values()].sort((a,b)=>Number(direct.has(b.id))-Number(direct.has(a.id))||a.name.localeCompare(b.name,'zh-CN')||a.id.localeCompare(b.id));
+ const listed=members.map((m,i)=>`${i+1}. **${safe(m.name||'姓名未提供')}** · ${safe(m.employeeNo||'工号未提供')} · ${safe(m.jobTitle||'岗位未提供')}${direct.has(m.id)?'':'（下级部门）'}`).join('\n');
+ const rosterText='\n\n### 部门成员\n'+(listed||'当前读取范围内没有未离职成员。');
+ return {notice:(source.sourcePerson?`按${safe(source.sourcePerson.name||'指定人员')}（工号 ${safe(source.sourcePerson.employeeNo||'未提供')}）的当前所属部门查询\n`:'')+`部门：${departmentPath}\n直属人数：${direct.size} 人\n包含下级部门：${all.size} 人（按成员唯一标识去重）${rosterText}\n\n统计部门数：${descendants.size}\n口径：机器人获准读取范围内、未标记离职的成员；兼属多个部门只计一次，冻结或未激活成员如未离职也纳入。不能将权限外成员视为0人。\n读取窗口：${readStartedAt} 至 ${checkedAt}（UTC），分别读取，不是同一时点的事务快照。`,contactQuery:q,departmentSummary:{departmentId,departmentPath,directCount:direct.size,totalCount:all.size,members,directMemberIds:[...direct],sourcePerson:source.sourcePerson??null,departmentCounts,readStartedAt,checkedAt,scope:'approved-bot-directory',authorization:{binding:binding(turn),policyHash:hash(policy),scopeHash:hash(scope),name:department.name,parentId:department.parent_department_id??null}}};
 }
 
 export async function validateDepartmentSummary(directory,turn,item){
  const policy=await directory.policy(turn),proof=item?.authorization;
  if(!proof||proof.binding!==binding(turn)||proof.policyHash!==hash(policy))throw new Error('部门统计所属问题或读取配置已变化，未投递旧结果。');
  if(hash(await scopeIdentity(directory,turn))!==proof.scopeHash)throw new Error('部门统计的通讯录范围已变化，请重新查询后投递。');
+ if(item.sourcePerson)await validateSourcePerson(directory,turn,item.sourcePerson);
  const d=(await directory.request('/open-apis/contact/v3/departments/'+encodeURIComponent(item.departmentId),{},turn)).department;
  if(!d||d.name!==proof.name||(d.parent_department_id??null)!==proof.parentId)throw new Error('部门统计的组织信息已变化，请重新查询。');
+}
+
+const field=v=>typeof v==='string'?v.replace(/[\u0000-\u001f]/g,' ').trim():'';
+const safe=v=>String(v).replace(/[&<>*_`~\[\]\\]/g,c=>'&#'+c.codePointAt(0)+';');
+async function validateSourcePerson(directory,turn,person){
+ const u=(await directory.request('/open-apis/contact/v3/users/'+encodeURIComponent(person.id),{},turn)).user;
+ if(!u||u.open_id!==person.id||u.status?.is_resigned||field(u.name)!==person.name||field(u.employee_no)!==person.employeeNo||hash([...new Set(u.department_ids??[])].sort())!==hash([...person.departmentIds].sort()))throw new Error('人员资料或所属部门已变化，请重新查询；未投递原部门名单。');
 }

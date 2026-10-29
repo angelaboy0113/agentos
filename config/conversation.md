@@ -112,3 +112,5 @@ fileInput.cloudIssues区分缺应用scope、文件未共享和下载/导出失�
 ## 部门人数查询
 
 用户问某部门有多少人、某组织下人数时，用lookup_contact，contactLookup={type:"department",query:"用户给出的部门名称或组织路径",candidateId:""}；无需提供某位成员工号，不创建开发任务。完整路径保留上级名称，截图仅作上下文，不从截图推算人数。程序实时读取部门树和成员，分别返回直属人数及含下级去重人数，未标记离职成员口径与读取范围由结果说明。模型reply只表示正在查询，不能编造人数或以旧缓存作当前统计。重名部门使用本问题候选确认，不选第一项；候选type=department，按原query选择candidateId。查人专用群同样支持此能力，结果沿用提问者与群主私有投递及公开完成提醒。
+
+用户以某个人为线索问“他/她所属部门有几个人、列出来、同部门同事、部门成员名单”时，必须查询部门成员，而非只返回个人名片。使用lookup_contact，contactLookup.type=department_of_employee_no（query为完整工号字符串）或department_of_name（query为姓名）；candidateId初始为空。程序先核实人员，再按其当前真实部门ID实时分页列出姓名、工号、岗位，说明直属与含下级人数。重名人员先选择，选择时保留原type/query；多部门任职先请用户明确部门，不能默选第一个。只问个人资料仍用name/employee_no。单纯问某部门成员名单也使用department，不必出现“人数”字样。不得以识别到工号为由丢弃“部门成员”这个实际目标。

@@ -32,3 +32,46 @@ test('model routing recovery and measured department counts have accurate privat
 });
 
 test('only the exact explicit department command bypasses language interpretation',async()=>{const {departmentCommand}=await import('../src/control-plane/contact-commands.js');assert.equal(departmentCommand('帮我查部门人数'),null);assert.equal(departmentCommand('/部署 prod'),null);assert.equal(departmentCommand('/部门人数').action,'reply');assert.equal(validateDecision(departmentCommand('/部门人数 公司--部门')).contactLookup.query,'公司--部门');});
+
+async function personFixture(t){
+ const f=await fixture(t),base=f.context.feishu.contactRequest;
+ const people=[{open_id:'a',name:'测试甲',employee_no:'0011782',job_title:'系统经理',department_ids:['channel']},{open_id:'b',name:'测试乙',employee_no:'0002',job_title:'储备岗',department_ids:['channel','child']},{open_id:'c',name:'测试丙',employee_no:'0003',job_title:'专员',department_ids:['child']}];
+ f.service.users=async()=>Object.assign(people,{indexAsOf:Date.now(),indexHit:true});
+ f.context.feishu.contactRequest=async(route,args)=>{
+  if(route.includes('/users/')&&!route.endsWith('/find_by_department'))return {user:people.find(p=>p.open_id===route.split('/').at(-1))};
+  const r=await base(route,args);if(route.endsWith('/find_by_department'))return {...r,items:r.items.map(p=>({...people.find(u=>u.open_id===p.open_id),...p}))};return r;
+ };return {...f,people};
+}
+test('person department intent resolves current department ID and publishes all paginated names, numbers and roles, not a personal image',async t=>{
+ const f=await personFixture(t),q={type:'department_of_employee_no',query:'0011782',candidateId:''};
+ assert.equal(validateDecision({...decision,contactLookup:q}).contactLookup.type,q.type);
+ const r=await f.service.lookup(actor,q);assert.equal(r.contactImage,undefined);assert.equal(r.departmentSummary.directCount,2);assert.equal(r.departmentSummary.totalCount,3);
+ assert.match(r.notice,/测试甲.*0011782/);assert.match(r.notice,/测试乙.*0002.*储备岗/);assert.match(r.notice,/测试丙.*下级部门/);assert.equal(r.departmentSummary.members.length,3);assert.deepEqual(r.departmentSummary.directMemberIds,['a','b']);
+ assert.ok(!JSON.stringify(r.departmentSummary).includes('mobile'));await f.service.validateDepartmentSummary(actor,r.departmentSummary);
+ f.people[0].department_ids=['other'];await assert.rejects(f.service.validateDepartmentSummary(actor,r.departmentSummary),/所属部门已变化/);
+});
+test('person name ambiguities preserve the department intent and candidate binding',async t=>{
+ const f=await personFixture(t);f.people[1].name='测试甲';const q={type:'department_of_name',query:'测试甲',candidateId:''};
+ const r=await f.service.lookup(actor,q);assert.equal(r.contactCandidates.length,2);assert.equal(r.contactQuery.type,q.type);assert.match(r.notice,/查询其部门成员/);assert.equal(r.departmentSummary,undefined);
+ f.setPending([{...actor,status:'sent',outcome:r}]);assert.equal((await f.service.lookup(actor,{...q,candidateId:'a'})).departmentSummary.directCount,2);
+ await assert.rejects(f.service.lookup({...actor,senderId:'other'},{...q,candidateId:'a'}),/候选人员/);
+});
+test('multiple and missing person memberships require clarification instead of selecting first or treating absence as zero',async t=>{
+ const f=await personFixture(t),q={type:'department_of_employee_no',query:'0011782',candidateId:''};
+ f.people[0].department_ids=['channel','same'];let r=await f.service.lookup(actor,q);assert.match(r.notice,/多个部门/);assert.equal(r.departmentSummary,undefined);
+ f.people[0].department_ids=[];r=await f.service.lookup(actor,q);assert.match(r.notice,/未返回其所属部门/);assert.equal(r.departmentSummary,undefined);
+ f.people[0].department_ids=['not-authorized'];r=await f.service.lookup(actor,q);assert.equal(r.departmentSummary,undefined);assert.match(r.notice,/没有匹配/);
+});
+test('department roster escapes member text, preserves missing fields and rejects interrupted pages',async t=>{
+ const f=await personFixture(t);f.people[1].name='<at user_id="all">';delete f.people[1].job_title;
+ const r=await f.service.lookup(actor,query);assert.doesNotMatch(r.notice,/<at/);assert.match(r.notice,/岗位未提供/);assert.equal(r.departmentSummary.directCount,2);
+ const base=f.context.feishu.contactRequest;f.context.feishu.contactRequest=async(route,args)=>{if(args.page_token)throw new Error('read failed');return base(route,args);};await assert.rejects(f.service.lookup(actor,query),/CONTACT_ACCESS/);
+ const {departmentCommand}=await import('../src/control-plane/contact-commands.js');assert.equal(validateDecision(departmentCommand('/部门成员 公司--中心')).contactLookup.type,'department');
+});
+
+test('explicit same-department commands retain employee zeros and support names without a model',async()=>{
+ const {departmentCommand}=await import('../src/control-plane/contact-commands.js');
+ assert.deepEqual(validateDecision(departmentCommand('/同部门 00001234')).contactLookup,{type:'department_of_employee_no',query:'00001234',candidateId:''});
+ assert.equal(validateDecision(departmentCommand('/同部门 姓名 测试甲')).contactLookup.type,'department_of_name');
+ assert.equal(departmentCommand('/同部门').action,'reply');assert.equal(departmentCommand('同部门同事有哪些'),null);
+});
