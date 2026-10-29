@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.33.1** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.38.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 第一次部署请按顺序阅读：
 
@@ -32,6 +32,12 @@ npm ci
 基于飞书群聊驱动本地 Codex 的开发团队控制面。当前版本已支持两种接入方式：本机直接复用 `lark-cli` 长连接（无需公网域名），或由公网 HTTPS 控制面接收飞书回调。开发电脑上的 Runner 主动领取任务：代码修改使用隔离 Git worktree，只读分析使用配置的真实源码目录；关键状态回传飞书。
 
 ![AgentOS 工作流](docs/images/agentos-workflow-environment.png)
+
+## 可选私有网站入口
+
+新增独立目录 [workbench](workbench/README.md)：浅色聊天界面、私有话题、负责人全部对话、明确邀请协作、文件与处理进度、企业飞书登录和私聊提醒适配。运行 `npm run start:workbench` 可本机体验；正式接入需要按该目录说明配置企业HTTPS地址、OAuth回调及密钥。默认体验不调用业务系统或发飞书消息。
+
+复用同一套OS核心代码，独立进程/队列/data，不接收原群事件、不向原群输出私有内容，也不直接开放原 `/admin`；现有飞书实例无需升级或重启。该入口不会自动修复原有业务工具或模型连接问题，尚未完成企业真实端到端验收。
 
 ## 当前能力
 
