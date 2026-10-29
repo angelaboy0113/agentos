@@ -173,7 +173,7 @@ test('immutable cache deduplicates concurrent questions, refreshes tips, preserv
  await git(path.join(a.workspace,'business'),'checkout','--','source.txt');
  state.jobs.push({projectId:'demo',status:'running'});assert.equal((await gc(true)).skipped,'project-busy');state.jobs.pop();
  result=await gc(true);assert.equal(result.removed.length,1);await assert.rejects(access(a.workspace));await access(c.workspace);
- await git(f.repo,'remote','set-url','origin','/unavailable');await assert.rejects(question(),/未回退/);await access(c.workspace);
+ await git(f.repo,'remote','set-url','origin','/unavailable');await assert.rejects(question(),/远端来源、分支或指定提交不可用/);await access(c.workspace);
 });
 
 test('remote rollback selects an existing cache without mutating it; GC follows latest selection, and never follows symlinks',async t=>{
@@ -265,5 +265,30 @@ test('relocated deployments can seed objects from old caches but still publish f
  await assert.rejects(access(path.join(report.workspace,'business/stray.txt')));
  assert.equal(await git(local,'status','--porcelain'),before);await verifyAnalysisSources(project,report);
  await rm(f.origin,{recursive:true});
- await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),/远端分支不可用/);
+ await assert.rejects(prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),/远端来源、分支或指定提交不可用/);
+});
+
+test('branch advance and rollback during snapshot transfer retain the first checked commit without switching HEAD',async t=>{
+ const {fetchSnapshotCommit}=await import('../src/runner/source-snapshot.js');
+ for(const rollback of [false,true]){
+  const f=await fixture(t),first=await git(f.writer,'rev-parse','HEAD');
+  await commit(f.writer,'second');await git(f.writer,'push');const second=await git(f.writer,'rev-parse','HEAD');
+  const pinned=rollback?second:first,after=rollback?first:second;
+  // Remote initially advertises the pinned version; mutate only the fixture remote.
+  await git(f.writer,'push','--force','origin',`${pinned}:refs/heads/${f.branch}`);
+  const before=await git(f.repo,'rev-parse','HEAD'),work=await readFile(path.join(f.repo,'source.txt'),'utf8');let moved=false;
+  await fetchSnapshotCommit(f.repo,{branch:f.branch,commit:pinned},'false',{},async(cwd,args)=>{
+   if(args[0]==='fetch'&&args.at(-1)===`refs/heads/${f.branch}`&&!moved){moved=true;await git(f.writer,'push','--force','origin',`${after}:refs/heads/${f.branch}`);}
+   return git(cwd,...args);
+  });
+  assert.equal(await git(f.repo,'rev-parse','FETCH_HEAD'),pinned);assert.equal(await git(f.repo,'rev-parse','HEAD'),before);
+  assert.equal(await readFile(path.join(f.repo,'source.txt'),'utf8'),work);
+ }
+});
+test('snapshot failure retains repository, stage and safe diagnostic through the task result',async t=>{
+ const f=await fixture(t);await git(f.repo,'remote','set-url','origin',path.join(f.base,'missing-origin'));
+ const result=await executeJob({taskIntent:'analysis',stage:'developer',projectId:'demo',sourceEnvironment:'prd'},
+  {executor:'codex',codexBin:'/must-not-start',projects:{demo:{...f.project,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{prd:{repositories:[{path:'business',branch:f.branch}]}}}}},async()=>{});
+ assert.equal(result.outcome,'blocked');assert.equal(result.sourceFailure.repository,'business');assert.equal(result.sourceFailure.stage,'核对远端分支');assert.equal(result.sourceFailure.code,'SOURCE_GIT_REMOTE_UNAVAILABLE');assert.equal(result.sourceFailure.attempts,1);
+ assert.match(result.finalMessage,/核对远端分支/);assert.doesNotMatch(result.finalMessage,/远端可能在同步中变化/);
 });

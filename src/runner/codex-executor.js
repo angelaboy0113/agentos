@@ -40,7 +40,7 @@ export async function executeJob(job, config, emit) {
   if (job.taskIntent === 'analysis') {
     const reusingSnapshot = (job.context ?? []).some(entry => entry.result?.sourceSync);
     await emit({ type: 'progress', message: job.stage === 'owner_report' || reusingSnapshot ? '正在核对并复用本问题已同步的源码快照' : '正在同步配置仓库的 origin 分支，成功后进入只读分析' });
-    try { sourceSync = await prepareAnalysisSources(job, project);await emit({type:'progress',message:'已核验并固定本问题源码提交',sourceSnapshot:sourceSync}); }
+    try { sourceSync = await prepareAnalysisSources(job, project, {onProgress: message => emit({type:'progress',message})});await emit({type:'progress',message:'已核验并固定本问题源码提交',sourceSnapshot:sourceSync}); }
     catch (error) { return sourceBlocked(error); }
   }
   const workspace = sourceSync?.workspace ?? await prepareWorkspace(job, project, config.worktreeRoot);
@@ -87,7 +87,7 @@ export async function executeJob(job, config, emit) {
 
 function sourceBlocked(error) {
   const summary = `源码版本检查未通过，本次检查尚未完成。${error.message} 已有固定提交证据继续保留，不用旧缓存冒充最新，也不切换到其它提交；恢复来源或权限后可在原问题接续。`;
-  return { outcome: 'blocked', sourceSyncBlocked: true, summary, finalMessage: summary, verification: [] };
+  return { outcome: 'blocked', sourceSyncBlocked: true, ...(error.sourceFailure ? {sourceFailure: error.sourceFailure} : {}), summary, finalMessage: summary, verification: [] };
 }
 
 export function verificationCommands(job, project, outcome) {

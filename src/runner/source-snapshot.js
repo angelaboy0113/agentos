@@ -4,6 +4,7 @@ import {withSnapshotLock} from '../shared/snapshot-lock.js';
 import { mkdir, mkdtemp, realpath, writeFile, readFile, readdir, lstat, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { git, repositories } from './source-sync.js';
+import {snapshotFailure, sourceGitError} from '../shared/source-git-diagnostic.js';
 import { selectSourceEnvironment } from '../shared/source-environments.js';
 const policy = 'isolated-environment-source-v1';
 function within(root, target) {
@@ -79,19 +80,31 @@ async function settings(project, environment, {sourceOptional=false}={}) {
   repos.sort((a, b) => a.path.split('/').length - b.path.split('/').length || (a.path === '.' ? -1 : b.path === '.' ? 1 : a.path.localeCompare(b.path)));
   return { id, sourceRoot, snapshotRoot, repos };
 }
-export async function syncSnapshot(project, environment) {
+// A branch may advance/roll back after ls-remote. Retain the first observed
+// commit: fetch that exact object rather than silently choosing the new tip.
+export async function fetchSnapshotCommit(cwd, repo, shallow, options = {}, run = git) {
+ const flags = [...(shallow === 'true' ? ['--depth=1'] : []), '--no-tags', '--no-recurse-submodules', 'origin'];
+ await run(cwd, ['fetch', ...flags, `refs/heads/${repo.branch}`], options);
+ if (await run(cwd, ['rev-parse', 'FETCH_HEAD']) === repo.commit) return;
+ await options.onBranchMoved?.();
+ await run(cwd, ['fetch', ...flags, repo.commit], options);
+ if (await run(cwd, ['rev-parse', 'FETCH_HEAD']) !== repo.commit) throw sourceGitError({code:'SOURCE_BRANCH_MOVED',operation:'fetch',retryable:false,attempts:1,exitCode:null});
+}
+export async function syncSnapshot(project, environment, {onProgress} = {}) {
  const prepared=await settings(project,environment);
  return withSnapshotLock(prepared.snapshotRoot,async(checkLock)=>{
   const {id,sourceRoot,snapshotRoot,repos}=prepared;
   const remote=[];
   for(const repo of repos){
+   let stage='读取来源配置';
    try{
     const origin=await git(repo.cwd,['remote','get-url','origin']);
-    const lines=await git(repo.cwd,['ls-remote','origin',`refs/heads/${repo.branch}`]);
+    stage='核对远端分支';
+    const lines=await git(repo.cwd,['ls-remote','origin',`refs/heads/${repo.branch}`], {onRetry: d => onProgress?.(`${repo.path}：远端核对暂时失败，正在重试第${d.nextAttempt}次（${d.code}）`)});
     const [commit,ref]=lines.split(/\s+/);
-    if(!/^[a-f0-9]{40,64}$/.test(commit??'')||ref!==`refs/heads/${repo.branch}`)throw new Error();
+    if(!/^[a-f0-9]{40,64}$/.test(commit??'')||ref!==`refs/heads/${repo.branch}`)throw sourceGitError({code:'SOURCE_GIT_REMOTE_UNAVAILABLE',operation:'ls-remote',retryable:false,attempts:1,exitCode:null});
     remote.push({...repo,origin,commit});
-   }catch{throw new Error(`源码快照同步失败：${repo.path} 的 ${repo.branch}；远端分支不可用，未回退到旧缓存或其它环境。`);}
+   }catch(error){throw snapshotFailure(repo,stage,error);}
   }
   const cacheKey=createHash('sha256').update(JSON.stringify([sourceRoot,id,remote.map(({path,branch,origin,commit})=>({path,branch,origin,commit}))])).digest('hex');
   const container=path.join(snapshotRoot,'analysis-'+cacheKey),remoteCheckedAt=new Date().toISOString();
@@ -108,7 +121,10 @@ export async function syncSnapshot(project, environment) {
    report={policy,cacheKey,projectId:project.id??null,repositorySources:remote.map(r=>({path:r.path,originHash:createHash('sha256').update(r.origin).digest('hex')})),environment:id,sourceRoot,workspace:path.join(container,'workspace'),checkedAt:remoteCheckedAt,repositories:[]};
    try{
     await writeFile(path.join(temporary,'build-owner.json'),JSON.stringify({policy:'snapshot-build-v1',sourceRoot,environment:id}),{mode:0o600,flag:'wx'});
-    for(const repo of remote){
+    for(const [index,repo] of remote.entries()){
+     await onProgress?.(`正在准备源码 ${index+1}/${remote.length}：${repo.path}（${repo.branch}）`);
+     let stage='检查缓存路径';
+     try{
      const target=path.resolve(workspace,repo.path);let ancestor=workspace;
      for(const part of path.relative(workspace,target).split(path.sep).filter(Boolean)){
       ancestor=path.join(ancestor,part);const info=await lstat(ancestor).catch(e=>{if(e.code!=='ENOENT')throw e;return null;});
@@ -116,25 +132,33 @@ export async function syncSnapshot(project, environment) {
      }
      await mkdir(target,{recursive:true});
      if((target!==workspace&&!within(workspace,await realpath(target)))||(await readdir(target)).length)throw new Error(`快照路径冲突：${repo.path}`);
-     try{
+     stage='选择对象种子';
       // Independently copy local objects (including a shallow boundary), then
       // let the real origin supply and select the requested environment tip.
       // Never copy the personal index/worktree or depend on shared objects.
       const seed=await objectSeed(repo,snapshotRoot);
+      stage='复制本机Git对象';
       await git(workspace,['clone','--local','--no-hardlinks','--dissociate','--no-checkout','--no-tags','--',seed,target]);
+      stage='准备独立Git元数据';
       await git(target,['remote','set-url','origin',repo.origin]);
       // Detached caches have no refs. Advertise their copied objects during
       // fetch negotiation; discard this temporary ref before publication.
       const seedHead=await git(target,['rev-parse','--verify','HEAD']).catch(()=>null);
       if(seedHead)await git(target,['update-ref','refs/heads/agentos-object-seed',seedHead]);
       const shallow=await git(seed,['rev-parse','--is-shallow-repository']);
-      await git(target,['fetch',...(shallow==='true'?['--depth=1']:[]),'--no-tags','--no-recurse-submodules','origin',`refs/heads/${repo.branch}`]);
+      stage='下载固定版本';
+      await fetchSnapshotCommit(target,repo,shallow,{
+       onRetry: d => onProgress?.(`${repo.path}：源码下载暂时失败，正在重试第${d.nextAttempt}次（${d.code}）`),
+       onBranchMoved: () => onProgress?.(`${repo.path}：分支在同步期间变化，继续获取首次核对的固定提交，不切换版本`),
+      });
+      stage='核对对象独立性';
       await independentObjects(target);
-      if(await git(target,['rev-parse','FETCH_HEAD'])!==repo.commit)throw new Error();
+      stage='检出固定提交';
       await git(target,['checkout','--detach',repo.commit]);
+      stage='整理临时缓存对象';
       await discardSeedHistory(target);
       report.repositories.push({path:repo.path,branch:repo.branch,commit:repo.commit});
-     }catch{throw new Error(`源码快照同步失败：${repo.path} 的 ${repo.branch}；远端可能在同步中变化，请重新核对。未覆盖旧快照或个人源码。`);}
+     }catch(error){throw snapshotFailure(repo,stage,error);}
     }
     await writeFile(path.join(temporary,'source-manifest.json'),JSON.stringify(report),{mode:0o600,flag:'wx'});
     checkLock();await rename(temporary,container);

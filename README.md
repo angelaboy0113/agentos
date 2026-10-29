@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.52.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.52.1** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 多系统知识助手专用分支的部署与迁移见 [多系统助手说明](docs/system-assistants.md)。
 
@@ -328,3 +328,5 @@ Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地
 
 调查历史、期间规范化、恢复与清理的当前能力及验证边界见[多系统通用能力](docs/multi-system-capability-audit.md)。
 MongoDB文档来源、旧协议兼容、SSH远程只读、跨月完整数据集及恢复说明见[MongoDB受控只读来源](docs/mongodb-readonly.md)。配置示例使用凭据引用，不包含真实账号密码。
+
+源码准备失败时查看原卡的仓库、阶段与原因分类；1.52.1支持临时远端读取重试及同步期间分支变化的固定提交获取，详见[源码同步](docs/source-sync.spec.md)。
