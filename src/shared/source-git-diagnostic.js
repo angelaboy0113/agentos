@@ -2,6 +2,7 @@
 const labels = {
   SOURCE_GIT_AUTH: '认证失败或当前凭据不可用',
   SOURCE_GIT_REMOTE_UNAVAILABLE: '远端来源、分支或指定提交不可用',
+  SOURCE_GIT_TRUST: 'TLS证书校验失败，需要检查本机信任配置',
   SOURCE_GIT_TIMEOUT: '单次 Git 请求超时',
   SOURCE_GIT_NETWORK: '网络连接或远端服务暂时失败',
   SOURCE_GIT_STORAGE: '磁盘空间不足或文件系统写入失败',
@@ -15,7 +16,8 @@ const labels = {
 export function classifySourceGitError(error, operation) {
   const text = String(error.stderr ?? '');
   const code = error.killed || error.signal === 'SIGKILL' ? 'SOURCE_GIT_TIMEOUT'
-    : /authentication failed|could not read Username|terminal prompts disabled|HTTP[^\n]*\b40[13]\b/i.test(text) ? 'SOURCE_GIT_AUTH'
+    : /authentication failed|could not read Username|terminal prompts disabled|permission denied \(publickey\)|HTTP[^\n]*\b40[13]\b/i.test(text) ? 'SOURCE_GIT_AUTH'
+    : /certificate (problem|verify failed|has expired)|unable to get local issuer|self.signed certificate/i.test(text) ? 'SOURCE_GIT_TRUST'
     : /no space left|disk quota|read-only file system|ENOSPC|EDQUOT/i.test(text) ? 'SOURCE_GIT_STORAGE'
     : /permission denied|operation not permitted|EACCES|EPERM/i.test(text) ? 'SOURCE_GIT_PERMISSION'
     : /smudge|filter-process|filter .* failed|git-lfs/i.test(text) ? 'SOURCE_GIT_FILTER'
@@ -36,6 +38,6 @@ export function snapshotFailure(repo, stage, error) {
   const details = {code: old?.code ?? localCode, repository: repo.path, branch: repo.branch,
     stage, operation: old?.operation ?? null, attempts: old?.attempts ?? 1, retryable: old?.retryable ?? false,
     exitCode: old?.exitCode ?? null};
-  return Object.assign(new Error(`源码快照同步失败：${repo.path} 的 ${repo.branch}；阶段：${stage}；${labels[details.code] ?? '缓存路径、Git 元数据或对象独立性检查未通过'}。未覆盖旧快照或个人源码。`),
+  return Object.assign(new Error(`源码快照同步失败：${repo.path} 的 ${repo.branch}；阶段：${stage}；${labels[details.code] ?? '缓存路径、Git 元数据或对象独立性检查未通过'}（该请求已尝试${details.attempts}次）。未覆盖旧快照或个人源码。`),
     {code: details.code, sourceFailure: details});
 }

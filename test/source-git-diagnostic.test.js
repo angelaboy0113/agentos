@@ -9,6 +9,8 @@ test('Git failure classification distinguishes credentials, remote, network, sto
   ['fatal: Authentication failed for https://secret:token@host','AUTH'],
   ["fatal: couldn't find remote ref refs/heads/prd",'REMOTE_UNAVAILABLE'],
   ['error: RPC failed; HTTP 503','NETWORK'],['fatal: unable to access URL: Connection reset by peer','NETWORK'],
+  ['SSL certificate problem: self-signed certificate','TRUST'],
+  ['Permission denied (publickey).','AUTH'],
   ['No space left on device','STORAGE'],['permission denied','PERMISSION'],
   ['fatal: bad object aabb','OBJECTS'],['fatal: smudge filter lfs failed','FILTER'],
   ['unknown failure with token=not-public','UNAVAILABLE'],
@@ -35,7 +37,7 @@ test('retry exhaustion preserves error classification, operation and attempt cou
  }),e=>{assert.equal(e.sourceFailure.attempts,3);assert.equal(e.sourceFailure.operation,'ls-remote');assert.equal(e.code,'SOURCE_GIT_NETWORK');assert(!/secret|token|host/.test(JSON.stringify(e)+e.message));return true;});assert.equal(calls,3);
 });
 test('authentication, disk failure, unknown failure and non-read Git commands are never blindly replayed',async()=>{
- for(const [operation,error] of [['fetch',failure('Authentication failed')],['fetch',failure('No space left on device')],['fetch',failure('unknown')],['checkout',failure('',{killed:true})],['clone',failure('connection reset')],['repack',failure('connection reset')]]){
+ for(const [operation,error] of [['fetch',failure('Authentication failed')],['fetch',failure('No space left on device')],['fetch',failure('unknown')],['fetch',failure('SSL certificate problem: self-signed certificate')],['checkout',failure('',{killed:true})],['clone',failure('connection reset')],['repack',failure('connection reset')]]){
   let calls=0;await assert.rejects(git('/cache',[operation],{execute:async()=>{calls++;throw error;},wait:async()=>assert.fail('unexpected retry')}));assert.equal(calls,1);
  }
 });
