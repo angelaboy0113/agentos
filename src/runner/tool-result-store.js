@@ -15,12 +15,14 @@ export class ToolResultStore{
   const root=path.join(this.directory,'tool-results');await mkdir(root,{recursive:true,mode:0o700});
   if(!(await lstat(root)).isDirectory()||(await lstat(root)).isSymbolicLink())bad('工具结果目录不能是符号链接');return realpath(root);
  }
- async present(tool,result,maxBytes=24000){
+ async present(tool,result,maxBytes=24000,{persist=false}={}){
   const text=JSON.stringify(result,(_key,value)=>typeof value==='string'?this.secrets.reduce((v,s)=>v.split(s).join('[已隐藏]'),value):value);
-  if(Buffer.byteLength(text)<=maxBytes)return JSON.parse(text);
+  const small=Buffer.byteLength(text)<=maxBytes;
+  if(small&&!persist)return JSON.parse(text);
   await this.authorize();const ref='tool-result-'+randomUUID(),saved={ref,scope:this.scope,tool,createdAt:new Date().toISOString(),sha256:hash(text),text};
   if(this.directory){const root=await this.root();await writeFile(path.join(root,ref+'.json'),JSON.stringify(saved),{mode:0o600,flag:'wx'});}else this.memory.set(ref,saved);
   await this.authorize();
+  if(small)return {...JSON.parse(text),resultStored:true,resultRef:ref,resultLimited:false,totalCharacters:text.length,bytes:Buffer.byteLength(text),sha256:saved.sha256};
   const out={resultStored:true,resultRef:ref,resultLimited:true,totalCharacters:text.length,bytes:Buffer.byteLength(text),sha256:saved.sha256,omittedFields:[],note:'本次工具返回已完整保存；展示分页不改变原查询完整性，仍须遵循原始partial/complete。read_tool_result按resultRef和offset续读，不重查或重算已完成步骤。'};
   for(const [key,value]of Object.entries(result)){
    if(value===undefined)continue;
@@ -38,7 +40,7 @@ export class ToolResultStore{
    const root=await this.root();
    for(const name of await readdir(root))if(name.endsWith('.json')&&valid(name.slice(0,-5))){try{const saved=await this.load(name.slice(0,-5));items.push(saved);}catch{/* Foreign, linked or corrupt files cannot enter the catalog. */}}
   }else items.push(...this.memory.values());
-  const all=items.filter(x=>x.scope===this.scope).map(x=>({resultRef:x.ref,tool:x.tool,createdAt:x.createdAt,totalCharacters:x.text.length,sha256:x.sha256})).sort((a,b)=>(b.createdAt??'').localeCompare(a.createdAt??''));
+  const all=items.filter(x=>x.scope===this.scope).map(x=>{const r=JSON.parse(x.text);return{resultRef:x.ref,tool:x.tool,createdAt:x.createdAt,totalCharacters:x.text.length,sha256:x.sha256,...(typeof r?.groupId==='string'&&r.groupId.length<=128?{groupId:r.groupId}:{}),...(typeof r?.taskId==='string'&&r.taskId.length<=128?{taskId:r.taskId}:{})};}).sort((a,b)=>(b.createdAt??'').localeCompare(a.createdAt??''));
   await this.authorize();return {items:all.slice(offset,offset+limit),totalCount:all.length,nextOffset:offset+limit<all.length?offset+limit:null,note:'当前任务、当前环境的完整工具结果引用；历史结果不是新取数。'};
  }
  async load(resultRef){
