@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "environments": {
+    "example_prd_scheduler": {
+      "projectId": "example", "tier": "prd", "kind": "tct",
+      "credentialRef": "example-cloud", "membersRead": true,
+      "ownerOpenIdsByProfile": {"owner": ["ou_REPLACE"]},
+      "tct": {
+        "loginOrigin": "https://cloud.example.com",
+        "consoleOrigin": "https://console.cloud.example.com",
+        "apiOrigin": "https://tapi.cloud.example.com",
+        "ownerUin": "123456789", "region": "replace-region"
+      },
+      "queries": {
+        "investigate": {
+          "mode": "investigate", "reviewed": true,
+          "description": "Production scheduler metadata and execution batches, read only",
+          "groupIds": ["group-REPLACE"], "maxRows": 100, "timeoutMs": 10000,
+          "parameters": [{"name": "purpose", "type": "string"}]
+        }
+      }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import {validateTctQuery} from './tct-policy.js';
 import {validateWebsiteReadEndpoints} from './website-policy.js';
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 export function validateToolQuery(e, q) {
@@ -7,6 +8,7 @@ export function validateToolQuery(e, q) {
   if(q.exportTimeoutMs!==undefined&&(!q.exportMaxRows||!Number.isInteger(q.exportTimeoutMs)||q.exportTimeoutMs<1000))throw new Error('兼容exportTimeoutMs字段须为至少1000毫秒；完整查询不再按整批时限截停');
   if(q.exportDataBudgetBytes!==undefined&&(!q.exportMaxRows||!Number.isSafeInteger(q.exportDataBudgetBytes)||q.exportDataBudgetBytes<1))throw new Error('任务数据预算须为正安全整数字节，仅由管理员配置');
   if(q.exportSnapshotWindowMs!==undefined&&(!q.exportMaxRows||!Number.isInteger(q.exportSnapshotWindowMs)||q.exportSnapshotWindowMs<60000))throw new Error('显式报表取数窗口须为至少60000毫秒，仅由管理员按数据变化频率配置');
+  if(e.kind==='tct')validateTctQuery(q);
   if (q.mode !== 'investigate') return false;
   if (q.parameters.length !== 1 || q.parameters[0].name !== 'purpose' || q.parameters[0].type !== 'string') throw new Error('排查必须绑定本次目的');
   // Legacy maxCalls is accepted for compatibility, but no longer controls investigation.

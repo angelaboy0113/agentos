@@ -330,3 +330,5 @@ Codex 可执行文件解析顺序为显式执行器配置、`CODEX_BIN`、本地
 MongoDB文档来源、旧协议兼容、SSH远程只读、跨月完整数据集及恢复说明见[MongoDB受控只读来源](docs/mongodb-readonly.md)。配置示例使用凭据引用，不包含真实账号密码。
 
 源码准备失败时查看原卡的仓库、阶段与原因分类；1.52.1支持临时远端读取重试及同步期间分支变化的固定提交获取，详见[源码同步](docs/source-sync.spec.md)。
+
+私有云 TCT 调度只读入口、配置与验证见 [TCT read access](docs/tct-readonly.md)。支持按系统/环境分组隔离的规则、状态和执行批次读取；不提供调度写入和原始日志。

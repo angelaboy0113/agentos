@@ -152,3 +152,5 @@ questionSourceContext沿经边界核验的问题父链取得已登记的源码�
 continuous_analysis的固定快照在sourceRoot匹配时可作为历史定位线索保留答案；requiresRecheckForCurrentSource仍为true，不能把它作为当前源码/部署事实。源码字段和结构说明可直接以文字或Markdown表格交付；用户未要求文件或完整线上普查时不自动增加CSV、validator等完成门。明确要求文件及业务统计报表的完整性和文件核验保持。规则在config/conversation.md、conversation.schema.json和roles/analysis.md同步，提示词仍不是环境权限。
 
 部署无需新增通用配置或依赖，更新主控/Runner后按空闲维护流程重启。已有错误关联历史不会自动重写，需要维护者针对原问题核对修复；不批量重放群消息。迁移代码包包含上述文件，实际生产元数据、群交付、平台/跨机验收另由部署实例保存。
+
+TCT调度作为独立environment kind，使用已审核HTTPS入口、租户/地域及精确分组范围。环境授权每次HTTP读取复核；模型只见固定只读工具和脱敏元数据，任务ID保持精确字符串。会话按连接凭据在进程内共享，过期只重试固定读取，不能盲目重放登录或执行调度。详见[tct-readonly.md](tct-readonly.md)。

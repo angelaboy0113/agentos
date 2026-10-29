@@ -9,6 +9,7 @@ const stages = Object.freeze({
   'browser.click': '点击页面控件', 'browser.search': '搜索页面', 'browser.snapshot': '读取页面', 'browser.operation': '浏览器操作',
   'browser.reuse-session': '复用已登录页面',
   period_dataset:'补齐期间并计算分组累计',group_dataset:'分组查询与保存数据',linked_group_dataset:'关联分组查询与保存数据',inspect_dataset:'读取任务内数据集',list_datasets:'列出任务内数据集',enrich_dataset:'组合业务维度',compare_datasets:'核对数据集差异',inspect_report:'读取文件绑定审阅证据',refresh_report:'集中刷新与重算报表',compose_report:'生成清单草稿',finalize_report:'核验最终清单',read_source_evidence:'读取已核验源码',
+  'tct.login':'调度平台登录','tct.read':'调度平台读取',groups:'读取调度分组',tasks:'读取定时任务',task_detail:'读取定时任务规则',task_batches:'读取任务执行批次',
   connection: '环境连接检查', discover: '发现配置', read_config: '读取配置',
   browser_open: '打开后台浏览器页面', browser_click: '点击页面控件',
   browser_snapshot: '读取页面及字段状态', browser_search: '搜索页面', browser_navigate: '进入业务表单页面', browser_fill: '临时填写表单复现', browser_select: '选择页面选项',
@@ -16,6 +17,12 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+ ['TCT_AUTH', /TCT_AUTH|TCT_LOGIN_PROTOCOL/, '调度平台登录核验', '调度平台登录或会话核验未完成，未触发或修改任务。', '维护者核对本机凭据、验证码、多因素认证及登录协议，保留已有证据后在原问题接续。'],
+ ['TCT_NETWORK', /TCT_NETWORK|TCT_HTTP/, '调度平台连接', '调度平台本次连接失败、超时或HTTP读取失败，未取得完整响应。', '核对公司云网络及服务，恢复后继续原问题；不把读取失败当成任务没有执行。'],
+ ['TCT_SCOPE', /TCT_SCOPE|TCT_ORIGIN|TCT_CLOSED/, '调度读取范围核验', '请求的调度分组或任务不在当前有效范围，或返回范围发生变化。', '核对当前系统、环境、精确分组及任务归属；不跨环境借用权限。'],
+ ['TCT_RATE_LIMIT', /TCT_RATE_LIMIT/, '调度平台读取限流', '平台在短暂退避后仍拒绝当前读取，已有结果保留。', '待平台额度恢复后接续当前读取，不重跑业务任务或触发定时任务。'],
+ ['TCT_RESPONSE', /TCT_RESPONSE|TCT_PAGINATION/, '调度结果完整性核验', '调度响应或分页不完整，未将缺失数据当作空结果。', '保留已读证据，核对平台响应后接续缺页。'],
+ ['TCT_API', /TCT_API/, '调度只读接口', '调度平台拒绝本次只读接口，未触发或修改任务。', '维护者按任务内具体接口及平台错误码核查权限或平台状态，恢复后在原问题接续。'],
  ['MONGO_SERVER_VERSION', /MONGO_SERVER_VERSION/, 'MongoDB协议兼容检查', '驱动与目标MongoDB协议版本不兼容，尚未查询业务数据。', '维护者选用已核验的兼容驱动；不升级或重启生产数据库，不把版本问题解释为密码错误。'],
  ['MONGO_DATE_TYPE_AMBIGUOUS', /MONGO_DATE_TYPE_AMBIGUOUS/, 'MongoDB日期完整性核验', '候选范围的日期字段存在非日期、空值或缺失；不能把它当范围外数据再补零。', '核对实际字段、业务口径及数据类型，保留已有证据；不能猜测时区或未知金额。'],
  ['MONGO_READ_PERMISSION', /MONGO_READ_PERMISSION|MONGO_ACCOUNT_UNVERIFIED|MONGO_ACCOUNT_HAS_WRITE_PRIVILEGES/, 'MongoDB读取权限检查', '账号未通过当前读取权限或账号模式核验，未绕过权限执行。', '核对管理员登记的账号策略和实际授权；程序只读工具不等于账号自身只读。'],
@@ -79,11 +86,11 @@ export function failureDetails(error,{stage}={}) {
   const diagnosticStage=[error?.diagnosticStage,error?.rpcMethod,error?.stage,stage].find(s=>Object.hasOwn(stages,s));
   const observedCode=[error?.observedCode,...chain.map(e=>e.code)].find(c=>observedCodes.has(c))??[...observedCodes].find(c=>new RegExp('\\b'+c+'\\b').test(message));
   return {code,stage:diagnosticStage??null,phase:diagnosticStage?stages[diagnosticStage]:phase,cause,next,
-    ...(observedCode?{observedCode}:{}),...(httpStatus?{httpStatus}:{}),...(Number.isInteger(error?.exitCode)&&Math.abs(error.exitCode)<256?{exitCode:error.exitCode}:{}),...(exitSignals.has(error?.exitSignal)?{exitSignal:error.exitSignal}:{})};
+    ...(typeof error?.platformCode==='string'&&/^(RequestLimitExceeded|AuthFailure|UnauthorizedOperation|ResourceNotFound|InvalidParameter|InternalError|FailedOperation|MissingParameter|UnsupportedOperation)(\.[A-Za-z][A-Za-z0-9]*)?$/.test(error.platformCode)?{platformCode:error.platformCode}:{}),...(['DescribeGroups','DescribeTaskRecords','DescribeTaskDetail','DescribeTaskBatchRecords'].includes(error?.apiAction)?{apiAction:error.apiAction}:{}),...(observedCode?{observedCode}:{}),...(httpStatus?{httpStatus}:{}),...(Number.isInteger(error?.exitCode)&&Math.abs(error.exitCode)<256?{exitCode:error.exitCode}:{}),...(exitSignals.has(error?.exitSignal)?{exitSignal:error.exitSignal}:{})};
 }
 export function failureDiagnostic(error) {
   const d=failureDetails(error);
-  return `错误码：${d.code}\n失败环节：${d.phase}\n原因：${d.cause}${d.observedCode?'\n记录到：'+d.observedCode:''}${d.httpStatus?'\nHTTP状态：'+d.httpStatus:''}${d.exitCode!==undefined?'\n退出码：'+d.exitCode:''}${d.exitSignal?'\n退出信号：'+d.exitSignal:''}\n建议：${d.next}`;
+  return `错误码：${d.code}\n失败环节：${d.phase}\n原因：${d.cause}${d.apiAction?'\n只读接口：'+d.apiAction:''}${d.platformCode?'\n平台错误码：'+d.platformCode:''}${d.observedCode?'\n记录到：'+d.observedCode:''}${d.httpStatus?'\nHTTP状态：'+d.httpStatus:''}${d.exitCode!==undefined?'\n退出码：'+d.exitCode:''}${d.exitSignal?'\n退出信号：'+d.exitSignal:''}\n建议：${d.next}`;
 }
 export function safeExecutionError(error) {
   const d=failureDetails(error);

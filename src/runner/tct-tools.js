@@ -1,0 +1,57 @@
+import {constants,publicEncrypt,createHash,randomUUID} from 'node:crypto';
+import {validateTct,validateTctQuery} from '../shared/tct-policy.js';
+const sessions=new Map(), lanes=new Map();
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function pace(origin){const prior=lanes.get(origin)??Promise.resolve();const next=prior.catch(()=>{}).then(()=>pause(250));lanes.set(origin,next);await next;}
+const fail=(code,message)=>Object.assign(new Error(message),{code});
+export function losslessTctJson(text){return JSON.parse(text,(_k,v,c)=>typeof v==='number'&&Number.isInteger(v)&&!Number.isSafeInteger(v)?c.source:v);}
+const taskFields=['TaskId','TaskName','GroupId','GroupName','GroupType','CurrentVersion','TaskState','TaskStatus','TaskRule','CreatedTime','UpdatedTime','Version','BatchesCount','TaskType','ExecuteType','TriggerType','TimeOut','RetryCount','RetryInterval'];
+const groupFields=['Id','Name','GroupId','GroupName','ClusterId','ClusterName','NamespaceId','NamespaceName','ApplicationId','ApplicationName','InstanceNum','OnlineInstanceNum','TaskNum'];
+const batchFields=['TaskId','TaskLogId','BatchLogId','BatchId','BatchType','GroupId','GroupName','ScheduleFireTime','StartTime','TaskName','ExecuteType','State','TriggerType','EndTime','TotalCount','SuccessCount','FailedCount','TerminateCount','TimeoutCount','UnknownCount','HistoryCount','SpanTime'];
+export async function createTctTools(e,q,cred,adapters={}){
+ validateTct(e);validateTctQuery(q);const c=e.tct,fetcher=adapters.tctFetch??fetch;let active=true;
+ const key=createHash('sha256').update(JSON.stringify([c,cred])).digest('hex');
+ const checked=async()=>{if(!active)throw fail('TCT_CLOSED','调度工具已关闭');await adapters.authorize?.();};
+ const clean=v=>typeof v==='string'?[cred.username,cred.password].filter(Boolean).reduce((s,x)=>s.split(x).join('[redacted]'),v):Array.isArray(v)?v.map(clean):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clean(x)])):v;
+ const pick=(v,fields)=>clean(Object.fromEntries(fields.filter(k=>v[k]!==undefined).map(k=>[k,k==='TaskRule'&&v[k]&&typeof v[k]==='object'?Object.fromEntries(['RuleType','Expression','RepeatInterval','AllowParallel'].filter(x=>v[k][x]!==undefined).map(x=>[x,v[k][x]])):v[k]])));
+ async function raw(url,session,{method='GET',body}={}){
+  await checked();const u=new URL(url);if(![c.loginOrigin,c.consoleOrigin,c.apiOrigin].includes(u.origin))throw fail('TCT_ORIGIN','未批准的云入口');
+  const cookies=session.cookies.filter(x=>(x.hostOnly?u.hostname===x.domain:u.hostname===x.domain||u.hostname.endsWith('.'+x.domain))&&u.pathname.startsWith(x.path)).map(x=>x.name+'='+x.value).join('; ');
+  let r;try{r=await fetcher(url,{method,body:body?JSON.stringify(body):undefined,redirect:'manual',signal:AbortSignal.timeout(Math.max(q.timeoutMs,20000)),headers:{Cookie:cookies,'X-CsrfCode':session.csrf??'','X-SeqId':randomUUID(),...(body?{'Content-Type':'application/json'}:{})}});}catch{throw fail('TCT_NETWORK','调度平台连接失败或单次请求超时；未触发任务，可重试读取');}
+  for(const header of r.headers.getSetCookie()){
+   const [pair,...parts]=header.split(';'),at=pair.indexOf('='),attrs=Object.fromEntries(parts.map(s=>{const a=s.trim().split('=');return [a[0].toLowerCase(),a.slice(1).join('=')];}));const domain=(attrs.domain??u.hostname).replace(/^\./,'').toLowerCase();
+   if(!(u.hostname===domain||u.hostname.endsWith('.'+domain))||domain.split('.').length<2)continue;
+   const cookie={name:pair.slice(0,at).trim(),value:pair.slice(at+1),domain,path:attrs.path??'/',hostOnly:!attrs.domain};session.cookies=session.cookies.filter(x=>!(x.name===cookie.name&&x.domain===domain&&x.path===cookie.path));session.cookies.push(cookie);
+  }
+  if(r.status!==200)throw fail('TCT_HTTP','调度平台HTTP读取失败（'+r.status+'）；未触发任务');return r;
+ }
+ async function login(){
+  const s={cookies:[],csrf:''};const html=await(await raw(c.loginOrigin+'/login/subAccount',s)).text();const match=html.match(/<script[^>]+id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);let props;try{props=JSON.parse(match?.[1]).props.pageProps;}catch{throw fail('TCT_LOGIN_PROTOCOL','云登录页面协议变化，需维护者核查');}
+  if(props.transportSecret?.method!=='rsa-2048')throw fail('TCT_LOGIN_PROTOCOL','云登录加密协议不支持，需人工验证');s.csrf=props.csrfCode??'';
+  let encrypted;try{encrypted=publicEncrypt({key:Buffer.from(props.transportSecret.public_key,'base64').toString('utf8'),padding:constants.RSA_PKCS1_PADDING},Buffer.from(cred.password)).toString('base64');}catch{throw fail('TCT_LOGIN_PROTOCOL','云登录加密信息无效');}
+  const prefix='T'+['TCESECURITY','rsa-2048','V1'].map(x=>Buffer.from(x).toString('hex')).join(':')+':';
+  const result=losslessTctJson(await(await raw(c.loginOrigin+'/api/login/subaccount',s,{method:'POST',body:{ownerUin:c.ownerUin,username:cred.username,password:prefix+encrypted,captcha:''}})).text());
+  if(String(result.code)!=='0'||result.data?.action!=='continue')throw fail('TCT_AUTH','云登录未完成；请维护者核查账号、验证码或多因素认证，不自动重放登录');
+  const csrf=s.cookies.find(x=>x.name==='csrfCode')?.value,skey=s.cookies.find(x=>x.name==='skey')?.value;
+  if(csrf)s.csrf=decodeURIComponent(csrf);else if(skey){let hash=5381;for(const ch of decodeURIComponent(skey))hash+=(hash<<5)+ch.charCodeAt(0);s.csrf=String(hash&2147483647);}else throw fail('TCT_AUTH','云会话缺少有效登录信息');return s;
+ }
+ async function session(){if(!sessions.has(key))sessions.set(key,login().catch(err=>{sessions.delete(key);throw err;}));return sessions.get(key);}
+ const actions=new Set(['DescribeGroups','DescribeTaskRecords','DescribeTaskDetail','DescribeTaskBatchRecords']);
+ async function api(action,data,recover=true,rateRetry=true){
+  if(!actions.has(action))throw fail('TCT_ACTION','仅允许已实现的调度只读接口');const s=await session();await pace(c.apiOrigin);const r=await raw(c.apiOrigin+'/capi/v3?i=tct/'+action,s,{method:'POST',body:{serviceType:'tct',action,region:c.region,data:{...data,Version:'2018-03-26',Language:'zh-CN'}}});let v;try{v=losslessTctJson(await r.text());}catch{throw fail('TCT_RESPONSE','调度平台返回了无法解析的响应');}
+  if(String(v.code)!=='0'||v.data?.Response?.Error){if(v.data?.Response?.Error?.Code==='RequestLimitExceeded'&&rateRetry){await pause(1500);return api(action,data,recover,false);}const auth=/Login|Session|Csrf/i.test(String(v.codeDesc));if(auth&&recover){sessions.delete(key);return api(action,data,false,rateRetry);}const observed=String(v.data?.Response?.Error?.Code??v.codeDesc??v.code),platformCode=/^(RequestLimitExceeded|AuthFailure|UnauthorizedOperation|ResourceNotFound|InvalidParameter|InternalError|FailedOperation|MissingParameter|UnsupportedOperation)(\.[A-Za-z][A-Za-z0-9]*)?$/.test(observed)?observed:'UNRECOGNIZED_PLATFORM_ERROR';throw Object.assign(fail(auth?'TCT_AUTH':platformCode==='RequestLimitExceeded'?'TCT_RATE_LIMIT':'TCT_API','调度只读接口失败；'+action+'；'+platformCode),{platformCode,apiAction:action});}
+  const result=v.data?.Response?.Result;if(!result||typeof result!=='object')throw fail('TCT_RESPONSE','调度平台响应缺少结果');return result;
+ }
+ const group=id=>{if(!q.groupIds.includes(id))throw fail('TCT_SCOPE','该调度分组不在当前系统/环境授权范围');return id;};
+ function page(args){const offset=args.offset??0,limit=args.limit??q.maxRows;if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>q.maxRows)throw fail('REPORT_INPUT','offset须为非负安全整数，limit须在本入口页大小范围内');return{Offset:offset,Limit:limit};}
+ function paged(result,p,fields){const rows=result.Content;if(!Array.isArray(rows)||!Number.isSafeInteger(result.TotalCount)||result.TotalCount<0)throw fail('TCT_RESPONSE','调度分页响应不完整');if(!rows.length&&p.Offset<result.TotalCount)throw fail('TCT_PAGINATION','调度分页未前进；保留已读证据，不将缺页当作空结果');const next=p.Offset+rows.length;return{rows:rows.map(r=>pick(r,fields)),total:result.TotalCount,nextOffset:next<result.TotalCount?next:null,complete:next>=result.TotalCount,fetchedAt:new Date().toISOString(),snapshot:'逐次读取，非事务快照'};}
+ async function member(groupId,taskId){group(groupId);if(typeof taskId!=='string'||!/^\d+$/.test(taskId))throw fail('REPORT_INPUT','taskId须为原始十进制字符串，不能使用浮点数');let offset=0;for(;;){const p={Offset:offset,Limit:q.maxRows},r=await api('DescribeTaskRecords',{GroupId:groupId,...p}),page=paged(r,p,taskFields);if(r.Content.some(t=>String(t.TaskId)===taskId&&t.GroupId===groupId))return;if(page.nextOffset===null)throw fail('TCT_SCOPE','任务不属于当前授权分组或已不可见');offset=page.nextOffset;}}
+ const spec=[{tool:'connection',args:{},description:'Authenticate private-cloud TCT; return configured groups only. No task execution.'},{tool:'groups',args:{groupId:'optional configured group ID'},description:'Without groupId list configured scope only (not a live check). With groupId read current cluster/namespace metadata for that group. No other environment groups are returned.'},{tool:'tasks',args:{groupId:'configured group ID',offset:'0 or nextOffset',limit:'page size'},description:'Read task names, schedule, status and retry metadata. Follow nextOffset; task arguments and secret configuration are not exposed.'},{tool:'task_detail',args:{groupId:'configured group ID',taskId:'exact decimal string'},description:'Read task schedule/status metadata after verifying group membership. Timestamps are scheduler metadata, not application deployment time.'},{tool:'task_batches',args:{groupId:'configured group ID',taskId:'exact decimal string',offset:'0 or nextOffset',limit:'page size'},description:'Read execution batch status, start/end times and counts. Follow nextOffset. Does not trigger/retry/stop a task. Execution logs and arguments are not exposed.'}];
+ return{spec,async run(tool,args={}){await checked();const contract=spec.find(x=>x.tool===tool);if(!contract||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(contract.args,k)))throw fail('REPORT_INPUT','未知调度工具或参数');
+  if(tool==='connection'){await session();return{connected:true,kind:'tct',groupIds:[...q.groupIds],readOnlyBy:'fixed-program-actions',accountReadOnlyVerified:false};}
+  if(tool==='groups'){if(args.groupId===undefined)return{rows:q.groupIds.map(GroupId=>({GroupId})),metadataVerified:false,source:'reviewed-configuration',complete:true};const rows=[];for(const id of [group(args.groupId)]){const r=await api('DescribeGroups',{GroupType:'tsf',GroupId:id});if(!Array.isArray(r.Content)||r.Content.length!==1||![r.Content[0].Id,r.Content[0].GroupId].includes(id))throw fail('TCT_SCOPE','已登记分组不可见或返回范围不一致');rows.push(pick(r.Content[0],groupFields));}return{rows,complete:true,fetchedAt:new Date().toISOString()};}
+  const id=group(args.groupId);if(tool==='tasks'){const p=page(args),r=await api('DescribeTaskRecords',{GroupId:id,...p});if(r.Content?.some(t=>t.GroupId!==id))throw fail('TCT_SCOPE','调度平台返回了其它分组任务');return paged(r,p,taskFields);}
+  await member(id,args.taskId);if(tool==='task_detail'){const r=await api('DescribeTaskDetail',{TaskId:args.taskId});if(r.GroupId!==id)throw fail('TCT_SCOPE','调度任务分组发生变化');return{task:pick(r,taskFields),fetchedAt:new Date().toISOString()};}
+  const p=page(args),r=await api('DescribeTaskBatchRecords',{TaskId:args.taskId,BatchType:'N',...p});if(r.Content?.some(t=>t.GroupId!==id||String(t.TaskId)!==args.taskId))throw fail('TCT_SCOPE','调度执行记录范围不一致');return paged(r,p,batchFields);
+ },async close(){active=false;}};
+}
