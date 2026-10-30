@@ -221,7 +221,9 @@ export class ConversationService {
               if (event === 'error') this.update(turn.id, { connectionRetryAt: new Date().toISOString(), connectionWillRetry: info.willRetry }).catch(() => {});
             } }));
           if (decision.definitionUpdates?.length) {
-            try { decision.definitionReceipts=await recordBusinessDefinitions({dataDir:this.context.config.dataDir,actor:turn,projectId:input.project?.id,updates:decision.definitionUpdates}); }
+            try { decision.definitionReceipts=await recordBusinessDefinitions({dataDir:this.context.config.dataDir,file:this.context.config.knowledgeFile,actor:turn,projectId:input.project?.id,updates:decision.definitionUpdates});
+              if(decision.definitionReceipts.length)decision.reply+=`\n已保存团队口径：${decision.definitionReceipts.map(r=>`${r.title}（${r.environment}，第${r.version}版）`).join('、')}。后续同范围提问沿用该版本，实时数据重新查询。`;
+            }
             catch { decision.definitionSaveFailed=true;decision.reply+='\n本次口径尚未成功保存为共享版本，不能声称已记住；仍保留原问题继续处理。'; }
           }
           if (this.context.knowledge&&!decision.definitionUpdates?.length) decision = await this.context.knowledge.reuse(turn, input.project?.id, decision, input);
@@ -344,7 +346,7 @@ export class ConversationService {
         rule: '仅处理当前系统。明确属于其它系统时用 reply 提示重新 @ 对应助手发起新问题，不转交、不查其它系统。' } } : {}),
       delivery:{visibility:turn.visibility??'public',rule:turn.visibility==='requester'?'只向提问者投递临时卡片；附件通过同一机器人私聊，不得公开。':'普通公开回复'},
       contactDirectory: this.context.contacts ? await this.context.contacts.catalog(turn) : {enabled:false,pending:[]},
-      businessDefinitions: await readBusinessDefinitions({dataDir:this.context.config.dataDir,actor:turn,projectId}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不能声称此前没有确认或已保存；保留任务并报告读取缺口。'}]),
+      businessDefinitions: await readBusinessDefinitions({dataDir:this.context.config.dataDir,file:this.context.config.knowledgeFile,actor:turn,projectId}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不能声称此前没有确认或已保存；保留任务并报告读取缺口。'}]),
       teamKnowledge: this.context.knowledge ? await this.context.knowledge.candidates(turn, projectId) : { enabled: false, candidates: [] },
       memory, nativeSession: scoped, contextIsolation: { policy: 'question-v2', questionIds: [...questionIds], rule: '只回答当前问题；关联问题历史不是其他任务的授权。不得引入无关话题。' }, requestId: turn.id, questionId: turn.questionId ?? null,
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),

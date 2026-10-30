@@ -70,7 +70,7 @@ export async function recordBusinessDefinitions({dataDir,actor,projectId,updates
     source:{conversationId:actor.id,senderId:actor.senderId,quote:u.quote},previousId:old?.id??null};
    if(old)db.prepare("UPDATE definitions SET status='superseded' WHERE id=?").run(old.id);
    db.prepare('INSERT INTO definitions VALUES(?,?,?,?,?,?,?)').run(entry.id,entry.team,entry.environment,entry.topic,entry.version,'active',JSON.stringify(entry));
-   accepted.push({id:entry.id,version:entry.version,title:entry.title});
+   accepted.push({id:entry.id,version:entry.version,title:entry.title,environment:entry.environment});
   }
   db.prepare('INSERT INTO definition_receipts VALUES(?,?)').run(receipt,JSON.stringify(accepted));db.exec('COMMIT');return accepted;
  }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}finally{db.close();}

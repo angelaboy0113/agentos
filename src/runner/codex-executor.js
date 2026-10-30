@@ -50,7 +50,7 @@ export async function executeJob(job, config, emit) {
     job.taskIntent === 'analysis' ? path.join(config.worktreeRoot, 'analysis-resources') : workspace);
   const ledger = job.taskIntent === 'analysis'&&!resumingAnalysis ? await readProjectLedger(workspace, project, sourceSync) : [];
   if(job.reportFiles?.length)job={...job,reportEvidence:await reportReviewEvidence(config.dataDir??path.dirname(config.worktreeRoot),job)};
-  if(job.taskIntent==='analysis')job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),actor:definitionActor(job),projectId:job.projectId,environment:job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
+  if(job.taskIntent==='analysis')job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile,actor:definitionActor(job),projectId:job.projectId,environment:job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
   const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace)+`
 固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标}，Runner按需补取并恢复同一会话。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });

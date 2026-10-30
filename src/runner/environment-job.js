@@ -29,7 +29,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   const sourceQueryContext=await buildSourceQueryContext(sourceResult);
   const renewPlan=async current=>(await controlPost(config,`/api/v1/jobs/${encodeURIComponent(job.id)}/environment-renew`,{leaseId:job.lease.id,runnerId:job.lease.runnerId,scopeHash:current.scopeHash})).plan;
   try { const cfg=await loadEnvironments();environment=cfg.environments[plan.environmentId];
-    job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),actor:definitionActor(job),projectId:job.projectId,environment:job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
+    job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile,actor:definitionActor(job),projectId:job.projectId,environment:job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
     const adapters={renewPlan,reportJob:job,dataDir:config.dataDir??path.dirname(config.worktreeRoot),exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id),investigationContext:reportInvestigationContext(job),sourceQueryContext,...(environment.kind==='website'?{tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint}:{})};
     result=environment?.queries[plan.queryId]?.mode==='investigate'?await investigateEnvironment(plan,emit,adapters):await readEnvironment(plan);
   }

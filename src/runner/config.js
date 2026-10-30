@@ -14,6 +14,7 @@ export async function runnerConfig(overrides = {}) {
   const analysisTurnTimeoutMs = 0, analysisResumeTimeoutMs = 0;
   return {
     ...(overrides.localExecutionRegistry?{localExecutionRegistry:overrides.localExecutionRegistry}:{}),
+    knowledgeFile:path.resolve(overrides.knowledgeFile??process.env.AGENTOS_KNOWLEDGE_FILE??'./config/knowledge.local.json'),
     dataDir:path.resolve(overrides.dataDir??process.env.AGENTOS_DATA_DIR??'./data'),
     serverUrl: String(overrides.serverUrl ?? process.env.AGENTOS_SERVER_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, ''),
     runnerId: overrides.runnerId ?? process.env.AGENTOS_RUNNER_ID ?? `runner-${process.platform}-${process.pid}`,
