@@ -246,3 +246,12 @@ test('source-backed where-to-create guidance normalizes ready and partial before
  const original={...input,outcome:'ready'};
  const strict=assessInvestigation(live,original);assert.equal(enforceHandoff(strict,await validateHandoff(live,strict,dir)).outcome,'blocked');
 });
+
+test('generated investigation instructions cannot turn an accepted reconciliation report into a root-cause investigation',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'核对订单与明细金额，导出完整CSV，保留无法解释的差额，不补假零。',instruction:'深入分析异常原因与根因，继续定位失败环节'};
+ assert.equal(requiresCausalEvidence(job),false);assert.equal(requiresDeepInvestigation(job),false);
+ const result={outcome:'ready',summary:'核对和CSV已完成，差额保留未知。',finalMessage:'完整清单和金额已核实，未解释差额已列明。',investigation:{status:'complete',blocker:null,causalAssessment:null,goals:[{id:QUESTION_GOAL_ID,required:true,status:'verified',evidence:'全部对象已覆盖，文件已核验，差额按原要求保留'}]},handoff:{checks:[{id:QUESTION_GOAL_ID,required:true,status:'passed',evidence:'原要求完成'}],artifacts:[],risks:['差额原因未知'],returnTo:'none'}};
+ assert.equal(assessInvestigation(job,result).outcome,'ready');assert.equal(investigationComplete(job,result),true);
+ const causal={...job,originalQuestion:'为什么订单与明细金额不一致？请查明根因',instruction:'只输出CSV即可'};assert.equal(requiresCausalEvidence(causal),true);assert.equal(investigationComplete(causal,result),false);
+ assert.equal(requiresCausalEvidence({instruction:'为什么失败'}),true);
+});

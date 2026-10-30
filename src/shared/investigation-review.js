@@ -12,14 +12,24 @@ const diagnosticKinds = new Set(['application_log','runtime_trace','database','s
 const operationGuidance = /(?:怎么|如何|怎样|在哪|哪里).{0,18}(?:操作|创建|新增|配置|发起|申请|填写|保存|提交|办理)|(?:操作|创建|新增|配置|发起|申请|填写|保存|提交|办理).{0,18}(?:怎么|如何|怎样|步骤|流程|入口)|(?:能不能|是否能|可不可以).{0,12}(?:操作|创建|新增|配置|发起|申请|保存|提交|办理)|(?:how\s+to|where\s+(?:can|do)\s+i).{0,30}(?:create|configure|submit|apply|operate)/i;
 const explicitLiveVerification = /(?:实际|直接|现场).{0,10}(?:操作|打开|进入|登录|实测|验证)|(?:打开|进入|登录).{0,12}(?:页面|系统).{0,12}(?:看看|看一下|确认|验证|操作)|(?:当前|现在).{0,10}(?:账号|用户|页面|权限).{0,12}(?:能否|是否|可以|展示|显示)|(?:帮我|请).{0,10}(?:实测|实际操作|代为操作|创建一条|提交一次)|(?:live|current\s+account|actually).{0,20}(?:verify|test|open|submit)/i;
 
+function originalAcceptanceText(job){
+ if(!nonempty(job.originalQuestion))return job.instruction??'';
+ const text=job.originalQuestion;
+ // Short references retain their resolved subject. A substantive original
+ // request is authoritative; appended historical knowledge never adds goals.
+ const rest=text.replace(/(?:prd|uat|sit|测试|生产)\s*环境/gi,'').replace(/深度|深入|彻底|完整|全面|排查|调查|分析|一下|请|帮我|继续|接着|再|看看|查一下|这个问题|该问题|上述问题|前面的问题|在|中|[\s，,。.!！?？]/g,'');
+ return rest?text:text+'\n'+String(job.instruction??'').split(/已有历史知识|已有知识资料/)[0];
+}
+
 export function requiresCausalEvidence(job) {
- return causalQuestion.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+ // Generated directions must not add a causal acceptance gate to a report.
+ return causalQuestion.test(originalAcceptanceText(job));
 }
 export function requiresDeepInvestigation(job) {
- return deepInvestigation.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+ return deepInvestigation.test(originalAcceptanceText(job));
 }
 export function isOperationGuidanceQuestion(job) {
- return operationGuidance.test(`${job.originalQuestion ?? ''}\n${job.instruction ?? ''}`);
+ return operationGuidance.test(originalAcceptanceText(job));
 }
 export function requiresLiveVerification(job) {
  // Generated investigation instructions must not expand the user's acceptance target.

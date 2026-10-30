@@ -1,0 +1,15 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,rm}from'node:fs/promises';import os from'node:os';import path from'node:path';
+import {maintenanceCheckpoint,resumeMaintenanceCheckpoint}from'../src/runner/maintenance-checkpoint.js';import{JsonStore}from'../src/shared/store.js';
+const prior={handoffGate:{passed:true},threadId:'thread',reportAssessment:{decision:'deliver'},investigation:{status:'complete',goals:[{id:'original-question',required:true,status:'verified',evidence:'file checks passed'}]},verifiedArtifacts:[{path:'code.java'}]};
+async function fixture(t){const dataDir=await mkdtemp(path.join(os.tmpdir(),'checkpoint-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));const job={id:'JOB-test',taskIntent:'analysis',stage:'developer',continuousInvestigation:true,originalQuestion:'导出已核对清单，差额保留',context:[{kind:'analysis_turn',result:prior}]};return{dataDir,job};}
+test('only explicit operator request at a new source step parks, never an environment read or unrelated task',async t=>{
+ const f=await fixture(t);assert.equal(await maintenanceCheckpoint(f.job,f),null);await mkdir(path.join(f.dataDir,'maintenance'));await writeFile(path.join(f.dataDir,'maintenance/checkpoints.json'),JSON.stringify({version:1,requests:[{jobId:f.job.id,requestId:'upgrade-1'}]}));
+ const p=await maintenanceCheckpoint(f.job,f);assert.equal(p.outcome,'needs_clarification');assert.equal(p.investigation.status,'wait');assert.equal(p.reportAssessment,null);assert.deepEqual(p.verifiedArtifacts,prior.verifiedArtifacts);assert.equal(p.investigation.goals[0].status,'open');
+ assert.equal(await maintenanceCheckpoint({...f.job,environmentAccess:{kind:'mysql'}},f),null);assert.equal(await maintenanceCheckpoint({...f.job,id:'other'},f),null);
+});
+test('offline resume requires exact checkpoint and original scope, retaining files, identities and audits',async t=>{
+ const f=await fixture(t);await mkdir(path.join(f.dataDir,'maintenance'));await writeFile(path.join(f.dataDir,'maintenance/checkpoints.json'),JSON.stringify({version:1,requests:[{jobId:f.job.id,requestId:'upgrade-2'}]}));const p=await maintenanceCheckpoint(f.job,f),store=new JsonStore(path.join(f.dataDir,'state.json'));
+ await store.transact(s=>{s.jobs.push({...f.job,status:'awaiting_clarification',result:p,events:[],reportFiles:[{id:'f',verificationHash:'proof'}],senderId:'original-owner',chatId:'original-chat'});});
+ await assert.rejects(resumeMaintenanceCheckpoint(store,{jobId:f.job.id,requestId:'wrong'}),/mismatch/);
+ const r=await resumeMaintenanceCheckpoint(store,{jobId:f.job.id,requestId:'upgrade-2'}),j=await store.getJob(f.job.id);assert.equal(r.resumed,true);assert.equal(j.status,'queued');assert.equal(j.instruction,f.job.originalQuestion);assert.equal(j.reportFiles[0].id,'f');assert.equal(j.senderId,'original-owner');assert.equal(j.maintenanceRecoveries.length,1);assert.equal(j.result.maintenanceCheckpoint.requestId,'upgrade-2');assert.equal(j.result.reportAssessment,null);
+});
