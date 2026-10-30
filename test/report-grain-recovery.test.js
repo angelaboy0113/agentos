@@ -32,8 +32,9 @@ test('one-to-many grouped LEFT JOIN keeps all68 masters and139 details, nulls an
  const inner=groupedDatasetStatement({...args,join:{...args.join,type:'inner'}},tables,types,q);assert.equal(db.prepare(inner.sql).all(...inner.params).length,139);
  }finally{db.close();}
 });
-test('left joins reject unscoped masters, unknown join kinds and injected fields; defaults remain INNER',()=>{
- assert.throws(()=>linkedAggregateStatement({...args,filters:args.filters.filter(f=>f.table==='details')},tables,types,q),/左表范围/);
+test('left joins retain authorized full masters with right eligibility and reject unknown joins or injected fields',()=>{
+ const full=linkedAggregateStatement({...args,filters:args.filters.filter(f=>f.table==='details')},tables,types,q);assert.match(full.sql,/ON .* AND .* WHERE 1=1/);assert.ok(full.params.length>0);
+ assert.match(linkedAggregateStatement({...args,filters:[]},tables,types,q).sql,/WHERE 1=1/);
  for(const type of ['right','full','left;DELETE'])assert.throws(()=>linkedAggregateStatement({...args,join:{...args.join,type}},tables,types,q));
  for(const rowKey of ['__proto__','constructor','password','amount','bad;DROP'])assert.throws(()=>groupedDatasetStatement({...args,rowKey},tables,types,q));
  assert.throws(()=>groupedDatasetStatement({...args,groupColumns:[{table:'details',column:'amount;DROP'}]},tables,types,q));

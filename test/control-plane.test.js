@@ -42,17 +42,13 @@ test('read-only analysis resumes once after temporary model capacity failure', a
   assert.equal(isModelCapacityError(new Error('Selected model is at capacity. Please try a different model.')), true);
 });
 
-test('capacity retry is read-only only and a second capacity failure remains explicit', async () => {
-  let calls = 0;
-  await assert.rejects(runCodexWithCapacityRetry({
-    job: { taskIntent: 'implementation' }, workspace: '/workspace', prompt: 'write', emit: async () => {},
-  }, { run: async () => { calls++; throw new Error('Selected model is at capacity.'); }, wait: async () => {} }), /at capacity/);
-  assert.equal(calls, 1);
-  calls = 0;
-  await assert.rejects(runCodexWithCapacityRetry({
-    job: { taskIntent: 'analysis', stage: 'developer', context: [] }, workspace: '/workspace', prompt: 'read', emit: async () => {},
-  }, { run: async () => { calls++; throw new Error('Selected model is at capacity.'); }, wait: async () => {} }), /at capacity/);
-  assert.equal(calls, 2);
+test('capacity waits through repeated failures, resumes latest thread and stops on other errors', async () => {
+ let calls=0;const ids=[],events=[];
+ const result=await runCodexWithCapacityRetry({job:{taskIntent:'analysis',context:[]},workspace:'/workspace',emit:async e=>events.push(e),prompt:'read'},
+ {run:async o=>{ids.push(o.resumeThreadIdOverride);if(++calls<5)throw Object.assign(new Error('Selected model is at capacity.'),{threadId:'same'});return 'done';},wait:async()=>{}});
+ assert.equal(result,'done');assert.equal(calls,5);assert.ok(ids.slice(1).every(id=>id==='same'));assert.equal(events.length,4);
+ calls=0;await assert.rejects(runCodexWithCapacityRetry({job:{taskIntent:'implementation'},emit:async()=>{}},{run:async()=>{calls++;throw new Error('Selected model is at capacity.');}}),/capacity/);assert.equal(calls,1);
+ await assert.rejects(runCodexWithCapacityRetry({job:{taskIntent:'analysis',context:[]},workspace:'/workspace',emit:async()=>{}},{run:async()=>{throw new Error('permission denied');}}),/permission denied/);
 });
 
 test('only explicit role commands are recognized for execution', () => {

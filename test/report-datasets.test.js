@@ -85,3 +85,15 @@ test('persisted datasets reject tampering and renewed grants still recheck permi
  const next=new ReportDatasets({maxRows:100,directory:root,scope:'scope'});assert.equal((await next.list()).datasets.length,0);await assert.rejects(next.compose(compose(a.datasetRef)),/摘要/);
  const revoked=new ReportDatasets({maxRows:100,directory:root,scope:'scope',authorize:async()=>{throw new Error('revoked');}});await assert.rejects(revoked.list(),/revoked/);await assert.rejects(revoked.compose(compose(a.datasetRef)),/revoked/);
 });
+
+test('authorized full population needs no fabricated filter and keeps all pages beyond preview',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'agentos-all-export-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const tables=new Map([['contracts',['code','applicant']]]),types=new Map([['contracts',new Map([['code','varchar'],['applicant','varchar']])]]),q={tables:['contracts'],maxRows:20};
+ const s=groupedDatasetStatement({table:'contracts',groupColumns:['code','applicant'],aggregates:[{op:'count',as:'records'}],filters:[]},tables,types,q);
+ assert.match(s.sql,/WHERE 1=1/);assert.doesNotMatch(s.sql,/LIMIT/);assert.deepEqual(s.params,[]);
+ const data=Array.from({length:1201},(_,i)=>({code:String(i).padStart(6,'0'),applicant:i%2?'张三':null,records:'1'}));
+ const d=new ReportDatasets({directory:root,previewRows:20,maxRows:"all"});let calls=0;
+ const result=await d.collect(s,async statement=>{calls++;return pages(data)(statement);});assert.equal(result.complete,true);assert.equal(result.rowCount,1201);assert.ok(calls>1);assert.ok(result.preview.length<=20);
+ const draft=await d.compose({sources:[{name:'s1',datasetRef:result.datasetRef,keyColumn:'code'}],columns:[{label:'合同编码',value:{op:'key'}},{label:'申请人',value:{op:'field',source:'s1',column:'applicant',missing:'empty',nulls:'empty'}}]});assert.equal(draft.rowCount,1201);
+ assert.throws(()=>groupedDatasetStatement({table:'foreign',groupColumns:['code'],aggregates:[{op:'count',as:'records'}],filters:[]},tables,types,q),/范围/);
+});

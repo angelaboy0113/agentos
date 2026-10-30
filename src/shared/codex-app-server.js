@@ -1,3 +1,4 @@
+import {retryModelCapacity} from './model-capacity.js';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
@@ -110,7 +111,13 @@ export class CodexAppServer extends EventEmitter {
     } else this.emit('notification', message);
   }
 
-  async turn(params, { signal, timeoutMs = 0, onEvent } = {}) {
+  async turn(params, options = {}) {
+    // These app-server turns plan decisions only; tools execute outside this call.
+    return retryModelCapacity(()=>this.turnOnce(params,options),{signal:options.signal,active:()=>Boolean(this.child),
+      onRetry:({attempt})=>options.onEvent?.('error',{willRetry:true,reason:'model_capacity',attempt})});
+  }
+
+  async turnOnce(params, { signal, timeoutMs = 0, onEvent } = {}) {
     if (signal?.aborted) throw new Error('Codex turn aborted');
     await waitForStart(this.start(), signal);
     return new Promise((resolve, reject) => {

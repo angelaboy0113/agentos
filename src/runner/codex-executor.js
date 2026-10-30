@@ -1,3 +1,5 @@
+import {isModelCapacityError,retryModelCapacity} from '../shared/model-capacity.js';
+export {isModelCapacityError} from '../shared/model-capacity.js';
 import {prepareSnapshotHistory} from './source-snapshot.js';
 import {downloadInputFiles,inputFileContext} from './input-files.js';
 import {reportOutputPolicy} from '../shared/report-output-policy.js';
@@ -190,25 +192,16 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
   });
 }
 
-export function isModelCapacityError(error) {
-  return /selected model is at capacity|model.{0,40}(?:at capacity|overloaded|temporarily unavailable)/i.test(String(error?.message ?? error ?? ''));
-}
-
 export async function runCodexWithCapacityRetry(options, adapters = {}) {
-  const run = adapters.run ?? runCodex;
-  const wait = adapters.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  try {
-    return await run(options);
-  } catch (error) {
-    if (options.job.taskIntent !== 'analysis' || !isModelCapacityError(error)) throw error;
-    await options.emit({ type: 'progress', phase: 'model_capacity_retry', attempt: 1 });
-    await wait(adapters.delayMs ?? 5000);
-    const resumeThreadIdOverride = error.threadId ?? analysisThreadId(options.job, options.workspace);
-    const prompt = resumeThreadIdOverride
-      ? '上一轮只读调查因所选模型临时容量不足而中断。请基于同一会话已经取得的源码与工具证据继续，完成原问题并按输出 schema 返回结果；不要重复无必要的检索，也不要执行任何写操作。'
-      : options.prompt;
-    return run({ ...options, prompt, resumeThreadIdOverride });
-  }
+ const run=adapters.run??runCodex;
+ if(options.job.taskIntent!=='analysis')return run(options);
+ let current=options;
+ return retryModelCapacity(()=>run(current),{signal:options.signal,wait:adapters.wait,delayMs:adapters.delayMs,
+  onRetry:async({attempt,error})=>{
+   await options.emit({type:'progress',phase:'model_capacity_retry',attempt});
+   const resumeThreadIdOverride=error.threadId??current.resumeThreadIdOverride??analysisThreadId(options.job,options.workspace);
+   current={...options,resumeThreadIdOverride,prompt:resumeThreadIdOverride?'上一轮只读调查因所选模型临时容量不足而中断。请基于同一会话已经取得的源码与工具证据继续，完成原问题并按输出 schema 返回结果；不要重复无必要的检索，也不要执行任何写操作。':options.prompt};
+  }});
 }
 
 export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false, runtime = {}, resumeThreadId = null } = {}) {

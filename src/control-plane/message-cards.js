@@ -63,10 +63,10 @@ export function conversationCard(turn, now = Date.now()) {
   const final = ['ready', 'sent'].includes(turn.status);
   const failed = turn.aiFailed || turn.actionError;
   const state = final ? (failed ? '未执行' : turn.cloudInputPending ? '等待云文件就绪' : turn.setupPending ? '等待补齐接入' : '已回复') : turn.status === 'queued' ? '排队中'
-    : turn.connectionWillRetry ? '连接重试中' : '正在处理';
+    : turn.connectionWillRetry ? (turn.connectionRetryReason==='model_capacity'?'模型繁忙，自动重试中':'连接重试中') : '正在处理';
   const color = failed ? 'red' : turn.cloudInputPending||turn.setupPending ? 'orange' : final ? 'green' : 'blue';
   const content = final ? '' : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
-    : turn.cloudFileProgress&&!['ready','partial'].includes(turn.cloudFileProgress.phase) ? cloudFileProgressText(turn.cloudFileProgress) : turn.connectionWillRetry ? (turn.connectionRetryReason==='workspace_routing'?'Codex工作区路由暂时不可用，正在自动恢复，尚未执行本次操作。':'连接暂时异常，Codex 正在重试，尚未得到结果。') : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
+    : turn.cloudFileProgress&&!['ready','partial'].includes(turn.cloudFileProgress.phase) ? cloudFileProgressText(turn.cloudFileProgress) : turn.connectionWillRetry ? (turn.connectionRetryReason==='model_capacity'?'当前模型暂时没有可用容量，已保留原问题，正在同一会话中自动等待重试；可以主动停止。':turn.connectionRetryReason==='workspace_routing'?'Codex工作区路由暂时不可用，正在自动恢复，尚未执行本次操作。':'连接暂时异常，Codex 正在重试，尚未得到结果。') : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));

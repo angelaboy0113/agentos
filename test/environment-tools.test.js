@@ -36,7 +36,7 @@ test('dynamic query builder only permits actual scoped fields and bound filters'
   const tables = new Map([['orders', ['id','status','password']]]);
   const args = { table: 'orders', columns: ['status'], filters: [{ column: 'id', op: '=', value: "x' OR 1=1" }] };
   const s = selectStatement(args, tables, query); assert.doesNotMatch(s.sql, /OR 1=1/); assert.equal(s.params[0], "x' OR 1=1");
-  for (const bad of [{ ...args, columns: ['password'] }, { ...args, table: 'users' }, { ...args, columns: ['SLEEP(5)'] }, { ...args, filters: [] }, { ...args, filters: [{ column: 'id', op: '= 1;DELETE', value: 1 }] }]) assert.throws(() => selectStatement(bad, tables, query));
+  for (const bad of [{ ...args, columns: ['password'] }, { ...args, table: 'users' }, { ...args, columns: ['SLEEP(5)'] }, { ...args, filters: [{ column: 'id', op: '= 1;DELETE', value: 1 }] }]) assert.throws(() => selectStatement(bad, tables, query));
 });
 test('dynamic query builder supports bounded parameterized contains and in filters', () => {
   const tables = new Map([['logs', ['oper_param','status','id']]]);
@@ -333,7 +333,7 @@ test('aggregate counts validate same table fields and filters without sample lim
  assert.match(countStatement({...args,distinctColumns:['id','line']},tables,query).sql,/COUNT\(DISTINCT `id`, `line`\)/);
  assert.throws(()=>countStatement({...args,table:'other'},tables,query));
  assert.throws(()=>countStatement({...args,distinctColumns:['id); DROP TABLE orders']},tables,query));
- assert.throws(()=>countStatement({...args,filters:[]},tables,query));
+ assert.match(countStatement({...args,filters:[]},tables,query).sql,/WHERE 1=1/);
 });
 
 test('duplicate grouping is parameterized and limited to validated single-table fields',()=>{
