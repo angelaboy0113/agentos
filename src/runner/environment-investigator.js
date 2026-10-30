@@ -139,7 +139,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
         try{
           if(unresolvedInput||unresolvedTimeout||!results.some(x=>x.result?.datasetRef||x.result?.rows?.length))throw new Error('先修正未解决错误并保存当前有效数据，不能以切换入口跳过失败');
           nextEnvironmentQuery=validateContinuation(await authorizePlan(),plan,adapters.reportJob,args);
-          summary=String(choice.summary??'已保存本步骤证据，申请同问题下一数据库步骤。').slice(0,6000);complete=false;break;
+          summary=String(choice.summary??'').trim().slice(0,6000)||'已保存本步骤证据，申请同问题下一数据库步骤；完整原问题仍待审阅。';complete=false;break;
         }catch(error){results.push({tool:choice.tool,error:{code:'CONTINUATION_INPUT',message:error.message},executed:false});continue;}
       }
       lastArgumentKeys=args&&typeof args==='object'?Object.keys(args).filter(k=>['datasetRef','ref','startLine','leftRef','rightRef','leftKey','rightKey','table','columns','filters','sourceColumn','targetColumn','lookups','keyColumn','groupColumns','aggregates'].includes(k)).slice(0,12):[];
@@ -205,7 +205,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     }
     if (!summary) summary = '本次排查未完成；以下为已取得的证据。';
     // A planner cannot turn unresolved extraction or an empty evidence trail into success.
-    if (stopReason || results.filter(x => x.result).length < 2 || unresolvedInput || unresolvedTimeout || results.some((x,index) => x.result?.partial&&!(e.kind==='website'&&x.result.pageStatus==='loading'&&results.slice(index+1).some(later=>later.result?.pageStatus==='ready'&&typeof x.result.url==='string'&&later.result.url===x.result.url)))) complete = false;
+    if (nextEnvironmentQuery || stopReason || results.filter(x => x.result).length < 2 || unresolvedInput || unresolvedTimeout || results.some((x,index) => x.result?.partial&&!(e.kind==='website'&&x.result.pageStatus==='loading'&&results.slice(index+1).some(later=>later.result?.pageStatus==='ready'&&typeof x.result.url==='string'&&later.result.url===x.result.url)))) complete = false;
     if (unresolvedInput) summary = '仍有工具参数尚未修正；已取得的结果继续保留，完整交付尚未通过核验。';
     if (stopReason) summary = `${stopReason}\n\n${summary}`;
     if(adapters.renewPlan&&!stopReason)await authorizePlan();

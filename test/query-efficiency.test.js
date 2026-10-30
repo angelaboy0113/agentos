@@ -46,8 +46,8 @@ test('same-tier catalog and actual plan validation isolate two systems, environm
 test('planner proposes a database handoff without executing its target or claiming overall completion',async()=>{
  let calls=0;const ran=[];const result=await investigateEnvironment(plan(),async()=>{},{load:async()=>cfg,credential:async()=>({username:'synthetic-user',password:'synthetic-secret'}),reportJob:job,
   tools:async()=>({spec:[{tool:'connection'},{tool:'list_datasets'},{tool:'group_dataset'}],run:async tool=>{ran.push(tool);return tool==='group_dataset'?{datasetRef:'saved',rowCount:3,rows:[{id:'1'}]}:{};},close:async()=>{}}),
-  planner:async()=>({close:async()=>{},next:async input=>{calls++;assert.ok(input.tools.some(t=>t.tool==='continue_environment'));return calls===1?{tool:'group_dataset',arguments:'{}'}:{tool:'continue_environment',arguments:JSON.stringify(next),summary:'Current rows saved; remaining amount uses another database'};}})});
- assert.deepEqual(ran,['connection','list_datasets','group_dataset']);assert.deepEqual(result.nextEnvironmentQuery,next);assert.equal(result.partial,true);
+  planner:async()=>({close:async()=>{},next:async input=>{calls++;assert.ok(input.tools.some(t=>t.tool==='continue_environment'));return calls===1?{tool:'group_dataset',arguments:'{}'}:{tool:'continue_environment',arguments:JSON.stringify(next),summary:''};}})});
+ assert.deepEqual(ran,['connection','list_datasets','group_dataset']);assert.equal(calls,2);assert.deepEqual(result.nextEnvironmentQuery,next);assert.equal(result.partial,true);
 });
 test('unresolved tool failure cannot be bypassed by an environment handoff',async()=>{
  const {QueryInputError}=await import('../src/runner/environment-tools.js');let calls=0;
