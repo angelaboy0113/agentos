@@ -57,3 +57,21 @@ test('refresh routes each raw source by its trusted scope and rewrites persisted
  const final=await d.refresh({datasetRef:draft.datasetRef,requirement:'合成完整范围编号导出',populationRef:pop,populationKey:'id',expectedColumns:['编号'],scopeEvidence:'独立完整对象查询',columnRules:[{label:'编号',definition:'对象主键',evidence:'合成主档'}],checks:[]},{begin:async()=>{},reload:async(recipe,source)=>{calls.push({recipe,scope:source.scope});const reader=new ReportDatasets({directory:dir,scope:source.scope,datasetScopes:['sql-source','mongo-source'],maxRows:'all'});return reader.captureRows([{id:'a'}],['id'],{complete:true,queryDefinition:{sql:'REFRESH '+source.scope,params:[]},recipe});}});
  assert.equal(calls[0].scope,'sql-source');assert.equal(calls[1].scope,'mongo-source');assert.notEqual(calls[1].recipe.args.cohort.datasetRef,pop);assert.equal(final.refresh.sourceCount,2);assert.equal(final.refresh.mode,'renewed_authorized_sources_with_read_times');
 });
+
+test('Mongo amount type/null failures remain specific correctable data checks, never generic stops or zero amounts',async t=>{
+ const {QueryInputError}=await import('../src/runner/environment-tools.js');const {failureDiagnostic}=await import('../src/shared/failure-diagnostic.js');
+ for(const code of ['MONGO_AMOUNT_TYPE','MONGO_NULL_AMOUNT']){
+  const dir=await temp(t),tools=await createEnvironmentTools(e,q,{username:'synthetic',password:'hidden'},{exportDirectory:dir,mongoConnection:async()=>({destroy(){},request:async()=>{throw Object.assign(new Error('sensitive raw error body hidden'),{code});}})});
+  await assert.rejects(tools.run('group_dataset',{collections:['Evidence'],groupColumns:['owner'],aggregates:[{op:'sum',column:'amount',as:'total'}]}),error=>error instanceof QueryInputError&&error.code===code&&error.executed===true&&!error.message.includes('sensitive raw'));
+  assert.ok(!failureDiagnostic(Object.assign(new Error('hidden'),{code})).includes('EXECUTION_ERROR'));await tools.close();
+ }
+});
+
+test('planner recovers from rejected Mongo native sum and retains exact raw evidence without replaying the task',async t=>{
+ const {investigateEnvironment}=await import('../src/runner/environment-investigator.js');const dir=await temp(t),cfg={version:1,environments:{mongo:e}};
+ const plan=planQuery(cfg,{environmentId:'mongo',queryId:'investigate',parameters:['Verify amount exactly']},'alpha',{profile:'bot',senderId:'ou_owner'});let planning=0,rejected=0;
+ const out=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>({username:'synthetic',password:'hidden'}),exportDirectory:dir,
+ tools:async()=>createEnvironmentTools(e,q,{username:'synthetic',password:'hidden'},{exportDirectory:dir,mongoConnection:async()=>({destroy(){},request:async(op,args)=>{if(op==='connection')return{connected:true};if(op==='read'&&args.aggregates){rejected++;throw Object.assign(new Error('raw hidden'),{code:'MONGO_AMOUNT_TYPE'});}return{rows:[{id:'a',amount:'9007199254740993.25'}],complete:true};}})}),
+ planner:async()=>({next:async input=>{planning++;if(planning===1)return{tool:'group_dataset',arguments:JSON.stringify({collections:['Evidence'],groupColumns:['id'],aggregates:[{op:'sum',column:'amount',as:'total'}]})};if(planning===2){assert.ok(input.results.some(x=>x.error?.code==='MONGO_AMOUNT_TYPE'&&x.executed));return{tool:'group_dataset',arguments:JSON.stringify({collections:['Evidence'],columns:['id','amount']})};}return{tool:'finish',complete:false,summary:'Exact raw evidence retained; independent validation still required'};},close:async()=>{}})});
+ assert.equal(rejected,1);assert.equal(out.failure,null);assert.ok(out.toolInputErrors.some(x=>x.code==='MONGO_AMOUNT_TYPE'&&x.executed&&x.resolved));assert.equal(out.partial,true);
+});

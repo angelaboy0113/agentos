@@ -17,6 +17,8 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+ ['MONGO_AMOUNT_TYPE',/MONGO_AMOUNT_TYPE/,'MongoDB金额类型核验','金额字段含非数值BSON类型，直接数值聚合未通过；不能把数字字符串静默算成零。','保留完整明细并核对类型，使用精确十进制整理及独立原值分组核验；无效值不能丢弃。'],
+ ['MONGO_NULL_AMOUNT',/MONGO_NULL_AMOUNT/,'MongoDB金额完整性核验','金额字段存在真实空值或缺失，不能自动补零。','复用已存明细，核对缺失范围和业务含义，保留有效证据，不重跑整项任务。'],
  ['TCT_AUTH', /TCT_AUTH|TCT_LOGIN_PROTOCOL/, '调度平台登录核验', '调度平台登录或会话核验未完成，未触发或修改任务。', '维护者核对本机凭据、验证码、多因素认证及登录协议，保留已有证据后在原问题接续。'],
  ['TCT_NETWORK', /TCT_NETWORK|TCT_HTTP/, '调度平台连接', '调度平台本次连接失败、超时或HTTP读取失败，未取得完整响应。', '核对公司云网络及服务，恢复后继续原问题；不把读取失败当成任务没有执行。'],
  ['TCT_SCOPE', /TCT_SCOPE|TCT_ORIGIN|TCT_CLOSED/, '调度读取范围核验', '请求的调度分组或任务不在当前有效范围，或返回范围发生变化。', '核对当前系统、环境、精确分组及任务归属；不跨环境借用权限。'],
