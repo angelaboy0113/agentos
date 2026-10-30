@@ -1,3 +1,4 @@
+import {buildWindowDataset} from './window-dataset.js';
 import {normalizeCalendarPeriod} from './calendar-period.js';
 export {normalizeCalendarPeriod} from './calendar-period.js';
 import {summarizeDataset} from './dataset-summary.js';
@@ -81,13 +82,17 @@ export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Nu
  return {rows,columns,numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===inputs[0].snapshotId)?inputs[0].snapshotId:hash(inputs.map(d=>d.snapshotId).sort()),derivation:{kind:'period_grid',args:effectiveArgs,audit:{objects:populationMap.size,periods:periods.length,rowCount:rows.length,sources:audits},provenance}};
 }
 export async function verifyPeriodDataset(data,load,options={}){
- const kind=data?.derivation?.kind;if(!['left_lookup','period_grid','dataset_transform','dataset_summary'].includes(kind))return;
+ const kind=data?.derivation?.kind;if(!['left_lookup','period_grid','dataset_transform','dataset_summary','window_counts'].includes(kind))return;
  const state=options.state??(options.state={visiting:new Set(),done:new Set()}),token=options.ref??data;
  if(state.visiting.has(token))bad('期间数据依赖循环');if(state.done.has(token))return;
  state.visiting.add(token);
  try{
   const dependencies=new Map(),read=async ref=>{if(dependencies.has(ref))return dependencies.get(ref);const d=await load(ref);if(!d?.complete)bad('期间依赖缺失或不完整');await verifyPeriodDataset(d,load,{...options,state,ref});dependencies.set(ref,d);return d;};
-  if(kind==='dataset_transform'||kind==='dataset_summary'){
+  if(kind==='window_counts'){
+   if(data.derivation.version!==1)bad('不支持的窗口配方版本');const args=data.derivation.args;
+   await read(args.populationRef);for(const source of args.sources)await read(source.datasetRef);
+   const rebuilt=await buildWindowDataset(args,read,options);for(const k of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(JSON.stringify(data[k])!==JSON.stringify(rebuilt[k]))bad('窗口统计与完整来源重算不一致');
+  }else if(kind==='dataset_transform'||kind==='dataset_summary'){
    if(kind==='dataset_transform'?data.derivation.version!=='tree-filter-v1':data.derivation.version!==1)bad('不支持的数据整理配方版本');
    const base=await read(data.derivation.args.datasetRef),rebuilt=(kind==='dataset_summary'?summarizeDataset:transformDataset)(data.derivation.args,base);
    for(const key of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(JSON.stringify(data[key])!==JSON.stringify(rebuilt[key]))bad('整理数据与完整来源重算不一致');

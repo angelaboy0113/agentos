@@ -38,5 +38,5 @@ export class TaskDatasetStore {
 
 export function datasetDependencies(data){
  const d=data.derivation;
- return [...new Set([...(data.reportDraft?.sources??[]).map(s=>s.datasetRef),...(data.reportDraft?.population?[data.reportDraft.population.datasetRef]:[]),...(d?.kind==='period_grid'?[d.args.populationRef,...d.args.sources.map(s=>s.datasetRef)]:d?.kind==='left_lookup'?[d.datasetRef,...d.lookups.map(s=>s.datasetRef)]:['dataset_summary','dataset_transform'].includes(d?.kind)?[d.args.datasetRef]:[])])];
+ return [...new Set([...(data.reportDraft?.sources??[]).map(s=>s.datasetRef),...(data.reportDraft?.population?[data.reportDraft.population.datasetRef]:[]),...(['period_grid','window_counts'].includes(d?.kind)?[d.args.populationRef,...d.args.sources.map(s=>s.datasetRef)]:d?.kind==='left_lookup'?[d.datasetRef,...d.lookups.map(s=>s.datasetRef)]:['dataset_summary','dataset_transform'].includes(d?.kind)?[d.args.datasetRef]:[])])];
 }

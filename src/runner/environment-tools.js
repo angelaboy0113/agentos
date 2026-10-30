@@ -1,3 +1,4 @@
+import {mongoInputDiagnostic} from './mongo-input-diagnostic.js';
 import {createTctTools} from './tct-tools.js';
 import {createMongoBackend,mongoToolSpec} from './mongo-tools.js';
 import {sshMysqlConnection} from './ssh-mysql.js';
@@ -122,7 +123,7 @@ const aggregateExpression = (item, tables, types, q, aliases = new Map()) => {
   return item.op==='count_distinct'?`COUNT(DISTINCT ${target})`:`${item.op.toUpperCase()}(${target})`;
 };
 function checkedAggregates(aggregates,tables,types,q,aliases){
-  if(!Array.isArray(aggregates)||!aggregates.length)throw new QueryInputError('QUERY_INPUT','aggregates必须包含非空指标列表。');
+  if(!Array.isArray(aggregates)||!aggregates.length)throw new QueryInputError('QUERY_INPUT','aggregates须为非空数组，例如[{op:"count",as:"record_count"}]。读取完整原始行时按实际唯一主键及所需列分组并带count；不要传空数组，也不要用预览代替完整读取。');
   return aggregates.map((item,index)=>{
     const name=item.as??`metric_${index+1}`;
     if(!ident(name)||secretName.test(name))throw new QueryInputError('QUERY_INPUT','aggregate as必须是普通非敏感字段名。');
@@ -131,7 +132,7 @@ function checkedAggregates(aggregates,tables,types,q,aliases){
 }
 export function aggregateStatement(args,tables,types,q,valueSets=new Map()){
   tableColumns(tables,args.table,q);
-  if(!Array.isArray(args.aggregates))throw new QueryInputError('QUERY_INPUT','aggregates必须包含非空指标列表。');
+  if(!Array.isArray(args.aggregates))throw new QueryInputError('QUERY_INPUT','aggregates须为非空数组，例如[{op:"count",as:"record_count"}]。读取完整原始行时按实际唯一主键及所需列分组并带count；不要传空数组，也不要用预览代替完整读取。');
   const metrics=checkedAggregates((args.aggregates??[]).map(x=>({...x,table:args.table})),tables,types,q,new Map());
   const filter=filterClause(args.filters,tables,args.table,q,valueSets);
   return {sql:`SELECT ${metrics.map(x=>`${x.expression} AS \`${x.name}\``).join(', ')} FROM \`${args.table}\` WHERE ${filter.where}`,params:filter.params,columns:metrics.map(x=>x.name)};
@@ -149,7 +150,7 @@ export function linkedAggregateStatement(args,tables,types,q,valueSets=new Map()
   tableColumns(tables,left,q);tableColumns(tables,right,q);
   const leftJoin=checkedColumn(tables,left,args.join?.leftColumn,q),rightJoin=checkedColumn(tables,right,args.join?.rightColumn,q);
   const aliases=new Map([[left,'l'],[right,'r']]);
-  if(!Array.isArray(args.aggregates))throw new QueryInputError('QUERY_INPUT','aggregates必须包含非空指标列表。');
+  if(!Array.isArray(args.aggregates))throw new QueryInputError('QUERY_INPUT','aggregates须为非空数组，例如[{op:"count",as:"record_count"}]。读取完整原始行时按实际唯一主键及所需列分组并带count；不要传空数组，也不要用预览代替完整读取。');
   if((args.aggregates??[]).some(item=>!item||![left,right].includes(item.table)))throw new QueryInputError('QUERY_INPUT','每项aggregate必须指定leftTable或rightTable。');
   const metrics=checkedAggregates(args.aggregates,tables,types,q,aliases);
   const filters=args.filters??[];
@@ -271,6 +272,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     {tool:'indexes',args:{table:'已读取结构的实际表'},description:'读取真实索引元数据，超时后先核对可用索引。'},
     {tool:'explain_query',args:{tool:'select/aggregate/group_dataset',arguments:'对应工具的结构化参数对象'},description:'EXPLAIN固定受控只读语句，不接收SQL；查询超时先看计划、调整筛选及分页，不把超时当无数据。'},
     {tool:'transform_dataset',args:{datasetRef:'本任务完整来源',keyColumn:'唯一稳定主键',scopeEvidence:'源码或原问题范围依据',filters:[{column:'实际列',op:'eq/ne/in/not_in/is_null/is_not_null/gt/gte/lt/lte',type:'date=ISO timestamp with timezone; civil_day=calendar day, civil_month=calendar month; decimal/string' ,nulls:'范围比较默认error，可明确exclude真实null；格式错误不排除',value:'单值',values:['in/not_in使用数组']}],hierarchy:{parentColumn:'父键',rootIds:['实际根ID'],includeRoots:false,nodeFilters:[],pathColumns:[{column:'名称列',as:'完整路径'}],separator:' / '}},description:'无需SQL转换权限，在已有完整数据集上精确筛选及遍历任意深度后代，不重复取数。hierarchy可省略仅筛选。filters最终选输出；nodeFilters控制可见节点及其后代是否可达，不跳过无效父节点。根可多个但不能相互包含，路径从指定根开始。保留原始字段、null、文本编码及取数时点；重复主键/循环/缺根报错，范围外断链计数不冒充全局完整。派生配方可恢复、重放、刷新并在定稿重算；不允许模型提供代码或任意文件路径。完整范围仍需源码及原始数据依据，不能自称独立金额核验。'},
+    {tool:'window_dataset',args:{populationRef:'完整主对象数据集',populationKeys:['主对象唯一复合键'],groupColumns:['实际分组字段'],timeType:'instant/civil_day/civil_month，明确来源和边界语义',windows:[{start:'左闭边界，instant须ISO含时区',end:'右开边界，同类型',countColumn:'去重对象数输出列',percentageColumn:'可选占比列',precision:2,zeroDenominator:'empty'}],sources:[{datasetRef:'完整合格事件来源',populationKeys:['与主对象键逐项对应的事件字段'],timeColumn:'实际时间字段',outsidePopulation:'error或明确exclude',outsideEvidence:'仅exclude时给真实范围依据'}],populationDuplicates:'默认error；确需deduplicate必须duplicateEvidence说明且归属一致',denominatorColumn:'默认population_count',rowKey:'默认group_key'},description:'一次计算所有显式时间窗口的主对象去重数量及占比，无需逐窗口transform/summarize/enrich。保留零发生组，完整主对象集合做分母；多来源同一对象跨记录去重，错误日期/空时间不能按范围外排除补零。instant要求明确时区，civil_day/月按明确民用日期处理，不猜BSON类型或时区。来源必须完整且已按真实状态过滤。结果含配方、范围外/重复计数和各来源时间，可恢复刷新。计算成功不代表独立核验或任务完成；文件需不同原始查询形成同分组窗口基准逐对象核验。'},
     {tool:'period_dataset',args:{populationRef:'完整主对象数据集',keyColumns:['实际对象键'],period:{unit:'month或day或values',start:'2026-01',end:'2026-12',column:'period',values:'仅values时提供有序期间数组'},rowKey:'period_key',sources:[{datasetRef:'完整金额数据集',keyColumns:['对应对象键'],periodColumn:'月份列（YYYYMM/数值YYYYMM/YYYY-MM/YYYY-M）或日期列（YYYYMMDD/YYYY-MM-DD）',periodUnit:'Optional explicit day/month source grain; day to month supported, never timestamp guessing',yearColumn:'可选，仅分开的年/月列',duplicates:'error或明确sum',outside:'error或exclude',outsideEvidence:'exclude时说明排除依据',metrics:[{op:'sum (default), count rows, or count_distinct; cumulativeAs for distinct is set union since period.start, NOT sum of monthly counts',column:'真实金额字段',as:'当期金额',cumulativeAs:'可选累计金额输出列',statusAs:'可选状态列known/unknown/no_occurrence',missing:'zero/empty/error，无发生记录',nulls:'zero/empty/error，实际金额为空'}]}]},description:'自动将六位年月、标准年月及分开的年/月统一为YYYY-MM；八位日期统一为YYYY-MM-DD，不做时区转换。非法日期明确报错，不能按outside=exclude吞掉后补零。无需额外SQL转换权限。按完整主对象×指定月/日/有序期间生成全部组合，保留无发生对象和空月份；多来源按对象复合键及期间对齐，精确十进制累计，支持跨年，累计从指定起点零开始。含期初余额的报表须另取期初来源并在compose_report显式相加，不把月度流量当余额。sources=[]生成独立覆盖范围；金额源必须同对象期间唯一，确需合并重复时明确sum。默认不猜缺失/空值；empty会让其后的累计保持未知。数据集保留派生配方与排除/缺失计数，可恢复/refresh重放。finalize每个期间金额列需要独立原始查询产生的另一个period_dataset作逐行基准，不能用同一查询自证或拿全年合计替代累计列；inspect_dataset查看实际列与来源。'},
     {tool:'compose_report',args:{sources:[{name:'s1',datasetRef:'本轮完整datasetRef',keyColumn:'对象主键'}],columns:[{label:'dealer_id',displayName:'经销商编号',value:{op:'key'}},{label:'余额',total:true,value:{op:'subtract',args:[{op:'field',source:'s1',column:'amount',missing:'zero'},{op:'field',source:'s2',column:'used',missing:'zero'}]}}]},description:'按业务主键全外连接本任务完整数据集（可选population:{datasetRef,keyColumn}限定完整主对象集合），生成CSV草稿并返回行数、校验和、列合计与预览；完整原始记录可按实际唯一主键及所有要导出字段分组，不因预览select的12字段限制删列。sources[].name必须使用不重复的s1、s2等（s加正整数）；field.source引用同名来源，不能改为业务名称。固定计算key/field/add/subtract/min，后3项使用args数组；field指定source、column及可选missing=zero或empty，缺失默认报错。数字精确十进制计算。数值列应标记total:true。中文业务导出默认中文（英文字段）双语表头：label保留原字段，displayName填已核实中文名称，工具生成双语标题；也接受完整中文label。中文含义依据源码注解/字段说明并在finalize columnRules登记，未知含义先核实，不猜译。除用户明确要求原始或英文表头，不接受纯英文字段名；改表头复用已有数据集，不重新取数。只返回draftFile；之后finalize_report通过才可交付。必须先核实各来源口径、关联基数及覆盖范围，不得用样本或不完整数据集导出完整报表。'});
   }
@@ -325,6 +327,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         if(tool==='list_datasets')return datasets.list(args);
         if(tool==='read_dataset')return datasets.readDataset(args);
         if(tool==='deployment_evidence')return datasets.deployment(args);
+        if(tool==='window_dataset')return datasets.window(args);
         if(tool==='period_dataset')return datasets.period(args);
         if(tool==='compose_report')return datasets.compose(args);
         if(tool==='enrich_dataset')return datasets.enrich(args);
@@ -411,7 +414,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
       })();
     } catch (error) {
       if(['MONGO_AMOUNT_TYPE','MONGO_NULL_AMOUNT'].includes(error.code)){const repaired=new QueryInputError(error.code,error.code==='MONGO_AMOUNT_TYPE'?'Mongo金额聚合遇到非数值BSON类型（可能为数字字符串）；不是网络或权限故障。保留已有完整明细，用summarize_dataset的精确十进制汇总；独立数据库核对可按对象及原始金额字段分组计数后精确合成，不能直接sum字符串或把它算成0。先核对实际类型和所有原值，无效值不得跳过。':'Mongo金额聚合范围存在真实空值或缺失字段，不能默认补零。用已存明细核对缺失范围；可用is_null/is_missing专项只读检查及原值分组核验。只有明确业务含义后才能处理，保留已有效证据。');repaired.executed=true;throw repaired;}
-      if(/^MONGO_(?:VALUE_TYPE|FILTERS|FIELDS|ARGUMENTS|AGGREGATE|DISTINCT_COMBINATION)$/.test(error.code??''))throw new QueryInputError('REPORT_INPUT','Mongo结构化参数或BSON类型不正确；核对目录与实际schema，不允许原始pipeline/命令或猜测时区'); if(error instanceof ReportInspectionError)throw new QueryInputError(error.code,error.message); if(error instanceof DatasetCapacityError)throw new QueryInputError(error.code,error.message); if(error instanceof ReportInputError||error?.code==='REPORT_INPUT')throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
+      if(/^MONGO_(?:VALUE_TYPE|FILTERS|FIELDS|ARGUMENTS|AGGREGATE|DISTINCT_COMBINATION)$/.test(error.code??''))throw new QueryInputError('REPORT_INPUT',mongoInputDiagnostic(args,error.code)); if(error instanceof ReportInspectionError)throw new QueryInputError(error.code,error.message); if(error instanceof DatasetCapacityError)throw new QueryInputError(error.code,error.message); if(error instanceof ReportInputError||error?.code==='REPORT_INPUT')throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
 
   };
   const visibleSpec=mongo?spec.filter((item,index)=>item.tool!=='linked_group_dataset'&&spec.findIndex(x=>x.tool===item.tool)===index):spec;

@@ -1,3 +1,4 @@
+import {buildWindowDataset} from '../shared/window-dataset.js';
 import {summarizeDataset,percentage,divide} from '../shared/dataset-summary.js';
 import {transformDataset} from '../shared/dataset-transform.js';
 import {deploymentEvidence} from '../shared/deployment-evidence.js';
@@ -148,9 +149,17 @@ export class ReportDatasets {
   if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
   return {datasetRef:ref,dataHash:hash(data),complete:true,rowCount:data.rows.length,columns:data.columns,numericColumns:data.numericColumns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'完整对象期间表已生成并精确累计；需独立基准核对及原问题审阅后交付'};
  }
+ async window(args){
+  await this.check();const data=await buildWindowDataset(args,ref=>this.restore(ref),{check:()=>this.check()}),ref='dataset-'+randomUUID();
+  if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
+  return {datasetRef:ref,dataHash:hash(data),complete:true,rowCount:data.rows.length,columns:data.columns,numericColumns:data.numericColumns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'完整主对象的所有显式窗口已一次去重统计，保留零发生组；仍需独立核验与原问题审阅'};
+ }
  async verifyDerived(data,validation={}){await verifyPeriodDataset(data,ref=>this.restore(ref),Object.assign(validation,{check:()=>this.check(),maxRows:this.maxRows}));}
  async rawEvidence(data,column,validation={}){
   await this.verifyDerived(data,validation);
+  if(data.derivation?.kind==='window_counts'){
+   const proof=await this.windowEvidence(data,column,validation);return proof.ids.length===1?proof.ids[0]:proof.ids.length?hash(proof.ids):null;
+  }
   if(data.derivation?.kind==='period_grid'){
    const p=data.derivation.provenance[column]??{datasetRef:data.derivation.args.populationRef,column};
    return this.rawEvidence(await this.restore(p.datasetRef),p.column,validation);
@@ -161,6 +170,28 @@ export class ReportDatasets {
    return this.rawEvidence(await this.restore(data.derivation.datasetRef),column,validation);
   }
   return queryEvidenceIdentity(data);
+ }
+ async windowEvidence(data,column,validation={}){
+  const d=data.derivation;
+  if(d?.kind==='window_counts'){
+   const refs=column===(d.args.denominatorColumn??'population_count')?[d.args.populationRef]:d.args.sources.map(s=>s.datasetRef),ids=[];
+   for(const ref of refs){const p=await this.windowEvidence(await this.restore(ref),column,validation);ids.push(...p.ids);}
+   return {window:true,ids:[...new Set(ids)].sort()};
+  }
+  if(['dataset_summary','dataset_transform'].includes(d?.kind))return this.windowEvidence(await this.restore(d.args.datasetRef),column,validation);
+  if(d?.kind==='period_grid'){const p=d.provenance[column]??{datasetRef:d.args.populationRef,column};return this.windowEvidence(await this.restore(p.datasetRef),p.column,validation);}
+  if(d?.kind==='left_lookup'){const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column)),field=lookup?.fields.find(f=>f.as===column);return this.windowEvidence(await this.restore(lookup?.datasetRef??d.datasetRef),field?.column??column,validation);}
+  const id=queryEvidenceIdentity(data);return {window:false,ids:id?[id]:[]};
+ }
+ async windowField(data,column){
+  const d=data.derivation;if(!d)return null;
+  if(d.kind==='window_counts'){const w=d.args.windows.find(w=>w.percentageColumn===column);return w?{count:w.countColumn,denominator:d.args.denominatorColumn??'population_count',precision:w.precision??2,zeroDenominator:w.zeroDenominator??'empty'}:null;}
+  if(['dataset_summary','dataset_transform'].includes(d.kind))return this.windowField(await this.restore(d.args.datasetRef),column);
+  if(d.kind==='left_lookup'){
+   const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column));if(!lookup)return this.windowField(await this.restore(d.datasetRef),column);
+   const original=lookup.fields.find(f=>f.as===column).column,w=await this.windowField(await this.restore(lookup.datasetRef),original);
+   return w?{...w,count:lookup.fields.find(f=>f.column===w.count)?.as,denominator:lookup.fields.find(f=>f.column===w.denominator)?.as}:null;
+  }return null;
  }
  async compose(args){
   const validation={};
@@ -177,6 +208,14 @@ export class ReportDatasets {
   if(args.population){const population=await this.restore(args.population.datasetRef);if(!population?.complete||!population.columns.includes(args.population.keyColumn))throw new ReportInputError('population需要完整范围数据集及主键');keys=uniqueKeys(population,args.population.keyColumn);}
   if(keys.size>this.maxRows)throw new ReportInputError('合并后超过报表行数上限；未生成文件');
   const headers=args.columns.map(c=>c?.label);if(headers.some(x=>typeof x!=='string'||!x.trim()||x.length>80)||new Set(headers).size!==headers.length)throw new ReportInputError('列标题应唯一且不超过80字符');
+  const expandWindow=async e=>{
+   if(e?.op==='field'){
+    const source=sources.get(e.source);const w=source&&await this.windowField(source,e.column);
+    if(w){if(!source.columns.includes(w.count)||!source.columns.includes(w.denominator))throw new ReportInputError('窗口占比需要原始去重数量和分母分量参与核验；使用包含这两列的窗口来源，不只复制百分比文本');return {op:'percentage',args:[{...e,column:w.count},{...e,column:w.denominator}],precision:w.precision,zeroDenominator:w.zeroDenominator};}
+   }
+   return Array.isArray(e?.args)?{...e,args:await Promise.all(e.args.map(expandWindow))}:e;
+  };
+  args={...args,columns:await Promise.all(args.columns.map(async c=>({...c,value:await expandWindow(c.value)})))};
   const validate=(e,depth=0)=>{if(!e||typeof e!=='object')throw new ReportInputError('报表列计算过于复杂');
    if(e.op==='constant'){if(!depth)throw new ReportInputError('常量只允许作为计算参数');decimal(e.value);return;}
    if(e.op==='key')return;
@@ -241,7 +280,7 @@ export class ReportDatasets {
    visiting.add(ref);const d=await this.restore(ref);if(!d?.complete)throw new ReportInputError('刷新来源不完整');
    if(d.reportDraft){for(const source of d.reportDraft.sources)await visit(source.datasetRef,depth+1);if(d.reportDraft.population)await visit(d.reportDraft.population.datasetRef,depth+1);}
    else if(['dataset_summary','dataset_transform'].includes(d.derivation?.kind)){await visit(d.derivation.args.datasetRef,depth+1);}
-   else if(d.derivation?.kind==='period_grid'){await visit(d.derivation.args.populationRef,depth+1);for(const source of d.derivation.args.sources)await visit(source.datasetRef,depth+1);}
+   else if(['period_grid','window_counts'].includes(d.derivation?.kind)){await visit(d.derivation.args.populationRef,depth+1);for(const source of d.derivation.args.sources)await visit(source.datasetRef,depth+1);}
    else if(d.derivation?.kind==='left_lookup'){await visit(d.derivation.datasetRef,depth+1);for(const lookup of d.derivation.lookups)await visit(lookup.datasetRef,depth+1);}
    else{
     const recipe=d.recipe;
@@ -258,6 +297,7 @@ export class ReportDatasets {
   for(const [ref,d] of graph){await this.check();let output;
    if(d.reportDraft){output=await this.compose({sources:d.reportDraft.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)})),columns:d.reportDraft.columns,...(ref===args.datasetRef?{population:{datasetRef:mapped.get(args.populationRef),keyColumn:args.populationKey}}:d.reportDraft.population?{population:{...d.reportDraft.population,datasetRef:mapped.get(d.reportDraft.population.datasetRef)}}:{})});}
    else if(['dataset_summary','dataset_transform'].includes(d.derivation?.kind))output=await this[d.derivation.kind==='dataset_summary'?'summarize':'transform']({...d.derivation.args,datasetRef:mapped.get(d.derivation.args.datasetRef)});
+   else if(d.derivation?.kind==='window_counts')output=await this.window({...d.derivation.args,populationRef:mapped.get(d.derivation.args.populationRef),sources:d.derivation.args.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
    else if(d.derivation?.kind==='period_grid')output=await this.period({...d.derivation.args,populationRef:mapped.get(d.derivation.args.populationRef),sources:d.derivation.args.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
    else if(d.derivation?.kind==='left_lookup')output=await this.enrich({...d.derivation,datasetRef:mapped.get(d.derivation.datasetRef),lookups:d.derivation.lookups.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
    else {const recipe=structuredClone(d.recipe);if(recipe.tool==='mongo_dataset'&&recipe.args.cohort)recipe.args.cohort.datasetRef=mapped.get(recipe.args.cohort.datasetRef);output=await reload(recipe,{scope:this.sourceScopes.get(ref)??this.scope});rawCount++;if(!output?.complete)throw new ReportInputError('集中刷新返回不完整来源，不能定稿');}
@@ -308,9 +348,17 @@ export class ReportDatasets {
    if(issues.length)throw new ReportInputError(prefix+issues.join('；'));
    const referenceEvidence=await this.rawEvidence(ref,c.referenceColumn,validation),sourceEvidence=await this.rawEvidence(source,c.column,validation);
    if(!referenceEvidence)throw new ReportInputError(prefix+'基准无法追溯到原始查询；inspect_dataset核对dependencies/derivation和queryDefinition，只补缺失来源，不重跑整套取数');
+   const sourceProof=await this.windowEvidence(source,c.column,validation),referenceProof=await this.windowEvidence(ref,c.referenceColumn,validation);
+   if((sourceProof.window||referenceProof.window)&&sourceProof.ids.some(id=>referenceProof.ids.includes(id)))throw new ReportInputError('窗口分量与基准共享同一原始查询；不能从同一批来源重算后自证');
    if(referenceEvidence===sourceEvidence)throw new ReportInputError(prefix+'基准与分量来自同一查询，另存datasetRef或改列名不能自证；复用已有不同原始查询的完整基准，没有时按同口径补一次独立聚合，不重复全部明细');
    if(totals.some(x=>x.name===name))throw new ReportInputError('同一分量不能重复核验');
    const sourceKey=draft.sources.find(s=>s.name===c.source).keyColumn;
+   if(sourceProof.window&&source.derivation?.kind!=='period_grid'){
+    if(!referenceProof.window)throw new ReportInputError('窗口统计须用不同原始查询生成同分组同窗口基准，逐对象核对，不能只核对合计');
+    const refKey=c.referenceKey??ref.derivation?.args?.rowKey??'group_key',index=new Map(ref.rows.map(row=>[row[refKey],row]));
+    if(index.size!==ref.rows.length||index.size!==expected.size)throw new ReportInputError('窗口独立基准范围重复或不完整');
+    for(const row of source.rows)if(expected.has(row[sourceKey])){const other=index.get(row[sourceKey]);if(!other||decimal(row[c.column])!==decimal(other[c.referenceColumn]))throw new ReportInputError('窗口独立基准逐对象数值不一致，不能用总数相等代替');}
+   }
    if(source.derivation?.kind==='period_grid'){
     if(ref.derivation?.kind!=='period_grid')throw new ReportInputError('期间金额需独立查询后按相同对象期间规则展开的基准，不能用全年总数代替累计行核验');
     const refKey=ref.derivation.args.rowKey??'period_key',index=new Map(ref.rows.map(row=>[row[refKey],row]));

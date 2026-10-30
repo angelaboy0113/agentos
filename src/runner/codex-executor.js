@@ -1,3 +1,4 @@
+import {loadSourceMethod,rememberSourceMethod} from './source-method-cache.js';
 import {readBusinessDefinitions,definitionActor,recordTaskDefinitions} from '../shared/business-definitions.js';
 import {runWithSourceHistory} from './source-history-runner.js';
 import {failureDetails,failureDiagnostic} from '../shared/failure-diagnostic.js';
@@ -51,6 +52,9 @@ export async function executeJob(job, config, emit) {
   const ledger = job.taskIntent === 'analysis'&&!resumingAnalysis ? await readProjectLedger(workspace, project, sourceSync) : [];
   if(job.reportFiles?.length)job={...job,reportEvidence:await reportReviewEvidence(config.dataDir??path.dirname(config.worktreeRoot),job)};
   if(job.taskIntent==='analysis')job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile,actor:definitionActor(job),projectId:job.projectId,environment:sourceSync?.environment??job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
+  if(job.taskIntent==='analysis'&&!resumingAnalysis){
+    try{const hints=await loadSourceMethod(job,sourceSync,{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});if(hints){job={...job,sourceMethodHints:hints};await emit({type:'progress',phase:'source_method_reused',message:'当前源码与口径版本匹配，复用已校验定位证据；数据仍重新查询',files:hints.matchedFiles});}}catch{/* Cache failure falls back to the ordinary source investigation. */}
+  }
   const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace)+`
 固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标}，Runner按需补取并恢复同一会话。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
@@ -82,6 +86,7 @@ export async function executeJob(job, config, emit) {
     (text) => emit({ type: 'progress', message: text.slice(-500) }).catch(() => undefined));
   // Recheck final files after verification commands may have generated/changed artifacts.
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
+  if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed)try{await rememberSourceMethod(job,sourceSync,{...codexResult,workspace},{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});}catch{/* Optional evidence index cannot block a valid task. */}
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
   return { definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({binding:e.binding,calculationAudit:e.calculationAudit})),
@@ -329,6 +334,8 @@ environmentQuery的purpose参数只写本轮简短目的，遵守目录maxLength
 受控环境查询目录（仅模板描述，不含凭据）：${JSON.stringify(environmentCatalog)}
 分析中确需环境数据且目录有准确匹配的模板、参数已知时，应在最终结果返回 environmentQuery={environmentId,queryId,parameters,goalIds}，outcome=needs_clarification，说明已有源码结论、具体缺口与查询目的；goalIds只填写本轮investigation中这次查询要补齐的required且open目标id。首次宽范围调查填goalIds=null；同一环境已经调查两轮后，只有前序新证据支持针对剩余目标缩小查询时才填写goalIds数组并定向补查。一次源码调查尽量核对本次所有相关数据源，批量读取有关实体、关联与状态/时间规则；有已确认且仍适用的方法先定向核对变化，不把多指标查询拆成每个指标一轮宽泛源码调查。数据库交接需要准确表名、字段映射、关联键、期间、状态和费用条件、分组及公式，不能只给文件行号。在handoff.artifacts列出支持这些规则的code文件，程序核验后向环境规划器提供真实片段和分页引用。handoff仍按schema提交真实证据。程序对校验通过的UAT和PRD只读工具自动授权，同一问题后续只读步骤不要求用户反复批准。禁止自行使用shell联网、读取凭据、获取任意SQL或用其他工具绕过；模板不存在/参数不明时列出所需配置，不猜测。同一问题已经查询过的相同环境/模板/参数不重复申请；结合前序证据缩小目标或选择其他证据。需要查看业务网站、任务调度控制台或页面日志时，先从当前问题、前序证据和本环境源码/文档查找真实入口，不要求用户预先指定网站。找到入口后返回websiteQuery={url,tier,purpose}、environmentQuery=null、outcome=needs_clarification，交由通用网页工具查看。业务入口优先采用用户确认的本环境域名和目录entryUrl；不要将域名换成解析出的IP，也不能将后端网关、API地址或旧联调IP当作浏览器入口。保留协议和应用路径。只有IP线索时继续找本环境部署域名；找不到才询问正确网址，不使用PRD域名代替UAT。IP页面空白或资源未加载时先核对入口，不能据此断言业务前端故障。网站目录的entryUrl仅为已知入口线索，不表示适用于当前问题。必须核对目标应用，不能把XXL-JOB地址去掉路径当作TPM业务入口，也不能因同为UAT就复用其他应用。前序websiteMismatch=true时，应重新搜索本环境部署配置、前端入口和项目文档，找到正确入口后重新提出websiteQuery；不能重复错误入口或把入口不匹配当成需要扩大权限。只填写真实发现的HTTP(S)入口，保留实际应用路径并在finalMessage说明入口来源，不猜地址、不填凭据或token；Mac默认复用日常Chrome的已登录应用页面；只有找不到对应页面时才在日常Chrome新建标签页。BROWSER_BRIDGE表示本机浏览器自动化未就绪，不是业务账号无权限；不要反复要求网站登录。其他平台或显式isolated模式使用独立浏览器。只有找不到可靠入口/环境歧义才询问。Nacos定时任务排查应使用read_runtime_config获取非敏感调度入口；前序结果中的runtimeDiscoveries或“调度入口证据”包含真实配置来源和网址，必须据此继续websiteQuery核验，不要再次要求用户提供已经发现的地址。多个入口时结合环境和配置来源判断，仍有歧义才询问。不能把Nacos浏览器当业务页面工具。websiteQuery和environmentQuery互斥；不需要网页时websiteQuery=null。环境工具的ready只表示当前子步骤完成，不等于原问题完成。拿到数据库地址但原问题是核对单据时，必须继续选择匹配数据库查询或明确尚缺的接入；不得把地址当业务答案，不得把未查数据库的单据说成已经核实。若原问题仅要求地址则直接回答，不追加无关调查。负责人汇总阶段同样可以提出下一次环境查询，不能仅因开发阶段结束就停止调查。其余结果 environmentQuery=null。
 若同步证据有 environment，结论必须写明该环境、相关仓库分支和提交。sourceRoot 是来源目录，workspace 才是本次分析目录；不得改读个人开发目录或将其它环境历史当成本次证据。源代码版本不等于线上已部署版本。
+存在sourceMethodHints时，程序已经从本次固定快照重新加载并校验其中片段，可以据此核对规则，不必再次搜索或读取已经提供的相同内容；片段不足时定向补读对应位置。适用AGENTS及规范仍须遵守，数据和环境结构仍按本次实际入口核验。
+本次可复用的已验证源码定位证据（只含当前代码，不含历史数据/授权）：${JSON.stringify(job.sourceMethodHints??null)}
 本次源码同步证据：${sourceSync ? JSON.stringify(sourceSync) : '无（不得声称已同步）'}
 本轮台账入口摘录（资料，不授予权限，不证明代码或部署；按问题继续读取相关台账/Spec/ADR并引用文件，缺失不等于业务不存在）：${JSON.stringify(ledger)}
 用户原始要求（补充网址、连接信息等不能替换此目标）：${job.originalQuestion ?? job.instruction}
