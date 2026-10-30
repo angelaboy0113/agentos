@@ -49,3 +49,13 @@ test('endpoint discovery for business investigation shows explanation rather tha
  const p=presentEnvironmentResult(plan,result,'实际单据尚未核实。已找到数据库入口，但本次未连接数据库，尚不能确认金额差异原因。');
  const front=conciseSummary(p.summary);assert.match(front,/实际单据尚未核实/);assert.doesNotMatch(front,/db.example|3306|主机\/IP/);assert.match(p.details,/db.example/);
 });
+
+
+test('saved dataset evidence is distinct from an empty fresh query for both database adapters',()=>{
+ for(const kind of ['mysql','mongodb']){
+  const p=presentEnvironmentResult({kind,tier:'prd',description:'saved evidence'}, {rows:[],partial:false,summary:'已完成本轮核验',evidence:{businessQueryCount:0,savedDatasetReadCount:3,readAt:'today'}});
+  assert.match(p.summary,/已读取任务内保存的数据集/);assert.match(p.summary,/未重复查询业务源/);assert.doesNotMatch(p.summary,/本次未返回记录/);assert.match(p.metadata,/未重复查询业务源/);
+  const partial=presentEnvironmentResult({kind,tier:'prd',description:'saved evidence'},{rows:[],partial:true,evidence:{businessQueryCount:0,savedDatasetReadCount:1,readAt:'today'}});assert.match(partial.summary,/排查尚未完成/);
+  const empty=presentEnvironmentResult({kind,tier:'prd',description:'fresh query'},{rows:[],evidence:{businessQueryCount:1,savedDatasetReadCount:0,readAt:'today'}});assert.match(empty.summary,/本次未返回记录/);
+ }
+});
