@@ -1,10 +1,10 @@
 # 多系统知识助手部署与迁移
 
-程序版本 1.52.0，更新日期 2026-10-28；Node 22.13–22.x，依赖以 package-lock.json 为准。新实例须使用自己的专用分支和独立检出目录。本文不改变旧部署的配置或运维手册。
+程序版本 1.54.3，更新日期 2026-10-30；Node 22.13–22.x，依赖以 package-lock.json 为准。新实例须使用自己的专用分支和独立检出目录。本文不改变旧部署的配置或运维手册。
 
 ## 布局与启动
 
-实例根目录含 `agentos/`（程序）、`systems/`（各系统规范总仓及微服务）、`runtime/`（私有配置、认证、快照、状态和日志）。真实路径、群 ID、应用 ID、群主 ID 在 ignored 的 `config/*.local.json` 或实例私有 runtime 中，不进公开 Git。
+实例根目录含 `agentos/`（程序）、`systems/`（各系统源码：总仓加子仓，或普通目录下的独立微服务仓）、`runtime/`（私有配置、认证、快照、状态和日志）。真实路径、群 ID、应用 ID、群主 ID 在 ignored 的 `config/*.local.json` 或实例私有 runtime 中，不进公开 Git。
 
 `projects.local.json` 中 `chatProfileProjectMap` 按群和机器人 profile 选择系统，`topicChatIds` 配置话题群。每个项目配置 `repoPath`、`assistantInstructionsFile`、`analysisSourceMode=isolated`、独立 `analysisSnapshotRoot` 和 `analysisEnvironments`。环境未指定不设置默认值。`analysisEnvironments.<环境>.unavailableRepositories` 记录远端环境分支缺失的仓库，查询相关范围时必须说明证据缺口，不拿其它分支替代。
 
@@ -249,3 +249,20 @@ schema查询同时读取数据库真实主键及完整主键列数。仅已证�
 卡片刷新只读取同群、同profile、同问题当前任务；仍需原发起人或可信管理员身份，但不要求旧按钮版本与当前执行轮次完全相同。停止、审批、授权及补充继续执行仍严格校验轮次和实际发布的按钮，旧卡不可控制新任务。
 
 拒绝的回调不是业务执行结果，不再作为文字回复广播到公共话题；回调 HTTP 返回原因，`cardCallbackAudit` 保存事件ID、应用profile、消息ID、操作人、白名单操作类型、结果与原因，不保存表单内容或凭据。当前 CLI 长连接转发不将该 HTTP 返回转换为飞书原生 toast，不能声称已实现仅操作人可见的弹窗。权限失败不更新他人卡片；授权用户的过期操作只尝试修复展示，不重跑业务。旧审计缺少操作人的事件无法事后补造身份或判定误触来源。
+
+
+## 新系统与独立多仓接入
+
+repoPath可以是没有.git的普通父目录，不需要伪造总仓。analysisEnvironments逐个列出子仓相对path和真实环境branch，不配置不存在的“.”仓。先核对真实仓库清单和目标分支；旧版本、CI/CD密钥仓及非运行项目单列，不自动混进现役快照。公共依赖与管理端按真实服务关系纳入。环境缺分支记录unavailableRepositories，不换分支冒充。原总仓布局继续适用。
+
+新系统须独立projectId、profile、instructions、快照和团队知识范围，同群也不共享实时数据或默认业务定义。chatProfileProjectMap新增明确绑定；群主open_id按新应用实际读取，不能复制其它应用的ID。只有已发布、入群、身份和源码均通过的助手才加入生效agents；候选保存在私有接入目录。三个助手为六路消息/卡片消费者，不创建另一套OS。
+
+能列组织仓库不等于能clone。专用组织只读令牌分别核对目录、仓库基本信息、代码读取权限，并实际ls-remote/克隆；安全输入或已授权的浏览器操作直接保存Keychain，不输出Token，核对服务器最终返回的组织、权限与有效期。
+
+数据库先核对目标应用和环境的实际配置发布绑定，再解析对应配置ID/版本，不用最新草稿冒充已发布。只存必要密码到Keychain，摘要和指纹不含配置原文。源码分支连接是线索，库身份/认证/元数据另验；源码commit不等于线上部署commit。发布配置和源码线索使用独立凭据引用，避免旧值覆盖已核实值。
+
+MySQL验证只读事务、库身份和完整表元数据；Mongo验证认证和明确集合范围；调度验证精确分组与任务归属。缺库显示DATABASE_NOT_FOUND，缺表显示DATABASE_OBJECT_MISSING，保留缺项，不创建、不换库、不填假零。连接和元数据验证不等于业务报表验收。遵守已有SSH跳板机和只读边界，新增系统不放宽原系统权限。网页账号/发布证据缺失应单列。
+
+空闲备份后合并新系统私有配置、指令和独立CLI profile，preflight通过才重启本实例，核对全部消费者ready，保留原任务、投递和业务仓。真实群@由用户发起或另有授权；不自行发测试。完整私有迁移应带新源码、配置、指令、安全凭据和Git helper策略，公开代码包不含它们。其它OS/整套跨机须另行验证。
+
+普通父目录布局见[独立多仓配置示例](../config/multi-repository-project.example.json)。所有路径、群/profile/owner ID、仓路径与分支均为占位符；把核实后的项目合并进已有配置，不整体覆盖旧配置，也不把示例分支当真实分支。

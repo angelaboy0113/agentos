@@ -107,3 +107,9 @@ test('edited message with own trusted application ID is accepted once and routed
  await f.send(f.event('a','late-app',{edited_mention:true,mentions:[{id:'cli_a'}]}));
  assert.equal(f.input.length,1);await f.send(f.event('b','foreign-app',{mentions:[{id:'cli_a'}]}));assert.equal(f.input.length,1);
 });
+
+
+test('third assistant keeps project/owner isolation and six consumer plans',async()=>{
+ const {isAdministrator}=await import('../src/control-plane/authorization.js');const cfg=structuredClone(projects),bots=structuredClone(agents);cfg.projects.gamma={displayName:'GAMMA',analysisSourceMode:'isolated',analysisEnvironments:{sit:{},prd:{}}};cfg.chatProfileProjectMap.shared.c='gamma';cfg.ownerOpenIdsByProfile.c=['admin-c'];bots.c={profile:'c',openId:'bot-c',displayName:'C',role:'developer',projectId:'gamma',systemAssistant:true,allowedChatIds:['shared']};validateProjectScopes(cfg);
+ assert.deepEqual(['a','b','c'].map(p=>resolveProjectId(cfg,'shared',p)),['alpha','beta','gamma']);for(const profile of ['a','b','c'])for(const role of ['developer','qa','owner_report'])assert.equal(routeAgent(bots,role,profile).agentProfile,profile);const plans=larkEventSourcePlans({},bots);assert.equal(plans.length,6);for(const p of plans)assert.deepEqual(p.allowedChatIds,['shared']);assert.equal(isAdministrator(cfg,{profile:'c',senderId:'admin-c'}),true);assert.equal(isAdministrator(cfg,{profile:'c',senderId:'admin-a'}),false);assert.equal(resolveProjectId(cfg,'shared','unknown'),null);
+});

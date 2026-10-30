@@ -49,3 +49,9 @@ test('structured failure survives terminal persistence and reopen',async t=>{
 test('HTTP status and result submission stage stay visible without replaying state changes',async()=>{
  let posts=0;const runner=new AgentRunner({},async()=>({outcome:'ready',finalMessage:'已取得证据'}));runner.post=async()=>{posts++;throw Object.assign(new Error('synthetic-secret'),{statusCode:503,diagnosticStage:'control_result'});};const result=await runner.executeContinuous({...job,environmentAccess:{}},async()=>{},new AbortController().signal);assert.equal(posts,1);assert.match(result.finalMessage,/保存任务结果与状态回执/);assert.match(result.finalMessage,/HTTP状态：503/);assert.doesNotMatch(result.finalMessage,/synthetic-secret/);
 });
+
+
+test('missing database and table keep safe specific diagnostics',()=>{
+ const message=failureDiagnostic(Object.assign(new Error('secret=password-value and database private_db'),{code:'ER_BAD_DB_ERROR'}));assert.match(message,/DATABASE_NOT_FOUND/);assert.doesNotMatch(message,/password-value|private_db|EXECUTION_ERROR/);
+ const table=failureDiagnostic(Object.assign(new Error('sensitive query body'),{code:'ER_NO_SUCH_TABLE'}));assert.match(table,/DATABASE_OBJECT_MISSING/);assert.match(table,/不能据此解释为业务记录为空/);assert.doesNotMatch(table,/sensitive query/);
+});

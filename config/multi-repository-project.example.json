@@ -1,0 +1,57 @@
+{
+  "ownerOpenIdsByProfile": {
+    "your-system-assistant": [
+      "ou_YOUR_HUMAN_OWNER_IN_THIS_APP"
+    ]
+  },
+  "chatProfileProjectMap": {
+    "oc_YOUR_EXISTING_GROUP": {
+      "your-system-assistant": "your-system"
+    }
+  },
+  "topicChatIds": [
+    "oc_YOUR_EXISTING_GROUP"
+  ],
+  "projects": {
+    "your-system": {
+      "displayName": "Your system",
+      "repoPath": "/absolute/path/to/your-instance/systems/YourSystem",
+      "verifyCommands": [],
+      "assistantInstructionsFile": "/absolute/path/to/your-instance/runtime/assistant-instructions/your-system.md",
+      "analysisSourceMode": "isolated",
+      "analysisSnapshotRoot": "/absolute/path/to/your-instance/runtime/snapshots/YourSystem",
+      "analysisEnvironments": {
+        "test": {
+          "runtimeTier": "uat",
+          "description": "Replace branches with verified remote branch names",
+          "repositories": [
+            {
+              "path": "service-one",
+              "branch": "YOUR_TEST_BRANCH"
+            },
+            {
+              "path": "shared-library",
+              "branch": "YOUR_TEST_BRANCH"
+            }
+          ]
+        },
+        "production": {
+          "runtimeTier": "prd",
+          "description": "Replace branches with verified remote branch names",
+          "repositories": [
+            {
+              "path": "service-one",
+              "branch": "YOUR_PRODUCTION_BRANCH"
+            },
+            {
+              "path": "shared-library",
+              "branch": "YOUR_PRODUCTION_BRANCH"
+            }
+          ]
+        }
+      },
+      "knowledgePaths": [],
+      "environmentExportMaxRows": "all"
+    }
+  }
+}

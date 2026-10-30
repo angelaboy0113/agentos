@@ -17,6 +17,8 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+ ['DATABASE_NOT_FOUND',/ER_BAD_DB_ERROR/,'目标数据库核验','已配置的数据库在目标服务器上不存在，当前数据查询尚未完成。','核对当前系统、环境与实际发布配置中的库名；保留已有证据，不创建数据库或改用其它环境，也无需盲目重输密码。'],
+ ['DATABASE_OBJECT_MISSING',/ER_NO_SUCH_TABLE/,'目标表核验','目标表在当前数据库中不存在，不能据此解释为业务记录为空。','核对当前环境、源码版本和真实表结构，保留其它有效结果，不创建表或跨库猜测。'],
  ['MONGO_AMOUNT_TYPE',/MONGO_AMOUNT_TYPE/,'MongoDB金额类型核验','金额字段含非数值BSON类型，直接数值聚合未通过；不能把数字字符串静默算成零。','保留完整明细并核对类型，使用精确十进制整理及独立原值分组核验；无效值不能丢弃。'],
  ['MONGO_NULL_AMOUNT',/MONGO_NULL_AMOUNT/,'MongoDB金额完整性核验','金额字段存在真实空值或缺失，不能自动补零。','复用已存明细，核对缺失范围和业务含义，保留有效证据，不重跑整项任务。'],
  ['TCT_AUTH', /TCT_AUTH|TCT_LOGIN_PROTOCOL/, '调度平台登录核验', '调度平台登录或会话核验未完成，未触发或修改任务。', '维护者核对本机凭据、验证码、多因素认证及登录协议，保留已有证据后在原问题接续。'],
