@@ -294,8 +294,21 @@ export class ReportDatasets {
   for(const c of args.checks){
    if(!c||typeof c!=='object'||typeof c.source!=='string'||typeof c.column!=='string'||typeof c.referenceRef!=='string'||typeof c.referenceColumn!=='string')throw new ReportInputError('checks每项必须明确source、column、referenceRef和referenceColumn');
    const source=sources.get(c.source),ref=await this.restore(c.referenceRef),name=c.source+':'+c.column;
-   const referenceEvidence=ref&&await this.rawEvidence(ref,c.referenceColumn,validation),sourceEvidence=source&&await this.rawEvidence(source,c.column,validation);
-   if(!required.has(name)||!source?.columns.includes(c.column)||!ref?.complete||ref.reportDraft||!referenceEvidence||referenceEvidence===sourceEvidence||!ref.columns.includes(c.referenceColumn)||!text(c.evidence))throw new ReportInputError('分量合计需引用不同原始查询的完整基准集和实际数值列，不能用同一查询或草稿自证；须说明基准口径依据');
+   // Separate input mistakes from provenance failures. A single generic error
+   // made the planner inspect every dataset repeatedly to discover which check
+   // was wrong; none of these diagnostics changes the verification criteria.
+   const issues=[];
+   if(!required.has(name))issues.push('source/column不是草稿requiredChecks要求的分量；inspect_dataset选择reportDraft核对来源别名与实际字段');
+   if(!source?.columns.includes(c.column))issues.push('source或column不存在于草稿实际来源；不要把输出中文列名当作来源字段');
+   if(!ref?.complete)issues.push('referenceRef不存在、范围不符或不是完整数据集；list_datasets定位已保存的完整基准');
+   if(ref?.reportDraft)issues.push('referenceRef指向report_draft；需要原始查询基准，不能拿草稿自证');
+   if(ref&&!ref.columns.includes(c.referenceColumn))issues.push('referenceColumn不存在于referenceRef；inspect_dataset核对该基准实际列名，不重跑业务查询');
+   if(!text(c.evidence))issues.push('evidence缺少有效的基准口径依据文字');
+   const prefix='分量合计需引用不同原始查询的完整基准集和实际数值列：';
+   if(issues.length)throw new ReportInputError(prefix+issues.join('；'));
+   const referenceEvidence=await this.rawEvidence(ref,c.referenceColumn,validation),sourceEvidence=await this.rawEvidence(source,c.column,validation);
+   if(!referenceEvidence)throw new ReportInputError(prefix+'基准无法追溯到原始查询；inspect_dataset核对dependencies/derivation和queryDefinition，只补缺失来源，不重跑整套取数');
+   if(referenceEvidence===sourceEvidence)throw new ReportInputError(prefix+'基准与分量来自同一查询，另存datasetRef或改列名不能自证；复用已有不同原始查询的完整基准，没有时按同口径补一次独立聚合，不重复全部明细');
    if(totals.some(x=>x.name===name))throw new ReportInputError('同一分量不能重复核验');
    const sourceKey=draft.sources.find(s=>s.name===c.source).keyColumn;
    if(source.derivation?.kind==='period_grid'){

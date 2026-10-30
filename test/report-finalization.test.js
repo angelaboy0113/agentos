@@ -98,3 +98,14 @@ test('trusted longer read window is explicit and recorded; amount checks cannot 
  await assert.rejects(f.d.finalize({...f.args,checks:[]}),/s1:amount/);
  const result=await f.d.finalize(f.args);assert.equal(result.readWindow.maxSpreadMs,1200000);assert.ok(result.readWindow.spreadMs>=599000);assert.match(result.snapshotNote,/不代表多轮属于同一事务/);
 });
+
+test('finalization distinguishes field, draft, completeness, evidence and same-query errors without weakening checks',async t=>{
+ const f=await fixture(t),check=f.args.checks[0],run=override=>f.d.finalize({...f.args,checks:[{...check,...override}]});
+ await assert.rejects(run({source:'output-label'}),/source\/column不是.*requiredChecks/);
+ await assert.rejects(run({referenceColumn:'wrong-column'}),/referenceColumn不存在/);
+ await assert.rejects(run({referenceRef:f.draft.datasetRef}),/指向report_draft/);
+ await assert.rejects(run({referenceRef:'dataset-missing'}),/list_datasets/);
+ await assert.rejects(run({evidence:''}),/evidence缺少/);
+ await assert.rejects(run({referenceRef:f.amounts.datasetRef}),/同一查询.*不重复全部明细/);
+ const accepted=await f.d.finalize(f.args);assert.equal(accepted.totals[0].total,'0.3');assert.equal(accepted.coverage.rowCount,2);
+});
