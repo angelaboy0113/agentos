@@ -76,3 +76,18 @@ export async function recordBusinessDefinitions({dataDir,actor,projectId,updates
  }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}finally{db.close();}
 }
 export function definitionActor(job){return {senderId:job.senderId,chatId:job.chatId,profile:job.originProfile??job.agentProfile,chatType:job.originChatType??'group',visibility:job.visibility};}
+
+// Card-form corrections bypass the conversation model. Reuse the investigation
+// model's typed extraction, bound to the original authenticated form statement.
+// No additional model, external read, task replay or chat broadcast is needed.
+export async function recordTaskDefinitions(job,updates,options){
+ if((updates??[]).some(u=>!job.definitionStatements?.some(s=>s.id===u.statementId)))throw new Error('Missing authenticated definition statement');
+ const receipts=[];
+ for(const statement of job.definitionStatements??[]){
+  const selected=(updates??[]).filter(u=>u.statementId===statement.id);
+  if(!selected.length)continue;
+  receipts.push(...await recordBusinessDefinitions({...options,projectId:job.projectId,
+   actor:{...definitionActor(job),id:statement.id,senderId:statement.senderId,createdAt:statement.at,content:statement.content},updates:selected}));
+ }
+ return receipts;
+}

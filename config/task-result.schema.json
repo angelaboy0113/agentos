@@ -11,7 +11,8 @@
     "investigation",
     "environmentSetup",
     "reportAssessment",
-    "sourceHistoryQuery"
+    "sourceHistoryQuery",
+    "definitionUpdates"
   ],
   "properties": {
     "outcome": {
@@ -608,6 +609,52 @@
           }
         }
       ]
+    },
+    "definitionUpdates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environment",
+          "title",
+          "definition",
+          "quote",
+          "previousId",
+          "previousVersion",
+          "aliases",
+          "statementId"
+        ],
+        "properties": {
+          "environment": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "definition": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "previousId": {
+            "type": "string"
+          },
+          "previousVersion": {
+            "type": "integer"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "statementId": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

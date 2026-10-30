@@ -679,6 +679,10 @@ export class JsonStore {
       }
       const now = new Date().toISOString();
       job.context = compactContext([...job.context, { stage: job.stage, result: job.result, kind: 'clarification_requested' }]);
+      if(input.definitionStatement&&input.senderId){
+        job.definitionStatements??=[];
+        job.definitionStatements.push({id:createId('DS'),at:now,senderId:input.senderId,content:String(input.definitionStatement)});
+      }
       job.instruction = `${job.instruction}\n\n用户补充信息：${input.instruction}`.trim();
       job.attachments.push(...(input.attachments ?? []).filter((item) => !job.attachments.some((old) => old.id === item.id)));
       job.sourceInstructionMessageId = input.sourceMessageId ?? job.sourceInstructionMessageId ?? null;

@@ -47,3 +47,10 @@ test('the same convention reaches source continuation and environment investigat
  const prompt=await buildPrompt(job,{baseBranch:'main'}, {instruction:'read only',metadata:{}},null,[],null);
  assert.ok(prompt.includes(update.definition));assert.deepEqual(reportInvestigationContext(job).businessDefinitions,businessDefinitions);
 });
+
+test('authenticated card-form corrections are saved by the task model without another model round or a new public question',async t=>{
+ const x=await setup(t);const {recordTaskDefinitions}=await import('../src/shared/business-definitions.js');
+ const job={projectId:'alpha',chatId:'g',senderId:'creator',originProfile:'a',definitionStatements:[{id:'form-1',senderId:'A',at:x.actor.createdAt,content:x.actor.content}]};
+ const receipts=await recordTaskDefinitions(job,[{...update,statementId:'form-1'}],x);assert.equal(receipts.length,1);assert.equal((await read({...x,actor:{...x.actor,senderId:'B'}}))[0].definition,update.definition);
+ await assert.rejects(recordTaskDefinitions(job,[{...update,statementId:'forged'}],x),/authenticated/);
+});
