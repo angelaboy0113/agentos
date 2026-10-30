@@ -4,7 +4,7 @@ import path from 'node:path';
 export const CONTROL_PROTOCOL='durable-control-v1';
 export const validRequestId=id=>typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id);
 export const controlDigest=(route,body)=>createHash('sha256').update(JSON.stringify([route,body])).digest('hex');
-export function criticalControl(route,body){return route==='/api/v1/jobs/lease'||/^\/api\/v1\/jobs\/[^/]+\/(?:environment-claim|environment-renew|continuous-environment|continuous-environment-result|continuous-analysis-continue)$/.test(route)||/^\/api\/v1\/jobs\/[^/]+\/events$/.test(route)&&!['heartbeat','progress'].includes(body.type);}
+export function criticalControl(route,body){return route==='/api/v1/jobs/lease'||/^\/api\/v1\/jobs\/[^/]+\/(?:environment-claim|environment-renew|continuous-source|continuous-environment|continuous-environment-result|continuous-analysis-continue)$/.test(route)||/^\/api\/v1\/jobs\/[^/]+\/events$/.test(route)&&!['heartbeat','progress'].includes(body.type);}
 const conflict=()=>Object.assign(new Error('Control request identity mismatch'),{statusCode:409});
 export class ControlReceipts{
  constructor(store){this.store=store;this.directory=path.join(path.dirname(store.file),'control-receipts');this.pending=new Map();}

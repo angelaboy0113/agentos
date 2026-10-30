@@ -12,7 +12,8 @@
     "environmentSetup",
     "reportAssessment",
     "sourceHistoryQuery",
-    "definitionUpdates"
+    "definitionUpdates",
+    "sourceEnvironmentQuery"
   ],
   "properties": {
     "outcome": {
@@ -655,6 +656,29 @@
           }
         }
       }
+    },
+    "sourceEnvironmentQuery": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "environmentId",
+            "reason"
+          ],
+          "properties": {
+            "environmentId": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      ]
     }
   }
 }

@@ -1,5 +1,6 @@
+import {requestedSourceEnvironments} from '../shared/source-comparison.js';
 import {authorizeWebsiteRequest} from './website-authorization.js';
-import {assertSourceRuntimeTier,sourceEnvironmentForTier} from '../shared/source-environments.js';
+import {assertSourceRuntimeTier,sourceEnvironmentForTier,sourceRuntimeTier} from '../shared/source-environments.js';
 import {HistoryRetention} from './retention.js';
 import { resolveProjectId, routeAgent } from '../shared/project-scope.js';
 import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
@@ -286,6 +287,13 @@ async function route(context) {
     return json(response,200,result);
   }
 
+  const continuousSourceMatch=url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-source$/);
+  if(request.method==='POST'&&continuousSourceMatch){
+    requireBearer(request,config.runnerToken,'runner');const body=await readJson(request),id=decodeURIComponent(continuousSourceMatch[1]),job=await store.getJob(id),result=body.result??{};
+    if(!job||result.outcome!=='needs_clarification'||result.environmentQuery||result.websiteQuery||result.environmentSetup)throw Error('无有效的独立源码接续请求');
+    return json(response,200,await commitControl(context,async()=>({ok:true,job:await store.switchContinuousSourceEnvironment(id,{runnerId:body.runnerId,leaseId:body.leaseId},result,result.sourceEnvironmentQuery,context.projects.projects[job.projectId])})));
+  }
+
   const continuousPlanMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/continuous-environment$/);
   if (request.method === 'POST' && continuousPlanMatch) {
     requireBearer(request, config.runnerToken, 'runner');
@@ -301,10 +309,19 @@ async function route(context) {
     const sourceResult = body.result ?? {};
     try {
       let query = sourceResult.environmentQuery;
-      if (sourceResult.websiteQuery) query = await prepareWebsiteQuery(context, job, sourceResult.websiteQuery);
+      if(sourceResult.websiteQuery){
+        const project=context.projects.projects[job.projectId],other=requestedSourceEnvironments(job,project).find(env=>env!==job.sourceEnvironment&&sourceRuntimeTier(project,env)===sourceResult.websiteQuery.tier);
+        if(other)return json(response,200,await commitControl(context,async()=>({ok:true,planned:false,sourcePreparedNext:true,job:await store.switchContinuousSourceEnvironment(id,identity,sourceResult,{environmentId:other,reason:'先核对目标环境源码和真实入口，再申请网页读取'},project)})));
+        query=await prepareWebsiteQuery(context,job,sourceResult.websiteQuery);
+      }
       if (!query || sourceResult.outcome !== 'needs_clarification') throw new Error('当前结果没有可执行的环境查询');
       const plan = planQuery(await loadEnvironments(), query, job.projectId,
         { senderId: job.senderId, profile: job.originProfile });
+      const project=context.projects.projects[job.projectId],scope=requestedSourceEnvironments(job,project);
+      const other=scope.find(env=>env!==job.sourceEnvironment&&sourceRuntimeTier(project,env)===plan.tier);
+      if(other){
+        return json(response,200,await commitControl(context,async()=>({ok:true,planned:false,sourcePreparedNext:true,job:await store.switchContinuousSourceEnvironment(id,identity,sourceResult,{environmentId:other,reason:'先核对目标环境独立源码，再重新规划原问题所需只读证据'},project)})));
+      }
       assertSourceRuntimeTier(context.projects.projects[job.projectId],job.sourceEnvironment,plan.tier);
       const convergence = environmentContinuation(await store.read(), job, query, sourceResult);
       if (!convergence.continue) throw Object.assign(new Error(convergence.reason), { queryDiagnostic: { code: convergence.terminal?'CONVERGENCE_STALLED':'REPEATED_TARGET', reason: convergence.reason } });

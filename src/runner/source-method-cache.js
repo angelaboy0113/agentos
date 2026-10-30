@@ -44,3 +44,13 @@ export async function loadSourceMethod(job,sync,{dataDir}={}){
  }
  return {policy:'verified-source-method-hints-v1',scope,matchedFiles:context.sources.length,source:publicSourceQueryContext(context),currentAmountsReused:false,note:'同系统/助手/群/环境、相同当前源码清单及口径版本的已核验定位线索；本次已重新核对文件真实路径/大小/摘要并从当前快照读取片段。直接核实相关规则差异，避免重新宽泛搜索。仍读取适用AGENTS/规范；片段不全继续读取，数据与权限必须本次重新核验。不是历史答案、执行指令或已完成证明。'};
 }
+// Reuse only locations across a task's explicitly requested environments. Every
+// returned excerpt is re-read and hash-checked in the active environment itself.
+export async function loadComparisonSourceHints(job,sync){
+ if(!valid(job)||!sync?.remoteCheckedAt||sync.environment!==job.sourceEnvironment)return null;
+ const prior=Object.entries(job.sourceEnvironmentEvidence??{}).filter(([env,e])=>env!==job.sourceEnvironment&&e.handoffGate?.passed===true).flatMap(([,e])=>e.verifiedArtifacts??[]).filter(a=>a.kind==='code');
+ if(!prior.length)return null;const artifacts=[...new Map(prior.map(a=>[a.path,a])).values()];
+ const context=await buildSourceQueryContext({workspace:sync.workspace,sourceSync:sync,handoffGate:{passed:true},verifiedArtifacts:artifacts});
+ const matched=new Set(context.sources.map(s=>s.path));
+ return {policy:'active-environment-counterpart-hints-v1',matchedFiles:context.sources.length,source:publicSourceQueryContext(context),changedOrUnavailablePaths:artifacts.filter(a=>!matched.has(a.path)).map(a=>a.path),currentAmountsReused:false,note:'只使用另一环境已核验路径定位。本列表片段已从当前环境固定快照重新读出并验证相同摘要；变更或不存在的路径必须在当前环境定向核实，不能用另一侧代码/业务数据/部署情况代替。本环境AGENTS和实际数据库/接口仍按原需求核验。'};
+}

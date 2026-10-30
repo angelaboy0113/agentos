@@ -9,7 +9,7 @@ export async function maintenanceCheckpoint(job,config){
  const previous=[...(job.context??[])].reverse().find(x=>x.kind==='analysis_turn'&&x.result?.handoffGate?.passed===true)?.result;
  if(!previous)return null;
  const summary='本机维护检查点已保存已有文件与证据；升级后自动接续原问题，无需用户补充或重发。';
- return {...previous,outcome:'needs_clarification',summary,finalMessage:summary,environmentQuery:null,websiteQuery:null,environmentSetup:null,reportAssessment:null,
+ return {...previous,outcome:'needs_clarification',summary,finalMessage:summary,environmentQuery:null,websiteQuery:null,environmentSetup:null,sourceEnvironmentQuery:null,reportAssessment:null,
   maintenanceCheckpoint:{requestId:request.requestId,at:new Date().toISOString(),originalQuestionHash:createHash('sha256').update(job.originalQuestion??'').digest('hex')},
   investigation:{...previous.investigation,status:'wait',goals:(previous.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),nextStep:'完成本机受控升级后按原问题自动接续',blocker:{kind:'unavailable',needed:'本机维护自动接续',evidence:'由本机维护者明确申请，在新的源码分析步骤开始前暂存，未执行本轮模型或业务查询'}}};
 }

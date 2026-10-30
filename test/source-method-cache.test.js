@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {createHash} from 'node:crypto';
-import {rememberSourceMethod,loadSourceMethod} from '../src/runner/source-method-cache.js';
+import {rememberSourceMethod,loadSourceMethod,loadComparisonSourceHints} from '../src/runner/source-method-cache.js';
 const sha=x=>createHash('sha256').update(x).digest('hex');
 async function fixture(t){const root=await mkdtemp(path.join(os.tmpdir(),'method-cache-'));t.after(()=>rm(root,{recursive:true,force:true}));const workspace=path.join(root,'snapshot'),dataDir=path.join(root,'data');await mkdir(workspace);await mkdir(dataDir);const body='// Current code\nclass Invoice {\n String reference; // business invoice identity\n}\n';await writeFile(path.join(workspace,'Invoice.java'),body);const sync={workspace,cacheKey:'fixed',environment:'prd',remoteCheckedAt:new Date().toISOString(),repositorySources:[{path:'.',originHash:'source'}],repositories:[{path:'.',branch:'prd',commit:'a'.repeat(40)}]},job={projectId:'a',chatId:'group1',agentProfile:'assistant1',taskIntent:'analysis',stage:'developer',originalQuestion:'查询客户订单销售金额及订单数量，不同客户分别汇总',businessDefinitions:[{id:'d',version:1}]},result={workspace,handoffGate:{passed:true},verifiedArtifacts:[{kind:'code',path:'Invoice.java',sha256:sha(body),bytes:Buffer.byteLength(body)}],finalMessage:'Invoice.java:3',handoff:{checks:[{evidence:'current identity rule'}]}};return {root,workspace,dataDir,body,sync,job,result};}
 test('same-version related request receives current verified code hints, never previous results or query values',async t=>{
@@ -29,4 +29,11 @@ test('cache directory links cannot write outside private data root',async t=>{
 test('resume prompt keeps current evidence hints separate from historical amounts and authorizations',async t=>{
  const f=await fixture(t);await rememberSourceMethod(f.job,f.sync,f.result,{dataDir:f.dataDir});const hints=await loadSourceMethod(f.job,f.sync,{dataDir:f.dataDir});
  assert.equal(hints.policy,'verified-source-method-hints-v1');assert.match(hints.note,/权限必须本次重新核验/);assert.ok(hints.source.sources.every(s=>!Object.hasOwn(s,'root')));
+});
+
+test('cross-environment locations reload only matching active code, never answers or changed/symlinked source',async t=>{
+ const f=await fixture(t),job={...f.job,sourceEnvironment:'prd',sourceEnvironmentEvidence:{sit:{handoffGate:{passed:true},verifiedArtifacts:f.result.verifiedArtifacts,summary:'OLD_AMOUNT_PRIVATE',rows:[{secret:'OLD_ROW_PRIVATE'}]}}};
+ let hints=await loadComparisonSourceHints(job,f.sync);assert.equal(hints.matchedFiles,1);assert.match(hints.source.sources[0].excerpt,/Current code/);assert.doesNotMatch(JSON.stringify(hints),/OLD_AMOUNT_PRIVATE|OLD_ROW_PRIVATE/);
+ await writeFile(path.join(f.workspace,'Invoice.java'),'changed');hints=await loadComparisonSourceHints(job,f.sync);assert.equal(hints.matchedFiles,0);assert.deepEqual(hints.changedOrUnavailablePaths,['Invoice.java']);
+ await rm(path.join(f.workspace,'Invoice.java'));await symlink(path.join(f.root,'outside'),path.join(f.workspace,'Invoice.java'));hints=await loadComparisonSourceHints(job,f.sync);assert.equal(hints.matchedFiles,0);assert.equal(await loadComparisonSourceHints({...job,sourceEnvironment:'sit'},f.sync),null);
 });

@@ -1,3 +1,4 @@
+import {comparisonTarget,requestedSourceEnvironments} from './source-comparison.js';
 import { connectionEndpoints } from './connection-endpoints.js';
 import {recordReportFiles,recordReportReview} from './report-acceptance.js';
 import {interruptedInvestigation} from './investigation-budget.js';
@@ -382,6 +383,25 @@ export class JsonStore {
     });
   }
 
+  async switchContinuousSourceEnvironment(id,identity,result,request,project){
+    return this.transact(state=>{
+      const job=requireJob(state,id);requireActiveLease(job,identity);
+      if(!job.continuousInvestigation||job.taskIntent!=='analysis'||job.stage!=='developer'||job.environmentAccess||result.handoffGate?.passed!==true)throw new Error('当前任务不能接续另一源码环境');
+      const target=comparisonTarget(job,project,request),current=job.sourceEnvironment,snapshot=job.analysisSourceSnapshot;
+      if(!snapshot||result.sourceSync?.cacheKey!==snapshot.cacheKey||result.workspace!==snapshot.workspace||result.sourceQuestionId!==job.questionId)throw new Error('环境交接缺少本问题固定源码证据');
+      job.analysisSourceSnapshots??={};job.analysisSourceSnapshots[current]=structuredClone(snapshot);
+      job.sourceEnvironmentEvidence??={};job.sourceEnvironmentEvidence[current]=structuredClone({environment:current,workspace:result.workspace,sourceSync:result.sourceSync,summary:result.summary,finalMessage:result.finalMessage,verifiedArtifacts:result.verifiedArtifacts,handoffGate:result.handoffGate});
+      job.context=compactContext([...job.context,{stage:job.stage,kind:'analysis_turn',result:structuredClone({...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:null})}]);
+      job.sourceEnvironmentThreads??={};if(result.threadId)job.sourceEnvironmentThreads[current]={questionId:job.questionId,workspace:result.workspace,threadId:result.threadId};
+      job.analysisContinuations??={};if(job.analysisContinuation)job.analysisContinuations[current]=job.analysisContinuation;
+      if(job.analysisContinuations[target])job.analysisContinuation=job.analysisContinuations[target];else delete job.analysisContinuation;
+      job.sourceEnvironment=target;
+      if(job.analysisSourceSnapshots[target])job.analysisSourceSnapshot=job.analysisSourceSnapshots[target];else delete job.analysisSourceSnapshot;
+      job.updatedAt=new Date().toISOString();job.events.push({id:createId('EVT'),type:'source_environment_continued',at:job.updatedAt,from:current,to:target,scope:requestedSourceEnvironments(job,project)});
+      return structuredClone(job);
+    });
+  }
+
   async rejectContinuousEnvironment(id, identity, sourceResult, diagnostic) {
     return this.transact((state) => {
       const job = requireJob(state, id);
@@ -509,8 +529,13 @@ export class JsonStore {
         job.lease.expiresAt = new Date(Date.now() + 120_000).toISOString();
       }
       if(event.type==='progress'&&event.sourceSnapshot?.policy==='isolated-environment-source-v1'){
-        if(job.analysisSourceSnapshot&&JSON.stringify(job.analysisSourceSnapshot)!==JSON.stringify(event.sourceSnapshot))throw new Error('本问题源码提交已经固定，不能替换');
-        job.analysisSourceSnapshot=structuredClone(event.sourceSnapshot);job.analysisSourceQuestionId=job.questionId;
+        const snapshot=event.sourceSnapshot,env=job.sourceEnvironment??snapshot.environment;
+        if(snapshot.environment!==env)throw new Error('源码快照与当前环境不一致');
+        const previous=job.analysisSourceSnapshots?.[env]??job.analysisSourceSnapshot;
+        if(previous&&JSON.stringify(previous)!==JSON.stringify(snapshot))throw new Error('本问题源码提交已经固定，不能替换');
+        job.sourceEnvironment??=env;
+        job.analysisSourceSnapshots??={};job.analysisSourceSnapshots[env]=structuredClone(snapshot);
+        job.analysisSourceSnapshot=structuredClone(snapshot);job.analysisSourceQuestionId=job.questionId;
       }
       if(event.type==='progress'&&event.sourceContinuation){
         const c=event.sourceContinuation;if(c.questionId!==job.questionId||c.workspace!==job.analysisSourceSnapshot?.workspace||typeof c.threadId!=='string')throw new Error('源码历史接续身份不匹配');

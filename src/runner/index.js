@@ -142,6 +142,10 @@ export class AgentRunner {
       const result = direct??await this.execute(current, this.config, emit, signal);
       recordReportReview(current,result);
       save({...current,context:[...(current.context??[]),{kind:'analysis_turn',result}]});
+      if(result?.outcome==='needs_clarification'&&result.sourceEnvironmentQuery){
+        const switched=await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-source`,{...identity,result},{signal});
+        current=switched.job;continue;
+      }
       if (result?.outcome === 'partial' && result.investigation?.status === 'continue' && !result.investigation?.blocker) {
         const continued = await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/continuous-analysis-continue`,
           { ...identity, result },{signal});

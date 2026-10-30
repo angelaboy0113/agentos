@@ -99,7 +99,7 @@ export async function verifyAnalysisSources(project, report) {
 }
 
 export async function prepareAnalysisSources(job, project, options = {}) {
-  const report = job.analysisSourceSnapshot ?? [...(job.context ?? [])].reverse().find((entry) => entry.result?.sourceSync)?.result.sourceSync;
+  const report = job.analysisSourceSnapshots?.[job.sourceEnvironment] ?? job.analysisSourceSnapshot ?? [...(job.context ?? [])].reverse().find((entry) => entry.result?.sourceSync && (!job.sourceEnvironment || entry.result.sourceSync.environment===job.sourceEnvironment))?.result.sourceSync;
   if(job.analysisSourceQuestionId&&job.analysisSourceQuestionId!==job.questionId)throw new Error('源码固定记录不属于当前问题');
   if(report?.policy==='isolated-environment-source-v1'&&job.sourceEnvironment&&report.environment!==job.sourceEnvironment)throw new Error('同一问题不能切换源码环境；请明确新建另一环境的问题');
   // A same-question investigation keeps one immutable source snapshot. Runtime
