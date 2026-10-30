@@ -1,3 +1,4 @@
+import {validateDefinitionUpdate} from '../shared/business-definitions.js';
 import { readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -189,6 +190,7 @@ export function validateDecision(value) {
   catch (error) { throw new DecisionProtocolError(error.message); }
 }
 function validateDecisionValue(value) {
+  if(value?.definitionUpdates!==undefined){if(!Array.isArray(value.definitionUpdates)||value.definitionUpdates.length>12)throw new Error('Invalid definition updates');for(const u of value.definitionUpdates)validateDefinitionUpdate(u);}
   if(value.requiresTabularDelivery!==undefined&&typeof value.requiresTabularDelivery!=='boolean')throw new Error('Invalid tabular delivery decision');
   const actions = ['lookup_contact', 'reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];
   const intents = ['none', 'implementation', 'planning', 'analysis', 'verification', 'audit'];

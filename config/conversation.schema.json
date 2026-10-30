@@ -15,7 +15,8 @@
     "sourceEnvironment",
     "knowledgeMatch",
     "contactLookup",
-    "requiresTabularDelivery"
+    "requiresTabularDelivery",
+    "definitionUpdates"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -246,6 +247,48 @@
     "requiresTabularDelivery": {
       "type": "boolean",
       "description": "多对象、多指标的业务数据清单或可复用统计结果默认需要表格文件，即使未写Excel/导出。源码字段/接口/结构说明可直接用文字或Markdown表格，未要求文件时false；明确要求CSV/XLSX/文件时true。不代替数据权限或完整业务报表核验。"
+    },
+    "definitionUpdates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environment",
+          "title",
+          "definition",
+          "quote",
+          "previousId",
+          "previousVersion",
+          "aliases"
+        ],
+        "properties": {
+          "environment": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "definition": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "previousId": {
+            "type": "string"
+          },
+          "previousVersion": {
+            "type": "integer"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   }
 }

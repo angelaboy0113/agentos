@@ -1,3 +1,4 @@
+import {readBatchSpec,expandReadBatch} from './read-batch.js';
 import {ToolResultStore} from './tool-result-store.js';
 import {sourceQueryTools,publicSourceQueryContext,SourceEvidenceInputError} from './source-query-context.js';
 import { CodexAppServer } from '../shared/codex-app-server.js';
@@ -94,12 +95,17 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     const source=sourceQueryTools(adapters.sourceQueryContext,{authorize,secrets:[cred.username,cred.password]});return {...base,spec:[...base.spec,...source.spec,{tool:'list_tool_results',args:{offset:'0 or nextOffset',limit:'1..20'},description:'Locate persisted large results for this job/environment after restart. Does not query a database.'},{tool:'read_tool_result',args:{resultRef:'tool-result reference from a stored response',offset:'0 or nextOffset',limit:'1..4000 characters'},description:'Read persisted full tool JSON after presentation overflow. No query replay or arbitrary file path; continue nextOffset.'}],run:async(tool,args)=>{try{return await (tool==='list_tool_results'?resultStore.list(args):tool==='read_tool_result'?resultStore.read(args):source.spec.some(s=>s.tool===tool)?source.run(tool,args):base.run(tool,args));}catch(error){if(error instanceof SourceEvidenceInputError||error.code==='REPORT_INPUT')throw new QueryInputError(error.code,error.message);throw error;}}};};
   const savedToolResults=await resultStore.list();
   let tools=await makeTools();
+  const pendingBatch=[];
+  const timing={plannerSetupMs:0,plannerMs:0,toolMs:0,plannerCalls:0,toolCalls:0};
   let planner; const steps = [...(adapters.checkpoint?.steps??[])], results = [...(adapters.checkpoint?.results??[])]; let summary = '', complete = false, unresolvedInput = false, stalled = 0, stopReason = '';
   let lastAuthorizedAt = adapters.checkpoint?.lastAuthorizedAt ?? null;
   const seen = new Set(),pendingInputs=new Set();
   let timeoutStreak = 0, unresolvedTimeout = false;
   try {
+    const setupStarted=Date.now();
     planner = await (adapters.planner ?? createToolPlanner)({onProgress:current=>emit({type:'progress',phase:'tool_activity',activity:{current,total:0,completed:0,recent:[]}})});
+    timing.plannerSetupMs=Date.now()-setupStarted;
+    const nextPlan=async input=>{const began=Date.now();timing.plannerCalls++;try{return await planner.next(input);}finally{timing.plannerMs+=Date.now()-began;}};
     let diagnosticStage = 'planning',failure=null,lastArgumentKeys=[];
     try {
     for (let i = 0; ; i++) {
@@ -107,7 +113,11 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       // Recheck scope/expiry before every tool, not just at job claim.
       try { cfg = await authorizePlan(); e = verifyApprovedPlan(cfg, plan); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
-      const choice = i === 0 ? { tool: 'connection', arguments: '{}' } : i===1&&tools.spec.some(x=>x.tool==='list_datasets')?{tool:'list_datasets',arguments:'{}'}:await planner.next({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: tools.spec, results: results.slice(-12), reportState: reportPlannerState(results),savedToolResults, progress: { toolCount: results.length, consecutiveNoProgress: stalled }, instruction: '优先修正investigationContext.corrections中的未解决校验原因；inspect_dataset会返回草稿所需检查项。不因为REPORT_INPUT重查整套数据。list_datasets有nextOffset时继续分页找已有成果。优先用一次聚合或重复组合查询关闭核心缺口；表结构定向读取并按真实证据推进。先前结果仍在本会话历史中。' });
+      let choice = pendingBatch.length?pendingBatch.shift():i === 0 ? { tool: 'connection', arguments: '{}' } : i===1&&tools.spec.some(x=>x.tool==='list_datasets')?{tool:'list_datasets',arguments:'{}'}:await nextPlan({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: [...tools.spec,...readBatchSpec(tools.spec)], results: results.slice(-12), reportState: reportPlannerState(results),savedToolResults, progress: { toolCount: results.length, consecutiveNoProgress: stalled }, instruction: '已确定的团队口径直接沿用，不能因为换提问人而重问；完整源码规则一次交接，独立查询可batch_read减少逐步模型往返；不将依赖前一步结果的操作提前猜测。优先修正investigationContext.corrections中的未解决校验原因；inspect_dataset会返回草稿所需检查项。不因为REPORT_INPUT重查整套数据。list_datasets有nextOffset时继续分页找已有成果。优先用一次聚合或重复组合查询关闭核心缺口；表结构定向读取并按真实证据推进。先前结果仍在本会话历史中。' });
+      if(choice.tool==='batch_read'){
+        try{pendingBatch.push(...expandReadBatch(choice,tools.spec));choice=pendingBatch.shift();}
+        catch{results.push({tool:'batch_read',error:{code:'TOOL_ARGUMENTS',message:'批次须为1至32项本环境已开放的独立只读工具和完整参数对象；请修正，不重跑已完成步骤。'},executed:false});continue;}
+      }
       if (choice.tool === 'finish') {
         const mysqlEvidence = results.some(item => item.result && ['collections','tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','read_tool_result','list_tool_results','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
         const mysqlQueryTools = ['mysql','mongodb'].includes(e.kind) && tools.spec.some(item => ['collections','tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','read_tool_result','list_tool_results','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
@@ -129,8 +139,9 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       diagnosticStage = choice.tool;
       let result;
 
-      try { result = await tools.run(choice.tool, args); }
+      try { const began=Date.now();timing.toolCalls++;try{result = await tools.run(choice.tool, args);}finally{timing.toolMs+=Date.now()-began;} }
       catch (error) {
+        pendingBatch.length=0;
         if (['mysql','mongodb'].includes(e.kind) && ['collections','select', 'count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','read_tool_result','list_tool_results','compose_report','finalize_report','refresh_report','enrich_dataset','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(choice.tool) && /^错误码：TIMEOUT\b/m.test(failureDiagnostic(error))) {
           unresolvedTimeout = true;
           results.push({ tool: choice.tool, error: { code: 'TIMEOUT', message: '本次查询超时，连接已关闭；不是业务故障根因。重新读取目标表结构，缩小时间范围、增加单号等条件或选择其他证据路径。保持原授权和单次等待上限。' }, completed: false });
@@ -174,7 +185,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     if (!summary) {
       // Final synthesis uses existing evidence only; it cannot execute another query.
       try {
-        const final = await planner.next({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: [], results: results.slice(-20), remainingCalls: 0, stopReason,
+        const final = await nextPlan({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: [], results: results.slice(-20), remainingCalls: 0, stopReason,
           completionPolicy: '没有固定调用次数上限；remainingCalls=0仅表示本次进入只汇总阶段，不表示调用额度耗尽。仅依据stopReason解释暂停原因。',
           instruction: '排查已暂停。仅返回finish汇总已有证据、来源表与未查明原因，不执行工具、不把查到记录等同根因已确认。' });
         if (final.tool === 'finish') { summary = String(final.summary ?? '').slice(0,6000); complete = final.complete === true; }
@@ -194,6 +205,6 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     if(e.kind==='website')business.push(...uniqueResults.filter(x=>x.result?.url&&typeof x.result.pageText==='string').map(x=>({url:x.result.url,pageText:x.result.pageText,fields:x.result.fields??[]})));
     return { toolResultCatalog:uniqueResults.filter(x=>x.result?.resultStored).map(x=>({resultRef:x.result.resultRef,tool:x.tool,bytes:x.result.bytes})),fileInspections:uniqueResults.filter(x=>x.tool==='inspect_report').map(x=>x.result).slice(-1),failure,toolInputErrors:results.filter(x=>x.error&&x.executed===false).map(x=>({tool:x.tool,code:x.error.code,message:[cred.username,cred.password].filter(Boolean).reduce((m,secret)=>m.split(secret).join('[已隐藏]'),String(x.error.message??'')).slice(0,1200),resolved:!pendingInputs.has(x.tool)})).slice(-12),datasetCatalog:uniqueResults.flatMap(x=>x.result?.datasets??[]), websiteScreenshots:[...new Map(uniqueResults.flatMap(x=>[...(x.result?.screenshot?[x.result.screenshot]:[]),...(x.result?.screenshotDeliveries??[])]).map(item=>[item.sha256,item])).values()], exportFiles: uniqueResults.flatMap(x=>x.result?.exportFile?[x.result.exportFile]:[]), websiteMismatch: results.some(x => x.result?.websiteMismatch === true), runtimeDiscoveries: uniqueResults.filter(x => x.result?.runtimeDiscovery).map(x => x.result.runtimeDiscovery), rows: uniqueResults.filter(x => x.result?.rows).flatMap(x => x.result.rows.map(row => x.result.table ? { ...row, '来源表': x.result.table } : row)), steps, summary, partial: !complete,
       note: e.kind === 'tct' ? '本次仅使用已登记调度分组的固定只读接口，未触发、停止或修改任务；账号本身的只读权限未验证。' : e.kind === 'website' ? '本次读取业务网页，未执行修改。' : e.kind === 'nacos' ? 'Nacos 读取与数据库连接是两步；本次未连接数据库。' : '仅本次范围内的数据库只读工具。',
-      evidence: { environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash, readAt: new Date().toISOString(), lastAuthorizedAt, toolCount: results.length, businessProgressHash:business.length?fingerprint([...new Set(business.map(x=>JSON.stringify(x)))].sort()):null, businessQueryCount:['mysql','mongodb'].includes(e.kind)?uniqueResults.reduce((n,x)=>n+(x.tool==='refresh_report'?(x.result.refresh?.sourceCount??0):!x.result.reused&&['select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset'].includes(x.tool)?1:0),0):undefined, rowCount: uniqueResults.reduce((n,x)=>n+(x.tool==='refresh_report'?(x.result.exportFile?.rowCount??0):x.result?.datasetRef?x.result.rowCount:Array.isArray(x.result?.rows)?x.result.rows.length:0),0), resultHash: fingerprint(serialized) } };
+      evidence: { timing,environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash, readAt: new Date().toISOString(), lastAuthorizedAt, toolCount: results.length, businessProgressHash:business.length?fingerprint([...new Set(business.map(x=>JSON.stringify(x)))].sort()):null, businessQueryCount:['mysql','mongodb'].includes(e.kind)?uniqueResults.reduce((n,x)=>n+(x.tool==='refresh_report'?(x.result.refresh?.sourceCount??0):!x.result.reused&&['select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset'].includes(x.tool)?1:0),0):undefined, rowCount: uniqueResults.reduce((n,x)=>n+(x.tool==='refresh_report'?(x.result.exportFile?.rowCount??0):x.result?.datasetRef?x.result.rowCount:Array.isArray(x.result?.rows)?x.result.rows.length:0),0), resultHash: fingerprint(serialized) } };
   } finally { await tools.close(); await planner?.close(); }
 }

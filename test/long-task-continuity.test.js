@@ -147,3 +147,19 @@ test('malformed tool JSON is corrected locally instead of losing already gathere
  let turns=0,reads=0;const result=await investigateEnvironment(grant(),async()=>{},{load:async()=>cfg,credential:async()=>({}),tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async tool=>{if(tool==='select')reads++;return{rows:[{id:'retained'}]};},close:async()=>{}}),planner:async()=>({next:async()=>++turns===1?{tool:'select',arguments:'{invalid'}:turns===2?{tool:'select',arguments:'{}'}:{tool:'finish',complete:true,summary:'Corrected current input'},close:async()=>{}})});
  assert.equal(reads,1);assert.equal(result.partial,false);assert.ok(result.toolInputErrors.some(x=>x.code==='TOOL_ARGUMENTS'&&x.resolved));
 });
+
+test('independent read batch saves planning turns while preserving individual authorization, evidence and timing',async()=>{
+ let plans=0,calls=[];
+ const out=await investigateEnvironment(grant(),async()=>{},{load:async()=>cfg,credential:async()=>({}),
+  tools:async()=>({spec:[{tool:'connection'},{tool:'count'}],run:async(tool,args)=>{calls.push(tool);return tool==='count'?{rows:[{n:args.n}]}:{};},close:async()=>{}}),
+  planner:async()=>({next:async input=>{plans++;if(plans===1){assert.ok(input.tools.some(t=>t.tool==='batch_read'));return {tool:'batch_read',arguments:JSON.stringify({requests:[{tool:'count',arguments:{n:1}},{tool:'count',arguments:{n:2}}]})};}return {tool:'finish',complete:true,summary:'Two independent counts verified'};},close:async()=>{}})});
+ assert.deepEqual(calls,['connection','count','count']);assert.equal(plans,2);assert.equal(out.evidence.businessQueryCount,2);assert.equal(out.evidence.timing.toolCalls,3);assert.equal(out.evidence.timing.plannerCalls,2);assert.equal(out.partial,false);
+});
+
+test('batch stops on failure, retains successful reads and replans without replaying them',async()=>{
+ let plans=0,calls=[];
+ const out=await investigateEnvironment(grant(),async()=>{},{load:async()=>cfg,credential:async()=>({}),
+  tools:async()=>({spec:[{tool:'connection'},{tool:'count'}],run:async(tool,args)=>{calls.push(args.n??0);if(args.n===2)throw new Error('source disconnected');return {rows:[{n:args.n??0}]};},close:async()=>{}}),
+  planner:async()=>({next:async()=>++plans===1?{tool:'batch_read',arguments:JSON.stringify({requests:[1,2,3].map(n=>({tool:'count',arguments:{n}}))})}:{tool:'finish',complete:false,summary:'First result retained; source disconnected'},close:async()=>{}})});
+ assert.deepEqual(calls,[0,1,2]);assert.equal(out.partial,true);assert.ok(out.failure);assert.ok(out.rows.some(x=>x.n===1));
+});

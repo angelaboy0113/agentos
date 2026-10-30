@@ -1,3 +1,4 @@
+import {parallelRead,prepareRepositoryLayers} from '../shared/parallel-read.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {verifyIndependentGit} from '../shared/git-metadata.js';
 import {withSnapshotLock} from '../shared/snapshot-lock.js';
@@ -94,8 +95,7 @@ export async function syncSnapshot(project, environment, {onProgress} = {}) {
  const prepared=await settings(project,environment);
  return withSnapshotLock(prepared.snapshotRoot,async(checkLock)=>{
   const {id,sourceRoot,snapshotRoot,repos}=prepared;
-  const remote=[];
-  for(const repo of repos){
+  const remote=await parallelRead(repos,async(repo)=>{
    let stage='读取来源配置';
    try{
     const origin=await git(repo.cwd,['remote','get-url','origin']);
@@ -103,9 +103,9 @@ export async function syncSnapshot(project, environment, {onProgress} = {}) {
     const lines=await git(repo.cwd,['ls-remote','origin',`refs/heads/${repo.branch}`], {onRetry: d => onProgress?.(`${repo.path}：远端核对暂时失败，正在重试第${d.nextAttempt}次（${d.code}）`)});
     const [commit,ref]=lines.split(/\s+/);
     if(!/^[a-f0-9]{40,64}$/.test(commit??'')||ref!==`refs/heads/${repo.branch}`)throw sourceGitError({code:'SOURCE_GIT_REMOTE_UNAVAILABLE',operation:'ls-remote',retryable:false,attempts:1,exitCode:null});
-    remote.push({...repo,origin,commit});
+    return {...repo,origin,commit};
    }catch(error){throw snapshotFailure(repo,stage,error);}
-  }
+  });
   const cacheKey=createHash('sha256').update(JSON.stringify([sourceRoot,id,remote.map(({path,branch,origin,commit})=>({path,branch,origin,commit}))])).digest('hex');
   const container=path.join(snapshotRoot,'analysis-'+cacheKey),remoteCheckedAt=new Date().toISOString();
   const existing=await lstat(container).catch(e=>{if(e.code!=='ENOENT')throw e;return null;});
@@ -121,7 +121,7 @@ export async function syncSnapshot(project, environment, {onProgress} = {}) {
    report={policy,cacheKey,projectId:project.id??null,repositorySources:remote.map(r=>({path:r.path,originHash:createHash('sha256').update(r.origin).digest('hex')})),environment:id,sourceRoot,workspace:path.join(container,'workspace'),checkedAt:remoteCheckedAt,repositories:[]};
    try{
     await writeFile(path.join(temporary,'build-owner.json'),JSON.stringify({policy:'snapshot-build-v1',sourceRoot,environment:id}),{mode:0o600,flag:'wx'});
-    for(const [index,repo] of remote.entries()){
+    report.repositories=await prepareRepositoryLayers(remote,async(repo,index)=>{
      await onProgress?.(`正在准备源码 ${index+1}/${remote.length}：${repo.path}（${repo.branch}）`);
      let stage='检查缓存路径';
      try{
@@ -157,9 +157,9 @@ export async function syncSnapshot(project, environment, {onProgress} = {}) {
       await git(target,['checkout','--detach',repo.commit]);
       stage='整理临时缓存对象';
       await discardSeedHistory(target);
-      report.repositories.push({path:repo.path,branch:repo.branch,commit:repo.commit});
+      return {path:repo.path,branch:repo.branch,commit:repo.commit};
      }catch(error){throw snapshotFailure(repo,stage,error);}
-    }
+    });
     await writeFile(path.join(temporary,'source-manifest.json'),JSON.stringify(report),{mode:0o600,flag:'wx'});
     checkLock();await rename(temporary,container);
    }catch(error){await rm(temporary,{recursive:true,force:true});throw error;}
