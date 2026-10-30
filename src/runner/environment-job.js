@@ -1,3 +1,5 @@
+import {reusableReportSources} from './report-reuse.js';
+import {createHash} from 'node:crypto';
 import {controlPost} from './control-client.js';
 import {buildSourceQueryContext} from './source-query-context.js';
 import { connectionEndpoints } from '../shared/connection-endpoints.js';
@@ -24,7 +26,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   let result, environment;
   const sourceResult=(job.context??[]).filter(x=>x.kind==='analysis_turn').at(-1)?.result;
   const sourceQueryContext=await buildSourceQueryContext(sourceResult);
-  try { const cfg = await loadEnvironments(); environment = cfg.environments[plan.environmentId]; result = environment?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, environment.kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {reportJob:job,dataDir:config.dataDir??path.dirname(config.worktreeRoot),exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id),investigationContext:reportInvestigationContext(job),sourceQueryContext}) : await readEnvironment(plan); }
+  try { const cfg = await loadEnvironments(); environment = cfg.environments[plan.environmentId];const reuse=environment?.kind==='mysql'?await reusableReportSources(config.dataDir??path.dirname(config.worktreeRoot),job,createHash('sha256').update(JSON.stringify(environment)).digest('hex')):[]; result = environment?.queries[plan.queryId]?.mode === 'investigate' ? await investigateEnvironment(plan, emit, environment.kind==='website' ? {tools:async()=>websiteTools(job,config),checkpoint:job.browserCheckpoint} : {preferReuse:reuse.length>0,reportJob:job,dataDir:config.dataDir??path.dirname(config.worktreeRoot),exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id),investigationContext:reportInvestigationContext(job),sourceQueryContext}) : await readEnvironment(plan); }
   catch (error) {
     const diagnostic = failureDiagnostic(error);
     if (/^错误码：BROWSER_BRIDGE\b/.test(diagnostic)) return { outcome:'needs_clarification', browserLoginRequired:true,

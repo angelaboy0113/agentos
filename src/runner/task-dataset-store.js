@@ -19,7 +19,7 @@ export class TaskDatasetStore {
   const file=path.join(this.root,id+'.json'),root=await realpath(this.root),actual=await realpath(file),info=await lstat(file);
   if(!actual.startsWith(root+path.sep)||!info.isFile()||info.isSymbolicLink())throw new Error('数据集文件校验未通过');
   const d=JSON.parse(await readFile(file,'utf8'));
-  if(d.id!==id||d.scope!==this.scope||!Number.isFinite(Date.parse(d.readAt))||Date.now()-Date.parse(d.readAt)>86400000||Date.parse(d.readAt)>Date.now()+1000||d.data?.complete!==true||!Array.isArray(d.data.columns)||!Array.isArray(d.data.rows)||hash(d.data)!==d.dataHash)throw new Error('数据集范围、完整性、有效期或摘要校验失败');
+  if(d.id!==id||d.scope!==this.scope||!Number.isFinite(Date.parse(d.readAt))||Date.parse(d.readAt)>Date.now()+1000||d.data?.complete!==true||!Array.isArray(d.data.columns)||!Array.isArray(d.data.rows)||hash(d.data)!==d.dataHash)throw new Error('数据集范围、完整性、有效期或摘要校验失败');
   return d;
  }
  async save(id,data,snapshotId,readAt=new Date().toISOString()){

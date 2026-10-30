@@ -1,3 +1,4 @@
+import {verifyTransformTree} from './relational-dataset.js';
 import {verifyPeriodDataset} from './period-dataset.js';
 import {readFile,readdir,lstat} from 'node:fs/promises';
 import path from 'node:path';
@@ -56,8 +57,9 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  };
  await compareScope(receipt.coverage.populationRef,receipt.coverage.populationKey,true);for(const source of draft.sources)await compareScope(source.datasetRef,source.keyColumn);
  const loadPeriodSource=async ref=>{const saved=await storage.get(ref);return {...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};};
+ await verifyTransformTree(await loadPeriodSource(receipt.coverage.populationRef),loadPeriodSource);
  await verifyPeriodDataset(await loadPeriodSource(receipt.coverage.populationRef),loadPeriodSource);
- for(const source of draft.sources)await verifyPeriodDataset(await loadPeriodSource(source.datasetRef),loadPeriodSource);
+ for(const source of draft.sources){await verifyTransformTree(await loadPeriodSource(source.datasetRef),loadPeriodSource);await verifyPeriodDataset(await loadPeriodSource(source.datasetRef),loadPeriodSource);}
  const populationAudit={selected:{...describe(receipt.coverage.populationRef,receipt.coverage.populationKey,population.data),scopeEvidence:receipt.scopeEvidence},comparisons,note:'这些是实际来源与主键直接关联的完整集合，不自动等于应纳入的业务范围。逐项对照原问题和源码确定全集/子集，不能把有金额记录自动当全部对象，也不能因有零金额而排除对象；多层组织维度可能本来不属于同一全集。差异须明确审阅，不因名称相似猜测。'};
  const checks=receipt.totals??[];
  const binding={fileId:item.id,sourceJobId,datasetRef:bound.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:item.rowCount};

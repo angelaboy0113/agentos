@@ -1,3 +1,4 @@
+import {reusableReportSources,importReportDataset,inspectReusableReport} from './report-reuse.js';
 import {inspectReport,ReportInspectionError} from '../shared/report-inspection.js';
 import {DatasetCapacityError} from './task-dataset-store.js';
 import { ReportDatasets, ReportInputError } from './report-datasets.js';
@@ -80,6 +81,12 @@ export function selectStatement(args, tables, q) {
   if (columns.some(c => !known.includes(c))) throw new QueryInputError('SCHEMA_FIELDS', '字段未在已读取结构中；重新读取目标表schema或继续分页，仅使用返回的字段。');
   const {where,params}=filterClause(filters,tables,table,q,new Map(),'',6);
   return { sql: `SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`${table}\` WHERE ${where} LIMIT ${q.maxRows + 1}`, params, columns };
+}
+export function rowDatasetStatement(args,tables,types,q){
+ const cs=args.columns,order=args.orderBy;if(!Array.isArray(cs)||!cs.length||new Set(cs).size!==cs.length||!Array.isArray(order)||!order.length)throw new QueryInputError('QUERY_INPUT','row_dataset需实际columns和稳定唯一键orderBy；不支持表达式');
+ cs.forEach(c=>checkedColumn(tables,args.table,c,q));order.forEach(c=>{checkedColumn(tables,args.table,c,q);if(!cs.includes(c))throw new QueryInputError('QUERY_INPUT','orderBy唯一键必须同时选入columns以核实分页完整性');});
+ const f=filterClause(args.filters,tables,args.table,q);
+ return {sql:`SELECT ${cs.map(c=>'`'+c+'`').join(', ')} FROM \`${args.table}\` WHERE ${f.where} ORDER BY ${order.map(c=>'`'+c+'`').join(', ')}`,params:f.params,columns:cs,uniqueKeyColumns:order,numericColumns:cs.filter(c=>['decimal','numeric','float','double'].includes(types.get(args.table)?.get(c)))};
 }
 // Count only validated base-table fields and filters; no model-provided SQL.
 export function countStatement(args, tables, q) {
@@ -209,9 +216,10 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   async function mysql() {
     if (!conn) {
       const driver = adapters.mysql ?? await import('mysql2/promise');
-      conn = await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
+      const actual=adapters.loadCredential?await adapters.loadCredential():cred;for(const value of [actual.username,actual.password].filter(Boolean)){if(!secrets.includes(value))secrets.push(value);if(!datasets.secrets.includes(value))datasets.secrets.push(value);}
+      conn = await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: actual.username, password: actual.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
         // Business IDs frequently exceed Number.MAX_SAFE_INTEGER. Keep BIGINT/DECIMAL values lossless so a value returned by one read can be used by the next read unchanged.
-        supportBigNumbers: true, bigNumberStrings: true, dateStrings: true,
+        supportBigNumbers: true, bigNumberStrings: true, dateStrings: true, jsonStrings: true,
         ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
       if (!active) { conn.destroy(); conn = null; throw new Error('连接已超时'); }
       try { const [g] = await conn.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, g); await conn.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`); await conn.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ'); await conn.query('START TRANSACTION READ ONLY'); }
@@ -237,10 +245,19 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   ];
   if(e.kind==='mysql'&&q.exportMaxRows){
     spec.push({tool:'enrich_dataset',args:{datasetRef:'完整主对象数据集',keyColumn:'主对象唯一编码列',lookups:[{name:'area',datasetRef:'完整维度数据集',sourceColumn:'主对象已有列或上一步输出列',targetColumn:'维度唯一键',fields:[{column:'维度列',as:'新的输出列名'}],missing:'empty或error，必须明确',fallbackKey:'可选，源码已证实的默认配置关联键，须在同一完整维度数据中实际存在'}]},description:'同一任务内按实际关联键左连接维度，最多4步、每步4字段；可以沿显式parent键多级查名称。不执行SQL，不接受路径/表达式，不丢主对象。专属配置缺失且源码明确规定沿用通用配置时，可传fallbackKey（实际存在的默认行键），把生效值写入每行并标记沿用默认配置；不能猜默认键或常量。重复维度键拒绝猜选；missing=empty保留未匹配并写入name_status，返回未匹配数量。保留原取数时间，仍需最终核验。'}, {tool:'inspect_dataset',args:{datasetRef:'任务内数据集引用'},description:'查看已有数据集实际SQL、筛选参数、取数时间，或草稿列公式和来源；列表预览截断时使用。结果limited仍为true时不能猜测未展示条件。'}, {tool:'finalize_report',args:{datasetRef:'compose_report草稿引用',requirement:'原问题的交付要求，不缩减范围',expectedColumns:['按用户要求的完整列标题，顺序一致'],scopeEvidence:'完整对象范围的源码/文档依据及期间条件',populationRef:'独立原始范围数据集',populationKey:'业务主键',columnRules:[{label:'逐列标题',definition:'业务定义和公式',evidence:'源码或文档位置及实际规则'}],checks:[{source:'s1',column:'amount',referenceRef:'不同原始查询的完整分量合计基准集',referenceColumn:'amount',evidence:'与该分量同期间/状态/费用范围的独立汇总依据'}]},description:'草稿最终核验：missing=empty的原始金额保留为空，仅核对已知金额并登记缺失数；不能当0或参与加减。列顺序完全一致、完整业务对象集合相等、计算/total的所有来源分量与不同原始查询的基准集精确合计一致、取数窗口按管理员的exportSnapshotWindowMs配置（默认5分钟），返回实际起止时间；不等于同一事务。不能以草稿或同一查询自证；业务依据仍须源码核实。只有此工具返回exportFile，compose_report只产出draftFile。'}, {tool:'compare_datasets',args:{leftRef:'左数据集引用',rightRef:'右数据集引用',leftKey:'左主键列',rightKey:'右主键列'},description:'在任务内精确比较两个完整数据集的业务主键；返回各自数量、匹配数、左右缺失数量和有限缺失行预览，不重新查询数据库。不接受任意文件路径。'}, {tool:'list_datasets',args:{offset:'可选非负整数，默认0',limit:'可选1至20，默认20；按nextOffset继续'},description:'列出当前任务在本环境已完整读取并持久保存的数据集、字段、取数时间和摘要。新一轮先查看已有成果，compose_report可直接引用这些datasetRef，不要重复查询已取得的金额。跨轮引用需核对取数时点；不能把旧数据当实时状态。'}, {tool:'group_dataset',args:{table:'已读取结构的表',groupColumns:['经销商主键等分组字段'],rowKey:'可选，生成分组组合行键的输出列名，如row_key',aggregates:[{op:'sum',column:'数值字段',as:'amount'}],filters:'与aggregate相同'},description:`按实际分组字段汇总并由程序连续分页取完，${q.exportMaxRows==='all'?'不预设总行数，直到实际分页结束':'最多'+q.exportMaxRows+'组'}；返回datasetRef、完整性和少量预览。不是前${q.maxRows}行样本；可用于完整经销商报表。`},
-    {tool:'linked_group_dataset',args:{leftTable:'左表',rightTable:'右表',join:{leftColumn:'字段',rightColumn:'字段',type:'可选inner或left，默认inner'},groupColumns:[{table:'左表或右表',column:'经销商主键'}],rowKey:'可选，如row_key，为所有分组字段生成稳定组合行键',aggregates:'与linked_aggregate相同',filters:'与linked_aggregate相同'},description:'两表受控等值关联后分组汇总并完整分页；一对多按实际明细粒度分组，须保留没有明细的主对象时指定join.type=left。left模式必须有左表筛选，右表filters在ON中筛选匹配明细，未匹配右字段为null，不能当0。需要导出一对象多行时指定rowKey，compose_report用返回的组合行键，独立范围查询也按相同分组生成rowKey核对；该键不是业务编号。不能重复累计左侧金额；enrich_dataset仅用于唯一维度查找，不能用于展开一对多。'},
+    {tool:'linked_group_dataset',args:{leftTable:'左表',rightTable:'右表',join:{leftColumn:'字段',rightColumn:'字段',type:'可选inner或left，默认inner'},groupColumns:[{table:'左表或右表',column:'经销商主键'}],rowKey:'可选，如row_key，为所有分组字段生成稳定组合行键',aggregates:'与linked_aggregate相同',filters:'与linked_aggregate相同'},description:'两表受控等值关联后分组汇总并完整分页；一对多按实际明细粒度分组，须保留没有明细的主对象时指定join.type=left。left模式可保留授权内完整左表，右表filters在ON中筛选匹配明细，未匹配右字段为null，不能当0。需要导出一对象多行时指定rowKey，compose_report用返回的组合行键，独立范围查询也按相同分组生成rowKey核对；该键不是业务编号。不能重复累计左侧金额；enrich_dataset仅用于唯一维度查找，不能用于展开一对多。'},
     {tool:'period_dataset',args:{populationRef:'完整主对象数据集',keyColumns:['实际对象键'],period:{unit:'month或day或values',start:'2026-01',end:'2026-12',column:'period',values:'仅values时提供有序期间数组'},rowKey:'period_key',sources:[{datasetRef:'完整金额数据集',keyColumns:['对应对象键'],periodColumn:'月份列（YYYYMM/数值YYYYMM/YYYY-MM/YYYY-M）或日期列（YYYYMMDD/YYYY-MM-DD）',yearColumn:'可选，仅分开的年/月列',duplicates:'error或明确sum',outside:'error或exclude',outsideEvidence:'exclude时说明排除依据',metrics:[{column:'真实金额字段',as:'当期金额',cumulativeAs:'可选累计金额输出列',missing:'zero/empty/error，无发生记录',nulls:'zero/empty/error，实际金额为空'}]}]},description:'自动将六位年月、标准年月及分开的年/月统一为YYYY-MM；八位日期统一为YYYY-MM-DD，不做时区转换。非法日期明确报错，不能按outside=exclude吞掉后补零。无需额外SQL转换权限。按完整主对象×指定月/日/有序期间生成全部组合，保留无发生对象和空月份；多来源按对象复合键及期间对齐，精确十进制累计，支持跨年，累计从指定起点零开始。含期初余额的报表须另取期初来源并在compose_report显式相加，不把月度流量当余额。sources=[]生成独立覆盖范围；金额源必须同对象期间唯一，确需合并重复时明确sum。默认不猜缺失/空值；empty会让其后的累计保持未知。数据集保留派生配方与排除/缺失计数，可恢复/refresh重放。finalize每个期间金额列需要独立原始查询产生的另一个period_dataset作逐行基准，不能用同一查询自证或拿全年合计替代累计列；inspect_dataset查看实际列与来源。'},
     {tool:'compose_report',args:{sources:[{name:'s1',datasetRef:'本轮完整datasetRef',keyColumn:'经销商主键'}],columns:[{label:'经销商',value:{op:'key'}},{label:'余额',total:true,value:{op:'subtract',args:[{op:'field',source:'s1',column:'amount',missing:'zero'},{op:'field',source:'s2',column:'used',missing:'zero'}]}}]},description:'按业务主键全外连接本任务完整数据集（可选population:{datasetRef,keyColumn}限定完整主对象集合），生成CSV草稿并返回行数、校验和、列合计与预览；列数按报表要求。sources[].name必须使用不重复的s1、s2等（s加数字）；field.source引用同名来源，不能改为业务名称。固定计算key/field/add/subtract/min，后3项使用args数组；field指定source、column及可选missing=zero或empty，缺失默认报错。数字精确十进制计算。数值列应标记total:true。只返回draftFile；之后finalize_report通过才可交付。必须先核实各来源口径、关联基数及覆盖范围，不得用样本或不完整数据集导出完整报表。'});
   }
+
+  if(e.kind==='mysql'&&q.exportMaxRows)spec.push(
+   {tool:'row_dataset',args:{table:'schema表',columns:['完整实际字段'],orderBy:['稳定唯一主键'],filters:[]},description:'读取原始完整行，不分组或去重；按稳定唯一键排序后完整分页保存datasetRef。JSON以完整字符串保留（不截断），随后expand_dataset拆行。全量filters=[]，范围仍按原授权；预览不是完整数据。'},
+   {tool:'expand_dataset',args:{datasetRef:'完整原始来源',column:'JSON数组列',keyColumns:['父行唯一键'],fields:[{path:['code'],as:'item_code'}],rowKey:'item_key',empty:'keep或drop'},description:'在程序中完整展开JSON数组，path=[]提取标量元素，path数组逐层取对象字段；精确保留数字与前导零。每项一行、空数组按明确keep/drop处理，保留父字段、原取数时间及审计；坏JSON报错不丢数据。'},
+   {tool:'join_dataset',args:{leftRef:'完整左集',rightRef:'完整右集',leftKeys:['字段'],rightKeys:['字段'],join:'left或inner',cardinality:'one或many',fields:[{column:'右字段',as:'唯一别名'}],rowKey:'joined_key',statusColumn:'可选，输出匹配状态的唯一列名'},description:'在本任务完整数据上按复合键关联，可一对多展开；one时右键重复报错，many明确保留全部匹配。left保留未匹配左行并留空；返回未匹配数、来源时间及可重放配方。多级组织可反复按parent键关联，不需要数据库任意SQL。'},
+   {tool:'union_dataset',args:{datasetRefs:['完整来源1','完整来源2'],columns:['同名投影字段'],keyColumns:['复合业务键'],rowKey:'union_key',duplicates:'error或distinct',evidence:'明确去重业务依据'},description:'跨来源按选定列合并，distinct仅在所有投影字段相同才合并；同键字段冲突拒绝任意丢弃。可用于多处编码集合交叉核对及保留无编码对象。'},
+   {tool:'filter_dataset',args:{datasetRef:'已有完整集',match:'all或any',filters:[{column:'实际列',op:'=|!=|>|>=|<|<=|in|is_null|not_null',type:'text/date（自然日）/datetime（本地原值时分秒）/decimal',value:'比较值'}]},description:'按固定比较筛选已有完整数据，不查询数据库、不改变取数时间。年份重叠用开始<=年底并结束>=年初；date只比较自然日，datetime比较无时区原值时分秒。未知值不猜测；保留派生配方，精确小数比较不转浮点。'});
+  const reuseSources=()=>reusableReportSources(adapters.dataDir,adapters.reportJob,datasets.storage.scope);
+  if(e.kind==='mysql'&&q.exportMaxRows&&adapters.reportJob&&adapters.dataDir&&datasets.storage)spec.push({tool:'list_reusable_datasets',args:{offset:'可选分页起点0',limit:'可选1至20，按nextOffset继续'},description:'列出本任务同身份、同项目、同环境且明确关联问题的历史完整来源；保留原取数时间，不把历史当实时。优先复用后用filter_dataset处理后续追问，明确要求最新时才重新取数。'},{tool:'inspect_reusable_report',args:{sourceJobId:'目录返回的来源任务',fileId:'来源中已审阅通过的文件ID',section:'summary/columns/sources/checks/scope',offset:'可选0',limit:'可选1至4'},description:'按明确父问题和同身份环境读取已交付文件的实际列配方、来源引用与取数时间，分页查看；不能猜其他任务文件。后续筛选先看原文件配方，再导入对应完整来源，不重查SQL或让用户上传文件。'},{tool:'reuse_dataset',args:{sourceJobId:'目录返回的来源任务ID',datasetRef:'目录返回的完整来源ID'},description:'仅导入目录中明确关联的历史数据及完整依赖，重验范围、摘要、时间、派生配方；拒绝无关群/人/环境、过期或路径变化。不会重新执行SQL，也不重新标记为最新数据。'});
   let browser;
   if (q.browser === true && e.kind === 'nacos') { browser = await (adapters.browser ?? createNacosBrowser)(e,q,cred,adapters); spec.push(...browser.spec); }
   if(e.kind==='mysql'&&q.exportMaxRows){const final=spec.find(x=>x.tool==='finalize_report');spec.push({...final,tool:'refresh_report',description:'参数与finalize_report相同。仅当当前口径变更或取数时点超窗需要重算时使用：预检已有来源recipe及派生依赖，在一个新只读事务里集中刷新完整来源、独立基准、维度和对象范围，再重做草稿并核验。不能执行保存SQL；旧数据无recipe或含临时in_set须先补齐。历史快照差异本身不要求重算。返回新文件供原问题审阅，不自动发群。'});}
@@ -253,6 +270,18 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     let timer;
     try {
       return await Promise.race([(async () => {
+        if(tool==='list_reusable_datasets'){const sources=await reuseSources();const all=sources.flatMap(s=>s.datasets.map(d=>({sourceJobId:s.jobId,questionId:s.questionId,...d})));const offset=args.offset??0,limit=args.limit??20;if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>20)throw new QueryInputError('QUERY_INPUT','复用目录分页offset>=0，limit为1至20；按nextOffset继续');return {reports:offset===0?sources.flatMap(s=>s.reports.map(r=>({sourceJobId:s.jobId,...r}))):[],datasets:all.slice(offset,offset+limit),totalCount:all.length,nextOffset:offset+limit<all.length?offset+limit:null};}
+        if(tool==='inspect_reusable_report'){await adapters.authorize?.();return inspectReusableReport(adapters.dataDir,adapters.reportJob,datasets.storage.scope,args);}
+        if(tool==='reuse_dataset'){await adapters.authorize?.();return importReportDataset(datasets,args,await reuseSources(),adapters.dataDir);}
+        if(['expand_dataset','join_dataset','union_dataset','filter_dataset'].includes(tool))return datasets.transform(tool,args);
+        if(tool==='list_datasets')return datasets.list(args);
+        if(tool==='compare_datasets')return datasets.compare(args);
+        if(tool==='period_dataset')return datasets.period(args);
+        if(tool==='compose_report')return datasets.compose(args);
+        if(tool==='enrich_dataset')return datasets.enrich(args);
+        if(tool==='finalize_report')return datasets.finalize(args);
+        if(tool==='inspect_dataset')return datasets.inspect(args);
+        if(tool==='inspect_report'){await adapters.authorize?.();return inspectReport(adapters.dataDir,adapters.reportJob,args);}
         if (e.kind === 'nacos') {
           if (tool === 'connection') { const v = JSON.parse(await nacos('/v1/auth/login', {}, true)); if (typeof v.accessToken !== 'string' || !v.accessToken) throw new Error('Nacos 认证未成功'); token = v.accessToken; return { stage: 'Nacos 网络与登录成功', databaseConnection: '尚未测试，需要独立只读数据库入口' }; }
           if (tool === 'discover') {
@@ -290,7 +319,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
          reload:async recipe=>{for(const table of [recipe.args.table,recipe.args.leftTable,recipe.args.rightTable].filter(Boolean)){let cursor;do{const page=await run('schema',{table,...(cursor!==undefined?{cursor}:{})});cursor=page.nextCursor;}while(cursor!==null&&cursor!==undefined);}return run(recipe.tool,structuredClone(recipe.args));}
         });
         const c = await mysql();
-        if(tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect({...statement,recipe:{tool,args:structuredClone(args)}},(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
+        if(tool==='row_dataset'||tool==='group_dataset'||tool==='linked_group_dataset'){for(const name of [args.table,args.leftTable,args.rightTable].filter(Boolean))if(tableEngines.get(name)!=='innodb')throw new QueryInputError('SNAPSHOT_REQUIRED','完整分页要求已读取schema且目标表使用InnoDB；未知或非事务引擎不能声称一致快照。');const statement=tool==='row_dataset'?rowDatasetStatement(args,tables,columnTypes,q):groupedDatasetStatement(args,tables,columnTypes,q,valueSets);return datasets.collect({...statement,recipe:{tool,args:structuredClone(args)}},(s,p)=>c.execute({...s,timeout:q.timeoutMs},p));}
         if (tool === 'connection') return { stage: '数据库连接、账号策略和只读事务已验证' };
         if (tool === 'tables') {
           const offset=args.cursor===undefined?0:Number(args.cursor);
@@ -343,7 +372,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const statement = selectStatement(args, tables, q);
         const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, sanitizedValue(r[k], secrets)]))), truncated: rows.length > q.maxRows };
-      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['group_dataset','linked_group_dataset','period_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','inspect_report','inspect_dataset','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
+      })(), new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['inspect_reusable_report','list_reusable_datasets','reuse_dataset','row_dataset','expand_dataset','join_dataset','union_dataset','filter_dataset','group_dataset','linked_group_dataset','period_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','inspect_report','inspect_dataset','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
     } catch (error) { if(error instanceof ReportInspectionError)throw new QueryInputError(error.code,error.message); if(error instanceof DatasetCapacityError)throw new QueryInputError(error.code,error.message); if(error instanceof ReportInputError||error?.code==='REPORT_INPUT')throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
