@@ -190,6 +190,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), valueSets = new Map();
   const datasets=new ReportDatasets({reuseQueries:true,dataBudgetBytes:q.exportDataBudgetBytes??Number.MAX_SAFE_INTEGER,snapshotWindowMs:q.exportSnapshotWindowMs??300000,originalQuestion:adapters.originalQuestion,scope:createHash('sha256').update(JSON.stringify(e)).digest('hex'),secrets,maxRows:q.exportMaxRows,previewRows:q.maxRows,directory:adapters.exportDirectory,authorize:adapters.authorize,active:()=>active});
+  if(adapters.schemaState){for(const [table,columns] of adapters.schemaState.tables??[]){if(!ident(table)||!(q.tables.includes('*')||q.tables.includes(table))||columns.some(c=>!ident(c)||secretName.test(c)))throw new Error('历史表结构不在当前授权');tables.set(table,columns);}for(const [table,types] of adapters.schemaState.types??[])columnTypes.set(table,new Map(types));for(const [table,engine] of adapters.schemaState.engines??[])tableEngines.set(table,engine);}
   const request = adapters.fetch ?? boundedFetch;
   const readCache = new Map(); let readCacheBytes = 0;
   // Only one live MySQL readonly transaction. Never import results from another task or snapshot.
@@ -376,5 +377,5 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     } catch (error) { if(error instanceof ReportInspectionError)throw new QueryInputError(error.code,error.message); if(error instanceof DatasetCapacityError)throw new QueryInputError(error.code,error.message); if(error instanceof ReportInputError||error?.code==='REPORT_INPUT')throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
-  return { spec, run, close: async ({ abort = false } = {}) => { active = false; token = null; readCache.clear(); datasets.clear(); await browser?.close(); if (conn) { try { if (!abort) await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
+  return { spec, run, exportSchema:()=>({tables:[...tables],types:[...columnTypes].map(([t,m])=>[t,[...m]]),engines:[...tableEngines]}),resetConnection:async()=>{readCache.clear();readCacheBytes=0;if(conn){try{await conn.rollback();}finally{conn.destroy();conn=null;}}}, close: async ({ abort = false } = {}) => { active = false; token = null; readCache.clear(); datasets.clear(); await browser?.close(); if (conn) { try { if (!abort) await conn.rollback(); } finally { conn.destroy(); conn = null; } } } };
 }

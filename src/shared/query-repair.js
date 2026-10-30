@@ -2,7 +2,8 @@
 export function queryRejection(error, job) {
  const d=error.queryDiagnostic;
  let code,reason,correction,recoverable=false;
- if(d?.code==='TEXT_PARAMETER'){
+ if(d?.code==='INVESTIGATION_PURPOSE'){code=d.code;reason='调查目的不是有效的非空文本，或含不可见控制字符。';correction='完整保留调查目的及正常换行，修正类型或去掉不可见控制字符；不需要截断业务目标。';recoverable=true;
+ }else if(d?.code==='TEXT_PARAMETER'){
   code=d.code;reason=`第${d.index+1}个查询文本参数不合格（${{type:'类型错误',empty:'为空',control_characters:'含换行或控制字符',length:'长度超限'}[d.reason]}；长度${d.length??'非文本'}，上限${d.maxLength}）。`;
   correction=`保留原业务目标，将第${d.index+1}个参数改为非空单行文本，最多${d.maxLength}字符；复杂目标可分解为明确的只读步骤，不能删掉原目标。`;recoverable=true;
  }else if(d?.code==='PARAMETER_COUNT'){

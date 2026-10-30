@@ -228,3 +228,7 @@ test('reviewed SQL reads preserve long fields and rows beyond former 24KB result
  const r=await readEnvironment(plan,{config:cfg,credential:async()=>({username:'synthetic-reader',password:'synthetic-secret'}),mysql:{createConnection:async()=>c}});
  assert.equal(r.rows.length,2);assert.equal(r.truncated,false);assert.equal(r.rows[0].status,text+' [已隐藏]');assert.equal(r.rows[1].order_id,'two');
 });
+test('investigation purpose is complete non-SQL metadata, not a 200-character business parameter',()=>{
+ const cfg=config();cfg.environments.prd.queries.investigate={mode:'investigate',reviewed:true,description:'investigate',tables:['orders'],maxRows:5,timeoutMs:1000,parameters:[{name:'purpose',type:'string',maxLength:200}]};
+ const purpose='Inspect source and verify all independent goals without dropping original requirements. '.repeat(40)+'\nKeep source and data evidence separate.';const plan=planQuery(cfg,{environmentId:'prd',queryId:'investigate',parameters:[purpose]},'demo',actor);assert.equal(plan.parameters[0],purpose);assert.equal(catalog(cfg,'demo')[0].queries.find(q=>q.queryId==='investigate').parameters[0].maxLength,undefined);assert.throws(()=>planQuery(cfg,{...request,parameters:['X'.repeat(41)]},'demo',actor));assert.throws(()=>planQuery(cfg,{environmentId:'prd',queryId:'investigate',parameters:['\u0000']},'demo',actor));
+});

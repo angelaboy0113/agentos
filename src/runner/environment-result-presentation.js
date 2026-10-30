@@ -28,7 +28,7 @@ export function presentEnvironmentResult(plan, result, explanation = '') {
       timeout ? '下一步\n建议从中断的查询继续，缩小范围并核对相关证据；需要其他系统证据时再补充接入。尚未自动重试。' : '',
       '查询记录、技术字段和执行过程见详情。'].filter(Boolean).join('\n\n');
   const details = rows.map((row,i) => `记录 ${i+1}（查询证据，不代表原因）\n\n${Object.entries(row).map(([k,v]) => `- ${cell(k)}：${evidenceValue(v)}`).join('\n\n')}`).join('\n\n');
-  const metadata = `${plan.tier.toUpperCase()} · ${plan.description}：${noBusinessRead?(fileEvidence?'已读取或核验已有报表文件，未重复查询业务表':'本轮未执行业务数据查询；没有返回业务记录不代表数据库为空'):`返回 ${unique.length} 条去重结果`}${result.truncated ? '（结果受限，非全部数据）' : ''}。读取时间：${result.evidence.readAt}。${note}`;
+  const metadata = `${plan.tier.toUpperCase()} · ${plan.description}：${noBusinessRead?(fileEvidence?'已读取或核验已有报表文件，未重复查询业务表':'本轮未执行业务数据查询；没有返回业务记录不代表数据库为空'):`返回 ${unique.length} 条去重结果`}${result.truncated ? '（结果受限，非全部数据）' : ''}。${result.evidence.sourceReadAt?`原证据取数起点：${result.evidence.sourceReadAt}；本轮核验回执：${result.evidence.readAt}`:`读取时间：${result.evidence.readAt}`}。${note}`;
   const records = rows.map(row => Object.fromEntries(Object.entries(row).map(([key,value]) => [key, plainEvidenceText(typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''))])));
   return { summary, details, metadata, records };
 }
