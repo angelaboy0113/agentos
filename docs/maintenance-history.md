@@ -1278,3 +1278,7 @@ TCT详情及执行批次兼容旧式task-任务标识，继续要求字符串和
 真实原卡接续发现Mongo金额为数字字符串时，严格sum检查被包装成未分类执行故障。现将MONGO_AMOUNT_TYPE/MONGO_NULL_AMOUNT保留为具体可纠正的数据校验，标记实际查询已执行，保留已取数并允许规划器按完整原值及精确十进制工具继续，独立核验仍必需。不静默转换或补零，不重复整任务。卡片表单纠正路径同期补齐，利用原任务模型提炼并核验原话/身份。
 
 1.54.1 additionally distinguishes saved-dataset reads from fresh empty queries for MySQL and MongoDB; reading stored evidence does not by itself claim verification passed.
+
+## 1.54.2（2026-10-30）
+
+修复共享口径与环境目录挤满接单默认文本预算而使普通追问在AI调用前失败。默认保守文本预算64000，保留原显式配置、权限和超长输入诊断。同话题已完成且来源兼容的最终交付固定为questionResult，不再因环境步骤留下environmentAccess字段而隐藏；历史改写保留原时间，不重复业务查询。超长结果节选明确标记。

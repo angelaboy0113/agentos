@@ -36,6 +36,6 @@ test('routing phase keeps every target and parameter contract while execution sc
 });
 
 test('budget diagnostics contain only numeric section sizes, not request contents',()=>{
- const message='PRIVATE_SENTINEL'.repeat(3000);
+ const message='PRIVATE_SENTINEL'.repeat(10000);
  assert.throws(()=>fitContext({message,history:[],jobs:[],memory:{}}),error=>{assert.ok(error.contextBudget.estimated>error.contextBudget.limit);assert.equal(error.contextBudget.sections.message,Buffer.byteLength(message));assert.doesNotMatch(JSON.stringify(error.contextBudget),/PRIVATE_SENTINEL/);return true;});
 });

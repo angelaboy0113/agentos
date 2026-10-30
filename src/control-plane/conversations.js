@@ -33,6 +33,16 @@ export function sourceEvidence(job, sourceDirectory) {
     requiresRecheckForCurrentSource: true };
 }
 
+// Scope/visibility filtering is performed before this projection. A stale
+// environmentAccess field is not evidence that a completed source-backed answer
+// is still an environment subtask. Keep its final delivery available to follow-ups.
+export function conversationJobResult(job, sourceDirectory) {
+  if (job.environmentAccess && !(job.status === 'completed' && job.result?.sourceSync)) return '环境查询的明细不注入共享记忆；需要当前数据请重新发起受控查询。';
+  if (sourceEvidence(job, sourceDirectory).applicability === 'not_evidence_for_current_source_directory' && job.taskIntent === 'analysis') return '旧分析结果不适用于当前源码目录；原结果保留在任务记录中，需要查当前源码时重新调查。';
+  const text=job.result?.finalMessage??'';
+  return text.length>6000?text.slice(0,6000)+'\n[历史交付较长，此处仅为节选；未展示部分不得推测已读。]':text;
+}
+
 // Persistence is shared with jobs. Language decisions come exclusively from AI;
 // the switches below enforce the typed action protocol, not keyword matching.
 export class ConversationService {
@@ -332,9 +342,7 @@ export class ConversationService {
       id: job.id, projectId: job.projectId, stage: job.stage, status: job.status, sourceEnvironment:job.sourceEnvironment??job.result?.sourceSync?.environment??null,
       instruction: job.instruction.slice(0, 4000),
       evidence: sourceEvidence(job, projects.projects[projectId]?.repoPath),
-      finalMessage: job.environmentAccess ? '环境查询的明细不注入共享记忆；需要当前数据请重新发起受控查询。' : sourceEvidence(job, projects.projects[projectId]?.repoPath).applicability === 'not_evidence_for_current_source_directory'
-        && job.taskIntent === 'analysis' ? '旧分析结果不适用于当前源码目录；原结果保留在任务记录中，需要查当前源码时重新调查。'
-        : job.result?.finalMessage?.slice(0, 6000) ?? '',
+      finalMessage: conversationJobResult(job, projects.projects[projectId]?.repoPath),
       environmentAccess: job.environmentAccess ? { environmentId: job.environmentAccess.environmentId, queryId: job.environmentAccess.queryId, scopeHash: job.environmentAccess.scopeHash, expiresAt: job.environmentAccess.expiresAt, description: job.environmentAccess.description } : null,
       canApprove: isAdministrator(projects, turn) && job.status === 'awaiting_approval',
     }));
@@ -352,6 +360,7 @@ export class ConversationService {
       environmentConnectionCandidates: connectionCandidates(state, turn, projectId),
       environmentEnrollment: Object.values(state.environmentEnrollments ?? {}).filter(e => e.questionId === turn.questionId).map(e => ({status:e.status,kind:e.kind,tier:e.tier,url:e.url})),
       questionSourceContext: sourceContext,
+      questionResult: jobs.filter(job=>job.status==='completed'&&job.finalMessage&&job.evidence?.applicability==='historical_snapshot_not_current_check').slice(-1).map(job=>({jobId:job.id,sourceEnvironment:job.sourceEnvironment,recordedAt:job.evidence.recordedAt,finalMessage:job.finalMessage,policy:'已完成任务的历史交付，只可用于同话题解释或改写；不是新查询、实时状态或操作授权。'})),
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       questionOriginalRequest: turn.questionId ? questionRequest(state, turn.questionId) : null,
       currentActor: { senderId: turn.senderId, profile: turn.profile },

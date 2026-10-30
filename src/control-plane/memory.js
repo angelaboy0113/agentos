@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 export const MEMORY_DEFAULTS = Object.freeze({ enabled: true, recentTurns: 20, summaryEveryTurns: 10,
-  summaryItems: 12, retrievalItems: 8, historyBudgetTokens: 12000, inputBudgetTokens: 24000,
+  summaryItems: 12, retrievalItems: 8, historyBudgetTokens: 12000, inputBudgetTokens: 64000,
   systemReserveTokens: 6000, outputReserveTokens: 4000 });
 export function memorySettings(value = {}) {
   const result = { ...MEMORY_DEFAULTS, ...value };
