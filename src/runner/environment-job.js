@@ -2,7 +2,7 @@ import {readBusinessDefinitions,definitionActor} from '../shared/business-defini
 import {BrowserInputError,validateBrowserTool,correctableBrowserCodes,screenshotRequested} from '../shared/browser-tool-input.js';
 import {QueryInputError} from './environment-tools.js';
 import {controlPost} from './control-client.js';
-import {buildSourceQueryContext} from './source-query-context.js';
+import {buildTaskSourceQueryContext} from './source-query-context.js';
 import { connectionEndpoints } from '../shared/connection-endpoints.js';
 import { failureDiagnostic,failureDetails } from '../shared/failure-diagnostic.js';
 import { presentEnvironmentResult } from './environment-result-presentation.js';
@@ -25,8 +25,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   const {plan}=await controlPost(config,`/api/v1/jobs/${encodeURIComponent(job.id)}/environment-claim`,{leaseId:job.lease.id,runnerId:job.lease.runnerId});phase='environment_read';
   await emit({ type: 'progress', phase: 'tool_activity', activity: { current: '执行已批准范围的环境只读查询', total: 1, completed: 0, recent: [] } });
   let result, environment;
-  const sourceResult=(job.context??[]).filter(x=>x.kind==='analysis_turn').at(-1)?.result;
-  const sourceQueryContext=await buildSourceQueryContext(sourceResult);
+  const sourceQueryContext=await buildTaskSourceQueryContext(job);
   const renewPlan=async current=>(await controlPost(config,`/api/v1/jobs/${encodeURIComponent(job.id)}/environment-renew`,{leaseId:job.lease.id,runnerId:job.lease.runnerId,scopeHash:current.scopeHash})).plan;
   try { const cfg=await loadEnvironments();environment=cfg.environments[plan.environmentId];
     job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile,actor:definitionActor(job),projectId:job.projectId,environment:job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
@@ -47,6 +46,11 @@ export async function executeEnvironmentJob(job, config, emit) {
       finalMessage:`当前需要登录的网站：${loginUrl || '入口尚未登记，请补充对应环境的网址'}。系统优先读取本机 Mac 钥匙串中的既有凭据自动重登；不把账号密码交给模型或长期记忆。首次未保存、凭据明确失效或需验证码/短信/扫码时才需要人工配合，后续卡片会显示具体原因。`,verification:[]};
   }
   let explanation = '';
+  // Investigate planners already synthesize their evidence. The final source
+  // review still checks the full user request; avoid a second prose-only model
+  // call after every intermediate database hop. Fixed templates keep theirs.
+  const needsExplanation=environment?.queries[plan.queryId]?.mode!=='investigate';
+  if(needsExplanation){
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });
   try {
     const answer = await engine.decide({ role: 'developer', administrator: false, memory: { enabled: true }, history: [], jobs: [], attachments: [],
@@ -59,12 +63,13 @@ export async function executeEnvironmentJob(job, config, emit) {
     if (answer.action === 'reply') explanation = publicText(answer.reply);
   } catch { explanation = '自动解释暂不可用，以下为本次实际查询结果。'; }
   finally { await engine.close(); }
+  }
   if(Date.parse(plan.expiresAt)-Date.now()<=60000){Object.assign(plan,await renewPlan(plan));if(result.evidence)result.evidence.scopeHash=plan.scopeHash;}
   const presented = presentEnvironmentResult(plan, result, explanation);
   const safeSummary = presented.metadata;
   const scopeDetails = publicText(`查询范围与授权\n环境：${plan.environmentId} (${plan.tier}) · 模板：${plan.queryId}\n参数：${JSON.stringify(plan.parameters)}\n最多 ${plan.maxRows} 条 · 超时 ${plan.timeoutMs} ms\n授权截止：${plan.expiresAt}\n仅本次只读查询，不授权修改。`);
   return { outcome: result.partial ? 'partial' : 'ready', summary: presented.summary, finalMessage: [presented.summary, explanation ? `业务解释\n${explanation}` : '', result.toolInputErrors?.length?`工具修正记录（按具体提示修正，不代表授权不足）\n${JSON.stringify(result.toolInputErrors)}`:'', result.summary ? `排查记录\n${result.summary}` : '', result.runtimeDiscoveries?.length ? `调度入口证据（待网页核验）\n${JSON.stringify(result.runtimeDiscoveries)}` : '', presented.details, result.fileInspections?.length?`已绑定文件的审阅证据\n${JSON.stringify(result.fileInspections)}`:'', result.toolResultCatalog?.length?`任务内可接续的大结果\n${JSON.stringify(result.toolResultCatalog)}`:'',result.datasetCatalog?.length?`任务内可接续的数据集\n${JSON.stringify(result.datasetCatalog)}`:'', result.websiteScreenshots?.length?`实际页面截图（由控制服务独立发送原话题）\n${JSON.stringify(result.websiteScreenshots)}`:'', result.exportFiles?.length?`完整报表文件\n${JSON.stringify(result.exportFiles)}\n文件由受控工具生成，最终结论通过后回复至原提问；尚需核对原问题的所有字段及业务口径。`:'', (result.steps ?? []).join(' → '), safeSummary, scopeDetails].filter(Boolean).join('\n\n'),
-    toolResultCatalog:result.toolResultCatalog??[],websiteMismatch: result.websiteMismatch === true, runtimeDiscoveries: result.runtimeDiscoveries ?? [], connectionEndpoints: connectionEndpoints(result.rows), environmentEvidence: result.evidence,
+    nextEnvironmentQuery:result.nextEnvironmentQuery??null,toolResultCatalog:result.toolResultCatalog??[],websiteMismatch: result.websiteMismatch === true, runtimeDiscoveries: result.runtimeDiscoveries ?? [], connectionEndpoints: connectionEndpoints(result.rows), environmentEvidence: result.evidence,
     websiteScreenshots:result.websiteScreenshots??[],fileInspections:result.fileInspections??[],environmentFailure:result.failure??null,toolInputErrors:result.toolInputErrors??[],exportFiles:result.exportFiles??[], evidenceRecords: presented.records, memorySafeSummary: safeSummary, verification: [] };
   } catch(error){const local=phase==='environment_claim';const reason=local?(error.statusCode?'本机环境领取请求被拒绝或回执不可用，未执行本轮环境查询。':'本机控制请求回执无法核实，已保留任务；未盲目重复执行环境查询。'):'环境步骤等待或结果整理中断；未据此确认业务故障。';return {outcome:'blocked',summary:reason,finalMessage:reason+'\n'+failureDiagnostic(error),executionFailure:failureDetails(error,{stage:phase}),investigationStopped:{code:local?(error.code??'CONTROL_REQUEST_REJECTED'):'ENVIRONMENT_INTERRUPTED',reason},verification:[]};} finally { clearInterval(heartbeat); }
 }

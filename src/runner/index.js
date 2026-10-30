@@ -1,3 +1,4 @@
+import {continuationSourceResult} from './environment-continuation.js';
 import {failureDetails,failureDiagnostic} from '../shared/failure-diagnostic.js';
 import {controlPost} from './control-client.js';
 import {recordReportFiles,recordReportReview} from '../shared/report-acceptance.js';
@@ -136,7 +137,9 @@ export class AgentRunner {
     }
     for (;;) {
       save(current);signal.throwIfAborted();
-      const result = await this.execute(current, this.config, emit, signal);
+      const direct=continuationSourceResult(current);
+      if(direct)await emit({type:'progress',phase:'environment_handoff',message:'复用已核验规则与已有数据，直接申请下一数据库步骤，最终仍审阅完整问题'});
+      const result = direct??await this.execute(current, this.config, emit, signal);
       recordReportReview(current,result);
       save({...current,context:[...(current.context??[]),{kind:'analysis_turn',result}]});
       if (result?.outcome === 'partial' && result.investigation?.status === 'continue' && !result.investigation?.blocker) {

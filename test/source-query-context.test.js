@@ -72,3 +72,24 @@ test('dataset and source-input failures have fixed actionable stages, not an unc
  const message=failureDiagnostic(Object.assign(new Error('[REPORT_INPUT] invalid datasetRef'),{diagnosticStage:'inspect_dataset'}));
  assert.match(message,/REPORT_INPUT/);assert.match(message,/读取任务内数据集/);assert.doesNotMatch(message,/EXECUTION_ERROR/);
 });
+
+test('literal search locates deep rules without walking every source page and retains exact verification boundaries',async t=>{
+ const f=await fixture(t),text=Array.from({length:1200},(_,i)=>i===1000?'RULE amount actual_amount [literal.*]':'ordinary source').join('\n');
+ await writeFile(path.join(f.root,'Mapper.xml'),text);const artifact={...f.result.verifiedArtifacts[0],bytes:Buffer.byteLength(text),sha256:sha(text)};
+ const context=await buildSourceQueryContext({...f.result,verifiedArtifacts:[artifact]}),tools=sourceQueryTools(context,{secrets:['actual_amount']});
+ const r=await tools.run('read_source_evidence',{ref:context.sources[0].ref,search:'[literal.*]'});assert.equal(r.matches,1);assert.ok(r.lines.some(x=>x.line===1001));assert.doesNotMatch(JSON.stringify(r),/actual_amount/);
+ assert.equal((await tools.run('read_source_evidence',{ref:context.sources[0].ref,search:'not present'})).matches,0);
+ await assert.rejects(tools.run('read_source_evidence',{ref:context.sources[0].ref,search:'',offset:0}),/search/);
+ await assert.rejects(tools.run('read_source_evidence',{ref:context.sources[0].ref,search:'ordinary',offset:5000}),/offset/);
+ await writeFile(path.join(f.root,'Mapper.xml'),'changed');await assert.rejects(tools.run('read_source_evidence',{ref:context.sources[0].ref,search:'RULE'}),/变化/);
+});
+test('database handoffs retain earlier verified files only for the same question and immutable snapshot',async t=>{
+ const {buildTaskSourceQueryContext}=await import('../src/runner/source-query-context.js');
+ const f=await fixture(t),second='second mapping';await writeFile(path.join(f.root,'Second.java'),second);
+ const first={...f.result,sourceQuestionId:'q',sourceSync:{workspace:f.root,cacheKey:'fixed'}};
+ const last={...first,verifiedArtifacts:[{kind:'code',path:'Second.java',sha256:sha(second),bytes:Buffer.byteLength(second)}]};
+ const build=earlier=>buildTaskSourceQueryContext({questionId:'q',context:[{kind:'analysis_turn',result:earlier},{kind:'analysis_turn',result:last}]});
+ assert.equal((await build(first)).sources.length,2);
+ assert.equal((await build({...first,sourceQuestionId:'foreign'})).sources.length,1);
+ assert.equal((await build({...first,sourceSync:{workspace:f.root,cacheKey:'other'}})).sources.length,1);
+});

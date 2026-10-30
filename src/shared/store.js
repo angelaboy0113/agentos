@@ -296,7 +296,14 @@ export class JsonStore {
       if(!job.continuousQueryKeys.includes(queryKey))job.continuousQueryKeys.push(queryKey);
       if(plan.continuationKey){job.continuousContinuationKeys??=[];job.continuousContinuationKeys.push(plan.continuationKey);}
       recordReportReview(job,sourceResult);
-      job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(sourceResult) }]);
+      if(sourceResult.environmentContinuation){
+        const previous=job.context.at(-1)?.result;
+        if(!previous?.nextEnvironmentQuery||JSON.stringify(previous.nextEnvironmentQuery)!==JSON.stringify(sourceResult.environmentQuery))throw new Error('直接接续必须引用上一份已保存的环境申请');
+        if(!job.context.some(x=>x.kind==='analysis_turn'&&x.result?.handoffGate?.passed===true&&x.result.sourceQuestionId===job.questionId))throw new Error('直接接续缺少本问题已核验源码');
+      }else{
+        job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(sourceResult) }]);
+        delete job.environmentHandoffResults;
+      }
       const progress=job.investigationProgress??{rounds:0,stagnant:0,seen:[]};
       const verified=(sourceResult.investigation?.goals??[]).filter(g=>g.required!==false&&g.status==='verified').map(g=>g.id);
       if(verified.some(id=>!(progress.verified??[]).includes(id)))progress.stagnant=0;
@@ -324,6 +331,14 @@ export class JsonStore {
         || Date.parse(evidence.readAt) < Date.parse(plan.startedAt) || !Number.isInteger(evidence.rowCount) || evidence.rowCount < 0
         || !/^[a-f0-9]{64}$/.test(evidence.resultHash ?? '') || !result.finalMessage) throw new Error('Invalid continuous environment evidence');
       job.context = compactContext([...job.context, { stage: 'developer', kind: 'environment_result', result: structuredClone(result) }]);
+      // Retain every unread handoff for the final source review, even if the
+      // ordinary recent-context window compacts early database steps away.
+      if(result.nextEnvironmentQuery||job.environmentHandoffResults?.length){
+        job.environmentHandoffResults??=[];
+        job.environmentHandoffResults.push(structuredClone({summary:result.summary,finalMessage:result.finalMessage,
+          environmentEvidence:result.environmentEvidence,toolResultCatalog:result.toolResultCatalog,
+          toolInputErrors:result.toolInputErrors,environmentFailure:result.environmentFailure}));
+      }
       const ledger=job.investigationProgress??{rounds:0,stagnant:0,seen:[]};
       const useful=evidence.businessProgressHash;
       const newData=typeof useful==='string'&&/^[a-f0-9]{64}$/.test(useful)&&!ledger.seen.includes(useful);
