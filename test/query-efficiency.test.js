@@ -107,10 +107,10 @@ test('durable long handoff chains survive context compaction and reach the final
   await store.beginContinuousEnvironment(id,identity,grant,handoff);const started=await store.claimEnvironment(id,identity);
   const nextReq=i<9?{...next,parameters:['read stage '+(i+1)]}:null;
   const updated=await store.completeContinuousEnvironment(id,identity,{outcome:'partial',summary:'stage '+i,finalMessage:'distinct-evidence-'+i,
-   nextEnvironmentQuery:nextReq,environmentEvidence:{environmentId:grant.environmentId,queryId:grant.queryId,scopeHash:grant.scopeHash,readAt:new Date().toISOString(),lastAuthorizedAt:started.startedAt,rowCount:1,resultHash:String(i).repeat(64),businessProgressHash:String(i).repeat(64)}});
+   nextEnvironmentQuery:nextReq,environmentEvidence:{timing:{plannerMs:i+1,toolMs:2,plannerCalls:1,toolCalls:2,untrusted:'not preserved'},environmentId:grant.environmentId,queryId:grant.queryId,scopeHash:grant.scopeHash,readAt:new Date().toISOString(),lastAuthorizedAt:started.startedAt,rowCount:1,resultHash:String(i).repeat(64),businessProgressHash:String(i).repeat(64)}});
   handoff=continuationSourceResult(updated);
  }
- const saved=await new JsonStore(file).getJob(id);assert.equal(saved.environmentHandoffResults.length,10);assert.equal(saved.context.filter(x=>x.kind==='analysis_turn').length,1);
+ const saved=await new JsonStore(file).getJob(id);assert.equal(saved.events.filter(e=>e.type==='continuous_environment_completed'&&e.timing?.toolMs===2).length,10);assert.ok(saved.events.filter(e=>e.timing).every(e=>e.timing.untrusted===undefined));assert.equal(saved.environmentHandoffResults.length,10);assert.equal(saved.context.filter(x=>x.kind==='analysis_turn').length,1);
  const prompt=await buildPrompt(saved,{}, {instruction:'read only',metadata:{}},source.sourceSync,[],source.workspace);
  for(let i=0;i<10;i++)assert.ok(prompt.includes('distinct-evidence-'+i));
  assert.equal(continuationSourceResult(saved),null);
@@ -148,4 +148,29 @@ test('initial source handoff never imports another question, environment or fixe
  const context=r=>[{kind:'analysis_turn',result:r}];
  assert.equal(reportInvestigationContext({...base,context:context(result)}).initialSourcePlan,'correct scoped plan');
  for(const change of [{sourceQuestionId:'another'},{sourceSync:{environment:'uat'}},{workspace:'/other-prd'}])assert.equal(reportInvestigationContext({...base,context:context({...result,...change})}).initialSourcePlan,null);
+});
+
+test('a saved report input failure can directly obtain independent evidence without marking the report resolved',async()=>{
+ const {QueryInputError}=await import('../src/runner/environment-tools.js');let count=0;
+ const draft='dataset-11111111-1111-4111-8111-111111111111';
+ const result=await investigateEnvironment(plan(),async()=>{},{load:async()=>cfg,credential:async()=>({}),reportJob:job,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'list_datasets'},{tool:'group_dataset'},{tool:'finalize_report'},{tool:'inspect_dataset'}],run:async(tool)=>{if(tool==='group_dataset')return{datasetRef:draft,complete:true,rowCount:2};if(tool==='finalize_report')throw new QueryInputError('REPORT_INPUT','Independent baseline is missing in the other authorized database');if(tool==='inspect_dataset')return{datasetRef:draft,reportDraft:{sources:[]}};return{};},close:async()=>{}}),
+ planner:async()=>({close:async()=>{},next:async input=>{count++;if(count===1)return{tool:'group_dataset',arguments:'{}'};if(count===2)return{tool:'finalize_report',arguments:JSON.stringify({datasetRef:draft,checks:[]})};const ref=input.results.findLast(r=>r.tool==='finalize_report'&&r.error)?.error.resultRef;return{tool:'continue_environment',arguments:JSON.stringify({...next,repairResultRef:ref})};}})});
+ assert.deepEqual(result.nextEnvironmentQuery,next);assert.equal(result.partial,true);assert.equal(result.repairContinuation.datasetRef,draft);assert.equal(result.toolInputErrors.find(e=>e.tool==='finalize_report').resolved,false);
+ const persisted={outcome:'partial',nextEnvironmentQuery:next,repairContinuation:result.repairContinuation,toolInputErrors:result.toolInputErrors,environmentEvidence:result.evidence};const root={...job,context:[{kind:'analysis_turn',result:source},{kind:'environment_result',result:persisted}]};assert.ok(continuationSourceResult(JSON.parse(JSON.stringify(root))));
+ for(const change of [{environmentFailure:{code:'TIMEOUT'}},{toolInputErrors:[{tool:'select',code:'REPORT_INPUT',resolved:false}]},{repairContinuation:{...result.repairContinuation,toEnvironmentId:'b_one'}},{repairContinuation:{...result.repairContinuation,failureRefs:[]}}])assert.equal(continuationSourceResult({...root,context:[root.context[0],{kind:'environment_result',result:{...persisted,...change}}]}),null);
+});
+test('a carried report failure remains pending until a successful real finalization receipt is returned',async()=>{
+ const carried={failureRef:'tool-result-old',datasetRef:'draft',arguments:{datasetRef:'draft'}};let steps=0;
+ const result=await investigateEnvironment(plan(),async()=>{},{load:async()=>cfg,credential:async()=>({}),reportJob:job,investigationContext:{repairContinuation:carried},
+ tools:async()=>({spec:[{tool:'connection'},{tool:'list_datasets'},{tool:'finalize_report'}],run:async tool=>tool==='finalize_report'?{exportFile:{id:'verified-file',verificationHash:'a'.repeat(64)}}:{},close:async()=>{}}),planner:async()=>({close:async()=>{},next:async()=>{steps++;return {tool:'finalize_report',arguments:'{}'};}})});
+ assert.equal(steps,1);assert.equal(result.partial,false);assert.equal(result.reportRepairResolution.failureRef,carried.failureRef);assert.equal(result.toolInputErrors[0].resolved,true);
+ const {reportInvestigationContext}=await import('../src/runner/environment-job.js');assert.equal(reportInvestigationContext({...job,context:[{result:{repairContinuation:carried}},{result:{reportRepairResolution:result.reportRepairResolution,exportFiles:result.exportFiles}}]}).repairContinuation,null);
+});
+
+test('report repair requires the latest scoped saved failure, a real draft, and no other unresolved tool',async()=>{
+ const {reportRepairHandoff}=await import('../src/runner/environment-continuation.js');const ref='tool-result-a',datasetRef='dataset-11111111-1111-4111-8111-111111111111',saved={tool:'finalize_report',text:JSON.stringify({failed:true,error:{code:'REPORT_INPUT'},arguments:{datasetRef,checks:[]}})};
+ const base={results:[{tool:'finalize_report',error:{code:'REPORT_INPUT',resultRef:ref}}],pendingInputs:new Set(['finalize_report']),resultRef:ref,plan:plan(),request:next,loadFailure:async()=>saved,verifyDraft:async()=>({reportDraft:{}})};
+ assert.equal((await reportRepairHandoff(base)).datasetRef,datasetRef);
+ for(const change of [{pendingInputs:new Set(['finalize_report','select'])},{resultRef:'stale-ref'},{verifyDraft:async()=>({})},{loadFailure:async()=>({...saved,tool:'select'})},{loadFailure:async()=>{throw Error('foreign scope');}}])await assert.rejects(reportRepairHandoff({...base,...change}));
 });

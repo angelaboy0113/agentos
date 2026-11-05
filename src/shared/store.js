@@ -396,8 +396,9 @@ export class JsonStore {
       delete job.browserCheckpoint;
       delete job.browserResumeClaim;
       job.updatedAt = new Date().toISOString();
+      const timing=Object.fromEntries(['plannerSetupMs','plannerMs','toolMs','plannerCalls','toolCalls'].flatMap(key=>Number.isFinite(evidence.timing?.[key])&&evidence.timing[key]>=0?[[key,evidence.timing[key]]]:[]));
       job.events.push({ id: createId('EVT'), type: 'continuous_environment_completed', at: job.updatedAt,
-        environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash });
+        environmentId: plan.environmentId, queryId: plan.queryId, scopeHash: plan.scopeHash,...(Object.keys(timing).length?{timing}:{}) });
       return structuredClone(job);
     });
   }

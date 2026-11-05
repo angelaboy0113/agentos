@@ -79,3 +79,5 @@ Runner 在源码同步后提供 knowledgePaths 的本轮入口及哈希；未配
 已有完整数据的配置文本展开或一对多关联使用 relate_dataset；按源码声明分隔符、set/preserve重复语义、空配置及非空未匹配各自处理。rightRowKey声明真实复合粒度，保留合法重复导出行；compose_report用relation_key。enrich_dataset仍只作唯一维度查找。不要因为数据已取得而宣称文件已交付；大CSV沿现有分卷投递，不为组装再次查整套数据。范围依据、独立金额核验及实际文件检查不省略。
 
 汇总后的改名字段核验沿原aggregate.column追溯；错误包含source/column/reference时只处理该分量，避免切换无关环境重做已完成指标。金额为文本时复用完整数据本地精确计算；已有独立金额分组和COUNT基准可用summarize_dataset weighted_sum声明column与weightColumn，不用原明细重复次数冒充独立权重。窗口基准允许带实际对象键的独立原始聚合，必须逐对象核对；无键总计及同源派生仍不通过。
+
+- 报表中不适用于某指标的列明确写“不适用”；真实未知写“未核实”并说明缺口，无发生额仅在完整取证后写0。不要用没有说明的破折号把这三种情况混在一起，也不能按展示习惯将未知自动替换为零。

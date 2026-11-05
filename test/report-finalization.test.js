@@ -125,3 +125,16 @@ test('empty versus known totals identify the exact component and preserve unknow
  const draft=await f.d.compose({sources:[{name:'s1',datasetRef:unknown.datasetRef,keyColumn:'id'}],columns:[{label:'编号',value:{op:'key'}},{label:'金额',value:{op:'field',source:'s1',column:'amount',missing:'empty'}}]});
  await assert.rejects(f.d.finalize({...f.args,datasetRef:draft.datasetRef,expectedColumns:draft.columns,columnRules:draft.columns.map(label=>({label,definition:'保持真实未知值为空',evidence:'完整原始来源真实空值'})),checks:[{...f.args.checks[0],source:'s1'}]}),error=>{assert.match(error.message,/source=s1/);assert.match(error.message,/sourceKnown=0/);assert.match(error.message,/referenceKnown=1/);return true;});
 });
+
+test('draft planning offers matching raw population and independent same-column baselines without claiming semantic verification',async t=>{
+ const f=await fixture(t);const hints=(await f.d.inspect({datasetRef:f.draft.datasetRef})).reportDraft.finalization;
+ assert.ok(hints.populationCandidates.some(c=>c.datasetRef===f.population.datasetRef&&c.populationKey==='id'));
+ const check=hints.checkCandidates.find(c=>c.source==='s1'&&c.column==='amount');assert.ok(check.referenceCandidates.some(c=>c.referenceRef===f.baseline.datasetRef));assert.ok(!check.referenceCandidates.some(c=>c.referenceRef===f.amounts.datasetRef));
+ assert.match(hints.note,/Each numeric check/);assert.equal(f.draft.exportFile,undefined);await assert.rejects(reportFile(f.root,'JOB-test',f.draft.draftFile),/最终核验/);
+ const second=await f.compose(f.amounts.datasetRef);assert.ok(second.finalization);assert.match(second.finalization.note,/does not establish the original business scope/);
+});
+
+test('composition hints do not rescan the whole task dataset catalog or bypass artifact checks',async t=>{
+ const f=await fixture(t);f.d.storage.list=async()=>assert.fail('Unnecessary full catalog rescan');
+ const fresh=await f.compose(f.amounts.datasetRef);assert.ok(fresh.finalization.populationCandidates.length);await assert.rejects(f.d.finalize({...f.args,datasetRef:fresh.datasetRef,checks:[{...f.args.checks[0],referenceRef:f.amounts.datasetRef}]}),/同一查询/);
+});
