@@ -10,10 +10,14 @@ export const stickerIdentity = agent => agent?.successStickers === true && agent
 const now = () => new Date().toISOString();
 const values = x => Object.values(x ?? {});
 const busy = status => ['queued','thinking','decided','ready','running','cancelling','awaiting_approval','awaiting_clarification','awaiting_environment_approval'].includes(status);
+const firstQuestionRound=q=>q?.generation===1&&q.latestTurnId===q.rootTurnId;
+// Includes old per-round outbox keys. A recorded choice/attempt already claims
+// this topic; changing generations or upgrading cannot select another sticker.
+const questionDelivery=(state,q,identity)=>values(state.stickerDeliveries).some(e=>e.questionId===q.id&&(e.identity===identity||e.profile===q.profile));
 
 // Display colour alone is never evidence that a business request succeeded.
 export function stickerSuccess(state,q,card,agent,library) {
-  if(!q || !library?.items?.length || !(Date.parse(q.createdAt)>=Date.parse(library.activatedAt))
+  if(!firstQuestionRound(q) || !library?.items?.length || !(Date.parse(q.createdAt)>=Date.parse(library.activatedAt))
     || q.profile!==agent.profile || q.projectId!==agent.projectId || q.visibility==='requester' || q.directoryChannel
     || agent.allowedChatIds && !agent.allowedChatIds.includes(q.chatId)
     || card?.questionRound?.generation!==q.generation || card?.questionRound?.turnId!==q.latestTurnId
@@ -99,9 +103,9 @@ export class SuccessStickers {
     return this.context.store.select(s=>{
       const questions=values(s.questions).filter(q=>{
         const a=this.agent(q.profile),identity=stickerIdentity(a),library=s.stickerLibraries?.[identity],card=s.cardMessages?.['question:'+q.id];
-        return library?.items?.length&&Date.parse(q.createdAt)>=Date.parse(library.activatedAt)
+        return firstQuestionRound(q)&&library?.items?.length&&Date.parse(q.createdAt)>=Date.parse(library.activatedAt)
           &&card?.terminal&&card.card?.header?.template==='green'
-          &&!s.stickerDeliveries?.[digest(`${identity}:${q.id}:${q.generation}`)];
+          &&!questionDelivery(s,q,identity);
       });
       const ids=new Set(questions.map(q=>q.id));
       for(const e of values(s.stickerDeliveries))if(!e.messageId&&!e.superseded)ids.add(e.questionId);
@@ -124,10 +128,10 @@ export class SuccessStickers {
     });
     for(const q of candidates){
       const a=this.agent(q.profile),identity=stickerIdentity(a),card=snapshot.cardMessages['question:'+q.id];
-      const key=digest(`${identity}:${q.id}:${q.generation}`);
-      if(snapshot.stickerDeliveries?.[key])continue;
+      const key=digest(`${identity}:${q.id}`);
+      if(questionDelivery(snapshot,q,identity))continue;
       await this.context.store.transact(s=>{
-        s.stickerDeliveries??={};if(s.stickerDeliveries[key])return;
+        s.stickerDeliveries??={};if(questionDelivery(s,q,identity))return;
         const current=s.questions?.[q.id],latest=s.cardMessages?.['question:'+q.id],library=s.stickerLibraries?.[identity];
         if(latest?.generation!==card.generation||!stickerSuccess(s,current,latest,a,library))return;
         const chosen=library.items[this.choose(library.items.length)];
@@ -141,7 +145,7 @@ export class SuccessStickers {
   async deliver(key,e){
     if(this.closed)return;
     const fresh=await this.snapshot(),q=fresh.questions?.[e.questionId],card=fresh.cardMessages?.['question:'+e.questionId],a=this.agent(e.profile);
-    if(stickerIdentity(a)!==e.identity||!q||q.generation!==e.questionGeneration||q.messageId!==e.destination.messageId||q.chatId!==e.destination.chatId){
+    if(stickerIdentity(a)!==e.identity||!firstQuestionRound(q)||q.generation!==e.questionGeneration||q.messageId!==e.destination.messageId||q.chatId!==e.destination.chatId){
       await this.context.store.transact(s=>{s.stickerDeliveries[key].superseded=true;});return;
     }
     const library=fresh.stickerLibraries?.[e.identity];
