@@ -1,3 +1,4 @@
+import {LongInvestigationNotices} from './long-investigation-notices.js';
 import {SuccessStickers} from './success-stickers.js';
 import{planTaskRead}from '../shared/integration-peers.js';
 import {pollModelCapacity}from './model-capacity-recovery.js';
@@ -75,7 +76,7 @@ export async function createControlPlane(overrides = {}) {
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
   context.cards = cards;
-  context.successStickers=new SuccessStickers(context);context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();await context.successStickers.retry();};
+  context.longNotices=new LongInvestigationNotices(context);context.successStickers=new SuccessStickers(context);context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();await context.successStickers.retry();};
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
   if (cards.enabled) await store.transact((state) => {
@@ -107,7 +108,7 @@ export async function createControlPlane(overrides = {}) {
     context.capacityRecoveryStopped=false;
     context.capacityRecoveryTimer=setInterval(()=>pollModelCapacity(context).catch(()=>console.error('[capacity-recovery] recovery deferred')),1000);context.capacityRecoveryTimer.unref();
     context.retention.start();
-    cards.start();
+    cards.start();context.longNotices.start();
     context.websiteEvidence.retry().catch(()=>console.error('[website-evidence] recovery unavailable'));
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
@@ -116,7 +117,7 @@ export async function createControlPlane(overrides = {}) {
   });
   server.once('close', () => {
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.longNotices.close(),context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards, successStickers:context.successStickers };
 }
