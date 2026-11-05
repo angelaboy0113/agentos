@@ -64,3 +64,24 @@ export function directoryTerminalMention(turn) {
     ? '查询已完成，请查看私有结果。' : '本次回复已结束，请查看私有结果。');
   return result ? { ...result, kind: 'directory_completion' } : null;
 }
+
+
+// Trusted configuration, not message prose; recipients use the originating app's mapping.
+export function validateFailureNotice(value,identities={}){
+ if(value===undefined)return undefined;
+ if(!value||typeof value!=='object'||Array.isArray(value)||typeof value.enabled!=='boolean'
+  ||typeof value.humanId!=='string'||!identities[value.humanId]
+  ||typeof value.message!=='string'||!value.message.trim()||value.message.length>160||/[<>\r\n]/.test(value.message)
+  ||typeof value.since!=='string'||!Number.isFinite(Date.parse(value.since)))throw Error('Invalid failureNotice configuration');
+ return value;
+}
+export function failureNotice(mention,view,projects={}){
+ const policy=projects.failureNotice;
+ if(!policy?.enabled||!mention||!view.terminal||view.card?.header?.template!=='red'||view.chatType!=='group'||view.visibility==='requester')return mention;
+ try{validateFailureNotice(policy,projects.humanIdentities);}catch{return mention;}
+ if(!Number.isFinite(Date.parse(view.occurredAt))||Date.parse(view.occurredAt)<Date.parse(policy.since))return mention;
+ const id=projects.humanIdentities[policy.humanId]?.[view.profile];
+ if(!OPEN_ID.test(String(id??'')))return mention;
+ const tag=`<at user_id="${id}"></at>`;
+ return {...mention,text:mention.text+'\n'+(mention.text.includes(tag)?'':tag+' ')+policy.message};
+}

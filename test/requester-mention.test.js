@@ -80,3 +80,35 @@ test('login-chain failure, rejection and verification notices do not ask users t
  const base={originChatType:'group',status:'awaiting_clarification',environmentAccess:{approvalOwnerIds:['ou_admin']},originMessageId:'m',originProfile:'owner'};
  for(const state of ['request_blocked','access_check_failed','rejected','verification_required']){const text=jobTerminalMention({...base,result:{browserLoginRequired:true,browserLoginState:state,browserCredentialState:'available'}}).text;assert.doesNotMatch(text,/直接回复.*密码/);assert.match(text,/无需重发|无需重发|安全更新|本机页面/);}
 });
+
+
+test('red terminal alerts use the configured human in the same bot identity and do not notify private or historical tasks',async()=>{
+ const {failureNotice,validateFailureNotice}=await import('../src/control-plane/requester-mention.js');
+ const projects={humanIdentities:{maintainer:{a:'ou_adminA',b:'ou_adminB'}},failureNotice:{enabled:true,humanId:'maintainer',message:'哎呀，怎么受阻了，老大快来看看 👀',since:'2026-11-05T00:00:00Z'}};
+ const base={replyTo:'origin',profile:'a',text:'<at user_id="ou_requester"></at> 排查受阻，请查看原因。'};
+ const view={card:{header:{template:'red'}},terminal:true,profile:'a',chatType:'group',occurredAt:'2026-11-05T01:00:00Z'};
+ assert.match(failureNotice(base,view,projects).text,/ou_adminA/);assert.doesNotMatch(failureNotice(base,view,projects).text,/ou_adminB/);
+ assert.match(failureNotice({...base,profile:'b'},{...view,profile:'b'},projects).text,/ou_adminB/);
+ for(const extra of [{terminal:false},{visibility:'requester'},{chatType:'p2p'},{profile:'unknown'},{occurredAt:'2026-11-04T00:00:00Z'},{occurredAt:undefined},...['green','orange','grey','blue'].map(template=>({card:{header:{template}}}))])assert.deepEqual(failureNotice(base,{...view,...extra},projects),base);
+ const already={...base,text:'<at user_id="ou_adminA"></at> 原因已说明。'};assert.equal((failureNotice(already,view,projects).text.match(/<at /g)||[]).length,1);
+ assert.deepEqual(failureNotice(base,view,{...projects,failureNotice:{...projects.failureNotice,enabled:false}}),base);
+ assert.throws(()=>validateFailureNotice({...projects.failureNotice,message:'<at user_id="all"></at>'},projects.humanIdentities));
+});
+
+test('red alert retry freezes the same native idempotency key and repeated card renders do not notify twice',async()=>{
+ const {LiveCards}=await import('../src/control-plane/live-cards.js');const {failureNotice}=await import('../src/control-plane/requester-mention.js');
+ const state={jobs:[],conversations:[],questions:{q:{id:'q',generation:1}},cardMessages:{}};const store={file:'/tmp/agentos-red-alert-test/state.json',read:async()=>structuredClone(state),transact:async f=>f(state)};
+ const attempts=[];let delivered=0;const service=new LiveCards(store,{replyCard:async()=>({message_id:'card'}),updateCard:async()=>{},reply:async(id,text,options)=>{attempts.push({id,text,key:options.idempotencyKey});if(attempts.length===1)throw Error('temporary network');delivered++;}});
+ const card={schema:'2.0',header:{template:'red',title:{tag:'plain_text',content:'合成故障'}},body:{elements:[{tag:'markdown',content:'原始错误保留'}]}};
+ const mention=failureNotice({replyTo:'origin',profile:'a',text:'<at user_id="ou_requester"></at> 失败原因见卡片。'},{card,terminal:true,profile:'a',chatType:'group',occurredAt:'2026-11-05T01:00:00Z'},{humanIdentities:{owner:{a:'ou_admin'}},failureNotice:{enabled:true,humanId:'owner',message:'老大快来看看 👀',since:'2026-11-05T00:00:00Z'}});
+ const render=()=>service.upsert('question:q',card,{replyTo:'origin',profile:'a',replyInThread:true},{terminal:true,immediate:true,generation:1,terminalMention:mention});
+ await assert.rejects(render(),/temporary network/);for(let i=0;i<2;i++)await render();
+ assert.equal(delivered,1);assert.equal(attempts.length,2);assert.equal(attempts[0].key,attempts[1].key);assert.equal(attempts[1].id,'origin');assert.match(attempts[1].text,/ou_requester.*\n.*ou_admin/);await service.stop();
+});
+
+test('failure notice configuration survives real projects-file loading and rejects missing trusted identities',async t=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const os=await import('node:os');const path=await import('node:path');const {loadProjects}=await import('../src/control-plane/config.js');
+ const root=await mkdtemp(path.join(os.tmpdir(),'failure-config-'));t.after(()=>rm(root,{recursive:true,force:true}));const file=path.join(root,'projects.json');
+ const config={projects:{},humanIdentities:{maintainer:{a:'ou_admin'}},failureNotice:{enabled:true,humanId:'maintainer',message:'老大快来看看 👀',since:'2026-11-05T00:00:00Z'}};await writeFile(file,JSON.stringify(config));assert.deepEqual((await loadProjects(file)).failureNotice,config.failureNotice);
+ await writeFile(file,JSON.stringify({...config,humanIdentities:{}}));await assert.rejects(loadProjects(file),/Invalid failureNotice/);
+});

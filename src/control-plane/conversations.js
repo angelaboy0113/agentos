@@ -18,7 +18,7 @@ import { conversationCard } from './message-cards.js';
 import path from 'node:path';
 import { MemoryService, fitContext } from './memory.js';
 import { canContinueTask, canCreateTask, isAdministrator, isTaskCreator } from './authorization.js';
-import { conversationTerminalMention } from './requester-mention.js';
+import { conversationTerminalMention, failureNotice } from './requester-mention.js';
 import { PRIMARY_RESPONSE_LIMIT } from './result-presentation.js';
 export { isAdministrator } from './authorization.js';
 
@@ -271,7 +271,7 @@ export class ConversationService {
         if (this.context.cards?.enabled) {
           const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
             cardDestination(turn), { terminal: true, immediate: true,
-              resultText: Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT ? turn.response : '', terminalMention: conversationTerminalMention(turn) });
+              resultText: Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT ? turn.response : '', terminalMention: failureNotice(conversationTerminalMention(turn),{card:conversationCard(turn),terminal:true,profile:turn.profile,chatType:turn.chatType,visibility:turn.visibility,occurredAt:turn.aiCompletedAt??turn.createdAt},this.context.projects) });
           if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
           parts = [];
         } else {

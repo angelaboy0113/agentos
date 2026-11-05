@@ -334,3 +334,24 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 
 
 汇总别名须追溯到原始字段；独立核验逐对象比对并保留关联行数来源。weighted_sum在完整保存数据上精确计算金额乘权重，配方随完整data迁移；旧版不能接续此新聚合配方。参数、核验与恢复边界见[报表核验与加权](report-provenance.md)。
+
+
+## 红色终态维护提醒（1.63.4）
+
+可在私有projects配置中增加`failureNotice`，复用已有可信`humanIdentities`的跨机器人身份映射；人名或消息内容不能作为身份。未配置默认关闭。示例（先在本地核实每个profile对应同一个维护者的open_id）：
+
+```json
+{
+  "humanIdentities": {"maintainer": {"your-profile": "ou_replace_with_verified_open_id"}},
+  "failureNotice": {
+    "enabled": true,
+    "humanId": "maintainer",
+    "message": "哎呀，怎么受阻了，老大快来看看 👀",
+    "since": "2026-11-05T00:00:00Z"
+  }
+}
+```
+
+since应设置为实际启用时点，避免启动补发历史红卡；不能用示例日期作为部署事实。配置按原实例流程校验、空闲重启后生效。普通公开群卡片真实终态且header.template为red时，在原提问者提醒后增加该profile维护者的原生@及配置文案。维护者与提问者相同只@一次。原具体错误保留，趣味文案不是故障结论，也不触发自动业务修改。
+
+黄色/蓝色/绿色/取消及私有任务不升级为公开管理员提醒；缺失该profile映射时不借用另一应用的open_id。收件人与文案随已有终态投递队列固定，重复渲染不重发；网络重试使用同一原话题与幂等键，不重新查询业务。迁移保留projects配置、humanIdentities及整个data中的卡片投递回执。该规则不扫描所有旧卡，也没有独立后台报警任务。

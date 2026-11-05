@@ -6,7 +6,7 @@ import { resultPages, withResultPage } from './result-presentation.js';
 import { createHash } from 'node:crypto';
 import { createId } from '../shared/protocol.js';
 import { conversationCard, jobCard, publicText } from './message-cards.js';
-import { conversationTerminalMention, jobTerminalMention } from './requester-mention.js';
+import { conversationTerminalMention, jobTerminalMention, failureNotice } from './requester-mention.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
 export const questionTitle = text => publicText(text).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\*\*|__|~~|`/g, '').replace(/\s+/g, ' ').trim().slice(0,60) || '附件问题';
 const pending = (turn) => ['queued', 'thinking', 'decided'].includes(turn.status);
@@ -114,6 +114,7 @@ export function questionView(state, questionId, projects = {}) {
     if(ids.length) mention={kind:'environment_setup_missing',profile:q.profile,replyTo:q.messageId,
       text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+' 排查尚未完成：需要补充本话题对应环境的接入信息或选择数据源。请查看卡片中的具体缺口；原需求和已有证据已保留。'};
   }
+  mention=failureNotice(mention,{card,terminal,profile:q.profile,chatType:root.chatType,visibility:q.visibility,occurredAt:useJob?job.updatedAt:turn.completedAt??turn.aiCompletedAt??turn.createdAt},projects);
   if (mention && q.replyInThread) mention.replyInThread = true;
   const currentResult=useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '';
   const priorJobs=state.jobs.filter(j=>j.questionId===q.id && j.id!== (useJob?job.id:null) && j.result?.finalMessage);

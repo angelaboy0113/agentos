@@ -42,7 +42,7 @@ import { ConversationService, splitReply, responseMessageId } from './conversati
 import { LiveCards } from './live-cards.js';
 import { jobCard, resultSummary } from './message-cards.js';
 import { handleCardAction } from './card-actions.js';
-import { jobTerminalMention } from './requester-mention.js';
+import { jobTerminalMention, failureNotice } from './requester-mention.js';
 import { adminOverview, adminRecordDetail, adminRecords } from './admin-view.js';
 import { CODEX_MODELS, CODEX_REASONING_EFFORTS, loadCodexRuntimeSettings, saveCodexRuntimeSettings } from '../shared/codex-runtime.js';
 
@@ -664,7 +664,7 @@ export async function notifyJobEvent(context, { job, event }) {
     const id = await context.cards.upsert(key, jobCard(current),
       current.visibility==='requester'?cardDestination(current):{ chatId: current.chatId, replyTo: current.chatId ? null : current.replyToMessageId, profile: current.agentProfile },
       { terminal, immediate: terminal, resultText: terminal ? current.result?.finalMessage : '',
-        terminalMention: frozenMention ?? jobTerminalMention(current, context.projects) });
+        terminalMention: frozenMention ?? failureNotice(jobTerminalMention(current, context.projects),{card:jobCard(current),terminal,profile:current.originProfile,chatType:current.originChatType,visibility:current.visibility,occurredAt:current.updatedAt},context.projects) });
     if (id) await context.store.transact((state) => {
       const saved = state.jobs.find((item) => item.id === job.id);
       saved.notificationIds = [...new Set([...(saved.notificationIds ?? []), id])];

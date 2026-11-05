@@ -1,3 +1,4 @@
+import {validateFailureNotice} from './requester-mention.js';
 import { validateProjectScopes } from '../shared/project-scope.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -50,6 +51,7 @@ export async function loadProjects(file) {
       ownerOpenIds: parsed.ownerOpenIds ?? [],
       ownerOpenIdsByProfile: parsed.ownerOpenIdsByProfile ?? {},
       humanIdentities: validateHumanIdentities(parsed.humanIdentities ?? {}),
+      ...(parsed.failureNotice!==undefined?{failureNotice:validateFailureNotice(parsed.failureNotice,parsed.humanIdentities??{})}:{}),
       chatProjectMap: parsed.chatProjectMap ?? {},
       chatProfileProjectMap: validateProjectScopes(parsed),
       ...chatDeliverySettings(parsed),
