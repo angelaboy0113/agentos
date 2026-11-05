@@ -1,5 +1,5 @@
 // Fixed DOM adapter shared by all applications; no model-supplied selectors or scripts.
-export const websiteControls='.ant-card-hoverable,a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
+export const websiteControls='.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
 export function controlMetadata(el,{readNavigationSelectors=[]}={}){
  const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
  if(!visible||el.disabled||el.getAttribute('aria-disabled')==='true'||el.matches('.disabled,.is-disabled,.ant-picker-cell-disabled,.ant-calendar-disabled-cell')||el.closest('.ant-calendar-disabled-cell,.ant-picker-cell-disabled')||el.closest('[contenteditable="true"],[data-sensitive],[data-agentos-secret]'))return {visible:false};
@@ -14,6 +14,8 @@ export function controlMetadata(el,{readNavigationSelectors=[]}={}){
  const localLabel=singleField?fieldGroup.innerText?.trim():'';
  const fieldLabel=fieldGroup?.querySelector('.el-form-item__label,.ant-form-item-label,label')?.innerText?.trim()||(localLabel&&localLabel.length<=100?localLabel:'');
  if(tag==='input'&&fieldLabel)label=fieldLabel+' / '+label;
+ const expansion=el.matches('.ant-table-row-expand-icon,.el-table__expand-icon');
+ if(expansion)label=(el.classList.contains('ant-table-row-expanded')||el.classList.contains('el-table__expand-icon--expanded')||el.getAttribute('aria-expanded')==='true'?'收起':'展开')+'行详情：'+(el.closest('tr,[role="row"]')?.innerText??'').trim().slice(0,70);
  const panel=el.matches('.el-collapse-item__header,.ant-collapse-header');
  if(panel)label=(el.classList.contains('is-active')||el.getAttribute('aria-expanded')==='true'?'收起':'展开')+(el.closest('form,.el-form,.ant-form')?'筛选：':'面板：')+label;
  const dismiss=!!el.closest('[role="dialog"],.el-dialog,.el-drawer,.ant-modal,.ant-drawer')&&(el.matches('.el-dialog__headerbtn,.el-drawer__close-btn,.ant-modal-close,.ant-drawer-close,[aria-label="Close" i],[aria-label="关闭"]')||/^(关闭|取消|返回|close|cancel|back)$/i.test(label));
@@ -35,28 +37,29 @@ export function controlMetadata(el,{readNavigationSelectors=[]}={}){
   else if(!el.readOnly&&/^(text|search|date|datetime-local|number|month|week|time|tel)$/.test(el.type)){type='search';kind='field';}
  }else if(tag==='select'){type='select';kind='field';}
  else if(picker){type='read-action';kind='picker';}
+ else if(expansion){type='read-action';kind='expansion';}
  else if(panel){type='read-action';kind='panel';}
  else if(dismiss){type='read-action';kind='dismiss';}
  else if(option||calendar&&el.matches('button,td,[role="gridcell"]')||pagination){type='read-action';kind=option?'option':calendar?'calendar':'pagination';}
  else if(navigation){type='read-action';kind='navigation';}
  else if(tag==='a'||row||el.matches('[role="combobox"],[aria-haspopup="listbox"],[aria-haspopup="dialog"]')){type='read-action';}
  else if(/^(?:更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|重置|查询|搜索|查看|详情|刷新|展开|收起|确定|返回|下一页|上一页|search|query|view|detail|refresh|next|previous|more|reset)$/i.test(label)||/查看|详情|日志/.test(label)){type='read-action';}
- if(tag==='span'&&!picker&&!calendar&&!option&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
+ if(tag==='span'&&!picker&&!calendar&&!option&&!expansion&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
  if(title||el.matches('[role="tab"]')&&[...el.querySelectorAll('button,[role="button"]')].some(child=>child.innerText?.trim()===label))type=null;
  // Fields, options and date cells change local query state; server writes remain independently blocked.
- const blocked=!['field','option','calendar','pagination','picker','dismiss','panel'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
+ const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
  if(blocked)type=null;
  return {visible:true,label:row?'行详情：'+label:label,type,kind,blocked,...(type==='select'?{options:[...el.options].slice(0,100).map(x=>({value:x.value,label:x.textContent}))}:{})};
 }
-export function websiteFields({secretSelector}){
+export function websiteFields({secretSelector,full=false}){
  const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
- return [...document.querySelectorAll('input,textarea,select')].filter(e=>visible(e)&&!e.matches(secretSelector)&&!e.closest('[data-sensitive],[data-agentos-secret]')).slice(0,101).map(e=>{
+ return [...document.querySelectorAll('input,textarea,select')].filter(e=>visible(e)&&!e.matches(secretSelector)&&!e.closest('[data-sensitive],[data-agentos-secret]')).slice(0,full?undefined:101).map(e=>{
   const group=e.closest('.el-form-item,.ant-form-item,.el-col,.ant-col,label,[role="group"]');
   const labels=[...group?.querySelectorAll('label,.el-form-item__label,.ant-form-item-label,span')??[]].filter(n=>n!==e&&/[:：]$/.test(n.innerText?.trim()??''));
   const local=group&&[...group.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(visible).length===1?group.innerText?.trim():'';
   const label=(e.getAttribute('aria-label')||labels[0]?.innerText||e.labels?.[0]?.innerText||(local&&local.length<=100?local:'')||e.placeholder||e.name||e.id||'字段').trim().slice(0,100);
   if(/password|passwd|secret|token|credential|authorization|api.?key|app.?key|密码|令牌|密钥/i.test([label,e.name,e.id,e.placeholder].join(' ')))return {label,value:'[已隐藏]',readOnly:true,disabled:!!e.disabled};
-  return {label,value:String(e.tagName==='SELECT'?e.selectedOptions[0]?.textContent??e.value:e.value).slice(0,500),readOnly:!!e.readOnly,disabled:!!e.disabled};
+  return {label,value:String(e.tagName==='SELECT'?e.selectedOptions[0]?.textContent??e.value:e.value).slice(0,full?undefined:500),readOnly:!!e.readOnly,disabled:!!e.disabled};
  });
 }
 

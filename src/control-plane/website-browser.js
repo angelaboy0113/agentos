@@ -114,6 +114,7 @@ export class WebsiteBrowser {
   if(tool==='browser_screenshot')return this.screenshot(s);
   if(!login.pageReady)return {stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded'});}
+  if(tool==='browser_read')return this.readVisible(s,args);
   if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot')return this.snapshot(s);
   if(tool==='browser_key'&&args.ref==='page'){await s.page.keyboard.press('Escape');return this.snapshot(s);}
   if(tool==='browser_scroll'&&args.ref==='page'){await s.page.evaluate(direction=>window.scrollBy(direction==='left'?-600:direction==='right'?600:0,direction==='up'?-600:direction==='down'?600:0),args.direction);return this.snapshot(s);}
@@ -133,6 +134,18 @@ export class WebsiteBrowser {
   }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   return this.snapshot(s);
+ }
+ async readVisible(s,{section,offset,limit,contentHash,find}){
+  // Reuse the same authenticated, authorised page. No URL, hidden DOM, selector,
+  // credential lookup, new HTTP request or executable expression from a model.
+  let text;
+  if(section==='fields'){const fields=await s.page.evaluate(websiteFields,{secretSelector:screenshotSecretSelector,full:true});text=JSON.stringify(fields.map(f=>({...f,value:cleanWebsiteText(f.value,Infinity)})));}
+  else text=cleanWebsiteText(await s.page.locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden],[data-sensitive],[data-agentos-secret]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');}),Infinity);
+  const hash=createHash('sha256').update(JSON.stringify([s.job.id,s.environment.projectId,s.environment.tier,s.page.url(),section,text])).digest('hex');
+  if(contentHash&&contentHash!==hash)throw new BrowserInputError('BROWSER_CONTENT_CHANGED','当前可见内容已变化；保留旧页证据，从offset=0重新读取，不能拼成同一份响应');
+  const matchOffset=find?text.indexOf(find,offset):null,begin=find?matchOffset<0?text.length:Math.max(0,matchOffset-Math.min(400,Math.floor(limit/4))):offset;
+  const part=text.slice(begin,begin+Math.min(limit,10000)),nextOffset=begin+part.length<text.length?begin+part.length:null,nextMatchOffset=find&&matchOffset>=0?text.indexOf(find,matchOffset+find.length):null;
+  return {section,url:websitePageLocation(s.page.url()),contentHash:hash,offset:begin,text:part,...(find?{matchOffset,nextMatchOffset:nextMatchOffset<0?null:nextMatchOffset,literalMatchOnly:true}:{}),totalCharacters:text.length,nextOffset,endOfContent:nextOffset===null,complete:begin===0&&nextOffset===null,note:'仅当前已授权页面的可见脱敏内容，分页不是历史快照；沿contentHash和nextOffset续读，变化时重新开始。无新的业务请求或写入。'};
  }
  async snapshot(s){
   await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;

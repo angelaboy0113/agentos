@@ -85,6 +85,7 @@ export function websiteTools(job,config,environment={}){
  {tool:'report_wrong_site',args:{},description:'当前页面属于其他系统或不是原问题的目标应用时报告入口不匹配，返回原问题继续查找正确入口，不扩大权限'},
  {tool:'browser_screenshot',args:{},description:'等待接口返回和页面稳定后保存视口截图，仅遮挡凭据和显式敏感区，由控制服务发送原话题；异常页面应截图并记路径和复现步骤'},
  {tool:'browser_open',args:{},description:'查看当前业务网页'}, {tool:'browser_snapshot',args:{},description:'刷新页面文本和引用'},
+ {tool:'browser_read',args:{section:'page或fields',offset:0,limit:4000,contentHash:'续读填写前页摘要，首页省略',find:'可选字面文本定位，返回匹配处上下文及nextMatchOffset，不是业务记录匹配'},description:'当前可见页面或输入框完整脱敏内容分段读取；查看长日志报文时先展开行，再沿nextOffset和contentHash读完，不以snapshot预览当完整响应。无URL/选择器/代码参数，不发新业务请求。'},
  {tool:'browser_click',args:{ref:'当前read-action引用'},description:'查看详情、日志、菜单、翻页；不能启动停止或修改'},
  {tool:'browser_key',args:{ref:'当前控件引用，或page仅用于Escape',key:'Enter/Tab/Escape/ArrowDown/ArrowUp/ArrowLeft/ArrowRight/Home/End/PageDown/PageUp/Space'},description:'日期/下拉框的键盘交互，Tab提交本地筛选输入，Escape关闭弹窗；不能执行系统快捷键'},
  {tool:'browser_scroll',args:{ref:'当前控件引用或page',direction:'up/down/left/right'},description:'滚动当前控件所在容器或页面，读取表格更多列与详情下部'},

@@ -53,8 +53,8 @@ export function websiteRequestAllowed(base, request, manualLogin=false, readEndp
  if(request.method==='OPTIONS')return true;
  return request.resourceType==='document'||/\.(?:js|css|png|jpg|jpeg|svg|ico|woff2?|ttf|map)$/i.test(tail)||reads.test(tail)||u.pathname==='/' || readEndpoints.some(e=>e.reviewed===true&&e.method===request.method&&reviewedPathMatches(e.path,u.pathname)) || /\/(?:api\/)?(?:menus?|permissions?|profiles?|users?\/me)$/i.test(u.pathname);
 }
-export function cleanWebsiteText(value) {
- return String(value??'').replace(/\b(?:Bearer\s+)[A-Za-z0-9._~+\/-]+/gi,'[凭据已隐藏]').replace(/((?:["']?)(?:password|passwd|pwd|secret|appSecret|apiKey|appKey|token|identitytoken|access.?token|refresh.?token|authorization|cookie|密码|令牌|密钥)(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/gi,'$1[已隐藏]').slice(0,10000);
+export function cleanWebsiteText(value,limit=10000) {
+ return String(value??'').replace(/\b(?:Bearer\s+)[A-Za-z0-9._~+\/-]+/gi,'[凭据已隐藏]').replace(/((?:["']?)(?:password|passwd|pwd|secret|appSecret|apiKey|appKey|token|identitytoken|access.?token|refresh.?token|authorization|cookie|密码|令牌|密钥)(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/gi,'$1[已隐藏]').slice(0,limit);
 }
 
 export function validateWebsiteReadEndpoints(value){
