@@ -43,9 +43,9 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  const csv='\uFEFF'+[data.columns,...rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n';
  if(csv!==verified.content.toString('utf8'))fail('实际CSV与绑定配方的逐行重算不一致，不能认定已修正');
  const columns=draft.columns.map((c,i)=>({label:c.label,value:c.value,definition:receipt.columnRules[i].definition,evidence:receipt.columnRules[i].evidence}));
- const sourceList=[...sources].map(([name,d])=>({name,datasetRef:d.datasetRef,keyColumn:d.keyColumn,columns:d.columns,rowCount:d.rows.length,readAt:d.readAt,queryDefinition:d.queryDefinition??null,derivation:d.derivation??null}));
+ const sourceList=[...sources].map(([name,d])=>({name,datasetRef:d.datasetRef,keyColumn:d.keyColumn,columns:d.columns,rowCount:d.rows.length,readAt:d.readAt,queryDefinition:d.queryDefinition??null,inputEvidence:d.inputEvidence??null,derivation:d.derivation??null}));
  const population=await storage.get(receipt.coverage.populationRef),fileKeys=new Set(draft.keys),comparisons=[],visited=new Set();
- const describe=(ref,key,d)=>({datasetRef:ref,keyColumn:key,rowCount:d.rows.length,queryDefinition:d.queryDefinition?{sql:d.queryDefinition.sql.slice(0,1400),params:d.queryDefinition.params.slice(0,20)}:null});
+ const describe=(ref,key,d)=>({datasetRef:ref,keyColumn:key,rowCount:d.rows.length,inputEvidence:d.inputEvidence??null,queryDefinition:d.queryDefinition?{sql:d.queryDefinition.sql.slice(0,1400),params:d.queryDefinition.params.slice(0,20)}:null});
  const compareScope=async(ref,key,include=false)=>{
   const identity=ref+':'+key,traversed=visited.has(identity);if(traversed&&(!include||comparisons.some(c=>c.datasetRef===ref&&c.keyColumn===key)))return;visited.add(identity);
   const saved=await storage.get(ref),d=saved.data,derivation=d.derivation;
@@ -53,6 +53,7 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
   const values=d.rows.map(r=>r[key]),keys=new Set(values),unique=keys.size===values.length&&!keys.has(null)&&!keys.has('');
   if(unique&&include){const onlyReference=[...keys].filter(k=>!fileKeys.has(k)),onlyFile=[...fileKeys].filter(k=>!keys.has(k));comparisons.push({...describe(ref,key,d),onlyReferenceCount:onlyReference.length,onlyFileCount:onlyFile.length,onlyReferencePreview:onlyReference.slice(0,3).map(k=>String(k).slice(0,80)),onlyFilePreview:onlyFile.slice(0,3).map(k=>String(k).slice(0,80))});}
   if(traversed)return;
+  if(derivation?.kind==='dataset_transform'&&key===derivation.args.keyColumn)await compareScope(derivation.args.datasetRef,key,true);
   if(derivation?.kind==='left_lookup'&&key===derivation.keyColumn){await compareScope(derivation.datasetRef,key);for(const lookup of derivation.lookups.filter(l=>l.sourceColumn===key))await compareScope(lookup.datasetRef,lookup.targetColumn,true);}
  };
  await compareScope(receipt.coverage.populationRef,receipt.coverage.populationKey,true);for(const source of draft.sources)await compareScope(source.datasetRef,source.keyColumn);

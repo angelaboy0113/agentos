@@ -174,3 +174,8 @@ test('report repair requires the latest scoped saved failure, a real draft, and 
  assert.equal((await reportRepairHandoff(base)).datasetRef,datasetRef);
  for(const change of [{pendingInputs:new Set(['finalize_report','select'])},{resultRef:'stale-ref'},{verifyDraft:async()=>({})},{loadFailure:async()=>({...saved,tool:'select'})},{loadFailure:async()=>{throw Error('foreign scope');}}])await assert.rejects(reportRepairHandoff({...base,...change}));
 });
+
+test('a durable whole task document can directly continue to an already authorized same-tier database',async()=>{
+ const c={...cfg,environments:{...cfg.environments,doc:{projectId:'a',tier:'prd',kind:'website',baseUrl:'https://example.feishu.cn/wiki/Node123',credentialRef:'none',membersRead:true,ownerOpenIdsByProfile:{owner:['ou_owner']},queries:{investigate:{...query,browser:true}}}}};const p=planQuery(c,{environmentId:'doc',queryId:'investigate',parameters:['read original complete input']},'a',{profile:'owner',senderId:'ou_owner'});
+ for(const foreign of [false,true]){let calls=0;const result=await investigateEnvironment(p,async()=>{},{load:async()=>c,reportJob:job,tools:async()=>({spec:[{tool:'connection',args:{}}],run:async()=>({nativeDocument:true,complete:true,inputAttachment:{id:'input',source:{kind:'authorized-native-cloud-sheet',projectId:foreign?'b':'a',originProfile:'owner',tier:'prd',sha256:'0'.repeat(64)}}}),close:async()=>{}}),planner:async()=>({close:async()=>{},next:async()=>{calls++;return calls===1?{tool:'connection',arguments:'{}'}:calls===2?{tool:'continue_environment',arguments:JSON.stringify(next)}:{tool:'finish',summary:'Input still needs scope repair',complete:false};}})});assert.equal(Boolean(result.nextEnvironmentQuery),!foreign);assert.equal(result.partial,true);}
+});

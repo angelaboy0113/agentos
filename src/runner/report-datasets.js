@@ -21,6 +21,11 @@ export class ReportDatasets {
   this.secrets=secrets.filter(Boolean);this.maxRows=maxRows==='all'?Number.MAX_SAFE_INTEGER:maxRows;this.previewRows=Math.min(previewRows,20);this.directory=directory;this.authorize=authorize;this.active=active;this.collected=new Map();this.datasets=new Map();this.bytes=0;this.files=0;
  }
  async check(){if(!this.active())throw new ReportInputError('报表查询已结束');await this.authorize();if(!this.active())throw new ReportInputError('报表查询已结束');}
+ async importInput(data){
+  await this.check();if(!this.storage||!data.inputEvidence||!data.complete)throw new ReportInputError('缺少本任务已核验的输入数据集');
+  const ref='dataset-'+randomUUID(),saved=await this.storage.save(ref,data,this.snapshotId);await this.check();this.remember(ref,{...data,snapshotId:saved.snapshotId,readAt:saved.readAt});this.sourceScopes.set(ref,this.scope);
+  return {datasetRef:ref,kind:'input',columns:data.columns,rowCount:data.rows.length,readAt:saved.readAt,dataHash:saved.dataHash,complete:true,inputEvidence:data.inputEvidence,preview:preview(data.rows,this.previewRows),note:'原始用户输入，不是SQL查询、独立金额基准或同事务快照；没有自动表头、去重或补零。用collect_dataset_values完整生成in_set，再从当前已批准数据库取证。'};
+ }
  async collect(statement,execute){
   await this.check();
   const queryHash=createHash('sha256').update(JSON.stringify([statement.sql,statement.params])).digest('hex');
@@ -65,7 +70,7 @@ export class ReportDatasets {
  }
  async list({offset=0,limit=20,kind,columns=[]}={}){
   await this.check();
-  if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>20||kind!==undefined&&!['query','derived','report_draft'].includes(kind)||!Array.isArray(columns)||columns.some(c=>typeof c!=='string'))throw new ReportInputError('Invalid dataset catalog offset/limit/kind/columns');
+  if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>20||kind!==undefined&&!['query','input','derived','report_draft'].includes(kind)||!Array.isArray(columns)||columns.some(c=>typeof c!=='string'))throw new ReportInputError('Invalid dataset catalog offset/limit/kind/columns');
   const all=(this.storage?await this.storage.list():[]).filter(d=>(kind===undefined||d.kind===kind)&&columns.every(c=>d.columns.includes(c)));
   await this.check();
   all.sort((a,b)=>Number(b.kind==='report_draft')-Number(a.kind==='report_draft')||(b.createdAt??b.readAt).localeCompare(a.createdAt??a.readAt)||a.datasetRef.localeCompare(b.datasetRef));
@@ -79,7 +84,7 @@ export class ReportDatasets {
   const catalog=[...new Map([...(this.catalogHints??[]),...[...this.datasets].map(([datasetRef,d])=>({datasetRef,complete:d.complete,rowCount:d.rows.length,kind:d.reportDraft?'report_draft':d.queryDefinition?'query':'derived',columns:d.columns,numericColumns:d.numericColumns??[],queryIdentity:queryEvidenceIdentity(d),readAt:d.readAt,queryHash:d.queryHash}))].map(x=>[x.datasetRef,x])).values()];
   for(const c of required){const source=await this.restore(data.reportDraft.sources.find(s=>s.name===c.source).datasetRef);checks.push({...c,sourceProof:await this.windowEvidence(source,c.column,validation),referenceCandidates:[]});}
   for(const item of catalog){
-   if(!item.complete||item.kind!=='query'||!(item.rowCount===keys.size||required.some(c=>item.columns.includes(c.column))))continue;
+   if(!item.complete||!['query','input'].includes(item.kind)||!(item.rowCount===keys.size||required.some(c=>item.columns.includes(c.column))))continue;
    // Suggestions reuse the previously verified catalog; they are not receipts.
    // Never rescan or retain every large raw dataset merely to build tool hints.
    if(item.rowCount===keys.size){const full=await this.restore(item.datasetRef);for(const keyColumn of full.columns){const set=new Set(full.rows.map(r=>r[keyColumn]));if(set.size===full.rows.length&&[...set].every(k=>typeof k==='string'&&keys.has(k)))populations.push({datasetRef:item.datasetRef,populationKey:keyColumn,rowCount:full.rows.length,queryHash:full.queryHash,readAt:full.readAt});}}
@@ -101,7 +106,7 @@ export class ReportDatasets {
   for(const source of data.reportDraft?.sources??[]){const d=await this.restore(source.datasetRef);if(d?.derivation?.kind==='period_grid'){const a=d.derivation.args;populationPlans.push({tool:'period_dataset',arguments:{populationRef:a.populationRef,keyColumns:a.keyColumns,period:a.period,rowKey:a.rowKey??'period_key',sources:[]},keyColumn:a.rowKey??'period_key'});}}
   const q=data.queryDefinition;
   await this.check();
-  const result={datasetRef,columns:data.columns,rowCount:data.rows.length,historical:Date.now()-Date.parse(data.readAt)>86400000,preview:rows,previewOffset:offset,nextOffset:offset+rows.length<data.rows.length?offset+rows.length:null,previewBlocked:rows.length===0&&offset<data.rows.length,previewNote:'Saved evidence only, no database read; old readAt is historical, not current. If previewBlocked, select fewer columns or use read_dataset for a long cell. Preview is not a complete population.',readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,sourceRead:data.sourceRead,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,dependencies,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns,finalization:{...await this.finalizationHints(data),populationPlans,snapshotWindowMs:this.snapshotWindowMs,note:'Each numeric check requires a different raw query. A period coverage population is a separate period_dataset with sources=[], not a metric grid. populationPlans only describe existing population/range; verify business scope and raw provenance before use.'}}:undefined};
+  const result={datasetRef,inputEvidence:data.inputEvidence??null,columns:data.columns,rowCount:data.rows.length,historical:Date.now()-Date.parse(data.readAt)>86400000,preview:rows,previewOffset:offset,nextOffset:offset+rows.length<data.rows.length?offset+rows.length:null,previewBlocked:rows.length===0&&offset<data.rows.length,previewNote:'Saved evidence only, no database read; old readAt is historical, not current. If previewBlocked, select fewer columns or use read_dataset for a long cell. Preview is not a complete population.',readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,sourceRead:data.sourceRead,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,dependencies,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns,finalization:{...await this.finalizationHints(data),populationPlans,snapshotWindowMs:this.snapshotWindowMs,note:'Each numeric check requires a different raw query. A period coverage population is a separate period_dataset with sources=[], not a metric grid. populationPlans only describe existing population/range; verify business scope and raw provenance before use.'}}:undefined};
   if(sections)for(const section of allowedSections)if(!sections.includes(section))delete result[section];
   result.omittedSections=[];
   for(const section of ['preview','dependencies','derivation','queryDefinition','reportDraft']){
@@ -372,7 +377,7 @@ export class ReportDatasets {
   const periodPopulation=population?.derivation?.kind==='period_grid'&&population.derivation.args.sources.length===0;
   let populationBase=periodPopulation?await this.restore(population.derivation.args.populationRef):population;
   const populationVisited=new Set();while(['dataset_summary','dataset_transform','dataset_relation'].includes(populationBase?.derivation?.kind)){const ref=populationBase.derivation.args.datasetRef;if(populationVisited.has(ref))throw new ReportInputError('范围依赖循环');populationVisited.add(ref);populationBase=await this.restore(ref);}
-  if(!population?.complete||population.reportDraft||!populationBase?.queryHash||!populationBase.queryDefinition||!population.columns.includes(args.populationKey))throw new ReportInputError('完整对象范围必须来自独立原始查询数据集，不能拿草稿自身当覆盖证明；期间覆盖请从原始对象集合单独period_dataset，sources=[]，populationKey使用其period_key；inspect_dataset的finalization.populationCandidates和populationPlans可定位已有来源及范围，不需重查整套数据');
+  if(!population?.complete||population.reportDraft||!(populationBase?.queryHash&&populationBase.queryDefinition||populationBase?.inputEvidence?.version===1&&populationBase.inputEvidence.kind==='native-cloud-sheet'&&populationBase.inputEvidence.rowKey===args.populationKey&&populationBase.inputEvidence.rowCount===populationBase.rows.length)||!population.columns.includes(args.populationKey))throw new ReportInputError('完整对象范围必须来自独立原始查询数据集，不能拿草稿自身当覆盖证明；期间覆盖请从原始对象集合单独period_dataset，sources=[]，populationKey使用其period_key；inspect_dataset的finalization.populationCandidates和populationPlans可定位已有来源及范围，不需重查整套数据');
   const expected=uniqueKeys(population,args.populationKey);
   if(!Array.isArray(draft.keys)||draft.keys.length!==data.rows.length||new Set(draft.keys).size!==draft.keys.length||draft.keys.some(k=>typeof k!=='string'||!k))throw new ReportInputError('草稿缺少完整内部主键索引；重新生成草稿后核验');
   const actual=new Set(draft.keys),missing=[...expected].filter(k=>!actual.has(k)),extra=[...actual].filter(k=>!expected.has(k));
