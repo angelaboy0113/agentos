@@ -100,7 +100,7 @@ export async function verifyPeriodDataset(data,load,options={}){
    await read(args.populationRef);for(const source of args.sources)await read(source.datasetRef);
    const rebuilt=await buildWindowDataset(args,read,options);for(const k of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(!sameJSON(data[k],rebuilt[k]))bad('窗口统计与完整来源重算不一致');
   }else if(kind==='dataset_transform'||kind==='dataset_summary'){
-   if(kind==='dataset_transform'?data.derivation.version!=='tree-filter-v1':data.derivation.version!==1)bad('不支持的数据整理配方版本');
+   if(kind==='dataset_transform'?!['tree-filter-v1','tree-filter-text-v2'].includes(data.derivation.version):data.derivation.version!==1)bad('不支持的数据整理配方版本');
    const base=await read(data.derivation.args.datasetRef),rebuilt=(kind==='dataset_summary'?summarizeDataset:transformDataset)(data.derivation.args,base);
    for(const key of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(!sameJSON(data[key],rebuilt[key]))bad('整理数据与完整来源重算不一致');
   }else if(kind==='left_lookup'){await read(data.derivation.datasetRef);for(const l of data.derivation.lookups)await read(l.datasetRef);}

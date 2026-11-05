@@ -1,5 +1,15 @@
 import {compareExact} from './dataset-summary.js';
 import {normalizeCalendarPeriod} from './calendar-period.js';
+// Explicit identifier conversion preserves textual leading zeros and nulls.
+export function exactText(value,normalization='none'){
+ const bad=()=>{throw Object.assign(new Error('文本转换需要原始文本、安全整数或布尔值；整数十进制规范化不接受小数、科学计数法或不安全数字'),{code:'REPORT_INPUT'});};
+ if(!['none','integer_decimal'].includes(normalization))bad();
+ if(value===null)return null;
+ if(typeof value==='string'){if(normalization==='integer_decimal'&&!/^[+-]?\d+$/.test(value))bad();return normalization==='integer_decimal'?BigInt(value).toString():value;}
+ if(typeof value==='number'){if(!Number.isSafeInteger(value))bad();return String(value);}
+ if(typeof value==='boolean'&&normalization==='none')return String(value);
+ bad();
+}
 // Declarative task-local transformations; no SQL, eval, filesystem paths or business rules.
 export function transformDataset(args, base) {
  const bad=m=>{throw Object.assign(new Error('数据集整理：'+m),{code:'REPORT_INPUT'});};
@@ -26,6 +36,11 @@ export function transformDataset(args, base) {
    return row=>{const v=row[f.column];if(v===undefined)bad('行缺少实际字段');const x=norm(v);switch(f.op){case 'is_null':return x===null;case 'is_not_null':return x!==null;case 'eq':return x===value;case 'ne':return x!==value;case 'in':return values.includes(x);case 'not_in':return !values.includes(x);}};
   });
  };
+ if(Object.keys(args).some(k=>!['datasetRef','keyColumn','scopeEvidence','filters','hierarchy','conversions'].includes(k)))bad('存在未支持的整理参数，不能静默忽略转换');
+ const conversions=args.conversions??[];
+ if(!Array.isArray(conversions))bad('conversions必须为数组');
+ const extra=new Set(base.columns);
+ for(const c of conversions){column(c.column);if(Object.keys(c).some(k=>!['column','as','type','normalization'].includes(k))||c.type!=='string'||!['none','integer_decimal',undefined].includes(c.normalization)||typeof c.as!=='string'||!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(c.as)||['__proto__','prototype','constructor'].includes(c.as)||extra.has(c.as))bad('转换须指定原列、新列、type=string及none/integer_decimal；保留原列');extra.add(c.as);}
  const filters=compile(args.filters??[]),index=new Map();
  for(const row of base.rows){const key=row[args.keyColumn];if(typeof key!=='string'||!key||index.has(key))bad('主键必须是非空唯一文本；不可静默去重');index.set(key,row);}
  let rows=base.rows.map(row=>({...row})),columns=[...base.columns],audit={inputCount:rows.length};
@@ -46,6 +61,7 @@ export function transformDataset(args, base) {
   audit={...audit,reachableCount:paths.size,blockedNodeCount,orphanCount,orphanPolicy:'仅记录来源中未解析父键；目标根以上不延伸，目标后代不跳过缺失节点'};
  }
  rows=rows.filter(row=>filters.every(f=>f(row)));
- const data={rows,columns,numericColumns:[...(base.numericColumns??[])],complete:true,readAt:base.readAt,readThroughAt:base.readThroughAt??base.readAt,snapshotId:base.snapshotId,derivation:{kind:'dataset_transform',version:'tree-filter-v1',args:structuredClone(args),audit:{...audit,outputCount:rows.length}}};
+ for(const c of conversions){columns.push(c.as);for(const row of rows)row[c.as]=exactText(row[c.column],c.normalization);}
+ const data={rows,columns,numericColumns:[...(base.numericColumns??[])],complete:true,readAt:base.readAt,readThroughAt:base.readThroughAt??base.readAt,snapshotId:base.snapshotId,derivation:{kind:'dataset_transform',version:conversions.length?'tree-filter-text-v2':'tree-filter-v1',args:structuredClone(args),audit:{...audit,outputCount:rows.length}}};
  return data;
 }

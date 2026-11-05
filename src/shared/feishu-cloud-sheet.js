@@ -1,3 +1,4 @@
+import {exactText} from './dataset-transform.js';
 import {createHash} from 'node:crypto';
 // Platform adapter: explicit task document only, GET-only, originating bot identity.
 export function cloudSheetTarget(value){
@@ -37,11 +38,12 @@ export function nativeInputDataset(attachment,bytes,args,job){
  let raw;try{raw=JSON.parse(bytes);}catch{bad('输入JSON无效');}const v=raw.data?.valueRange,values=v?.values;
  if(attachment.source.range&&v?.range!==attachment.source.range)bad('输入范围与登记记录不一致');
  if(!Array.isArray(values)||values.length!==attachment.source.rows||values.some(row=>!Array.isArray(row)||row.length>attachment.source.columns)||raw.data.revision!==attachment.source.revision)bad('原生输入范围、行列或revision与已保存证据不符；不能当作完整数据。');
+ if(Object.keys(args).some(k=>!['attachmentId','columns','rowKey'].includes(k)))bad('不支持的输入导入参数');
  const fields=args.columns,key=args.rowKey??'input_row';const name=x=>typeof x==='string'&&/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x)&&!['__proto__','prototype','constructor'].includes(x);
- if(!Array.isArray(fields)||!fields.length||!name(key)||fields.some(f=>!Number.isSafeInteger(f.index)||f.index<0||f.index>=attachment.source.columns||!name(f.as))||new Set([key,...fields.map(f=>f.as)]).size!==fields.length+1)bad('明确原始0-based列索引、唯一输出列名和独立行号列；不自动猜表头或去重。');
- const rows=values.map((cells,index)=>{const row={[key]:String(index+1)};for(const f of fields){const value=cells[f.index]??null;if(value!==null&&typeof value!=='string'&&typeof value!=='boolean'&&!(typeof value==='number'&&Number.isSafeInteger(value)))bad('输入包含无法精确解释的数字或复杂单元格；不能丢精度或猜测金额。');row[f.as]=value;}return row;});
+ if(!Array.isArray(fields)||!fields.length||!name(key)||fields.some(f=>Object.keys(f).some(k=>!['index','as','type','normalization'].includes(k))||!['string',undefined].includes(f.type)||!['none','integer_decimal',undefined].includes(f.normalization)||f.normalization!==undefined&&f.type!=='string'||!Number.isSafeInteger(f.index)||f.index<0||f.index>=attachment.source.columns||!name(f.as))||new Set([key,...fields.map(f=>f.as)]).size!==fields.length+1)bad('明确原始0-based列索引、唯一输出列名和独立行号列；不自动猜表头或去重。');
+ const rows=values.map((cells,index)=>{const row={[key]:String(index+1)};for(const f of fields){const value=cells[f.index]??null;if(value!==null&&typeof value!=='string'&&typeof value!=='boolean'&&!(typeof value==='number'&&Number.isSafeInteger(value)))bad('输入包含无法精确解释的数字或复杂单元格；不能丢精度或猜测金额。');row[f.as]=f.type==='string'?exactText(value,f.normalization):value;}return row;});
  const capturedAt=new Date().toISOString(),readAt=attachment.source.readAt??capturedAt;
- return {rows,columns:[key,...fields.map(f=>f.as)],numericColumns:[],complete:true,readAt,sourceRead:{kind:'task_input',readAtKnown:Boolean(attachment.source.readAt),capturedAt,revision:attachment.source.revision},inputEvidence:{version:1,kind:'native-cloud-sheet',attachmentId:attachment.id,sha256:attachment.source.sha256,rowCount:rows.length,rowKey:key,columns:fields.map(f=>({...f})),revision:attachment.source.revision,scope:{jobId:job.id,projectId:job.projectId,originProfile:job.originProfile,sourceEnvironment:job.sourceEnvironment}}};
+ return {rows,columns:[key,...fields.map(f=>f.as)],numericColumns:[],complete:true,readAt,sourceRead:{kind:'task_input',readAtKnown:Boolean(attachment.source.readAt),capturedAt,revision:attachment.source.revision},inputEvidence:{version:fields.some(f=>f.type)?2:1,kind:'native-cloud-sheet',attachmentId:attachment.id,sha256:attachment.source.sha256,rowCount:rows.length,rowKey:key,columns:fields.map(f=>({...f})),revision:attachment.source.revision,scope:{jobId:job.id,projectId:job.projectId,originProfile:job.originProfile,sourceEnvironment:job.sourceEnvironment}}};
 }
 
 export async function registerCloudSheetInput(store,dataDir,job,environment,result){
