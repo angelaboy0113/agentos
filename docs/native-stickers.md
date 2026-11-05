@@ -8,7 +8,7 @@
 
 需要机器人能力、已订阅 `im.message.receive_v1`，以及 `im:message.p2p_msg:readonly`、`im:message:readonly`、`im:message:send_as_bot` 和 `im:chat:read`；群消息读取沿现有应用授权。已有权限可直接复用，无需新建事件消费者。修改配置后按实例维护流程自然空闲、备份、重启原唯一服务；不得中断其它活动任务。
 
-管理员分别私聊目标机器人，从飞书**表情包面板**发送原生表情包，不是图片附件、截图或文本 emoji。收到的事件必须是 `message_type=sticker`、`chat_type=p2p`；群聊和非管理员被忽略，不交模型。程序使用同一机器人读取该 message_id 的原始内容，核对消息 ID、chat_id、发送者 open_id/类型、消息类型及未撤回状态；再以群信息的 `chat_mode=p2p` 核对单聊。CLI 的占位文字不作为 file_key，也不下载表情资源。有效 file_key 按 `profile:appId` 独立存储、去重。成功回复：`原生表情包已登记，素材库现有 N 张`。重复消息不重复回执；重新发同张素材仍可确认 N 不变。
+管理员分别私聊目标机器人，从飞书**表情包面板**发送原生表情包，不是图片附件、截图或文本 emoji。收到的事件必须是 `message_type=sticker`、`chat_type=p2p`；群聊和非管理员被忽略，不交模型。程序使用同一机器人读取该 message_id 的原始内容，核对消息 ID、chat_id、发送者 open_id/类型、消息类型及未撤回状态；再以群信息的 `chat_mode=p2p` 核对单聊。原生GET响应的 `msg_type` 与事件的 `message_type` 均按消息类型核验；不能只用合成事件字段替代真实接口形状。CLI 的占位文字不作为 file_key，也不下载表情资源。有效 file_key 按 `profile:appId` 独立存储、去重。成功回复：`原生表情包已登记，素材库现有 N 张`。重复消息不重复回执；重新发同张素材仍可确认 N 不变。
 
 飞书原生 sticker 仅能发送该机器人实际接收过的 file_key，不能跨机器人复制素材库。参考：[官方内容结构](https://open.feishu.cn/document/server-docs/im-v1/message-content-description/create_json)、[读取消息](https://open.feishu.cn/document/server-docs/im-v1/message/get)、[原生回复](https://open.feishu.cn/document/server-docs/im-v1/message/reply)。
 
