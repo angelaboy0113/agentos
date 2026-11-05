@@ -32,9 +32,9 @@ function current(state,q){
  if(root?.chatType!=='group'||!turn||turn.visibility==='requester'||root.profile!==q.profile||turn.profile!==q.profile||root.chatId!==q.chatId||turn.chatId!==q.chatId)return null;
  const jobs=(state.jobs??[]).filter(j=>j.questionId===q.id&&j.projectId===q.projectId&&(j.originProfile??j.agentProfile)===q.profile);
  const last=jobs.at(-1);if(!last||!active(last)||last.visibility==='requester'||last.taskIntent!=='analysis')return null;
- return {jobs,startAt:turn.createdAt,turnId:turn.id};
+ return {jobs,startAt:root.createdAt,turnId:root.id};
 }
-const keyFor=q=>createHash('sha256').update(JSON.stringify([q.profile,q.projectId,q.chatId,q.id,q.latestTurnId])).digest('hex');
+const keyFor=q=>createHash('sha256').update(JSON.stringify([q.profile,q.projectId,q.chatId,q.id,q.rootTurnId])).digest('hex');
 export class LongInvestigationNotices{
  constructor(context,{now=()=>Date.now(),intervalMs=30000}={}){this.context=context;this.now=now;this.intervalMs=intervalMs;this.closed=false;}
  start(){if(this.timer)return;this.retry().catch(()=>{});this.timer=setInterval(()=>this.retry().catch(()=>{}),this.intervalMs);this.timer.unref();}
@@ -47,16 +47,16 @@ export class LongInvestigationNotices{
   if(policy?.enabled&&now>=date(policy.since)){
    validateLongInvestigationNotice(policy,projects.humanIdentities);
    for(const q of values(snapshot.questions)){
-    const scope=current(snapshot,q),key=keyFor(q);if(!scope||snapshot.longInvestigationNotices?.[key])continue;
+    const scope=current(snapshot,q),key=keyFor(q);if(!scope||snapshot.longInvestigationNotices?.[key]||values(snapshot.longInvestigationNotices).some(e=>e.questionId===q.id&&e.profile===q.profile&&e.projectId===q.projectId&&e.chatId===q.chatId))continue;
     const elapsedMs=investigationElapsed(scope.jobs,scope.startAt,now);if(elapsedMs<policy.minutes*60000)continue;
     const id=projects.humanIdentities[policy.humanId]?.[q.profile],text=requesterMentionText(id,policy.message.replaceAll('{minutes}',String(policy.minutes)));if(!text)continue;
-    await store.transact(s=>{const fresh=s.questions?.[q.id],still=current(s,fresh);if(!still||fresh.latestTurnId!==q.latestTurnId||investigationElapsed(still.jobs,still.startAt,now)<policy.minutes*60000)return;
-     s.longInvestigationNotices??={};s.longInvestigationNotices[key]??={questionId:q.id,turnId:q.latestTurnId,profile:q.profile,projectId:q.projectId,chatId:q.chatId,replyTo:q.messageId,text,idempotencyKey:'aos-long-'+key.slice(0,32),thresholdMinutes:policy.minutes,elapsedMs,createdAt:new Date(now).toISOString(),failures:0,retryAt:0};});
+    await store.transact(s=>{const fresh=s.questions?.[q.id],still=current(s,fresh);if(!still||fresh.rootTurnId!==q.rootTurnId||investigationElapsed(still.jobs,still.startAt,now)<policy.minutes*60000)return;
+     s.longInvestigationNotices??={};s.longInvestigationNotices[key]??={questionId:q.id,turnId:q.rootTurnId,profile:q.profile,projectId:q.projectId,chatId:q.chatId,replyTo:q.messageId,text,idempotencyKey:'aos-long-'+key.slice(0,32),thresholdMinutes:policy.minutes,elapsedMs,createdAt:new Date(now).toISOString(),failures:0,retryAt:0};});
    }
   }
   const pending=await stateView(store,s=>Object.entries(s.longInvestigationNotices??{}).filter(([,e])=>!e.messageId&&!e.superseded&&!e.reconciliationRequired));
   for(const [key,e]of pending){
-   const valid=await stateView(store,s=>{const q=s.questions?.[e.questionId];return policy?.enabled&&now>=date(policy.since)&&q?.profile===e.profile&&q?.chatId===e.chatId&&q?.projectId===e.projectId&&q?.messageId===e.replyTo&&q?.latestTurnId===e.turnId&&Boolean(current(s,q));});
+   const valid=await stateView(store,s=>{const q=s.questions?.[e.questionId];return policy?.enabled&&now>=date(policy.since)&&q?.profile===e.profile&&q?.chatId===e.chatId&&q?.projectId===e.projectId&&q?.messageId===e.replyTo&&q?.rootTurnId===e.turnId&&Boolean(current(s,q));});
    if(!valid){await store.transact(s=>Object.assign(s.longInvestigationNotices[key],{superseded:true,reason:'question_or_policy_no_longer_active'}));continue;}
    if(now<(e.retryAt??0))continue;
    if(e.firstAttemptAt!==undefined&&now-e.firstAttemptAt>=55*60000){await store.transact(s=>s.longInvestigationNotices[key].reconciliationRequired=true);continue;}

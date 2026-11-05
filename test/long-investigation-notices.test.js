@@ -21,8 +21,8 @@ test('failed delivery reuses identical text and idempotency key; completion canc
  const f=fixture();f.setTime(36);let fail=true;f.context.feishu.reply=async(id,text,options)=>{f.calls.push({id,text,options});if(fail)throw Error('offline');return{message_id:'sent'};};await f.service().retry();assert.equal(f.calls.length,1);fail=false;f.setTime(37);await f.service().retry();assert.equal(f.calls.length,2);assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.state.jobs[0].status,'running');
  const g=fixture();g.setTime(36);g.context.feishu.reply=async()=>{throw Error('offline');};await g.service().retry();g.state.jobs[0].status='completed';g.setTime(37);await g.service().retry();assert.equal(Object.values(g.state.longInvestigationNotices)[0].superseded,true);
 });
-test('new authenticated question turn has its own elapsed interval, not the previous users accumulated time',async()=>{
- const f=fixture();f.setTime(36);await f.service().retry();f.state.questions.q.latestTurnId='followup';f.state.conversations.push({id:'followup',profile:'a',chatId:'group',chatType:'group',createdAt:at(36)});f.setTime(60);await f.service().retry();assert.equal(f.calls.length,1);f.setTime(72);await f.service().retry();assert.equal(f.calls.length,2);
+test('supplements to the same investigation neither reset time nor send a second reminder',async()=>{
+ const f=fixture();f.setTime(36);await f.service().retry();f.state.questions.q.latestTurnId='followup';f.state.conversations.push({id:'followup',profile:'a',chatId:'group',chatType:'group',createdAt:at(36)});f.setTime(60);await f.service().retry();assert.equal(f.calls.length,1);f.setTime(72);await f.service().retry();assert.equal(f.calls.length,1);
 });
 test('ambiguous retries beyond platform deduplication window pause only the optional notice, not investigation',async()=>{
  const f=fixture();f.setTime(36);f.context.feishu.reply=async()=>{throw Error('offline');};await f.service().retry();f.setTime(92);await f.service().retry();assert.equal(Object.values(f.state.longInvestigationNotices)[0].reconciliationRequired,true);assert.equal(f.state.jobs[0].status,'running');
@@ -37,4 +37,14 @@ test('config roundtrip and retention preserve undelivered reminder dependencies'
  const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');const {loadProjects}=await import('../src/control-plane/config.js');const {pruneHistory}=await import('../src/shared/retention.js');
  const f=fixture(),root=await mkdtemp(join(tmpdir(),'long-notice-'));t.after(()=>rm(root,{recursive:true,force:true}));const file=join(root,'projects.json');await writeFile(file,JSON.stringify({...f.context.projects,projects:{}}));assert.deepEqual((await loadProjects(file)).longInvestigationNotice,f.context.projects.longInvestigationNotice);
  f.setTime(36);f.context.feishu.reply=async()=>{throw Error('offline');};await f.service().retry();f.state.jobs[0].status='completed';f.state.conversations[0].status='sent';pruneHistory(f.state,Date.parse(at(1000)));assert.ok(f.state.questions.q);assert.equal(Object.keys(f.state.longInvestigationNotices).length,1);
+});
+
+
+test('an internal environment-setup conversation cannot reset accumulated investigation time',async()=>{
+ const f=fixture();f.state.questions.q.latestTurnId='setup';f.state.conversations.push({id:'setup',questionId:'q',setupSourceJobId:'source-job',profile:'a',chatId:'group',chatType:'group',createdAt:at(30)});f.setTime(36);await f.service().retry();assert.equal(f.calls.length,1);assert.match(f.calls[0].text,/35 分钟/);
+});
+
+
+test('old per-turn notice receipts still claim the question after upgrading to root-question idempotency',async()=>{
+ const f=fixture();f.setTime(36);f.state.longInvestigationNotices={legacy:{questionId:'q',profile:'a',projectId:'one',chatId:'group',turnId:'former-supplement',messageId:'already-sent'}};await f.service().retry();assert.equal(f.calls.length,0);assert.equal(Object.keys(f.state.longInvestigationNotices).length,1);
 });
