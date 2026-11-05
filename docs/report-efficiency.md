@@ -225,7 +225,7 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 
 ### 从输入表格到数据库核对
 
-原生整表完整读取后，控制面把原始二维值按固定JSON结构登记为本任务附件；返回inputAttachment引用、来源范围、revision、读取时间、SHA及短预览，完整值不再让模型逐段抄录。部分范围仍按真实范围返回，不能冒充完整文件。数据库阶段的investigationContext.inputAttachments提供可用输入目录。
+原生整表完整读取后，控制面把原始二维值按固定JSON结构登记为本任务附件；返回inputAttachment引用、来源范围、revision、读取时间、SHA及短预览，完整值不再让模型逐段抄录。分批范围按原任务持久保存并返回覆盖缺口，同sheet/网格/revision全覆盖且重叠一致后自动登记完整输入；缺页不能冒充完整文件。旧保存结果可用restore_cloud_sheet_input在原任务原环境恢复，不重读平台或跨环境开放原始结果。详见[native-cloud-sheet-inputs.md](native-cloud-sheet-inputs.md)。数据库阶段的investigationContext.inputAttachments提供可用输入目录。
 
 `import_task_input`只接收当前任务已有attachmentId及明确的原始0-based列索引，例如`{attachmentId:"ATT-...",columns:[{index:0,as:"invoice_no"}],rowKey:"input_row"}`。它校验实际文件SHA/范围/来源绑定，保留所有原始行和字符串、重复/空值，不自动去表头、去重或补零。`collect_dataset_values`可从导入后的完整列生成in_set供现有受控SQL/Mongo查询，仍受当前数据库授权约束。别人的附件或其他系统身份不能导入，工具不接受任意路径、URL、脚本或自造数据行。
 

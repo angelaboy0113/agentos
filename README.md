@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.70.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.71.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 长报表的分阶段口径保留、批量诊断与性能验收见 [查询效率](docs/report-efficiency.md)。
 
@@ -384,3 +384,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 管理员私聊原生表情包登记、成功交付后同话题随机回复：见 [配置与验收说明](docs/native-stickers.md)。按机器人独立、默认关闭，不回补历史任务。
 
 报表核验关联键、失败参数恢复与维度未匹配排查见 [报表修复与证据接续](docs/report-repair.md)。
+
+原生飞书表格分批读取现可按同版本全覆盖自动组装为任务输入，并从保存结果恢复，供同任务数据库核对；详见 [分页输入与接续](docs/native-cloud-sheet-inputs.md)。缺页、版本变化或重叠冲突不会被当作完整输入，无新增权限或整任务截止。
