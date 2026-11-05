@@ -132,3 +132,20 @@ test('planner is closed even when readonly tool cleanup fails',async()=>{
   planner:async()=>({next:async()=>choices++===0?{tool:'select',arguments:'{}'}:{tool:'finish',summary:'Retain gathered evidence',complete:false},close:async()=>{closed++;}})}),/connection already closed/);
  assert.equal(closed,1);
 });
+
+test('initial verified source plan and scoped business definitions survive later source turns',async()=>{
+ const {reportInvestigationContext}=await import('../src/runner/environment-job.js');
+ const definitions=[{id:'d',version:2,title:'已确认指标',definition:'按已确认规则计算，排除内部调拨'}];
+ const ctx=reportInvestigationContext({...job,businessDefinitions:definitions,originalQuestion:'完整对象与所有期间',context:[{kind:'analysis_turn',result:{sourceQuestionId:'q',handoffGate:{passed:true},finalMessage:'INITIAL cohort rule: current population historical coverage'}},...Array.from({length:4},()=>({kind:'analysis_turn',result:{summary:'LATER targeted repair'}}))]});
+ assert.match(ctx.initialSourcePlan,/INITIAL cohort/);assert.deepEqual(ctx.businessDefinitions,definitions);assert.match(ctx.sourceAnalysis,/LATER/);
+ const other=reportInvestigationContext({...job,businessDefinitions:[],context:[]});assert.equal(other.initialSourcePlan,null);assert.deepEqual(other.businessDefinitions,[]);
+});
+
+test('initial source handoff never imports another question, environment or fixed workspace',async()=>{
+ const {reportInvestigationContext}=await import('../src/runner/environment-job.js');
+ const base={...job,sourceEnvironment:'prd',analysisSourceSnapshot:{workspace:'/fixed-prd'}};
+ const result={sourceQuestionId:'q',handoffGate:{passed:true},sourceSync:{environment:'prd'},workspace:'/fixed-prd',finalMessage:'correct scoped plan'};
+ const context=r=>[{kind:'analysis_turn',result:r}];
+ assert.equal(reportInvestigationContext({...base,context:context(result)}).initialSourcePlan,'correct scoped plan');
+ for(const change of [{sourceQuestionId:'another'},{sourceSync:{environment:'uat'}},{workspace:'/other-prd'}])assert.equal(reportInvestigationContext({...base,context:context({...result,...change})}).initialSourcePlan,null);
+});

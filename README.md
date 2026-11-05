@@ -1,6 +1,8 @@
 # Angel AgentOS
 
-**成品版本：v1.63.1** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.63.2** · GitHub：<https://github.com/angelaboy0113/agentos>
+
+长报表的分阶段口径保留、批量诊断与性能验收见 [查询效率](docs/report-efficiency.md)。
 
 汇总字段追溯、独立核验和精确加权见 [报表核验](docs/report-provenance.md)。
 

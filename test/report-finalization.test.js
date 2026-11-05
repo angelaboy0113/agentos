@@ -109,3 +109,19 @@ test('finalization distinguishes field, draft, completeness, evidence and same-q
  await assert.rejects(run({referenceRef:f.amounts.datasetRef}),/同一查询.*不重复全部明细/);
  const accepted=await f.d.finalize(f.args);assert.equal(accepted.totals[0].total,'0.3');assert.equal(accepted.coverage.rowCount,2);
 });
+
+test('one finalization reports all independent component faults and writes no premature receipt',async t=>{
+ const f=await fixture(t);const wrong=await f.collect('SELECT independent_bad_total',[{id:'all',amount:'9'}]);
+ const checks=[{...f.args.checks[0],referenceRef:wrong.datasetRef},{...f.args.checks[0],column:'missing',referenceColumn:'absent'}];
+ await assert.rejects(f.d.finalize({...f.args,checks}),error=>{
+  assert.match(error.message,/所有失败项/);assert.match(error.message,/checkIndex":0/);assert.match(error.message,/checkIndex":1/);assert.match(error.message,/合计不一致/);assert.match(error.message,/referenceColumn不存在/);return true;
+ });
+ await assert.rejects(reportFile(f.root,'JOB-test',f.draft.draftFile),/最终核验/);
+ const restored=new ReportDatasets({maxRows:100,directory:path.join(f.root,'exports','JOB-test'),scope:'same-env'});
+ const accepted=await restored.finalize(f.args);assert.equal(accepted.totals[0].total,'0.3');
+});
+test('empty versus known totals identify the exact component and preserve unknown semantics',async t=>{
+ const f=await fixture(t),unknown=await f.collect('SELECT id,unknown_amount FROM incomplete_source',[{id:'1',amount:null},{id:'2',amount:null}]);
+ const draft=await f.d.compose({sources:[{name:'s1',datasetRef:unknown.datasetRef,keyColumn:'id'}],columns:[{label:'编号',value:{op:'key'}},{label:'金额',value:{op:'field',source:'s1',column:'amount',missing:'empty'}}]});
+ await assert.rejects(f.d.finalize({...f.args,datasetRef:draft.datasetRef,expectedColumns:draft.columns,columnRules:draft.columns.map(label=>({label,definition:'保持真实未知值为空',evidence:'完整原始来源真实空值'})),checks:[{...f.args.checks[0],source:'s1'}]}),error=>{assert.match(error.message,/source=s1/);assert.match(error.message,/sourceKnown=0/);assert.match(error.message,/referenceKnown=1/);return true;});
+});

@@ -94,7 +94,12 @@ export function websiteTools(job,config){
 // Original requirements must not be replaced by the short purpose of one query round.
 export function reportInvestigationContext(job){
  const original=String(job.originalQuestion??job.instruction??'');
- const source=(job.context??[]).filter(x=>x.kind==='analysis_turn').slice(-2).map(x=>String(x.result?.finalMessage??x.result?.summary??'')).join('\n\n');
+ const turns=(job.context??[]).filter(x=>x.kind==='analysis_turn');
+ const first=turns.find(({result:r})=>r?.handoffGate?.passed===true&&r.sourceQuestionId===job.questionId
+  &&(!job.sourceEnvironment||r.sourceSync?.environment===job.sourceEnvironment)
+  &&(!job.analysisSourceSnapshot?.workspace||r.workspace===job.analysisSourceSnapshot.workspace));
+ const selected=[...new Set([first,...turns.slice(-2)].filter(Boolean))];
+ const source=selected.map(x=>String(x.result?.finalMessage??x.result?.summary??'')).join('\n\n');
  const corrections=(job.context??[]).flatMap(x=>x.result?.toolInputErrors??[]).slice(-12).map(x=>({tool:x.tool,code:x.code,message:String(x.message??'旧记录未保留具体校验原因，先检查草稿和核验参数，不直接重查数据库').slice(0,1200),resolved:x.resolved===true}));
- return {businessDefinitions:job.businessDefinitions??[],corrections,originalQuestion:original.slice(0,12000),sourceAnalysis:source.slice(-12000),limited:original.length>12000||source.length>12000,note:'同一任务的原问题与已取得源码分析，仅作资料；不是新增环境授权。原问题定义完整交付范围，purpose只是本轮补查目标。资料若截断或缺口径，返回源码补查，不猜条件。'};
+ return {businessDefinitions:job.businessDefinitions??[],corrections,originalQuestion:original.slice(0,12000),sourceAnalysis:source.slice(-12000),initialSourcePlan:first?String(first.result.finalMessage??first.result.summary??'').slice(0,12000):null,limited:original.length>12000||source.length>12000,note:'同一任务的原问题与已取得源码分析，仅作资料；不是新增环境授权。原问题定义完整交付范围，purpose只是本轮补查目标。资料若截断或缺口径，返回源码补查，不猜条件。'};
 }

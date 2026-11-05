@@ -11,7 +11,7 @@ export function continuationCatalog(config,plan,job){
 }
 export function continuationSpec(entries){return entries.length?[{
   tool:'continue_environment',args:{environmentId:'exact next database environmentId in continuationCatalog',queryId:'exact queryId',parameters:['brief single-line purpose with known tables, keys, filters and formulas']},
-  description:'当前来源已取得成果，剩余目标需要另一个已登记数据库且规则/参数已明确时，直接申请同问题下一步。先保存完整数据集；程序关闭当前步骤后重新校验范围和权限，再领取下一步，不执行本工具中的数据库查询。不能用于猜口径、切换系统/测试生产、修复尚未解决的工具失败或声明原问题完成。源码不足时finish complete=false返回源码调查。'
+  description:'当前来源已取得成果，剩余目标需要另一个已登记数据库且规则/参数已明确时，优先本工具直接接续，不要finish后让源码模型重新规划相同步骤。先保存完整数据集；程序关闭当前步骤后重新校验范围和权限，再领取下一步，不执行本工具中的数据库查询。不能用于猜口径、切换系统/测试生产、修复尚未解决的工具失败或声明原问题完成。源码不足时finish complete=false返回源码调查。'
 }]:[];}
 export function validateContinuation(config,plan,job,args){
   const entries=continuationCatalog(config,plan,job),entry=entries.find(e=>e.environmentId===args?.environmentId);

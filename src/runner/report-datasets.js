@@ -368,8 +368,9 @@ export class ReportDatasets {
   const leaves=(e,numeric)=>{if(e.op==='field'&&numeric)required.add(e.source+':'+e.column);for(const child of e.args??[])leaves(child,true);};
   for(const c of draft.columns)leaves(c.value,data.numericColumns?.includes(c.label)||c.total===true);
   if(!Array.isArray(args.checks))throw new ReportInputError('checks必须为分量合计核验数组');
-  const totals=[],proofs=[];const times=[population,data,...sources.values()];
-  for(const c of args.checks){
+  const totals=[],proofs=[],checkErrors=[],seenChecks=new Set();const times=[population,data,...sources.values()];
+  for(const [checkIndex,c] of args.checks.entries()){
+   try{
    if(!c||typeof c!=='object'||typeof c.source!=='string'||typeof c.column!=='string'||typeof c.referenceRef!=='string'||typeof c.referenceColumn!=='string')throw new ReportInputError('checks每项必须明确source、column、referenceRef和referenceColumn');
    const source=sources.get(c.source),ref=await this.restore(c.referenceRef),name=c.source+':'+c.column;
    // Separate input mistakes from provenance failures. A single generic error
@@ -390,7 +391,8 @@ export class ReportDatasets {
    const sourceProof=await this.windowEvidence(source,c.column,validation),referenceProof=await this.windowEvidence(ref,c.referenceColumn,validation);
    if(sourceProof.ids.some(id=>referenceProof.ids.includes(id)))throw new ReportInputError('分量与基准来自同一查询（共享同一原始查询）；不能从同一批来源重算后自证；'+diagnostic+'；复用已有不同来源的基准，不重复全部明细；关联展开后的行数也属于依赖');
    if(referenceEvidence===sourceEvidence)throw new ReportInputError(prefix+'基准与分量来自同一查询，另存datasetRef或改列名不能自证；复用已有不同原始查询的完整基准，没有时按同口径补一次独立聚合，不重复全部明细');
-   if(totals.some(x=>x.name===name))throw new ReportInputError('同一分量不能重复核验');
+   if(seenChecks.has(name))throw new ReportInputError('同一分量不能重复核验');
+   seenChecks.add(name);
    const sourceKey=draft.sources.find(s=>s.name===c.source).keyColumn;
    if(sourceProof.window&&source.derivation?.kind!=='period_grid'){
     // A keyed raw aggregate is also a per-object independent baseline. A scalar
@@ -419,10 +421,17 @@ export class ReportDatasets {
     return {value,known,missing};
    };
    const actual=sum(source,c.column,row=>expected.has(row[sourceKey]),missingPolicy),reference=sum(ref,c.referenceColumn,()=>true,missingPolicy==='empty'?'empty':'error');
-   if(Boolean(actual.known)!==Boolean(reference.known))throw new ReportInputError('分量与独立基准的已知金额范围不一致；全为空不能当作已知零合计');
+   if(Boolean(actual.known)!==Boolean(reference.known))throw new ReportInputError(`分量与独立基准的已知金额范围不一致；全为空不能当作已知零合计；${diagnostic}；sourceKnown=${actual.known}, sourceMissing=${actual.missing}, referenceKnown=${reference.known}, referenceMissing=${reference.missing}；核对已声明口径与实际筛选，不把未知费用替换为零`);
    if(actual.value!==reference.value)throw new ReportInputError(`分量合计不一致：${name}为${format(actual.value)}，独立基准为${format(reference.value)}；不能交付，先核对期间、状态、费用范围及关联重复。`);
    times.push(ref);totals.push({name,total:missingPolicy==='empty'&&!actual.known?null:format(actual.value),referenceRef:c.referenceRef,referenceColumn:c.referenceColumn,evidence:c.evidence,...(actual.missing||reference.missing?{knownCount:actual.known,missingCount:actual.missing,referenceMissingCount:reference.missing,missingPolicy,note:missingPolicy==='empty'?'仅核对已知金额合计，空值保留为空，不代表零或完整金额已知':'缺失按明确补零规则处理'}:{})});proofs.push({datasetRef:c.referenceRef,dataHash:hash(ref),queryHash:ref.queryHash});
+   }catch(error){
+    // Collect correctable component problems in one pass. Authorization, IO and
+    // integrity failures must still abort immediately; no receipt is written.
+    if(!(error instanceof ReportInputError))throw error;
+    checkErrors.push({checkIndex,source:c?.source??null,column:c?.column??null,message:error.message});
+   }
   }
+  if(checkErrors.length)throw new ReportInputError('独立分量核验未通过（一次列出所有失败项；保留已保存来源，只修正列明分量）：'+JSON.stringify(checkErrors));
   if([...required].some(k=>!totals.some(c=>c.name===k)))throw new ReportInputError('计算或标记total的每个来源分量都必须通过独立合计核验；缺少基准：'+[...required].filter(k=>!totals.some(c=>c.name===k)).join('、')+'；补充这些分量的checks，不重复已核验取数');
   const timestamps=times.flatMap(d=>[Date.parse(d.readAt),Date.parse(d.readThroughAt??d.readAt)]);
   if(timestamps.some(t=>!Number.isFinite(t))||(this.snapshotWindowMs!==null&&Math.max(...timestamps)-Math.min(...timestamps)>this.snapshotWindowMs))throw new ReportInputError(`取数时点相差超过${this.snapshotWindowMs/60000}分钟（管理员配置窗口）；复用不变规则，集中刷新受影响来源与独立基准后重做草稿，不逐轮盲目刷新。`);
