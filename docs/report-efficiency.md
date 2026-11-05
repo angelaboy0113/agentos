@@ -205,3 +205,12 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 性能验收必须分别记录旧任务耗时、修复路径模型回放、实际历史CSV核验、真实飞书投递和新的生产查询全链路。用已有完整数据回放即使很快，也不代表跳过远端分支核对、实时数据库取数及最终业务审阅后的新问题会同样快；不能据此承诺固定分钟数或计算生产提速百分比。
 
 每个continuous_environment_completed审计事件保留有限的plannerSetupMs/plannerMs/toolMs/plannerCalls/toolCalls数字统计；即使近期上下文压缩，也能逐段分清规划、实际工具和阶段间隔。toolMs包含本地整理/核验，不可一律称数据库耗时；旧事件缺统计不能回填猜测。
+
+
+### 飞书知识库中的输入表格
+
+批准的网页地址若为飞书 `/wiki/<node>`（实际节点类型sheet）或 `/sheets/<token>`，由原任务originProfile的机器人读取，无需个人网页登录。应用需 `wiki:node:read`（知识库入口）和 `sheets:spreadsheet:readonly`，并且具体文档对该机器人有阅读权限；个人能打开不代表应用已授权。不要申请附带整套云空间权限。修改代码后须安全重启，权限审批生效无需重复发送文件。
+
+工具目录 `connection` 返回所有工作表及网格行列数；`read_cloud_sheet` 用sheetId及含首尾的startRow/endRow/startColumn/endColumn读取。可逐批完整读取，没有整表行数/轮次截止；10MB平台响应上限等失败须缩小单批后继续，不能丢弃未读部分。原始编号按字符串读取，不自动去重、补零、合并或认定首行为表头。网格行数不是业务记录数；多次读取保留revision/readAt，不保证同事务。原结果大时沿任务resultRef持久化分页读取。
+
+仅支持电子表格，非sheet节点返回明确类型诊断；不冒称已接通所有云文件、docx、附件或图片。只读接口权限失败与个人登录不同，不能让用户在群内发送密码。使用系统助手必须真正@对应机器人，群消息中的卡片/root关系不构成其它助手响应授权。

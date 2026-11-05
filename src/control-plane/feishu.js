@@ -1,3 +1,4 @@
+import {cloudReadRoute} from '../shared/feishu-cloud-sheet.js';
 import {openAsBlob} from 'node:fs';
 import {stat} from 'node:fs/promises';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -47,6 +48,11 @@ export class FeishuClient {
     return result;
   }
 
+  async cloudRequest(route,params={}){
+    if(!cloudReadRoute(route))throw new Error('Invalid cloud read scope');
+    const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:'Bearer '+await this.tenantToken()},signal:AbortSignal.timeout(30000)});const result=await response.json();
+    if(!response.ok||result.code!==0)throw new Error('Cloud read failed '+String(result.code));return result.data;
+  }
   async contactRequest(route,params){
     if(route!=='/open-apis/application/v6/scopes'&&!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
     const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(30000)});

@@ -1,3 +1,4 @@
+import {cloudSheetTarget,readCloudSheet} from '../shared/feishu-cloud-sheet.js';
 import{preserveAvailableEvidence}from '../shared/available-evidence.js';
 import {websiteApplication} from '../shared/website-application.js';
 import {renewWaitingWebsitePlan} from './website-authorization.js';
@@ -51,17 +52,19 @@ async function resumeWebsiteLogins(context){
   try{
    const cfg=await loadEnvironments(),e=cfg.environments[job.environmentAccess.environmentId];if(!e)continue;
    job=await renewWaitingWebsitePlan(context,job,cfg);
-   const recovery=context.websiteCredentials?.recoverLogin?await context.websiteCredentials.recoverLogin(job,e):(await context.websiteCredentials?.autoLogin(job,e),null);
-   const login=await context.websiteBrowser.loginStatusFor?.(job,e);
+   const native=Boolean(cloudSheetTarget(job.environmentAccess.websiteTarget??e.baseUrl));
+   if(native)await readCloudSheet(context.feishu,job,e,'connection');
+   const recovery=native?null:context.websiteCredentials?.recoverLogin?await context.websiteCredentials.recoverLogin(job,e):(await context.websiteCredentials?.autoLogin(job,e),null);
+   const login=native?null:await context.websiteBrowser.loginStatusFor?.(job,e);
    if(login&&!login.pageReady){
-    const state=login.passwordChangeRequired?'password_change_required':login.verificationRequired?'verification_required':login.credentialRejected?'rejected':login.rateLimited?'rate_limited':login.serviceUnavailable?'service_error':login.requestFailed?'request_error':login.blockedRequests?.length?'request_blocked':recovery?.credentialState==='unavailable'?'credential_unavailable':login.loginState??'waiting';
-    const messages={credential_unavailable:'本机未能读取此应用的可用凭据。首次使用可在原任务卡提供账号密码；若以前已保存，请维护者检查钥匙串解锁和应用绑定，不必反复重发密码。',service_error:'登录接口服务异常，不能认定账号密码错误；原任务保留，请维护者检查网站服务。',request_error:'登录请求未通过接口检查，不能认定账号密码错误；请维护者检查请求链路。',rate_limited:'登录接口限制了请求频率，不会反复自动提交凭据；原任务保留。',password_change_required:'网站要求修改或重置密码，请由本人在本机页面完成；AgentOS不会更改密码。',verification_required:'网站正在等待验证码、短信或扫码，请在本机页面完成。',rejected:'网站明确拒绝了本次登录；请核对账号状态和凭据后，在原任务卡重新提供。',request_blocked:'登录尚未完成，发现网页请求受到限制；请维护者核对允许范围，当前不能认定密码错误。',loading:'网页仍在加载或只有空白外壳，尚不能确认登录成功。',login_required:'正在使用本机已保存的凭据恢复登录，原任务保留；无需重复发送已有账号密码。',waiting:'尚未确认登录成功，原任务保留。'};
+    const state=recovery?.loginState==='interactive_login_required'?'interactive_login_required':login.loginState==='loading'?'loading':login.passwordChangeRequired?'password_change_required':login.verificationRequired?'verification_required':login.credentialRejected?'rejected':login.rateLimited?'rate_limited':login.serviceUnavailable?'service_error':login.requestFailed?'request_error':login.blockedRequests?.length?'request_blocked':recovery?.credentialState==='unavailable'?'credential_unavailable':login.loginState??'waiting';
+    const messages={interactive_login_required:'此页面使用本机账号、扫码或单点登录，未显示账号密码表单；请在本机页面使用已有登录入口，完成后自动继续，无需在群内发送密码。',credential_unavailable:'本机未能读取此应用的可用凭据。首次使用可在原任务卡提供账号密码；若以前已保存，请维护者检查钥匙串解锁和应用绑定，不必反复重发密码。',service_error:'登录接口服务异常，不能认定账号密码错误；原任务保留，请维护者检查网站服务。',request_error:'登录请求未通过接口检查，不能认定账号密码错误；请维护者检查请求链路。',rate_limited:'登录接口限制了请求频率，不会反复自动提交凭据；原任务保留。',password_change_required:'网站要求修改或重置密码，请由本人在本机页面完成；AgentOS不会更改密码。',verification_required:'网站正在等待验证码、短信或扫码，请在本机页面完成。',rejected:'网站明确拒绝了本次登录；请核对账号状态和凭据后，在原任务卡重新提供。',request_blocked:'登录尚未完成，发现网页请求受到限制；请维护者核对允许范围，当前不能认定密码错误。',loading:'网页仍在加载或只有空白外壳，尚不能确认登录成功。',login_required:'正在使用本机已保存的凭据恢复登录，原任务保留；无需重复发送已有账号密码。',waiting:'尚未确认登录成功，原任务保留。'};
     const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserCredentialState===(recovery?.credentialState??'unknown')&&current.result.browserLoginState===state&&JSON.stringify(current.result.browserLoginDiagnostic??null)===JSON.stringify(login.diagnostic??null))return false;current.result.browserCredentialState=recovery?.credentialState??'unknown';current.result.browserLoginState=state;current.result.browserLoginDiagnostic=login.diagnostic??null;current.result.summary=messages[state]??messages.waiting;current.result.finalMessage=current.result.summary+' 当前网站：'+e.baseUrl;if(current.availableSourceReviewPolicy==='preserve-and-review-v1')current.result=preserveAvailableEvidence(current,current.result);current.updatedAt=new Date().toISOString();return true;});
     const deferred=await context.store.deferUnavailableWebsite?.(job.id,{scopeHash:job.environmentAccess.scopeHash,reason:state});
     if((changed||deferred)&&context.cards&&job.questionId){const {publishQuestion}=await import('./questions.js');await publishQuestion(context,job.questionId);}
     continue;
    }
-   if(!await context.websiteBrowser.loginReady(job,e))continue;
+   if(!native&&!await context.websiteBrowser.loginReady(job,e))continue;
    await context.store.transact(state=>{
     const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired)return;
     let valid=true;try{verifyApprovedPlan(cfg,current.environmentAccess);}catch{valid=false;}
@@ -76,8 +79,8 @@ async function resumeWebsiteLogins(context){
     current.updatedAt=new Date().toISOString();current.events.push({type:'browser_login_resumed',at:current.updatedAt});
     const question=state.questions?.[current.questionId];if(question)question.generation++;
    });
-  }catch{
-   const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserLoginState==='access_check_failed')return false;current.result.browserLoginState='access_check_failed';current.result.summary='网页登录检测或原访问范围核验未完成，不能认定密码错误；请维护者检查浏览器会话、配置和权限。';current.result.finalMessage=current.result.summary;return true;});
+  }catch(error){
+   const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserLoginState==='access_check_failed')return false;current.result.browserLoginState='access_check_failed';current.result.summary=error?.code?.startsWith('CLOUD_DOCUMENT_')?error.message:'网页登录检测或原访问范围核验未完成，不能认定密码错误；请维护者检查浏览器会话、配置和权限。';current.result.finalMessage=current.result.summary;return true;});
    if(changed&&context.cards&&job.questionId){const {publishQuestion}=await import('./questions.js');await publishQuestion(context,job.questionId);}
   }
  }

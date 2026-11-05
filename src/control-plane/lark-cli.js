@@ -1,3 +1,4 @@
+import {cloudReadRoute} from '../shared/feishu-cloud-sheet.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, copyFile }  from 'node:fs/promises';
@@ -97,6 +98,11 @@ export class LarkCliFeishuClient {
       {cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000+Math.ceil((await stat(file)).size/64000)*1000});
   }
 
+  async cloudRequest(route,params={},options={}){
+    if(!cloudReadRoute(route)||!options.profile)throw new Error('Invalid cloud read scope');
+    const result=await runLarkCli(['api','GET',route,'--as','bot','--params',JSON.stringify(params),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
+    if(!result.data||typeof result.data!=='object')throw new Error('Invalid cloud read response');return result.data;
+  }
   async contactRequest(route,params,options={}){
     await mkdir(this.cwd,{recursive:true,mode:0o700});
     if(route!=='/open-apis/application/v6/scopes'&&!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');

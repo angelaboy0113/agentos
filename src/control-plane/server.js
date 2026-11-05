@@ -1,3 +1,4 @@
+import {cloudSheetTarget,readCloudSheet,CloudSheetError} from '../shared/feishu-cloud-sheet.js';
 import {LongInvestigationNotices} from './long-investigation-notices.js';
 import {SuccessStickers} from './success-stickers.js';
 import{planTaskRead}from '../shared/integration-peers.js';
@@ -99,7 +100,7 @@ export async function createControlPlane(overrides = {}) {
       if(!await durableControl(context,request,response))await route({ ...context, request, response });
     } catch (error) {
       console.error('[control-plane]', error);
-      if (!response.headersSent) json(response, error.statusCode ?? 500, { ok: false, error: error.message,...(error instanceof BrowserInputError?{code:error.code}:{}) });
+      if (!response.headersSent) json(response, error.statusCode ?? 500, { ok: false, error: error.message,...((error instanceof BrowserInputError||error instanceof CloudSheetError)?{code:error.code}:{}) });
       else response.destroy();
     }
   });
@@ -393,7 +394,7 @@ async function route(context) {
     if(job?.status!=='running'||!job.lease?.id||body.leaseId!==job.lease.id||body.runnerId!==job.lease.runnerId)return json(response,409,{error:'Stale or foreign Runner lease'});
     const e=verifyApprovedPlan(await loadEnvironments(),job.environmentAccess??{});if(e.kind!=='website')throw new Error('Not a website grant');
     if(body.tool==='browser_screenshot'&&!screenshotRequested(job))throw new Error('当前原问题未要求截图交付');
-    const result=await context.websiteBrowser.run(job,e,body.tool,body.args);if(body.tool==='browser_screenshot'&&result.screenshot)Object.assign(result.screenshot,await context.websiteEvidence.capture(job,result.screenshot));result.screenshotDeliveries=await context.websiteEvidence.status(job);return json(response,200,{result});
+    const result=cloudSheetTarget(job.environmentAccess.websiteTarget??e.baseUrl)&&['connection','read_cloud_sheet'].includes(body.tool)?await readCloudSheet(context.feishu,job,e,body.tool,body.args):await context.websiteBrowser.run(job,e,body.tool,body.args);if(body.tool==='browser_screenshot'&&result.screenshot)Object.assign(result.screenshot,await context.websiteEvidence.capture(job,result.screenshot));result.screenshotDeliveries=await context.websiteEvidence.status(job);return json(response,200,{result});
   }
   const eventMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/events$/);
   if (request.method === 'POST' && eventMatch) {
@@ -554,6 +555,12 @@ export async function handleLarkCliEvent(context, event) {
   if(stickerResult)return stickerResult;
   if (agent?.systemAssistant && event.chat_type === 'p2p') return { ignored: true, reason: 'assistant_group_only' };
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
+  // Group-only system assistants must route the addressee before credential
+  // intake; a shared topic/root is not permission for every bot to respond.
+  if(agent?.systemAssistant && event.chat_type==='group'){
+    const ids=(event.mentions??[]).flatMap(m=>[m.id?.open_id??m.id?.app_id??m.id,m.open_id,m.user_id]).filter(Boolean);
+    if(![agent.openId,agent.appId].filter(Boolean).some(id=>ids.includes(id)))return {ignored:true,reason:'mention_required'};
+  }
   const enrollmentCredentialResult = await context.enrollmentCredentials?.handle(event);
   if (enrollmentCredentialResult) return enrollmentCredentialResult;
   const credentialResult = await context.websiteCredentials?.handle(event);

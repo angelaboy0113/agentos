@@ -17,12 +17,13 @@ export function jobTerminalMention(job, projects = {}) {
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
   if(job.status==='awaiting_clarification'&&job.result?.browserLoginRequired){
     // Automatic credential/session recovery is progress, not a human action.
-    const humanStates=['request_blocked','access_check_failed','rejected','verification_required','credential_unavailable','password_change_required','service_error','request_error','rate_limited'];
+    const humanStates=['request_blocked','access_check_failed','rejected','verification_required','credential_unavailable','password_change_required','service_error','request_error','rate_limited','interactive_login_required'];
     if(job.result.browserActionRequired!=='automation'&&job.result.browserCredentialState!=='unavailable'&&!humanStates.includes(job.result.browserLoginState))return null;
     const ids=(job.environmentAccess?.approvalOwnerIds??[]).filter(id=>OPEN_ID.test(id));
     const instruction = job.result?.browserActionRequired === 'automation'
       ? ' 请在运行AgentOS的Mac上放行系统对Chrome的自动化访问；放行后自动继续原问题，不用回复继续。'
       : ['request_blocked','access_check_failed'].includes(job.result.browserLoginState) ? ' 已保存的登录信息无需重发；登录链路或请求范围尚未恢复，请维护者核对，恢复后自动继续原问题。'
+      : job.result.browserLoginState==='interactive_login_required' ? ' 请在本机登录页使用已登录账号或单点登录入口；无需在群内发送账号密码，完成后自动继续原任务。'
       : job.result.browserLoginState==='rejected' ? ' 网站拒绝了本次登录，请核对账号状态并安全更新本机凭据；不会反复自动提交失败的密码。'
       : job.result.browserLoginState==='verification_required' ? ' 已保存账号无需重发；请仅在本机页面完成验证码、扫码或本人确认，完成后自动继续。'
       : (job.result.browserCredentialState==='unavailable'||job.result.browserLoginState==='credential_unavailable') ? ' 当前未能读取本应用凭据；首次使用请安全配置，若以前已保存，请维护者核对钥匙串和应用绑定，无需反复发送密码。'

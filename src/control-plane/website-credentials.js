@@ -43,6 +43,7 @@ export function parseWebsiteCredentialMessage(value, { allowLoose = false } = {}
   }
   if (typeof result.username !== 'string' || !result.username || result.username.length > 1000
     || typeof result.password !== 'string' || !result.password || result.password.length > 8000) result.invalid = true;
+  if(result.invalid && allowLoose && !command.test(text) && !credentialShape)return null;
   return result;
 }
 
@@ -65,7 +66,7 @@ export class WebsiteCredentialService {
     let candidates = state.jobs.filter((job) => job.status === 'awaiting_clarification'
       && job.result?.browserLoginRequired === true && job.result?.browserActionRequired !== 'automation'
       && job.environmentAccess?.kind === 'website').map((job) => ({ job, environment: config.environments[job.environmentAccess.environmentId] }))
-      .filter(({ environment }) => environment?.kind === 'website' && isEnvironmentOwner(environment, { profile, senderId: event.sender_id }));
+      .filter(({ job,environment }) => environment?.kind === 'website' && (job.originProfile??job.agentProfile)===profile && (event.chat_type!=='group'||job.chatId===event.chat_id) && isEnvironmentOwner(environment, { profile, senderId: event.sender_id }));
     const replyIds = [event.reply_to, event.root_id, event.thread_id].filter(Boolean);
     const relatedKeys = new Set(Object.entries(state.cardMessages ?? {}).filter(([, card]) => replyIds.includes(card.messageId)
       && card.destination?.profile === profile && (!card.destination.chatId || card.destination.chatId === event.chat_id)).map(([key]) => key));
@@ -118,7 +119,7 @@ export class WebsiteCredentialService {
 
   async recoverLogin(job, environment) {
     if(typeof this.context.websiteBrowser.submitCredentials!=='function')return {authenticated:false,credentialState:'unsupported'};
-    try{if((await this.context.websiteBrowser.loginStatusFor?.(job,environment))?.pageReady===true)return {authenticated:true,credentialState:'not_needed'};}catch{return {authenticated:false,credentialState:'access_unavailable'};}
+    try{const status=await this.context.websiteBrowser.loginStatusFor?.(job,environment);if(status?.pageReady===true)return {authenticated:true,credentialState:'not_needed'};if(status?.loginState==='loading')return {authenticated:false,credentialState:'not_checked',loginState:'loading'};if(status?.loginRequired===true&&status.credentialFormVisible===false)return {authenticated:false,credentialState:'not_applicable',loginState:'interactive_login_required'};}catch{return {authenticated:false,credentialState:'access_unavailable'};}
     let saved;
     try{saved=await this.read(environment.credentialRef);}catch{return {authenticated:false,credentialState:'unavailable'};}
     try{const result=await this.context.websiteBrowser.submitCredentials(job,environment,saved);return {authenticated:Boolean(result.authenticated),credentialState:'available',loginState:result.loginState??null};}
