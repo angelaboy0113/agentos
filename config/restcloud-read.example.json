@@ -54,6 +54,11 @@
               "method": "GET",
               "path": "/restcloud/rest/core/monitor/logs/{objectId}",
               "reviewed": true
+            },
+            {
+              "method": "GET",
+              "path": "/restcloud/rest/core/monitor/apilogs",
+              "reviewed": true
             }
           ],
           "readNavigationSelectors": [

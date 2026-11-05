@@ -242,3 +242,13 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 转换配方记录版本，冷恢复、集中刷新与实际CSV核验均重算。原生输入version2仍仅证明完整输入范围，不能作为独立金额基准。部署无新配置、依赖或飞书权限；沿用各机器人原任务授权及安全空闲发布流程。可用混合数字/文本编号、null、前导零与超长编码回归，再核对实际文件全部行；单元测试和已保存数据回放不代表真人生产文件已投递。macOS已部署验证另记本机维护记录，完整跨Mac及其它OS未验证。
 
 部署会改变共同/岗位规范时，应检查未结束或因 `HARNESS_REVIEW_REQUIRED` 暂停的旧任务，核对其保存指纹和实际规范差异。仅维护者审阅并保存原规范metadata、原失败与精确差异后，才能在空闲停稳备份窗口恢复指定原任务；保留原身份、环境、固定源码和证据。不能在程序中自动接受所有新规范或将权限变化当无影响升级。澄清/等待属于业务状态，不能仅因发布改成成功。
+
+## 已保存JSON日志与实际文件行读取（1.69.0）
+
+`transform_dataset` 可声明 `json: {column: "change_text", path: [], records: "array", empty: "keep", invalid: "keep", statusAs: "parse_status", rowKey: "json_row", fields: [{path: ["business_code"], as: "code", missing: "null", presenceAs: "code_presence"}]}`，并提供原完整datasetRef、唯一keyColumn和scopeEvidence。path是固定属性/数组下标列表，不是代码、正则或JSONPath表达式；按声明展开一对多并保留原列/行顺序及稳定新键，重复业务编码不去重。筛选/树遍历在原列执行；对提取新列的筛选用下一次transform及新rowKey。
+
+数字词元保留原始十进制/指数文本，避免JSON.parse浮点精度损失；文本前导零、boolean和null保留。金额计算仍走精确算术，不能把JSON来源冒充独立金额基准。默认格式错误或重复对象键报错，不静默选首/末项；显式invalid=keep必须同时指定statusAs，保留原文并标注invalid_json或duplicate_json_key，不能把提取失败的null当真实字段空值或补零。empty按keep/drop/error明确，无效结构/缺失记录路径仍报错；字段missing规则及可选presenceAs区分不存在与真实null。新tree-filter-json-v3配方在恢复、集中刷新、定稿和文件检查重算，旧正确v1/v2兼容，旧版不认识v3时不能强行续跑。
+
+`inspect_report`增加section=rows，fileId必须属于当前任务；offset/limit和可选columns为实际表头，沿nextOffset读完。逐行内容来自已校验CSV的单元格，保留Excel公式转义，绑定原摘要/配方/完整行审计；分页不触发新数据库查询。摘要offset不再静默忽略，会提示改用rows。rows正整数页长按输出字节缩页并明确nextOffset，极长单元格走已有工具结果存储；不是整任务次数上限，也不把前三行预览当整份文件。
+
+无新运行依赖/任务截止，正式实例仅空闲安全部署。验收需分别记录合成边界回归、已保存实际日志及文件回放、平台接口只读访问、原任务业务结论与投递；不能互相替代。macOS本机验证另记，跨Mac完整私有迁移及其它OS未验证。

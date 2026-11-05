@@ -15,9 +15,11 @@ export async function inspectReport(dataDir,job,args={}){
  try{return await inspectBoundReport(dataDir,job,args);}
  catch(error){if(error instanceof ReportInspectionError)throw error;throw new ReportInspectionError('当前登记文件、核验记录或绑定来源无法读取或校验；保留成果，由维护者核对本机文件，不能据此认定业务公式错误。');}
 }
-async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0,limit=4}={}){
+async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0,limit=4,columns:requestedColumns}={}){
  const item=job.reportFiles?.find(f=>f.id===fileId);if(!item)fail('文件未登记在当前任务，不能猜测路径或读取其他任务');
- if(!['summary','columns','sources','checks','scope'].includes(section)||!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>4)fail('inspect_report的section或分页参数无效');
+ if(!['summary','columns','sources','checks','scope','rows'].includes(section)||!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||section!=='rows'&&limit>4)fail('inspect_report的section或分页参数无效');
+ if(section==='summary'&&offset!==0)fail('summary只有摘要预览，不支持行偏移；逐行读取请使用section=rows并沿nextOffset分页');
+ if(requestedColumns!==undefined&&section!=='rows')fail('columns选择仅适用于section=rows的实际文件单元格');
  const sourceJobId=item.sourceJobId??job.id;
  const verified=await reportFile(dataDir,sourceJobId,item);
  const receipt=JSON.parse(await readFile(path.join(path.dirname(verified.file),item.id+'.verification.json'),'utf8'));
@@ -64,6 +66,12 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  const checks=receipt.totals??[];
  const binding={fileId:item.id,sourceJobId,datasetRef:bound.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:item.rowCount};
  const audit={status:'passed',checkedRows:rows.length,checkedCells:rows.length*columns.length,note:'实际CSV逐行等于绑定固定公式的计算结果；业务口径仍需对照原问题和来源依据审阅。'};
+ if(section==='rows'){
+  const selected=requestedColumns??data.columns;if(!Array.isArray(selected)||!selected.length||new Set(selected).size!==selected.length||selected.some(c=>!data.columns.includes(c)))fail('实际文件行审阅须选择已存在且唯一的表头');
+  const indices=selected.map(c=>data.columns.indexOf(c)),items=[];let bytes=0;
+  for(let i=offset;i<Math.min(rows.length,offset+limit);i++){const item={rowNumber:i+1,key:draft.keys[i],values:indices.map(n=>cell(rows[i][n]).slice(1,-1).replaceAll('""','"'))},size=Buffer.byteLength(JSON.stringify(item));if(items.length&&bytes+size>16000)break;items.push(item);bytes+=size;}
+  return {binding,section,headers:selected,offset,items,totalCount:rows.length,nextOffset:offset+items.length<rows.length?offset+items.length:null,calculationAudit:audit,note:'实际CSV已逐行核验，页内保留真实值；空值展示沿文件配方，不是新查询，不以预览冒充完整读取。'};
+ }
  if(section!=='summary'){const all=section==='columns'?columns:section==='sources'?sourceList:section==='scope'?comparisons:checks;const items=all.slice(offset,offset+limit);const result={binding,section,items,totalCount:all.length,nextOffset:offset+items.length<all.length?offset+items.length:null,calculationAudit:audit};return result;}
  const result={binding,status:'verified',delivery:{owner:'AgentOS outbox',requiresModelDownloadUrl:false,trigger:'final accepted review and completed ready job',deliveryReceiptProvided:false,note:'这是实际文件核验资料；发送回执由系统单独记录，不能要求先出现下载URL才接受文件。'},headers:data.columns,columns:columns.map(c=>({...c,definition:c.definition.slice(0,240),evidence:c.evidence.slice(0,200)})),sources:sourceList.map(d=>({...d,queryDefinition:d.queryDefinition?{sql:d.queryDefinition.sql.slice(0,1000),params:d.queryDefinition.params.slice(0,20)}:null,derivation:d.derivation?{kind:d.derivation.kind,lookupChecks:d.derivation.lookupChecks,audit:d.derivation.audit,args:d.derivation.args}:null})),coverage:receipt.coverage,populationAudit,checks,readWindow:receipt.readWindow,calculationAudit:audit,preview:rows.slice(0,3),limited:true,note:'按文件ID绑定的实际配方与CSV审阅资料，不是新的数据库查询。文本和来源为有界摘要；细节可用inspect_report的columns/sources/checks分页读取。不因未查询数据库把已有文件说成无记录。'};
  if(Buffer.byteLength(JSON.stringify(result))>22000){result.preview=[];result.populationAudit.comparisons=result.populationAudit.comparisons.map(c=>({...c,queryDefinition:c.queryDefinition?{sql:c.queryDefinition.sql.slice(0,300),params:c.queryDefinition.params.slice(0,3)}:null}));result.sources=result.sources.map(s=>({...s,queryDefinition:s.queryDefinition?{sql:s.queryDefinition.sql.slice(0,200),params:s.queryDefinition.params.slice(0,3)}:null}));}

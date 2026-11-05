@@ -1,4 +1,4 @@
-# RestCloud 接口详情和日志定义的只读适配（1.58.10）
+# RestCloud 接口详情和日志定义的只读适配（1.69.0）
 
 用途：在已有 ESB 登录和原任务授权内读取接口目录对应的配置、输入输出定义及日志字段，继续原流水调查。不是调用业务接口、API测试、重推、保存、发布或改配。
 
@@ -12,6 +12,7 @@
 | GET | `/restcloud/rest/apiportal/apis/showdetails` | API管理中心详情 |
 | GET | `/restcloud/rest/businesslog/fieldCode/list/all` | 日志查询字段定义 |
 | GET | `/restcloud/rest/apiportal/apis/apm` | 接口依赖关系元数据 |
+| GET | `/restcloud/rest/core/monitor/apilogs` | 平台调用日志列表；沿实际页面的接口、日期、分页筛选，不执行接口 |
 | GET | `/restcloud/rest/core/monitor/logs/{objectId}` | 指定接口的调用日志；仍需原问题时间和分页筛选 |
 
 API目录标题在部分版本使用 `.api-list-right-home-card-header-name` 的 div，不是原生链接。审核确认为打开说明详情后，通过 `readNavigationSelectors` 暴露为模型可见的 read-action，不能把整个页面或任意 div 都设成可点击。该配置接入现有控件目录和浏览器请求门控，无须新增绕过工具。
@@ -27,3 +28,5 @@ API目录标题在部分版本使用 `.api-list-right-home-card-header-name` 的
 验收分别记录：schema/请求边界回归；真实页面详情读取；原任务的流水日志与最终结论；卡片交付。前两项成功不能冒充业务根因已确认。打包包含示例、本文及回归，完整私有迁移仍须保留实际配置、凭据和取证。其它平台版本和操作系统需另行验证。
 
 动态资源日志路径使用经过审核的完整路径模板。仅GET可用，整段`{objectId}`接受24位十六进制、`{uuid}`接受标准UUID、`{integerId}`接受1—20位十进制字符串，数字不转浮点。无通配符、自定义正则或任意动作名；静态前缀、路径段数量、同源与固定筛选仍核验。既有固定路径兼容，不为每张业务卡把接口ID写进OS核心。
+
+1.69.0补齐实际前端声明且观察为GET的apilogs路径，不能以通用路径名推断所有平台版本相同。示例及本机登记仅追加此固定只读方法；其它统计/未知详情路径仍独立审核。浏览器已登录与日志接口可读、返回空集合与目标业务从未执行分别判断。真实调用日志是否保留请求/响应、是否覆盖目标时间仍取决于平台配置，不能将HTTP200宣称已取得SAP报文。

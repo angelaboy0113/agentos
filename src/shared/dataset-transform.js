@@ -1,3 +1,5 @@
+import {parseExactJson} from './exact-json.js';
+import {datasetHash} from './dataset-json.js';
 import {compareExact} from './dataset-summary.js';
 import {normalizeCalendarPeriod} from './calendar-period.js';
 // Explicit identifier conversion preserves textual leading zeros and nulls.
@@ -36,7 +38,7 @@ export function transformDataset(args, base) {
    return row=>{const v=row[f.column];if(v===undefined)bad('行缺少实际字段');const x=norm(v);switch(f.op){case 'is_null':return x===null;case 'is_not_null':return x!==null;case 'eq':return x===value;case 'ne':return x!==value;case 'in':return values.includes(x);case 'not_in':return !values.includes(x);}};
   });
  };
- if(Object.keys(args).some(k=>!['datasetRef','keyColumn','scopeEvidence','filters','hierarchy','conversions'].includes(k)))bad('存在未支持的整理参数，不能静默忽略转换');
+ if(Object.keys(args).some(k=>!['datasetRef','keyColumn','scopeEvidence','filters','hierarchy','conversions','json'].includes(k)))bad('存在未支持的整理参数，不能静默忽略转换');
  const conversions=args.conversions??[];
  if(!Array.isArray(conversions))bad('conversions必须为数组');
  const extra=new Set(base.columns);
@@ -62,6 +64,20 @@ export function transformDataset(args, base) {
  }
  rows=rows.filter(row=>filters.every(f=>f(row)));
  for(const c of conversions){columns.push(c.as);for(const row of rows)row[c.as]=exactText(row[c.column],c.normalization);}
- const data={rows,columns,numericColumns:[...(base.numericColumns??[])],complete:true,readAt:base.readAt,readThroughAt:base.readThroughAt??base.readAt,snapshotId:base.snapshotId,derivation:{kind:'dataset_transform',version:conversions.length?'tree-filter-text-v2':'tree-filter-v1',args:structuredClone(args),audit:{...audit,outputCount:rows.length}}};
+ if(args.json){
+  const j=args.json;column(j.column);
+  const pathValid=p=>Array.isArray(p)&&p.every(k=>typeof k==='string'&&k.length>0&&!['__proto__','prototype','constructor'].includes(k)||Number.isSafeInteger(k)&&k>=0);
+  if(Object.keys(j).some(k=>!['column','path','records','empty','fields','rowKey','invalid','statusAs'].includes(k))||!pathValid(j.path??[])||!['array','object'].includes(j.records)||!['keep','drop','error'].includes(j.empty)||!Array.isArray(j.fields)||!j.fields.length||typeof j.rowKey!=='string'||columns.includes(j.rowKey)||!j.rowKey||['__proto__','constructor','prototype'].includes(j.rowKey))bad('JSON整理需要实际列、path、records=array/object、empty规则、fields和独立rowKey');
+  if(!['error','keep',undefined].includes(j.invalid)||j.invalid==='keep'&&!j.statusAs)bad('保留无效JSON须显式invalid=keep及独立statusAs，不能补成有效空值');
+  const names=new Set([...columns,j.rowKey]);if(j.statusAs){if(typeof j.statusAs!=='string'||!j.statusAs||names.has(j.statusAs)||['__proto__','constructor','prototype'].includes(j.statusAs))bad('JSON解析状态列无效');names.add(j.statusAs);}for(const f of j.fields){if(Object.keys(f).some(k=>!['path','as','missing','presenceAs'].includes(k))||!pathValid(f.path)||!['null','error'].includes(f.missing)||typeof f.as!=='string'||!f.as||names.has(f.as)||['__proto__','constructor','prototype'].includes(f.as))bad('JSON字段须显式path、唯一as、missing=null/error');names.add(f.as);if(f.presenceAs){if(typeof f.presenceAs!=='string'||names.has(f.presenceAs)||['__proto__','constructor','prototype'].includes(f.presenceAs))bad('JSON存在性列无效');names.add(f.presenceAs);}}
+  const lookup=(obj,path)=>{let v=obj;for(const k of path){if(v===null||typeof v!=='object'||!Object.hasOwn(v,k))return {found:false,value:null};v=v[k];}return {found:true,value:v};};
+  const output=[];let emptyRows=0,invalidRows=0,duplicateKeyRows=0;
+  for(const row of rows){const raw=row[j.column];let records,status='parsed',invalid=false;if(raw===null||raw==='')records=[];else{let parsed;try{parsed=parseExactJson(raw);}catch(error){if(j.invalid!=='keep'||!error.jsonReason)throw error;invalid=true;invalidRows++;if(error.jsonReason==='duplicate_key')duplicateKeyRows++;status=error.jsonReason==='duplicate_key'?'duplicate_json_key':'invalid_json';records=[null];}if(!invalid){const selected=lookup(parsed,j.path??[]);if(!selected.found)bad('JSON记录路径不存在，不可当成空集合');records=j.records==='array'?selected.value:[selected.value];if(!Array.isArray(records))bad('JSON记录不是声明的数组');}}
+   const emptyRecord=!records.length;if(emptyRecord){emptyRows++;if(j.empty==='error')bad('JSON记录为空，须明确保留或排除');if(j.empty==='keep')records=[null];status='empty';}
+   for(const [index,record]of records.entries()){if(!emptyRecord&&!invalid&&(record===null||typeof record!=='object'||Array.isArray(record)))bad('JSON每条记录必须为对象');const out={...row,[j.rowKey]:datasetHash([row[args.keyColumn],index])};if(j.statusAs)out[j.statusAs]=status;for(const f of j.fields){const x=record===null?{found:false,value:null}:lookup(record,f.path);if(!x.found&&!invalid&&f.missing==='error')bad('JSON字段路径缺失，不能补成真实null');if(x.value!==null&&typeof x.value==='object')bad('JSON字段不是标量；显式选择嵌套字段，不把对象转占位文字');out[f.as]=x.value;if(f.presenceAs)out[f.presenceAs]=x.found?'present':'missing';}output.push(out);}
+  }
+  rows=output;columns=[...names];audit={...audit,jsonInputRows:audit.inputCount,jsonEmptyRows:emptyRows,jsonInvalidRows:invalidRows,jsonDuplicateKeyRows:duplicateKeyRows,jsonOutputRows:rows.length,numericValues:'original_json_lexemes_as_text'};
+ }
+ const data={rows,columns,numericColumns:[...(base.numericColumns??[])],complete:true,readAt:base.readAt,readThroughAt:base.readThroughAt??base.readAt,snapshotId:base.snapshotId,derivation:{kind:'dataset_transform',version:args.json?'tree-filter-json-v3':conversions.length?'tree-filter-text-v2':'tree-filter-v1',args:structuredClone(args),audit:{...audit,outputCount:rows.length}}};
  return data;
 }
