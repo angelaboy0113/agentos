@@ -84,7 +84,10 @@ export function questionView(state, questionId, projects = {}) {
     card=withResultPage(card,resultPages(resultText));
     card.body.elements.push({tag:'markdown',text_size:'notation',content:`此前 ${allHistory.length} 项历史执行记录当前保留在本机；卡片展示最近 ${history.length} 项有效结果。`});
   }
-  return { question: q, job: useJob ? job : null, card, terminal, mention,
+  const stickerEligible = terminal && mention && !mention.kind && q.visibility !== 'requester' &&
+    (useJob ? job.status === 'completed' && job.result?.outcome === 'ready' && !job.nextJobId
+      : turn.decision?.action === 'reply' && !turn.aiFailed && !turn.actionError && Boolean(turn.response));
+  return { stickerEligible: stickerEligible ? q.generation : null, question: q, job: useJob ? job : null, card, terminal, mention,
     resultText,
     destination: cardDestination(q) };
 }
@@ -112,7 +115,7 @@ export function publishQuestion(context, id) {
       generation = q.cardGeneration;
     });
     return context.cards.upsert(key, view.card, view.destination, { terminal: view.terminal, immediate: true,
-      resultText: view.resultText, terminalMention: view.mention, publicCompletionMention: view.mention?.kind==='directory_completion', generation,
+      resultText: view.resultText, stickerEligible: view.stickerEligible, terminalMention: view.mention, publicCompletionMention: view.mention?.kind==='directory_completion', generation,
       guard: (state) => { if (sourceVersion(state, id) !== version) throw new Error('Question changed during presentation; retry'); } });
   });
   queue.set(id, work); work.finally(() => { if (queue.get(id) === work) queue.delete(id); }).catch(() => {});

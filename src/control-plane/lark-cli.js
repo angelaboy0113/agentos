@@ -105,6 +105,28 @@ export class LarkCliFeishuClient {
     if(!result.data||typeof result.data!=='object')throw new Error('Invalid contact response');
     return result.data;
   }
+  async readStickerKey(event, { profile }) {
+    const result = await runLarkCli(['api', 'GET', '/open-apis/im/v1/messages/' + encodeURIComponent(event.message_id),
+      '--as', 'bot', '--params', JSON.stringify({ user_id_type: 'open_id' }), '--json'],
+    { cwd: this.cwd, cliEntry: this.cliEntry, profile });
+    const message = result.data?.items?.find(item => item.message_id === event.message_id);
+    if (message?.chat_id !== event.chat_id || message?.msg_type !== 'sticker' || message.deleted ||
+        message.sender?.id !== event.sender_id) return null;
+    let key;
+    try { key = JSON.parse(message.body.content).file_key; } catch { return null; }
+    return typeof key === 'string' && /^[A-Za-z0-9_-]+$/.test(key) ? key : null;
+  }
+
+  async replySticker(messageId, fileKey, options = {}) {
+    return runLarkCli(['api', 'POST', '/open-apis/im/v1/messages/' + encodeURIComponent(messageId) + '/reply',
+      '--as', 'bot', '--data', JSON.stringify({
+        msg_type: 'sticker', content: JSON.stringify({ file_key: fileKey }),
+        uuid: larkIdempotencyKey(options.idempotencyKey),
+        ...(options.replyInThread ? { reply_in_thread: true } : {}),
+      }), '--json'],
+    { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile });
+  }
+
   async replyImage(messageId,file,options={}){
     await mkdir(path.join(this.cwd,'images'),{recursive:true,mode:0o700});
     const relative=path.join('images',path.basename(file));await copyFile(file,path.join(this.cwd,relative));

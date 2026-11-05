@@ -31,6 +31,7 @@ import { nextStage, routeInstruction, routeInstructionForStage, stageLabel } fro
 import { loadConversationSettings } from './conversation-settings.js';
 import { loadMemorySettings } from './memory.js';
 import { ConversationService, splitReply, responseMessageId } from './conversations.js';
+import { CompletionStickers } from './completion-stickers.js';
 import { LiveCards } from './live-cards.js';
 import { jobCard, resultSummary } from './message-cards.js';
 import { handleCardAction } from './card-actions.js';
@@ -66,7 +67,12 @@ export async function createControlPlane(overrides = {}) {
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
   context.cards = cards;
-  context.reports=new ReportDelivery(context);cards.afterRetry=state=>context.reports.retry(state);
+  context.reports = new ReportDelivery(context);
+  context.stickers = new CompletionStickers(context);
+  cards.afterRetry = async () => {
+    await context.reports.retry();
+    await context.stickers.retry();
+  };
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
   if (cards.enabled) await store.transact((state) => {
@@ -104,7 +110,7 @@ export async function createControlPlane(overrides = {}) {
     context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
-  server.once('close', () => { cards.stop();void (async()=>{await context.retention.close();await Promise.allSettled([conversations.stop(),context.reports.close(),context.websiteBrowser.close(),context.knowledge.close()]);})(); });
+  server.once('close', () => { cards.stop();void (async()=>{await context.retention.close();await Promise.allSettled([conversations.stop(),context.reports.close(),context.stickers.close(),context.websiteBrowser.close(),context.knowledge.close()]);})(); });
   return { server, config, projects, agents, store, conversations, cards, retention:context.retention };
 }
 
@@ -498,7 +504,8 @@ async function handleFeishuEvent(context, envelope) {
     type: 'im.message.receive_v1', message_id: message.message_id,create_time:message.create_time,
     chat_id: message.chat_id, chat_type: message.chat_type,
     sender_id: event.sender?.sender_id?.open_id, sender_type: 'user',
-    content: parsed.text, mentions: message.mentions, attachments,
+    message_type: message.message_type,
+    content: message.message_type === 'sticker' ? message.content : parsed.text, mentions: message.mentions, attachments,
     reply_to: message.parent_id, root_id: message.root_id, thread_id: message.thread_id,
     agent_role: context.config.feishu.role ?? 'owner_intake',
     agent_profile: context.config.feishu.profile ?? null,
@@ -517,6 +524,7 @@ export async function handleLarkCliEvent(context, event) {
   const agent = Object.values(context.agents.agents ?? {}).find((item) => (item.profile || null) === sourceProfile);
   if (event.agent_role && context.agents.agents?.[role]?.profile
     && context.agents.agents[role].profile !== sourceProfile) throw new Error('Agent role/profile mismatch');
+  if (event.message_type === 'sticker') return context.stickers.receive(event, sourceProfile);
   const mentions = event.mentions ?? [];
   const mentionIds = mentions.flatMap((item) => [item.id?.open_id ?? item.id, item.open_id, item.user_id]).filter(Boolean);
   const addressed = event.chat_type === 'p2p' || (agent?.openId && mentionIds.includes(agent.openId));

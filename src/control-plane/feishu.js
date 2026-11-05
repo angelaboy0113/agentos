@@ -56,6 +56,13 @@ export class FeishuClient {
     const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(30000)});
     const result=await response.json();if(!response.ok||result.code!==0)throw new Error('Contact API failed');return result.data??{};
   }
+  async replySticker(messageId, fileKey, options = {}) {
+    return this.cardRequest('POST', `/im/v1/messages/${encodeURIComponent(messageId)}/reply`, {
+      msg_type: 'sticker', content: JSON.stringify({ file_key: fileKey }), uuid: options.idempotencyKey,
+      ...(options.replyInThread ? { reply_in_thread: true } : {}),
+    });
+  }
+
   async replyImage(messageId,file,options={}){
     const form=new FormData();form.set('image_type','message');form.set('image',new Blob([await readFile(file)],{type:'image/png'}),path.basename(file));
     const response=await fetch(`${OPEN_API}/im/v1/images`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});
