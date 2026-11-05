@@ -40,6 +40,7 @@ test('invalid types, duplicate real keys, missing columns and unsafe aliases fai
  await assert.rejects(buildRelationalDataset(args,async ref=>ref==='products'?{...products,complete:false}:main),/完整/);
  await assert.rejects(buildRelationalDataset({...args,joins:[{...args.joins[0],unmatched:'error'}]},load),/未匹配/);
  await assert.rejects(buildRelationalDataset({...args,joins:[{...args.joins[0],empty:'error'}]},load),/为空/);
+ for(const a of [null,{...args,joins:[null]},{...args,joins:[{...args.joins[0],fields:[null]}]},{...args,project:[null]}])await assert.rejects(buildRelationalDataset(a,load),e=>e.code==='REPORT_INPUT');
 });
 async function fixture(t,scope='system-a/prd'){
  const root=await mkdtemp(path.join(os.tmpdir(),'relate-'));t.after(()=>rm(root,{recursive:true,force:true}));const directory=path.join(root,'exports','JOB-synthetic'),d=new ReportDatasets({directory,scope,maxRows:'all'});
