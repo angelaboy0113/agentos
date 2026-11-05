@@ -60,3 +60,13 @@ export class ToolResultStore{
   await this.authorize();return {resultRef,tool:saved.tool,text:saved.text.slice(offset,end),offset,nextOffset:end<saved.text.length?end:null,totalCharacters:saved.text.length,sha256:saved.sha256,note:'原结果JSON文本分段，未执行新查询；按nextOffset继续，不能把单段当完整结果。'};
  }
 }
+
+// Keep actionable failed transformation inputs, not raw database/browser calls.
+// Failure to save diagnostics must never replace the original error classification.
+export async function persistToolInputFailure(store,tool,args,error){
+ const failure={tool,error:{code:error.code,message:error.message},executed:error.executed===true};
+ if(!['finalize_report','refresh_report','enrich_dataset'].includes(tool))return failure;
+ try{const saved=await store.present(tool,{failed:true,executed:failure.executed,arguments:args,error:failure.error},24000,{persist:true});failure.error.resultRef=saved.resultRef;}
+ catch{failure.error.diagnosticStorageUnavailable=true;}
+ return failure;
+}

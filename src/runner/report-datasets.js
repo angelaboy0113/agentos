@@ -269,8 +269,9 @@ export class ReportDatasets {
    if(lookup.fallbackKey!==undefined&&(typeof lookup.fallbackKey!=='string'||!lookup.fallbackKey||lookup.fallbackKey.length>2000||!index.has(lookup.fallbackKey)))throw new ReportInputError('fallbackKey必须指向本次完整维度数据中实际存在且唯一的默认配置，不能猜测或填常量');
    let matchedCount=0,fallbackCount=0;const unmatched=[];
    for(const row of rows){const specific=index.get(row[lookup.sourceColumn]),fallback=!specific&&lookup.fallbackKey!==undefined?index.get(lookup.fallbackKey):null,found=specific??fallback;if(specific)matchedCount++;else if(fallback)fallbackCount++;else unmatched.push(row[args.keyColumn]);for(const f of lookup.fields){const value=found?found[f.column]:'';row[f.as]=value;}row[status]=specific?'已匹配':fallback?'沿用默认配置':'未匹配';}
-   if(unmatched.length&&lookup.missing==='error')throw new ReportInputError(`lookup ${lookup.name}有${unmatched.length}个对象未匹配；核对关联键或明确允许保留空值`);
-   columns.push(...outputs,status);numericColumns.push(...lookup.fields.filter(f=>right.numericColumns?.includes(f.column)).map(f=>f.as));lookupChecks.push({name:lookup.name,matchedCount,...(lookup.fallbackKey!==undefined?{fallbackCount,fallbackKey:lookup.fallbackKey}:{}),unmatchedCount:unmatched.length,unmatchedKeys:unmatched.slice(0,this.previewRows),previewLimited:unmatched.length>this.previewRows});inputs.push(right);
+   const joinDiagnostic=unmatched.length?{sourceColumn:lookup.sourceColumn,targetColumn:lookup.targetColumn,sourceValuePreview:[...new Set(rows.filter(row=>!index.has(row[lookup.sourceColumn])).map(row=>row[lookup.sourceColumn]))].slice(0,this.previewRows),targetValuePreview:[...index.keys()].slice(0,this.previewRows),note:'关联值来自已保存数据；核对编码列/名称列和实际类型，不扩大授权，不将未匹配补零'}:undefined;
+   if(unmatched.length&&lookup.missing==='error')throw new ReportInputError(`lookup ${lookup.name}有${unmatched.length}个对象未匹配；核对关联键或明确允许保留空值；${JSON.stringify(joinDiagnostic)}`);
+   columns.push(...outputs,status);numericColumns.push(...lookup.fields.filter(f=>right.numericColumns?.includes(f.column)).map(f=>f.as));lookupChecks.push({name:lookup.name,matchedCount,...(joinDiagnostic?{joinDiagnostic}:{}),...(lookup.fallbackKey!==undefined?{fallbackCount,fallbackKey:lookup.fallbackKey}:{}),unmatchedCount:unmatched.length,unmatchedKeys:unmatched.slice(0,this.previewRows),previewLimited:unmatched.length>this.previewRows});inputs.push(right);
   }
   const data={rows,columns,numericColumns,complete:true,readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),derivation:{kind:'left_lookup',datasetRef:args.datasetRef,keyColumn:args.keyColumn,lookups:args.lookups,lookupChecks}};
   const readAt=inputs.map(d=>d.readAt).sort()[0],snapshotIds=[...new Set(inputs.map(d=>d.snapshotId))].sort(),snapshotId=snapshotIds.length===1?snapshotIds[0]:hash(snapshotIds),ref='dataset-'+randomUUID();
@@ -361,9 +362,11 @@ export class ReportDatasets {
    const sourceKey=draft.sources.find(s=>s.name===c.source).keyColumn;
    if(sourceProof.window&&source.derivation?.kind!=='period_grid'){
     if(!referenceProof.window)throw new ReportInputError('窗口统计须用不同原始查询生成同分组同窗口基准，逐对象核对，不能只核对合计');
-    const refKey=c.referenceKey??ref.derivation?.args?.rowKey??'group_key',index=new Map(ref.rows.map(row=>[row[refKey],row]));
-    if(index.size!==ref.rows.length||index.size!==expected.size)throw new ReportInputError('窗口独立基准范围重复或不完整');
-    for(const row of source.rows)if(expected.has(row[sourceKey])){const other=index.get(row[sourceKey]);if(!other||decimal(row[c.column])!==decimal(other[c.referenceColumn]))throw new ReportInputError('窗口独立基准逐对象数值不一致，不能用总数相等代替');}
+    const refKey=c.referenceKey??(ref.columns.includes(sourceKey)?sourceKey:ref.derivation?.args?.rowKey??'group_key');
+    if(!ref.columns.includes(refKey))throw new ReportInputError(`窗口基准键不存在：source=${c.source}, sourceKey=${sourceKey}, referenceRef=${c.referenceRef}, referenceKey=${refKey}；显式指定实际referenceKey，不重查业务来源`);
+    const index=new Map(ref.rows.map(row=>[row[refKey],row])),sourceKeys=new Set(source.rows.filter(row=>expected.has(row[sourceKey])).map(row=>row[sourceKey]));
+    if(index.size!==ref.rows.length||[...sourceKeys].some(key=>!index.has(key)))throw new ReportInputError(`窗口独立基准范围重复或不完整：source=${c.source}, sourceKey=${sourceKey}, referenceKey=${refKey}, sourceObjects=${sourceKeys.size}, referenceObjects=${index.size}；核对键名及类型，referenceKey可显式指定`);
+    for(const row of source.rows)if(expected.has(row[sourceKey])){const other=index.get(row[sourceKey]);if(!other||decimal(row[c.column])!==decimal(other[c.referenceColumn]))throw new ReportInputError(`窗口独立基准逐对象数值不一致，不能用总数相等代替：source=${c.source}, column=${c.column}, sourceKey=${sourceKey}, referenceKey=${refKey}, object=${JSON.stringify(row[sourceKey])}, actual=${row[c.column]}, reference=${other?.[c.referenceColumn]??'未匹配'}；仅修正本分量，不重查已保存来源`);}
    }
    if(source.derivation?.kind==='period_grid'){
     if(ref.derivation?.kind!=='period_grid')throw new ReportInputError('期间金额需独立查询后按相同对象期间规则展开的基准，不能用全年总数代替累计行核验');

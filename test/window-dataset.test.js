@@ -81,3 +81,19 @@ test('refresh replays window raw dependencies once and validates rebuilt CSV wit
 test('invalid report expressions remain recoverable input errors after percentage expansion',async t=>{
  const f=await fixture(t);await assert.rejects(f.d.compose({sources:[{name:'s1',datasetRef:f.w.datasetRef,keyColumn:'group_key'}],columns:[{label:'非法表达式',value:{op:'add',args:'not-an-array'}}]}),e=>e.code==='REPORT_INPUT');
 });
+
+test('business object keys default to same named reference column instead of unrelated generated group_key',async t=>{
+ const f=await fixture(t),bp=await f.capture('SELECT owner,id FROM independent_master',p),be=await f.capture('SELECT object,at FROM independent_events',events);
+ const independent=await f.d.window({...f.a,populationRef:bp.datasetRef,sources:[{...f.a.sources[0],datasetRef:be.datasetRef}]});
+ const population=await f.capture('SELECT owner FROM distinct_independent_groups',data([{owner:'A'},{owner:'B'},{owner:'C'}]));
+ const draft=await f.d.compose({sources:[{name:'s1',datasetRef:f.w.datasetRef,keyColumn:'owner'}],columns:[{label:'对象',value:{op:'key'}},{label:'窗口数量',value:{op:'field',source:'s1',column:'quarter'}}]});
+ const a={datasetRef:draft.datasetRef,requirement:'完整对象窗口数量',expectedColumns:draft.columns,scopeEvidence:'完整主对象范围',populationRef:population.datasetRef,populationKey:'owner',columnRules:draft.columns.map(label=>({label,definition:'显式窗口唯一对象数',evidence:'独立读取来源与窗口定义'})),checks:[{source:'s1',column:'quarter',referenceRef:independent.datasetRef,referenceColumn:'quarter',evidence:'不同原始来源同窗口核对'}]};
+ const final=await f.d.finalize(a);assert.equal(final.exportFile.rowCount,3);
+ await assert.rejects(f.d.finalize({...a,checks:[{...a.checks[0],referenceKey:'group_key'}]}),/sourceKey=owner.*referenceKey=group_key/);
+});
+test('split components validate their own independent population while final report still covers every object',async t=>{
+ const f=await fixture(t),bp=await f.capture('SELECT owner,id FROM another_master',p),be=await f.capture('SELECT object,at FROM another_events',events),baseline=await f.d.window({...f.a,populationRef:bp.datasetRef,sources:[{...f.a.sources[0],datasetRef:be.datasetRef}]}),population=await f.capture('SELECT owner FROM third_group_source',data([{owner:'A'},{owner:'B'},{owner:'C'}]));
+ const part=async(ref,op)=>f.d.transform({datasetRef:ref,keyColumn:'owner',scopeEvidence:'明确分组分量范围，与完整主对象集合共同覆盖',filters:[{column:'owner',op,value:'A',type:'string'}]});const a=await part(f.w.datasetRef,'eq'),b=await part(f.w.datasetRef,'ne'),ar=await part(baseline.datasetRef,'eq'),br=await part(baseline.datasetRef,'ne');
+ const draft=await f.d.compose({sources:[{name:'s1',datasetRef:a.datasetRef,keyColumn:'owner'},{name:'s2',datasetRef:b.datasetRef,keyColumn:'owner'}],columns:[{label:'对象',value:{op:'key'}},{label:'窗口数量',value:{op:'add',args:[{op:'field',source:'s1',column:'quarter',missing:'zero'},{op:'field',source:'s2',column:'quarter',missing:'zero'}]}}]});
+ const result=await f.d.finalize({datasetRef:draft.datasetRef,requirement:'完整对象窗口数量',expectedColumns:draft.columns,scopeEvidence:'全部主对象无遗漏',populationRef:population.datasetRef,populationKey:'owner',columnRules:draft.columns.map(label=>({label,definition:'显式窗口分量相加，互斥对象缺项为零',evidence:'独立完整窗口及业务主键'})),checks:[{source:'s1',column:'quarter',referenceRef:ar.datasetRef,referenceColumn:'quarter',evidence:'独立来源相同A对象范围'},{source:'s2',column:'quarter',referenceRef:br.datasetRef,referenceColumn:'quarter',evidence:'独立来源相同非A对象范围'}]});assert.equal(result.exportFile.rowCount,3);
+});
