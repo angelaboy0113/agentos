@@ -1,3 +1,4 @@
+import {publicStickerPolicy} from './success-stickers.js';
 import {readBusinessDefinitions,recordBusinessDefinitions} from '../shared/business-definitions.js';
 import {sourceEnvironmentForTier} from '../shared/source-environments.js';
 import { resolveProjectId, routeAgent, assistantInstructions } from '../shared/project-scope.js';
@@ -366,6 +367,7 @@ export class ConversationService {
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: routingCatalog(catalog(await loadEnvironments(), projectId)),
       role: turn.role, administrator: isAdministrator(projects, turn),
+      assistantFeatures: {successSticker:publicStickerPolicy(this.context.agents,turn.profile)},
       sourcePolicy: { version: 'folder-evidence-v1', checkedNow: false,
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
       project: projectId ? { id: projectId, name: projects.projects[projectId]?.displayName ?? projectId,

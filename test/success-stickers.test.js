@@ -39,3 +39,26 @@ test('legacy per-round receipts claim the topic and legacy pending follow-up sen
  await f.store.transact(s=>{s.stickerDeliveries={legacy:{identity,profile:'a',questionId:'q',questionGeneration:1,messageId:'already-sent'}};});await f.service.retry();assert.equal(f.calls.filter(c=>c.kind==='sticker').length,0);
  await f.store.transact(s=>{s.questions.q.generation=2;s.cardMessages['question:q'].questionRound.generation=2;s.stickerDeliveries.legacy={identity,profile:'a',questionId:'q',questionGeneration:2,fileKey:'native-a',destination:{messageId:'root-q',chatId:'group',profile:'a'},idempotencyKey:'legacy-original-uuid'};});await f.service.retry();assert.equal((await f.store.read()).stickerDeliveries.legacy.superseded,true);assert.equal(f.calls.filter(c=>c.kind==='sticker').length,0);
 });
+
+
+test('public conversation policy reflects only the current bot configuration without exposing native materials',async()=>{
+ const {publicStickerPolicy}=await import('../src/control-plane/success-stickers.js');
+ const config={agents:{a:{profile:'a',appId:'app-a',successStickers:true,secret:'private'},b:{profile:'b',appId:'app-b',successStickers:false}}};
+ const active=publicStickerPolicy(config,'a');assert.equal(active.enabled,true);assert.equal(active.administratorConfigured,true);assert.equal(active.followups,false);
+ assert.equal(publicStickerPolicy(config,'b').enabled,false);assert.equal(publicStickerPolicy(config,'missing').enabled,false);
+ assert.equal(publicStickerPolicy({agents:{a:{profile:'a',successStickers:true}}},'a').enabled,false);
+ assert.doesNotMatch(JSON.stringify(active),/private|app-a|file_key|secret/);
+});
+
+
+test('a new internal question ID inside an existing Feishu topic is still a follow-up, even after parent retention',async t=>{
+ const f=await fixture(t);await f.service.handle(f.event());
+ await success(f,'original');await f.service.retry();const initial=f.calls.filter(c=>c.kind==='sticker').length;assert.equal(initial,1);
+ await success(f,'reply');await f.store.transact(s=>Object.assign(s.questions.reply,{threadRootId:'root-original',parentQuestionId:'original'}));await f.service.retry();assert.equal(f.calls.filter(c=>c.kind==='sticker').length,initial);
+ await success(f,'retained-reply');await f.store.transact(s=>Object.assign(s.questions['retained-reply'],{threadRootId:'root-old-no-longer-retained'}));await f.service.retry();assert.equal(f.calls.filter(c=>c.kind==='sticker').length,initial);
+ await success(f,'different-topic');await f.store.transact(s=>s.questions['different-topic'].threadRootId='root-different-topic');await f.service.retry();assert.equal(f.calls.filter(c=>c.kind==='sticker').length,initial+1);
+});
+test('legacy pending delivery for a child question is retired without reselecting or sending',async t=>{
+ const f=await fixture(t);await f.service.handle(f.event());await success(f);f.context.feishu.replySticker=async()=>{throw Error('offline');};await f.service.retry();
+ await f.store.transact(s=>{s.questions.q.parentQuestionId='older-question';s.questions.q.threadRootId='older-root';for(const e of Object.values(s.stickerDeliveries))e.retryAt=0;});let sent=0;f.context.feishu.replySticker=async()=>{sent++;return{message_id:'unexpected'};};await f.service.retry();assert.equal(sent,0);assert.equal(Object.values((await f.store.read()).stickerDeliveries)[0].superseded,true);
+});

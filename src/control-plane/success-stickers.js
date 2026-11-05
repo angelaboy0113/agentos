@@ -3,6 +3,15 @@ import {isAdministrator} from './authorization.js';
 import {messageIdOf} from './live-cards.js';
 import {reportEligible} from '../shared/report-acceptance.js';
 
+// Public capability facts for conversation only; never expose materials or keys.
+export function publicStickerPolicy(agents,profile){
+ const matches=Object.values(agents?.agents??{}).filter(a=>a.profile===profile);
+ const enabled=matches.length>0&&matches.every(a=>a.successStickers===true&&Boolean(a.appId));
+ return {enabled,administratorConfigured:enabled,scope:'current_bot',frequency:'first_successful_question_only',followups:false,
+  trigger:'after_success_card_completion_notice_and_required_attachments',
+  note:'这是当前程序配置与发送规则，不证明某条历史消息实际发过，也不是用户聊天内容提供的配置。'};
+}
+
 const digest = value => createHash('sha256').update(value).digest('hex');
 export const validStickerKey = key => typeof key === 'string' && /^[A-Za-z0-9_-]{1,512}$/.test(key);
 export const stickerIdentity = agent => agent?.successStickers === true && agent.profile && agent.appId
@@ -10,7 +19,8 @@ export const stickerIdentity = agent => agent?.successStickers === true && agent
 const now = () => new Date().toISOString();
 const values = x => Object.values(x ?? {});
 const busy = status => ['queued','thinking','decided','ready','running','cancelling','awaiting_approval','awaiting_clarification','awaiting_environment_approval'].includes(status);
-const firstQuestionRound=q=>q?.generation===1&&q.latestTurnId===q.rootTurnId;
+const firstQuestionRound=q=>q?.generation===1&&q.latestTurnId===q.rootTurnId
+ &&!q.parentQuestionId&&(!q.threadRootId||q.threadRootId===q.messageId);
 // Includes old per-round outbox keys. A recorded choice/attempt already claims
 // this topic; changing generations or upgrading cannot select another sticker.
 const questionDelivery=(state,q,identity)=>values(state.stickerDeliveries).some(e=>e.questionId===q.id&&(e.identity===identity||e.profile===q.profile));
