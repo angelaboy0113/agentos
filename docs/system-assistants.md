@@ -328,3 +328,6 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 ### 成功交付后的原生表情包
 
 各机器人可独立启用 `agents.<name>.successStickers`；只有当前机器人管理员的私聊 sticker 可登记，普通私聊仍不进入助手问答。成功的新问题在结果卡、完成通知及附件送达后随机回复一张；失败、部分完成、等待、私有任务跳过。详见 [原生表情包配置及恢复](native-stickers.md)。
+
+
+完整保存数据可通过 `relate_dataset` 声明一对多及配置成员展开，保留真实粒度与空值、原取数时间，恢复/刷新从依赖重算；不能拿同批来源冒充独立金额证据。迁移须保留 `dataset_relation/version=1` 全部依赖与行分块，旧程序不能接管该配方。参数、文件核验、部署和回退边界见[数据集关联](dataset-relations.md)。

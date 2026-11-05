@@ -1,6 +1,8 @@
 # Angel AgentOS
 
-**成品版本：v1.60.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.62.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+
+已保存数据的一对多关联、配置文本展开及恢复见 [数据集关联](docs/dataset-relations.md)。
 
 多系统知识助手专用分支的部署与迁移见 [多系统助手说明](docs/system-assistants.md)。
 

@@ -2,6 +2,7 @@ import {datasetHash,datasetBytes} from '../shared/dataset-json.js';
 import {buildWindowDataset} from '../shared/window-dataset.js';
 import {summarizeDataset,percentage,divide} from '../shared/dataset-summary.js';
 import {transformDataset} from '../shared/dataset-transform.js';
+import {buildRelationalDataset} from '../shared/dataset-relation.js';
 import {deploymentEvidence} from '../shared/deployment-evidence.js';
 import {queryEvidenceIdentity} from '../shared/query-evidence.js';
 import {buildPeriodDataset,verifyPeriodDataset} from '../shared/period-dataset.js';
@@ -150,6 +151,13 @@ export class ReportDatasets {
   await this.check();if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
   return {datasetRef:ref,complete:true,rowCount:data.rows.length,columns:data.columns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'按完整来源整理并保存配方；仍须核验范围、文件及原要求'};
  }
+ async relate(args){
+  await this.check();const validation={};
+  const load=async ref=>{const d=await this.restore(ref);if(d)await this.verifyDerived(d,validation);return d;};
+  const data=await buildRelationalDataset(args,load,{check:()=>this.check(),maxRows:this.maxRows}),ref='dataset-'+randomUUID();
+  if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
+  return {datasetRef:ref,complete:true,rowCount:data.rows.length,columns:data.columns,readAt:data.readAt,readThroughAt:data.readThroughAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'完整保存数据按显式粒度关联展开，配方可重算；仍需范围、计算分量及实际文件核验'};
+ }
  async period(args){
   await this.check();const data=await buildPeriodDataset(args,ref=>this.restore(ref),{check:()=>this.check(),maxRows:this.maxRows}),ref='dataset-'+randomUUID();
   if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
@@ -171,6 +179,9 @@ export class ReportDatasets {
    return this.rawEvidence(await this.restore(p.datasetRef),p.column,validation);
   }
   if(['dataset_summary','dataset_transform'].includes(data.derivation?.kind))return this.rawEvidence(await this.restore(data.derivation.args.datasetRef),column,validation);
+  if(data.derivation?.kind==='dataset_relation'){
+   const p=data.derivation.provenance[column];return p?this.rawEvidence(await this.restore(p.datasetRef),p.column,validation):null;
+  }
   if(data.derivation?.kind==='left_lookup'){
    for(const lookup of data.derivation.lookups){const field=lookup.fields.find(f=>f.as===column);if(field)return this.rawEvidence(await this.restore(lookup.datasetRef),field.column,validation);}
    return this.rawEvidence(await this.restore(data.derivation.datasetRef),column,validation);
@@ -185,6 +196,7 @@ export class ReportDatasets {
    return {window:true,ids:[...new Set(ids)].sort()};
   }
   if(['dataset_summary','dataset_transform'].includes(d?.kind))return this.windowEvidence(await this.restore(d.args.datasetRef),column,validation);
+  if(d?.kind==='dataset_relation'){const p=d.provenance[column];return p?this.windowEvidence(await this.restore(p.datasetRef),p.column,validation):{window:false,ids:[]};}
   if(d?.kind==='period_grid'){const p=d.provenance[column]??{datasetRef:d.args.populationRef,column};return this.windowEvidence(await this.restore(p.datasetRef),p.column,validation);}
   if(d?.kind==='left_lookup'){const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column)),field=lookup?.fields.find(f=>f.as===column);return this.windowEvidence(await this.restore(lookup?.datasetRef??d.datasetRef),field?.column??column,validation);}
   const id=queryEvidenceIdentity(data);return {window:false,ids:id?[id]:[]};
@@ -193,6 +205,7 @@ export class ReportDatasets {
   const d=data.derivation;if(!d)return null;
   if(d.kind==='window_counts'){const w=d.args.windows.find(w=>w.percentageColumn===column);return w?{count:w.countColumn,denominator:d.args.denominatorColumn??'population_count',precision:w.precision??2,zeroDenominator:w.zeroDenominator??'empty'}:null;}
   if(['dataset_summary','dataset_transform'].includes(d.kind))return this.windowField(await this.restore(d.args.datasetRef),column);
+  if(d.kind==='dataset_relation'){const p=d.provenance[column];return p?this.windowField(await this.restore(p.datasetRef),p.column):null;}
   if(d.kind==='left_lookup'){
    const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column));if(!lookup)return this.windowField(await this.restore(d.datasetRef),column);
    const original=lookup.fields.find(f=>f.as===column).column,w=await this.windowField(await this.restore(lookup.datasetRef),original);
@@ -234,7 +247,9 @@ export class ReportDatasets {
    if(e.op==='constant')return String(e.value);if(e.op==='divide'){if(e.args.length!==2)throw new Error('divide requires two operands');return divide(evaluate(e.args[0],key),evaluate(e.args[1],key),e);}if(e.op==='percentage'){if(e.args.length!==2)throw new ReportInputError('percentage requires two operands');return percentage(evaluate(e.args[0],key),evaluate(e.args[1],key),e);}
    const values=e.args.map(x=>decimal(evaluate(x,key)));let v=values[0];for(const n of values.slice(1))v=e.op==='add'?v+n:e.op==='subtract'?v-n:v<n?v:n;return format(v);
   };
-  const rows=[...keys].sort().map(key=>args.columns.map(c=>evaluate(c.value,key)));
+  if(args.rowOrder!==undefined&&!['key','source'].includes(args.rowOrder))throw new ReportInputError('rowOrder仅支持key或source，source保留完整来源/显式population的行顺序');
+  const orderedKeys=args.rowOrder==='source'?[...keys]:[...keys].sort();
+  const rows=orderedKeys.map(key=>args.columns.map(c=>evaluate(c.value,key)));
   const csv='\uFEFF'+[headers,...rows].map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';const bytes=Buffer.byteLength(csv);
   const totals=Object.fromEntries(args.columns.flatMap((c,i)=>['add','subtract','min'].includes(c.value.op)||c.total===true?[[c.label,c.value.op==='field'&&c.value.missing==='empty'&&!rows.some(row=>row[i]!=='')?null:format(rows.reduce((n,row)=>n+(c.value.op==='field'&&c.value.missing==='empty'&&row[i]===''?0n:decimal(row[i])),0n))]]:[]));
   const datasetRef=`dataset-${randomUUID()}`,composed={rows:rows.map(row=>Object.fromEntries(headers.map((h,i)=>[h,row[i]]))),columns:headers,complete:true,numericColumns:args.columns.filter(c=>c.total===true||['add','subtract','min','divide'].includes(c.value.op)||(c.value.op==='field'&&sources.get(c.value.source).numericColumns?.includes(c.value.column))).map(c=>c.label)};
@@ -248,7 +263,7 @@ export class ReportDatasets {
   this.files++;
   composed.readThroughAt=[...sources.values()].map(d=>d.readThroughAt??d.readAt).sort().at(-1);
   composed.authorizedDatasetScopes=this.datasetScopes;
-  composed.reportDraft={...(args.population?{population:args.population}:{}),keys:[...keys].sort(),file:{id,filename,bytes,sha256:createHash('sha256').update(csv).digest('hex'),rowCount:rows.length,complete:true},sources:args.sources,columns:args.columns,sourceSnapshots:[...sources].map(([name,data])=>({name,readAt:data.readAt,snapshotId:data.snapshotId}))};
+  composed.reportDraft={...(args.population?{population:args.population}:{}),...(args.rowOrder?{rowOrder:args.rowOrder}:{}),keys:orderedKeys,file:{id,filename,bytes,sha256:createHash('sha256').update(csv).digest('hex'),rowCount:rows.length,complete:true},sources:args.sources,columns:args.columns,sourceSnapshots:[...sources].map(([name,data])=>({name,readAt:data.readAt,snapshotId:data.snapshotId}))};
   if(this.storage){await this.check();await this.storage.save(datasetRef,composed,snapshotId,readAt);await this.check();}
 
   // Persisted derived datasets can be resumed without repeating SQL or resetting their evidence age.
@@ -287,6 +302,7 @@ export class ReportDatasets {
    visiting.add(ref);const d=await this.restore(ref);if(!d?.complete)throw new ReportInputError('刷新来源不完整');
    if(d.reportDraft){for(const source of d.reportDraft.sources)await visit(source.datasetRef,depth+1);if(d.reportDraft.population)await visit(d.reportDraft.population.datasetRef,depth+1);}
    else if(['dataset_summary','dataset_transform'].includes(d.derivation?.kind)){await visit(d.derivation.args.datasetRef,depth+1);}
+   else if(d.derivation?.kind==='dataset_relation'){await visit(d.derivation.args.datasetRef,depth+1);for(const j of d.derivation.args.joins)await visit(j.datasetRef,depth+1);}
    else if(['period_grid','window_counts'].includes(d.derivation?.kind)){await visit(d.derivation.args.populationRef,depth+1);for(const source of d.derivation.args.sources)await visit(source.datasetRef,depth+1);}
    else if(d.derivation?.kind==='left_lookup'){await visit(d.derivation.datasetRef,depth+1);for(const lookup of d.derivation.lookups)await visit(lookup.datasetRef,depth+1);}
    else{
@@ -302,8 +318,9 @@ export class ReportDatasets {
   await this.check();await begin();await this.check();this.snapshotId=randomUUID();this.collected.clear();
   const mapped=new Map();let rawCount=0;
   for(const [ref,d] of graph){await this.check();let output;
-   if(d.reportDraft){output=await this.compose({sources:d.reportDraft.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)})),columns:d.reportDraft.columns,...(ref===args.datasetRef?{population:{datasetRef:mapped.get(args.populationRef),keyColumn:args.populationKey}}:d.reportDraft.population?{population:{...d.reportDraft.population,datasetRef:mapped.get(d.reportDraft.population.datasetRef)}}:{})});}
+   if(d.reportDraft){output=await this.compose({sources:d.reportDraft.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)})),columns:d.reportDraft.columns,...(d.reportDraft.rowOrder?{rowOrder:d.reportDraft.rowOrder}:{}),...(ref===args.datasetRef?{population:{datasetRef:mapped.get(args.populationRef),keyColumn:args.populationKey}}:d.reportDraft.population?{population:{...d.reportDraft.population,datasetRef:mapped.get(d.reportDraft.population.datasetRef)}}:{})});}
    else if(['dataset_summary','dataset_transform'].includes(d.derivation?.kind))output=await this[d.derivation.kind==='dataset_summary'?'summarize':'transform']({...d.derivation.args,datasetRef:mapped.get(d.derivation.args.datasetRef)});
+   else if(d.derivation?.kind==='dataset_relation')output=await this.relate({...d.derivation.args,datasetRef:mapped.get(d.derivation.args.datasetRef),joins:d.derivation.args.joins.map(j=>({...j,datasetRef:mapped.get(j.datasetRef)}))});
    else if(d.derivation?.kind==='window_counts')output=await this.window({...d.derivation.args,populationRef:mapped.get(d.derivation.args.populationRef),sources:d.derivation.args.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
    else if(d.derivation?.kind==='period_grid')output=await this.period({...d.derivation.args,populationRef:mapped.get(d.derivation.args.populationRef),sources:d.derivation.args.sources.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
    else if(d.derivation?.kind==='left_lookup')output=await this.enrich({...d.derivation,datasetRef:mapped.get(d.derivation.datasetRef),lookups:d.derivation.lookups.map(x=>({...x,datasetRef:mapped.get(x.datasetRef)}))});
@@ -326,7 +343,7 @@ export class ReportDatasets {
   await this.verifyDerived(population??{},validation);
   const periodPopulation=population?.derivation?.kind==='period_grid'&&population.derivation.args.sources.length===0;
   let populationBase=periodPopulation?await this.restore(population.derivation.args.populationRef):population;
-  const populationVisited=new Set();while(['dataset_summary','dataset_transform'].includes(populationBase?.derivation?.kind)){const ref=populationBase.derivation.args.datasetRef;if(populationVisited.has(ref))throw new ReportInputError('范围依赖循环');populationVisited.add(ref);populationBase=await this.restore(ref);}
+  const populationVisited=new Set();while(['dataset_summary','dataset_transform','dataset_relation'].includes(populationBase?.derivation?.kind)){const ref=populationBase.derivation.args.datasetRef;if(populationVisited.has(ref))throw new ReportInputError('范围依赖循环');populationVisited.add(ref);populationBase=await this.restore(ref);}
   if(!population?.complete||population.reportDraft||!populationBase?.queryHash||!populationBase.queryDefinition||!population.columns.includes(args.populationKey))throw new ReportInputError('完整对象范围必须来自独立原始查询数据集，不能拿草稿自身当覆盖证明；期间覆盖请从原始对象集合单独period_dataset，sources=[]，populationKey使用其period_key；inspect_dataset的populationPlans可定位已有来源及范围，不需重查整套数据');
   const expected=uniqueKeys(population,args.populationKey);
   if(!Array.isArray(draft.keys)||draft.keys.length!==data.rows.length||new Set(draft.keys).size!==draft.keys.length||draft.keys.some(k=>typeof k!=='string'||!k))throw new ReportInputError('草稿缺少完整内部主键索引；重新生成草稿后核验');
