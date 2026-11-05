@@ -58,6 +58,7 @@ export class SuccessStickers {
       // Fetch even when the event contains a key: the same bot's native read is
       // authoritative for placeholders, sender identity and conversation scope.
       const raw=await this.context.feishu.getMessage(id,{profile:agent.profile});
+      if(!raw)throw Error('Native sticker message not yet available');
       if(raw?.message_id!==id||raw.chat_id!==event.chat_id||raw.message_type!=='sticker'
         ||raw.sender?.sender_type!=='user'||raw.sender?.id_type!=='open_id'||raw.sender.id!==event.sender_id
         ||raw.deleted)return {ignored:true,reason:'sticker_message_scope_mismatch'};
