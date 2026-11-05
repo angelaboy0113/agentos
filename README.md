@@ -1,6 +1,8 @@
 # Angel AgentOS
 
-**成品版本：v1.62.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.63.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+
+汇总字段追溯、独立核验和精确加权见 [报表核验](docs/report-provenance.md)。
 
 已保存数据的一对多关联、配置文本展开及恢复见 [数据集关联](docs/dataset-relations.md)。
 

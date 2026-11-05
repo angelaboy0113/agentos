@@ -178,7 +178,10 @@ export class ReportDatasets {
    const p=data.derivation.provenance[column]??{datasetRef:data.derivation.args.populationRef,column};
    return this.rawEvidence(await this.restore(p.datasetRef),p.column,validation);
   }
-  if(['dataset_summary','dataset_transform'].includes(data.derivation?.kind))return this.rawEvidence(await this.restore(data.derivation.args.datasetRef),column,validation);
+  if(data.derivation?.kind==='dataset_summary'){
+   const proof=await this.windowEvidence(data,column,validation);return proof.ids.length===1?proof.ids[0]:proof.ids.length?hash(proof.ids):null;
+  }
+  if(data.derivation?.kind==='dataset_transform')return this.rawEvidence(await this.restore(data.derivation.args.datasetRef),column,validation);
   if(data.derivation?.kind==='dataset_relation'){
    const p=data.derivation.provenance[column];return p?this.rawEvidence(await this.restore(p.datasetRef),p.column,validation):null;
   }
@@ -195,11 +198,22 @@ export class ReportDatasets {
    for(const ref of refs){const p=await this.windowEvidence(await this.restore(ref),column,validation);ids.push(...p.ids);}
    return {window:true,ids:[...new Set(ids)].sort()};
   }
-  if(['dataset_summary','dataset_transform'].includes(d?.kind))return this.windowEvidence(await this.restore(d.args.datasetRef),column,validation);
-  if(d?.kind==='dataset_relation'){const p=d.provenance[column];return p?this.windowEvidence(await this.restore(p.datasetRef),p.column,validation):{window:false,ids:[]};}
+  if(d?.kind==='dataset_summary'){
+   const a=d.args.aggregates.find(a=>a.as===column),base=await this.restore(d.args.datasetRef);
+   if(a?.op==='count')return {window:false,ids:await this.rowEvidence(base)};
+   const fields=a?(a.op==='weighted_sum'?[a.column,a.weightColumn]:[a.column]):d.args.groupColumns.includes(column)?[column]:[];
+   const proofs=await Promise.all(fields.map(c=>this.windowEvidence(base,c,validation)));
+   return {window:proofs.some(p=>p.window),ids:[...new Set(proofs.flatMap(p=>p.ids))].sort()};
+  }
+  if(d?.kind==='dataset_transform')return this.windowEvidence(await this.restore(d.args.datasetRef),column,validation);
+  if(d?.kind==='dataset_relation'){const p=d.provenance[column],proof=p?await this.windowEvidence(await this.restore(p.datasetRef),p.column,validation):{window:false,ids:[]};return {...proof,ids:p?[...new Set([...proof.ids,...await this.rowEvidence(data)])].sort():[]};}
   if(d?.kind==='period_grid'){const p=d.provenance[column]??{datasetRef:d.args.populationRef,column};return this.windowEvidence(await this.restore(p.datasetRef),p.column,validation);}
   if(d?.kind==='left_lookup'){const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column)),field=lookup?.fields.find(f=>f.as===column);return this.windowEvidence(await this.restore(lookup?.datasetRef??d.datasetRef),field?.column??column,validation);}
   const id=queryEvidenceIdentity(data);return {window:false,ids:id?[id]:[]};
+ }
+ async rowEvidence(data,visited=new Set()){
+  const ids=[];for(const ref of datasetDependencies(data)){if(visited.has(ref))continue;visited.add(ref);ids.push(...await this.rowEvidence(await this.restore(ref),visited));}
+  const own=queryEvidenceIdentity(data);if(own)ids.push(own);return [...new Set(ids)].sort();
  }
  async windowField(data,column){
   const d=data.derivation;if(!d)return null;
@@ -371,16 +385,18 @@ export class ReportDatasets {
    const prefix='分量合计需引用不同原始查询的完整基准集和实际数值列：';
    if(issues.length)throw new ReportInputError(prefix+issues.join('；'));
    const referenceEvidence=await this.rawEvidence(ref,c.referenceColumn,validation),sourceEvidence=await this.rawEvidence(source,c.column,validation);
-   if(!referenceEvidence)throw new ReportInputError(prefix+'基准无法追溯到原始查询；inspect_dataset核对dependencies/derivation和queryDefinition，只补缺失来源，不重跑整套取数');
+   const diagnostic=` source=${c.source}, column=${c.column}, referenceRef=${c.referenceRef}, referenceColumn=${c.referenceColumn}`;
+   if(!referenceEvidence)throw new ReportInputError(prefix+'基准无法追溯到原始查询；'+diagnostic+'；inspect_dataset核对该列聚合/改名及dependencies，只补缺失来源，不重跑整套取数');
    const sourceProof=await this.windowEvidence(source,c.column,validation),referenceProof=await this.windowEvidence(ref,c.referenceColumn,validation);
-   if((sourceProof.window||referenceProof.window)&&sourceProof.ids.some(id=>referenceProof.ids.includes(id)))throw new ReportInputError('窗口分量与基准共享同一原始查询；不能从同一批来源重算后自证');
+   if(sourceProof.ids.some(id=>referenceProof.ids.includes(id)))throw new ReportInputError('分量与基准来自同一查询（共享同一原始查询）；不能从同一批来源重算后自证；'+diagnostic+'；复用已有不同来源的基准，不重复全部明细；关联展开后的行数也属于依赖');
    if(referenceEvidence===sourceEvidence)throw new ReportInputError(prefix+'基准与分量来自同一查询，另存datasetRef或改列名不能自证；复用已有不同原始查询的完整基准，没有时按同口径补一次独立聚合，不重复全部明细');
    if(totals.some(x=>x.name===name))throw new ReportInputError('同一分量不能重复核验');
    const sourceKey=draft.sources.find(s=>s.name===c.source).keyColumn;
    if(sourceProof.window&&source.derivation?.kind!=='period_grid'){
-    if(!referenceProof.window)throw new ReportInputError('窗口统计须用不同原始查询生成同分组同窗口基准，逐对象核对，不能只核对合计');
+    // A keyed raw aggregate is also a per-object independent baseline. A scalar
+    // with no object key cannot prove which object it describes, even for one row.
     const refKey=c.referenceKey??(ref.columns.includes(sourceKey)?sourceKey:ref.derivation?.args?.rowKey??'group_key');
-    if(!ref.columns.includes(refKey))throw new ReportInputError(`窗口基准键不存在：source=${c.source}, sourceKey=${sourceKey}, referenceRef=${c.referenceRef}, referenceKey=${refKey}；显式指定实际referenceKey，不重查业务来源`);
+    if(!ref.columns.includes(refKey))throw new ReportInputError(`窗口基准键不存在：source=${c.source}, sourceKey=${sourceKey}, referenceRef=${c.referenceRef}, referenceKey=${refKey}；需要不同原始查询、同对象键的完整基准，可用带键原始聚合或独立window_dataset；无对象键的总计不能证明逐对象结果。显式指定实际referenceKey，不重查已有来源`);
     const index=new Map(ref.rows.map(row=>[row[refKey],row])),sourceKeys=new Set(source.rows.filter(row=>expected.has(row[sourceKey])).map(row=>row[sourceKey]));
     if(index.size!==ref.rows.length||[...sourceKeys].some(key=>!index.has(key)))throw new ReportInputError(`窗口独立基准范围重复或不完整：source=${c.source}, sourceKey=${sourceKey}, referenceKey=${refKey}, sourceObjects=${sourceKeys.size}, referenceObjects=${index.size}；核对键名及类型，referenceKey可显式指定`);
     for(const row of source.rows)if(expected.has(row[sourceKey])){const other=index.get(row[sourceKey]);if(!other||decimal(row[c.column])!==decimal(other[c.referenceColumn]))throw new ReportInputError(`窗口独立基准逐对象数值不一致，不能用总数相等代替：source=${c.source}, column=${c.column}, sourceKey=${sourceKey}, referenceKey=${refKey}, object=${JSON.stringify(row[sourceKey])}, actual=${row[c.column]}, reference=${other?.[c.referenceColumn]??'未匹配'}；仅修正本分量，不重查已保存来源`);}
