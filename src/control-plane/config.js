@@ -35,6 +35,7 @@ export function controlConfig(overrides = {}) {
 export async function loadAgents(file) {
   try {
     const parsed = JSON.parse(await readFile(path.resolve(file), 'utf8'));
+    for(const a of Object.values(parsed.agents??{}))if(a.successStickers!==undefined&&(typeof a.successStickers!=='boolean'||a.successStickers&&(!a.profile||!a.appId)))throw Error('successStickers requires boolean and a stable bot profile/appId');
     return { agents: parsed.agents ?? {} };
   } catch (error) {
     if (error.code === 'ENOENT') return { agents: {} };

@@ -17,7 +17,7 @@ export class LarkEventSource {
   }
 
   async start() {
-    if (this.config.eventKey === 'card.action.trigger') {
+    if (this.config.eventKey === 'card.action.trigger' || this.config.successStickers) {
       await mkdir(this.callbackDirectory, { recursive: true });
       for (const name of await readdir(this.callbackDirectory)) {
         if (!name.endsWith('.json')) continue;
@@ -47,7 +47,7 @@ export class LarkEventSource {
     return `[lark-event:${this.config.role ?? 'default'}:${this.config.profile ?? 'default'}:${this.config.eventKey ?? 'im.message.receive_v1'}]`;
   }
 
-  get callbackDirectory() { return path.join(this.config.cwd, 'pending-card-actions'); }
+  get callbackDirectory() { return path.join(this.config.cwd, this.config.eventKey==='card.action.trigger'?'pending-card-actions':'pending-stickers'); }
 
   consumeOnce() {
     return new Promise((resolve, reject) => {
@@ -103,6 +103,16 @@ export class LarkEventSource {
       return this.deliverCallback(file);
     }
     if (event.type !== 'im.message.receive_v1' || event.sender_type === 'bot') return;
+    if(event.message_type==='sticker'){
+      if(!this.config.successStickers||event.chat_type!=='p2p'||event.sender_type!=='user')return;
+      const payload=Object.fromEntries(['type','message_id','id','chat_id','chat_type','sender_id','sender_type','message_type'].map(k=>[k,event[k]]));
+      payload.agent_profile=this.config.profile??null;payload.agent_role=this.config.role??null;
+      if(!payload.message_id&&!payload.id)return;
+      await mkdir(this.callbackDirectory,{recursive:true,mode:0o700});
+      const file=path.join(this.callbackDirectory,createHash('sha256').update(payload.message_id??payload.id).digest('hex')+'.json');
+      await writeFile(file+'.tmp',JSON.stringify(payload),{encoding:'utf8',mode:0o600});await rename(file+'.tmp',file);
+      return this.deliverCallback(file);
+    }
     if (this.config.groupOnly && event.chat_type === 'p2p') return;
     if (!isForThisBot(event, this.config.botOpenId,this.config.botAppId)) return;
     if (this.config.allowedChatIds && event.chat_type !== 'p2p' && !this.config.allowedChatIds.includes(event.chat_id)) return;
@@ -131,7 +141,7 @@ export class LarkEventSource {
     try { payload = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
     if (this.stopped) return;
     try {
-      const response = await fetch(`${this.config.serverUrl}/api/v1/events/card-action`, {
+      const response = await fetch(`${this.config.serverUrl}/api/v1/events/${this.config.eventKey==='card.action.trigger'?'card-action':'lark-cli'}`, {
         method: 'POST', signal: AbortSignal.timeout(10_000),
         headers: { authorization: `Bearer ${this.config.adminToken}`, 'content-type': 'application/json' }, body: payload,
       });
@@ -218,6 +228,7 @@ export function larkEventSourcePlans(config, agents = {}) {
       role: agent.routeFromText ? null : agent.role ?? role,
       ...(agent.systemAssistant ? { groupOnly: true } : {}),
       ...(agent.allowedChatIds ? { allowedChatIds: agent.allowedChatIds } : {}),
+      successStickers: agent.successStickers===true,
       profile: agent.profile || null,
       botOpenId: agent.openId,
       botAppId: agent.appId,

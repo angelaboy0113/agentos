@@ -374,3 +374,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 补充网页不可访问时保留已核实业务数据，并在新连续调查中返回原问题审阅其它已授权来源；不将某个平台默认为数据交付必经入口。见 [可用来源接续](docs/available-source-continuity.md)。
 
 共享基础平台需为目标项目显式登记只读入口，不自动跨项目借用权限；已经独立核验的文件可按完整子范围先交付，整体缺口保持。见 [共享平台与部分成果交付](docs/shared-services-and-partial-delivery.md)。
+
+管理员私聊原生表情包登记、成功交付后同话题随机回复：见 [配置与验收说明](docs/native-stickers.md)。按机器人独立、默认关闭，不回补历史任务。

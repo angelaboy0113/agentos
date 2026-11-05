@@ -69,6 +69,14 @@ export class FeishuClient {
 
   async chatInfo(chatId){const response=await fetch(`${OPEN_API}/im/v1/chats/${encodeURIComponent(chatId)}?user_id_type=open_id`,{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(15000)});const r=await response.json();if(!response.ok||r.code!==0)throw new Error('Chat information unavailable');return r.data;}
   async uploadImage(file){const form=new FormData();form.set('image_type','message');form.set('image',new Blob([await readFile(file)],{type:'image/png'}),path.basename(file));const response=await fetch(`${OPEN_API}/im/v1/images`,{method:'POST',headers:{authorization:`Bearer ${await this.tenantToken()}`},body:form,signal:AbortSignal.timeout(30000)});const r=await response.json();if(!response.ok||r.code!==0)throw new Error('Image upload failed');return r;}
+  async getMessage(messageId){
+    const response=await fetch(OPEN_API+'/im/v1/messages/'+encodeURIComponent(messageId)+'?user_id_type=open_id',{headers:{authorization:'Bearer '+await this.tenantToken()},signal:AbortSignal.timeout(15000)});
+    const r=await response.json();if(!response.ok||r.code!==0)throw Error('Native message read failed');return r.data?.items?.find(m=>m.message_id===messageId)??null;
+  }
+  async replySticker(messageId,fileKey,options={}){
+    if(!/^[A-Za-z0-9_-]{1,512}$/.test(fileKey??'')||!options.idempotencyKey)throw Error('Invalid native sticker delivery');
+    return this.cardRequest('POST','/im/v1/messages/'+encodeURIComponent(messageId)+'/reply',{msg_type:'sticker',content:JSON.stringify({file_key:fileKey}),uuid:options.idempotencyKey,...(options.replyInThread?{reply_in_thread:true}:{})});
+  }
   async sendPrivateCard(chatId, openId, card, options={}) {
     if(!chatId||!/^ou_[A-Za-z0-9]+$/.test(openId??''))throw new Error('Private card recipient missing');
     try{return await this.cardRequest('POST','/ephemeral/v1/send',{chat_id:chatId,open_id:openId,msg_type:'interactive',card});}

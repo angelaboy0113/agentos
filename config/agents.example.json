@@ -19,7 +19,9 @@
     "developer": {
       "displayName": "开发 Agent",
       "profile": "agentos-developer",
-      "openId": "机器人 open_id"
+      "openId": "机器人 open_id",
+      "appId": "cli_your_app_id",
+      "successStickers": false
     },
     "qa": {
       "displayName": "测试 Agent",

@@ -113,6 +113,15 @@ export class LarkCliFeishuClient {
   }
 
   async chatInfo(chatId,options={}){await mkdir(this.cwd,{recursive:true});const r=await runLarkCli(['api','GET','/open-apis/im/v1/chats/'+encodeURIComponent(chatId),'--as','bot','--params',JSON.stringify({user_id_type:'open_id'}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});if(!r.data)throw new Error('Chat information unavailable');return r.data;}
+  async getMessage(messageId,options={}){
+    await mkdir(this.cwd,{recursive:true});
+    const r=await runLarkCli(['api','GET','/open-apis/im/v1/messages/'+encodeURIComponent(messageId),'--as','bot','--params',JSON.stringify({user_id_type:'open_id'}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
+    return r.data?.items?.find(m=>m.message_id===messageId)??null;
+  }
+  async replySticker(messageId,fileKey,options={}){
+    if(!/^[A-Za-z0-9_-]{1,512}$/.test(fileKey??'')||!options.idempotencyKey)throw Error('Invalid native sticker delivery');
+    return this.cardRequest('POST','/open-apis/im/v1/messages/'+encodeURIComponent(messageId)+'/reply',{msg_type:'sticker',content:JSON.stringify({file_key:fileKey}),uuid:larkIdempotencyKey(options.idempotencyKey),...(options.replyInThread?{reply_in_thread:true}:{})},options);
+  }
   async uploadImage(file,options={}){await mkdir(path.join(this.cwd,'images'),{recursive:true,mode:0o700});const relative=path.join('images',path.basename(file));await copyFile(file,path.join(this.cwd,relative));return runLarkCli(['im','images','create','--as','bot','--data',JSON.stringify({image_type:'message'}),'--file',relative,'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:30000});}
   async sendPrivateCard(chatId,openId,card,options={}){
     if(!chatId||!/^ou_[A-Za-z0-9]+$/.test(openId??''))throw new Error('Private card recipient missing');

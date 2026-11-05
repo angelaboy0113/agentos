@@ -156,7 +156,7 @@ export function publishQuestion(context, id) {
       generation = q.cardGeneration;
     });
     return context.cards.upsert(key, view.card, view.destination, { terminal: view.terminal, immediate: true,
-      resultText: view.resultText, terminalMention: view.mention, publicCompletionMention: view.mention?.kind==='directory_completion', generation,
+      questionRound:{generation:view.question.generation,turnId:view.question.latestTurnId}, resultText: view.resultText, terminalMention: view.mention, publicCompletionMention: view.mention?.kind==='directory_completion', generation,
       guard: (state) => { if (sourceVersion(state, id) !== version) throw new Error('Question changed during presentation; retry'); } });
   });
   queue.set(id, work); work.finally(() => { if (queue.get(id) === work) queue.delete(id); }).catch(() => {});

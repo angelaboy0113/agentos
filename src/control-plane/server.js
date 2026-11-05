@@ -1,3 +1,4 @@
+import {SuccessStickers} from './success-stickers.js';
 import{planTaskRead}from '../shared/integration-peers.js';
 import {pollModelCapacity}from './model-capacity-recovery.js';
 import {requestedSourceEnvironments} from '../shared/source-comparison.js';
@@ -74,7 +75,7 @@ export async function createControlPlane(overrides = {}) {
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
   context.cards = cards;
-  context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();};
+  context.successStickers=new SuccessStickers(context);context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();await context.successStickers.retry();};
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
   if (cards.enabled) await store.transact((state) => {
@@ -115,9 +116,9 @@ export async function createControlPlane(overrides = {}) {
   });
   server.once('close', () => {
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
-  return { server, config, projects, agents, store, conversations, cards };
+  return { server, config, projects, agents, store, conversations, cards, successStickers:context.successStickers };
 }
 
 export async function repairStaleTerminalQuestionCards(context) {
@@ -533,7 +534,7 @@ async function handleFeishuEvent(context, envelope) {
     type: 'im.message.receive_v1', message_id: message.message_id,
     chat_id: message.chat_id, chat_type: message.chat_type,
     sender_id: event.sender?.sender_id?.open_id, sender_type: 'user',
-    content: parsed.text, mentions: message.mentions, attachments,
+    message_type:message.message_type, content: parsed.text, mentions: message.mentions, attachments,
     reply_to: message.parent_id, root_id: message.root_id, thread_id: message.thread_id,
     agent_role: context.config.feishu.role ?? 'owner_intake',
     agent_profile: context.config.feishu.profile ?? null,
@@ -547,9 +548,11 @@ export async function handleLarkCliEvent(context, event) {
   const role = event.agent_role ?? 'owner_intake';
   const sourceProfile = event.agent_profile ?? null;
   const agent = Object.values(context.agents.agents ?? {}).find((item) => (item.profile || null) === sourceProfile);
+  if (agent?.systemAssistant && (agent.role ?? 'developer') !== role) throw new Error('System assistant role/profile mismatch');
+  const stickerResult=await context.successStickers?.handle(event);
+  if(stickerResult)return stickerResult;
   if (agent?.systemAssistant && event.chat_type === 'p2p') return { ignored: true, reason: 'assistant_group_only' };
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
-  if (agent?.systemAssistant && (agent.role ?? 'developer') !== role) throw new Error('System assistant role/profile mismatch');
   const enrollmentCredentialResult = await context.enrollmentCredentials?.handle(event);
   if (enrollmentCredentialResult) return enrollmentCredentialResult;
   const credentialResult = await context.websiteCredentials?.handle(event);
