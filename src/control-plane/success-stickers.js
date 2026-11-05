@@ -36,6 +36,7 @@ export function stickerSuccess(state,q,card,agent,library) {
     const files=jobs.flatMap(source=>(source.reportFiles??[]).filter(f=>f.questionGeneration===q.generation&&reportEligible(job.reportReviews?job:source,f)));
     const manifest=job.reportDeliverySet?.files;
     const required=manifest?.length ? manifest : files.slice(-1).map(f=>({fileId:f.id,verificationHash:f.verificationHash}));
+    if((job.tabularDelivery||job.result?.reportAssessment?.decision==='deliver'||job.reportDeliverySet)&&!required.length)return false;
     if(manifest?.length && required.some(m=>!files.some(f=>f.id===m.fileId&&f.verificationHash===m.verificationHash)))return false;
     if(required.some(m=>!values(state.reportDeliveries).some(e=>e.questionId===q.id&&e.questionGeneration===q.generation&&!e.superseded&&e.messageId&&e.item?.id===m.fileId&&e.item.verificationHash===m.verificationHash)))return false;
   }
