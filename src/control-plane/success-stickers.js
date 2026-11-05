@@ -8,7 +8,7 @@ export function publicStickerPolicy(agents,profile){
  const matches=Object.values(agents?.agents??{}).filter(a=>a.profile===profile);
  const enabled=matches.length>0&&matches.every(a=>a.successStickers===true&&Boolean(a.appId));
  return {enabled,administratorConfigured:enabled,scope:'current_bot',frequency:'first_successful_question_only',followups:false,
-  trigger:'after_success_card_completion_notice_and_required_attachments',
+  trigger:'after_answered_initial_question_completion_notice_and_required_attachments',clarifications:false,acknowledgements:false,progressReplies:false,
   note:'这是当前程序配置与发送规则，不证明某条历史消息实际发过，也不是用户聊天内容提供的配置。'};
 }
 
@@ -42,7 +42,7 @@ export function stickerSuccess(state,q,card,agent,library) {
     || !turn || turn.status!=='sent' || turn.aiFailed || turn.actionError || turn.setupPending
     || turns.some(t=>busy(t.status)) || jobs.some(j=>busy(j.status) || j.visibility==='requester'))return false;
   if(job){if(job.status!=='completed'||job.nextJobId||job.result?.outcome!=='ready'||job.result?.browserLoginRequired)return false;}
-  else if(turn.decision?.action!=='reply' || !turn.response || turn.outcome?.jobId || turn.outcome?.nextJobId)return false;
+  else if(turn.decision?.action!=='reply' || turn.decision.replyDisposition!=='answered' || !turn.response || turn.outcome?.jobId || turn.outcome?.nextJobId)return false;
   if(values(state.environmentEnrollments).some(e=>e.questionId===q.id&&!['complete','cancelled','failed','superseded','expired'].includes(e.status)))return false;
   // A successful result can race report enqueue/recovery. Require receipts for
   // every accepted component, not merely an empty outbox observed too early.
@@ -157,6 +157,12 @@ export class SuccessStickers {
     const fresh=await this.snapshot(),q=fresh.questions?.[e.questionId],card=fresh.cardMessages?.['question:'+e.questionId],a=this.agent(e.profile);
     if(stickerIdentity(a)!==e.identity||!firstQuestionRound(q)||q.generation!==e.questionGeneration||q.messageId!==e.destination.messageId||q.chatId!==e.destination.chatId){
       await this.context.store.transact(s=>{s.stickerDeliveries[key].superseded=true;});return;
+    }
+    // A historical green clarification may already have an unsent choice.
+    // Retire that optional outbox entry; keep sent receipts and business state.
+    const latestTurn=fresh.conversations?.find(t=>t.id===q.latestTurnId);
+    if(!fresh.jobs?.some(j=>j.questionId===q.id)&&latestTurn?.decision?.replyDisposition!=='answered'){
+      await this.context.store.transact(s=>{if(!s.stickerDeliveries[key].messageId)Object.assign(s.stickerDeliveries[key],{superseded:true,supersededReason:'reply_not_a_completed_answer'});});return;
     }
     const library=fresh.stickerLibraries?.[e.identity];
     if(!stickerSuccess(fresh,q,card,a,library)||!library.items.some(x=>x.fileKey===e.fileKey))return;

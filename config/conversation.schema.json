@@ -16,7 +16,8 @@
     "knowledgeMatch",
     "contactLookup",
     "requiresTabularDelivery",
-    "definitionUpdates"
+    "definitionUpdates",
+    "replyDisposition"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -289,6 +290,17 @@
           }
         }
       }
+    },
+    "replyDisposition": {
+      "type": "string",
+      "enum": [
+        "answered",
+        "clarification",
+        "acknowledgement",
+        "progress",
+        "not_applicable"
+      ],
+      "description": "原问题交付语义：已完整回答answered；询问环境/范围/口径等必要信息clarification；收到/好的等acknowledgement；进度说明progress；非reply动作为not_applicable。发出回复不等于回答完成。"
     }
   }
 }

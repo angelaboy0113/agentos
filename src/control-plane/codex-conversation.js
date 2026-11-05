@@ -191,6 +191,7 @@ export function validateDecision(value) {
 }
 function validateDecisionValue(value) {
   if(value?.definitionUpdates!==undefined){if(!Array.isArray(value.definitionUpdates)||value.definitionUpdates.length>12)throw new Error('Invalid definition updates');for(const u of value.definitionUpdates)validateDefinitionUpdate(u);}
+  if(value?.replyDisposition!==undefined&&(!['answered','clarification','acknowledgement','progress','not_applicable'].includes(value.replyDisposition)||value.action==='reply'&&value.replyDisposition==='not_applicable'||value.action!=='reply'&&value.replyDisposition!=='not_applicable'))throw new Error('Invalid reply disposition');
   if(value.requiresTabularDelivery!==undefined&&typeof value.requiresTabularDelivery!=='boolean')throw new Error('Invalid tabular delivery decision');
   const actions = ['lookup_contact', 'reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];
   const intents = ['none', 'implementation', 'planning', 'analysis', 'verification', 'audit'];
