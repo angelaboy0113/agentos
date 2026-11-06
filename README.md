@@ -1,6 +1,8 @@
 # Angel AgentOS
 
-**成品版本：v1.75.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.76.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+
+已交付CSV追加数据库字段、显式年月转换与原列保持见[报表补列](docs/report-append.md)。
 
 已交付文件的原话题追问、读取与派生修改见[文件接续](docs/delivered-file-followup.md)。
 

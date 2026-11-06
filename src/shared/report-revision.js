@@ -26,7 +26,8 @@ export function reportCsv(bytes){
  return {headers:rows[0],rows:rows.slice(1)};
 }
 const cell=v=>'"'+String(v).replaceAll('"','""')+'"';
-const encode=(headers,rows)=>Buffer.from('\uFEFF'+[headers,...rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n');
+export const encodeReportCsv=(headers,rows)=>Buffer.from('\uFEFF'+[headers,...rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n');
+const encode=encodeReportCsv;
 export function projectReport(input,args){
  if(!keys(args,['attachmentId','columns','filters','orderBy','requirement'])||typeof args.requirement!=='string'||!args.requirement.trim())fail('明确本次文件修改要求，不能执行任意代码或修改单元格数值');
  const columns=args.columns??input.headers.map(from=>({from,label:from}));
@@ -66,17 +67,18 @@ export async function reviseReportFile(dataDir,job,attachment,args){
  await writeFile(path.join(directory,id+'.verification.json'),receiptBytes,{mode:0o600,flag:'wx'});
  const exportFile={id,filename,sha256:hash(bytes),bytes:bytes.length,rowCount:output.rows.length,verificationHash:hash(receiptBytes),complete:true};
  await reportFile(dataDir,job.id,exportFile,{includeContent:false});
- return {exportFile,headers:output.headers,readWindow:receipt.readWindow,revision:receipt.revision,
-  note:'新版本已生成且与原文件按配方逐格核对，原文件保持不变；等待正常交付审阅和投递，不是新数据库查询。'};
+ const changed=!bytes.equals(source.content);
+ return {exportFile,changed,headers:output.headers,readWindow:receipt.readWindow,revision:receipt.revision,
+  note:changed?'新版本已生成且与原文件按配方逐格核对，原文件保持不变；等待正常交付审阅和投递，不是新数据库查询。':'配方没有改变原文件内容，不能作为新增字段或其它实质修改已完成的证明；新增字段请使用import_task_input及append_report_columns。'};
 }
 
 export async function inspectRevision(dataDir,job,item,receipt,args,visited=new Set()){
  const r=receipt.revision,key=(item.sourceJobId??job.id)+':'+item.id;
- if(visited.has(key)||r?.version!==1)fail('文件修订来源循环或版本无效');visited.add(key);
+ if(visited.has(key)||![1,2].includes(r?.version))fail('文件修订来源循环或版本无效');visited.add(key);
  const source=await reportFile(dataDir,r.sourceJobId,r.sourceFile),sourceReceipt=JSON.parse(await readFile(path.join(path.dirname(source.file),r.sourceFile.id+'.verification.json'),'utf8'));
  if(sourceReceipt.revision)await inspectRevision(dataDir,{id:r.sourceJobId},r.sourceFile,sourceReceipt,{section:'summary'},visited);
  else {const {inspectReport}=await import('./report-inspection.js');await inspectReport(dataDir,{id:r.sourceJobId,reportFiles:[{...r.sourceFile,sourceJobId:r.sourceJobId}]},{fileId:r.sourceFile.id});}
- const input=reportCsv(source.content),output=projectReport(input,r.recipe),verified=await reportFile(dataDir,item.sourceJobId??job.id,item);
+ const input=reportCsv(source.content),output=r.version===2?await (await import('./report-append.js')).replayReportAppend(dataDir,r,input):projectReport(input,r.recipe),verified=await reportFile(dataDir,item.sourceJobId??job.id,item);
  if(!encode(output.headers,output.rows).equals(verified.content)||output.rows.length!==item.rowCount)fail('文件修订内容与原文件/保存配方不一致');
  const binding={fileId:item.id,sourceJobId:item.sourceJobId??job.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:item.rowCount};
  const audit={status:'passed',checkedRows:output.rows.length,checkedCells:output.rows.length*output.headers.length};

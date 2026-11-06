@@ -369,7 +369,7 @@ export class ConversationService {
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       questionOriginalRequest: turn.questionId ? questionRequest(state, turn.questionId) : null,
       deliveredFiles:{files:deliveredFiles.inputs.map(({id,filename,source})=>({attachmentId:id,filename,sourceJobId:source.sourceJobId,sourceEnvironment:source.sourceEnvironment,sha256:source.sha256,deliveredAt:source.deliveredAt})),unavailable:deliveredFiles.unavailable,
-        rule:'这些是本问题可见链已经实际交付的文件，不是当前数据库。文件问题或修改必须创建只读analysis并携带对应attachmentId，Runner会下载完整原文件；不要让用户重传，不以历史文字或前三行猜全表。只做选列/改表头/筛选/排序时可用revise_report_file生成新核验CSV，不重新查询数据库；新金额或业务口径另按原权限核验。'} ,
+        rule:'这些是本问题可见链已经实际交付的文件，不是当前数据库。文件问题或修改必须创建只读analysis并携带对应attachmentId，Runner会下载完整原文件；不要让用户重传，不以历史文字或前三行猜全表。只做选列/改表头/筛选/排序时可用revise_report_file生成新核验CSV，不重新查询数据库；新增字段用import_task_input导入原键、完整in_set补查，再append_report_columns关联并显式格式化，不刷新旧列；新金额或业务口径另按原权限核验。'} ,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: routingCatalog(catalog(await loadEnvironments(), projectId)),
       role: turn.role, administrator: isAdministrator(projects, turn),

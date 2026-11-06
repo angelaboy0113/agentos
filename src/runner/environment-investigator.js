@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 const schema = { type: 'object', additionalProperties: false, required: ['tool','arguments','summary','complete'], properties: { tool: { type: 'string' }, arguments: { type: 'string' }, summary: { type: 'string' }, complete: { type: 'boolean' } } };
 const TOOL_RESULT_LIMIT = 24000;
+export const verifiedFileStepComplete=(tool,result)=>Boolean(result?.exportFile&&result.changed!==false&&['finalize_report','refresh_report','revise_report_file','append_report_columns'].includes(tool));
 
 // Carry artifact locations and current validation failures beyond the recent tool window.
 // No business rows, credentials, execution quotas or automatic completion decisions.
@@ -188,7 +189,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       if(result.loginRequired) return {loginRequired:true,summary:result.message??result.stage,checkpoint:{steps,results,lastAuthorizedAt},rows:[],partial:true};
       result = await resultStore.present(choice.tool,result,TOOL_RESULT_LIMIT,{persist:e.kind==='tct'&&['tasks','task_detail','task_batches','groups'].includes(choice.tool)});
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
-      if(result.exportFile&&['finalize_report','refresh_report','revise_report_file'].includes(choice.tool)){pendingInputs.clear();unresolvedInput=false;summary='当前文件已通过程序核验，返回源码Agent按原问题审阅；不在工具层追加历史对账。';complete=true;break;}
+      if(verifiedFileStepComplete(choice.tool,result)){pendingInputs.clear();unresolvedInput=false;summary='当前文件已通过程序核验，返回源码Agent按原问题审阅；不在工具层追加历史对账。';complete=true;break;}
       if(result.websiteMismatch){summary='网站入口不匹配，尚未核实目标业务数据。请结合本环境源码、部署配置和原问题重新发现正确入口，不复用此错误入口，不要求用户扩大权限。';complete=false;break;}
       const hash = fingerprint({ tool: choice.tool, result });
       stalled = seen.has(hash) ? stalled + 1 : 0; seen.add(hash);
@@ -227,7 +228,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
     const serialized = JSON.stringify(results);
     for (const secret of [cred.username, cred.password].filter(Boolean)) summary = summary.split(secret).join('[已隐藏]');
     const uniqueResults = [...new Map(results.filter(x => x.result).map(x => [fingerprint(x), x])).values()];
-    const business=uniqueResults.filter(x=>['select','count','group_count','aggregate','linked_aggregate','group_dataset','linked_group_dataset','window_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','read_tool_result','list_tool_results','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','read_cloud_sheet','restore_cloud_sheet_input','import_task_input'].includes(x.tool)).map(x=>({tool:x.tool,inputContentHash:x.result.inputAttachment?.source?.sha256??x.result.registeredPage?.id,inputRange:x.result.inputAttachment?.source?.range??x.result.registeredPage?.range,table:x.result.table,rows:Array.isArray(x.result.rows)?x.result.rows.map(row=>JSON.stringify(row)).sort():undefined,dataHash:x.result.dataHash,columns:x.result.columns,totals:x.result.totals}));
+    const business=uniqueResults.filter(x=>['select','count','group_count','aggregate','linked_aggregate','group_dataset','linked_group_dataset','window_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','read_tool_result','list_tool_results','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','read_cloud_sheet','restore_cloud_sheet_input','import_task_input','append_report_columns','revise_report_file'].includes(x.tool)).map(x=>({tool:x.tool,inputContentHash:x.result.inputAttachment?.source?.sha256??x.result.registeredPage?.id,inputRange:x.result.inputAttachment?.source?.range??x.result.registeredPage?.range,table:x.result.table,rows:Array.isArray(x.result.rows)?x.result.rows.map(row=>JSON.stringify(row)).sort():undefined,dataHash:x.result.dataHash??x.result.exportFile?.sha256,columns:x.result.columns,totals:x.result.totals}));
     if(e.kind==='tct')business.push(...uniqueResults.filter(x=>['groups','tasks','task_detail','task_batches'].includes(x.tool)).map(x=>({tool:x.tool,rows:x.result.rows,task:x.result.task})));
     if(e.kind==='website')business.push(...uniqueResults.filter(x=>x.result?.url&&typeof x.result.pageText==='string').map(x=>({url:x.result.url,pageText:x.result.pageText,fields:x.result.fields??[]})));
     if(e.kind==='website')business.push(...uniqueResults.filter(x=>x.tool==='browser_read'&&x.result?.url&&typeof x.result.text==='string').map(x=>({url:x.result.url,section:x.result.section,offset:x.result.offset,text:x.result.text})));
