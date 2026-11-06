@@ -54,6 +54,10 @@ test('actual conversation and terminal question-card paths address the latest as
  await app.conversations.enqueue({message_id:'second',chat_id:'oc_group',sender_id:'ou_b',chat_type:'group',agent_profile:'one',agent_role:'owner_intake',content:'请继续说明',root_id:'first',reply_to:'first'});await app.conversations.idle();
  const next=await app.store.read(),last=Object.values(next.questions).at(-1);assert.match(JSON.stringify(next.cardMessages['question:'+last.id].card),/专用称呼，已确认结果/);
  assert.equal(next.conversations.at(-1).senderId,'ou_b');
+ const created=await app.store.createJob({questionId:last.id,projectId:'demo',chatId:'oc_group',senderId:'ou_b',originProfile:'one',agentProfile:'dev',stage:'developer',workflow:'continuous_analysis',taskIntent:'analysis',instruction:'只读分析',sourceMessageId:'job-after-second'});
+ await app.store.transact(state=>{const job=state.jobs.find(j=>j.id===created.job.id);job.status='completed';job.updatedAt=new Date().toISOString();job.result={outcome:'ready',summary:'已核实任务结果。',finalMessage:'已有证据与数据保持原样。'};});
+ const {publishQuestion}=await import('../src/control-plane/questions.js');await publishQuestion(app.conversations.context,last.id);
+ const final=await app.store.read();assert.match(JSON.stringify(final.cardMessages['question:'+last.id].card),/专用称呼，已有证据与数据保持原样/);assert.equal(final.jobs[0].result.summary,'已核实任务结果。');
 });
 test('table-only cards get a separate greeting rather than altering a flow footer or business cells',()=>{
  const table={tag:'table',rows:[{amount:'100.00'}]},footer={tag:'markdown',text_size:'notation',content:'流程：开发'};
