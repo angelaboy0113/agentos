@@ -272,3 +272,40 @@ test('unshared cloud input stays orange without completion mention and same requ
  await send('cloud-root','ou_asker',{content:'请核对 https://tenant.feishu.cn/file/CloudCsv'});let s=await app.store.read();const q=s.conversations[0].questionId;assert.equal(s.conversations[0].cloudInputPending,true);assert.equal(s.jobs.length,0);let view=questionView(s,q,context.projects);assert.equal(view.terminal,false);assert.equal(view.card.header.template,'orange');assert.equal(calls.some(c=>c.type==='mention'&&/已完成|已结束/.test(c.text)),false);
  await send('cloud-retry','ou_asker',{content:'已共享，请重试',reply_to:'cloud-root',root_id:'cloud-root'});s=await app.store.read();assert.equal(attempts,2);assert.equal(s.conversations[1].questionId,q);assert.equal(s.conversations[1].cloudInputPending,false);assert.equal(s.jobs.length,1);assert.equal(s.jobs[0].attachments[0].id,'cloud-csv');assert.equal(inputs[1].fileInput.cloudLinks[0].token,'CloudCsv');
 });
+
+test('public topic members read prior context without taking ownership of an active task', async t => {
+  const {app,send,inputs}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'只读核对报表'}));
+  await send('topic','ou_asker');
+  let state=await app.store.read();const original=state.conversations[0].questionId,job=state.jobs[0];
+  await app.store.transact(s=>{s.jobs[0].status='running';});
+  await send('follow','ou_other',{root_id:'topic',reply_to:'topic',content:'在上面报表基础上补充部门和预算来源'});
+  state=await app.store.read();const follow=state.conversations.at(-1);
+  assert.notEqual(follow.questionId,original);
+  assert.equal(state.questions[follow.questionId].parentQuestionId,original);
+  assert.equal(state.questions[original].senderId,'ou_asker');
+  assert.equal(inputs.at(-1).administrator,false);
+  assert.equal(inputs.at(-1).history[0].senderId,'ou_asker');
+  assert.equal(inputs.at(-1).jobs.find(j=>j.id===job.id).canModifyTask,false);
+  assert.equal(state.jobs[0].senderId,'ou_asker');
+  assert.equal(state.jobs[0].status,'running');
+  assert.equal(state.jobs.at(-1).senderId,'ou_other');
+});
+
+test('minimal report references survive trimming of verbose old jobs and missing files remain explicit',async t=>{
+ const {app,send,inputs}=await setup(t,input=>input.message==='question-root'?decision({action:'create_task',intent:'analysis',instruction:'只读导出清单'}):decision());
+ await send('root');
+ await app.store.transact(s=>{const job=s.jobs[0];job.status='completed';job.reportFiles=[{id:'report-00000000-0000-0000-0000-000000000000',filename:'report-00000000-0000-0000-0000-000000000000.csv',rowCount:3,sha256:'a'.repeat(64),verificationHash:'b'.repeat(64)}];job.result={sourceSync:{repositories:Array.from({length:500},()=>({path:'large old source summary '.repeat(20)}))}};s.reportDeliveries={[job.id+':'+job.reportFiles[0].id]:{sourceJobId:job.id,item:job.reportFiles[0],destination:{profile:job.originProfile},messageId:'previous-file',deliveredAt:new Date().toISOString()}};});
+ await send('follow','ou_other',{reply_to:'root',root_id:'root',content:'原清单补充部门列'});
+ const input=inputs.at(-1);assert.equal(input.jobs.length,0);
+ assert.equal(input.relatedReports.length,1);assert.equal(input.relatedReports[0].files[0].availability,'unavailable');
+ assert.equal(input.relatedReports[0].files[0].rowCount,3);
+});
+
+test('an explicit reply to a delivered report resolves its question across public members',async t=>{
+ const {app,send,inputs}=await setup(t);
+ await send('root');const original=(await app.store.read()).conversations[0].questionId;
+ await app.store.transact(s=>{s.reportDeliveries={report:{questionId:original,deliveredAt:new Date().toISOString(),messageId:'file-message',messageIds:['file-part1','file-message']}};});
+ await send('follow','ou_other',{reply_to:'file-part1',content:'在这份文件上补充一列'});
+ const state=await app.store.read();assert.equal(state.questions[state.conversations.at(-1).questionId].parentQuestionId,original);
+ assert.equal(inputs.at(-1).history[0].user,'question-root');
+});

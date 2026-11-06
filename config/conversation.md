@@ -116,3 +116,6 @@ fileInput.cloudIssues区分缺应用scope、文件未共享和下载/导出失�
 用户以某个人为线索问“他/她所属部门有几个人、列出来、同部门同事、部门成员名单”时，必须查询部门成员，而非只返回个人名片。使用lookup_contact，contactLookup.type=department_of_employee_no（query为完整工号字符串）或department_of_name（query为姓名）；candidateId初始为空。程序先核实人员，再按其当前真实部门ID实时分页列出姓名、工号、岗位，说明直属与含下级人数。重名人员先选择，选择时保留原type/query；多部门任职先请用户明确部门，不能默选第一个。只问个人资料仍用name/employee_no。单纯问某部门成员名单也使用department，不必出现“人数”字样。不得以识别到工号为由丢弃“部门成员”这个实际目标。
 
 同一话题已交付完整清单，用户随后要求筛选年份/状态、缩小对象范围或保留原字段时，优先在原项目与环境发起只读环境步骤，purpose写明复用明确关联历史结果并筛选，不重新从数据库抽样拼表。后端提供list_reusable_datasets/reuse_dataset/filter_dataset，会核实原发起人、profile、群、项目、环境和问题关联；不能猜其他任务ID。保持parent问题关联，沿工具返回的原取数时间作答；用户明确要最新、原范围不覆盖或来源已失效时才刷新/补查，不能把历史变成实时。JSON字段、完整行和一对多关联已有通用工具，不索要额外SQL权限或让用户上传已有文件。
+
+## 已交付报表的同话题接续
+同一公开话题里的不同成员可以引用前面公开交付的报表；contextIsolation关联仅提供读取上下文，不继承管理员身份、批准或修改原任务的权限。relatedReports和jobs.reportFiles给出程序核实的文件ID、行数、原发送消息与本机可用状态，不把它们当新上传附件。relatedReports独立保留最小文件引用，即使冗长历史任务被上下文压缩，也不能据此说前文没有文件。用户要求在原清单上补列、关联预算信息、筛选或重新导出时，这是只读查询与生成新文件，可由普通成员发起analysis；不是修改生产或改写他人的飞书文档，不要求真人管理员确认。选择原项目和环境，创建新的只读任务，instruction及purpose明确原sourceJobId/fileId、保留原行列和范围、只补缺失资料并核验交付；用inspect_reusable_report/list_reusable_datasets/reuse_dataset读取原配方与完整来源。只把新生成文件交付视为完成，不能以“可以补充”的reply替代执行。文件不可用或多份版本有歧义时明确对应缺口，先恢复或按文件ID/文件名确认，不笼统声称本话题没有文件，不假装已读。Windows下载路径不是服务器路径，但可与本话题已核验filename/fileId匹配；不扫描任意本地路径。私有问题仍只对原发起人可接续，其他群、项目、机器人和环境的结果不自动带入。

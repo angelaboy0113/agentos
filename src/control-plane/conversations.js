@@ -1,3 +1,5 @@
+import {questionContextIds} from '../shared/question-context.js';
+import {reportConversationContext} from '../shared/report-context.js';
 import {departmentCommand} from './contact-commands.js';
 import {cloudFileLinks} from '../shared/cloud-file-links.js';
 import {stateView} from '../shared/state-view.js';
@@ -303,11 +305,7 @@ export class ConversationService {
     const state = await store.read();
     const projectId = projects.chatProjectMap[turn.chatId] ?? null;
     const scoped = Boolean(turn.questionId);
-    const questionIds = new Set();
-    let q = state.questions?.[turn.questionId];
-    while (q && !questionIds.has(q.id) && q.chatId === turn.chatId && q.profile === turn.profile && q.projectId === projectId && (q.visibility!=='requester'||turn.visibility==='requester'&&q.senderId===turn.senderId)) {
-      questionIds.add(q.id); q = state.questions?.[q.parentQuestionId];
-    }
+    const questionIds = questionContextIds(state, turn, projectId);
     if (scoped) questionIds.add(turn.questionId);
     const preceding = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.chatId === turn.chatId
       && item.profile === turn.profile && (item.visibility!=='requester'||turn.visibility==='requester'&&item.senderId===turn.senderId) && (scoped ? questionIds.has(item.questionId) : item.senderId === turn.senderId) && item.status === 'sent'
@@ -325,11 +323,14 @@ export class ConversationService {
     relatedMessages.add(turn.id); relatedMessages.add(turn.messageId);
     if(turn.directoryChannel)return {requestId:turn.id,questionId:turn.questionId,role:turn.role,nativeSession:true,currentActor:{senderId:turn.senderId,profile:turn.profile},project:{id:projectId},message:turn.content,history:history.map(t=>({user:t.content,assistant:t.response})),attachments:[],currentAttachmentIds:[],contactDirectory:await this.context.contacts.catalog(turn),delivery:{visibility:'requester_and_owner'},channel:{kind:'contacts_only',allowedActions:['lookup_contact','reply'],rule:'根据姓名、完整工号或部门名称/组织路径调用lookup_contact；部门人数或成员名单使用type=department；以某个人为线索问所属部门成员时用department_of_employee_no或department_of_name，不能只查个人名片。程序列成员姓名、工号、岗位及直属/含下级人数；联系人事实必须来自工具结果。需要补充姓名/工号时用reply，不得编造资料，不得创建开发、数据库或环境任务。结果在群内私有卡片中展示，仅提问者和群主可见。'}};
     const explicitJob = job => !scoped && isAdministrator(projects,turn) && String(turn.content).split(/[^A-Za-z0-9_-]+/).includes(job.id);
-    const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId && (!isPrivate(state,job)||turn.visibility==='requester'&&job.senderId===turn.senderId)
+    const sourceJobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId && (!isPrivate(state,job)||turn.visibility==='requester'&&job.senderId===turn.senderId)
       && (explicitJob(job) || (job.originProfile ?? job.agentProfile ?? null) === (turn.profile ?? null))
       && (scoped ? questionIds.has(job.questionId) : relatedMessages.has(job.originMessageId) || relatedMessages.has(job.sourceMessageId) || explicitJob(job))
-      && !suppressed.has(`job:${job.id}`) && !suppressed.has(`conversation:${job.sourceMessageId}`) && !suppressedMessages.has(job.originMessageId)).slice(-20).map((job) => ({
+      && !suppressed.has(`job:${job.id}`) && !suppressed.has(`conversation:${job.sourceMessageId}`) && !suppressedMessages.has(job.originMessageId)).slice(-20);
+    const jobs = await Promise.all(sourceJobs.map(async (job) => ({
       id: job.id, projectId: job.projectId, stage: job.stage, status: job.status,
+      reportFiles: await reportConversationContext(this.context.config.dataDir, state, job, turn),
+      canModifyTask: isTaskCreator(projects, job, turn) || isAdministrator(projects, turn),
       instruction: job.instruction.slice(0, 4000),
       evidence: sourceEvidence(job, projects.projects[projectId]?.repoPath),
       finalMessage: job.environmentAccess ? '环境查询的明细不注入共享记忆；需要当前数据请重新发起受控查询。' : sourceEvidence(job, projects.projects[projectId]?.repoPath).applicability === 'not_evidence_for_current_source_directory'
@@ -337,7 +338,7 @@ export class ConversationService {
         : job.result?.finalMessage?.slice(0, 6000) ?? '',
       environmentAccess: job.environmentAccess ? { environmentId: job.environmentAccess.environmentId, queryId: job.environmentAccess.queryId, scopeHash: job.environmentAccess.scopeHash, expiresAt: job.environmentAccess.expiresAt, description: job.environmentAccess.description } : null,
       canApprove: isAdministrator(projects, turn) && job.status === 'awaiting_approval',
-    }));
+    })));
     delete memory.suppressedRefs;
     const input=fitContext({
       delivery:{visibility:turn.visibility??'public',rule:turn.visibility==='requester'?'只向提问者投递临时卡片；附件通过同一机器人私聊，不得公开。':'普通公开回复'},
@@ -362,6 +363,7 @@ export class ConversationService {
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
       history: history.map((item) => ({ senderId: item.senderId, user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
         evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
+      relatedReports: jobs.filter(job=>job.reportFiles.length).map(job=>({sourceJobId:job.id,sourceEnvironment:job.evidence.sourceEnvironment,files:job.reportFiles.map(({rule,sha256,...file})=>file)})),
       jobs, attachments, attachmentErrors:turn.attachmentErrors??[], fileInput:{cloudIssues:turn.cloudFileIssues??[],cloudLinks:turn.cloudFileLinks??[],available:attachments.some(a=>a.type!=='image'),rule:'上传文件当前只有元信息。实际读取需求须requiresFileInspection=true并选择attachmentIds，程序创建只读任务读取完整本机文件。纯文件任务不需要源码环境，不能假装已经读过。'}, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
     }, this.memory.settings);
     return input;
