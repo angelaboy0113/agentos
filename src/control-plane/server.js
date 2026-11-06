@@ -1,3 +1,4 @@
+import {holdFailedHandoffQuery} from '../shared/query-repair.js';
 import {CloudFiles} from './cloud-files.js';
 import {validateRetainedRequest,expiredMessage} from '../shared/retention.js';
 import {RetentionService} from './retention.js';
@@ -371,6 +372,7 @@ async function route(context) {
     if (!job?.lease?.id || body.leaseId !== job.lease.id || body.runnerId !== job.lease.runnerId) {
       return json(response, 409, { ok: false, error: 'Stale or foreign Runner lease' });
     }
+    if(body.type==='completed')body.result=holdFailedHandoffQuery(body.result);
     let routing = agentRouting(context, nextStage(job.workflow, job.stage));
     if(body.type==='completed'&&body.result?.environmentSetup){
       if(job.taskIntent!=='analysis'||!job.questionId||job.environmentAccess||!['developer','owner_report'].includes(job.stage)

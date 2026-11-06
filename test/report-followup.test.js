@@ -1,3 +1,5 @@
+import {historicalReportReference} from '../src/shared/report-context.js';
+import {validateHandoff,enforceHandoff} from '../src/runner/harness.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
@@ -40,12 +42,20 @@ test('cross-member report reuse includes only delivered public bound sources, pr
  const reused=await importReportDataset(next,{sourceJobId:source.id,datasetRef:raw.datasetRef},catalog,root);
  assert.equal(reused.readAt,raw.readAt);assert.equal(reused.rowCount,2);
  const info=await inspectReusableReport(root,current,'scope',{sourceJobId:source.id,fileId:file.id});assert.equal(info.binding.fileId,file.id);
+ const reference=await historicalReportReference(root,current,file.filename);
+ assert.equal(reference.namespace,'historical-report-reference');assert.equal(reference.referenceOnly,true);assert.equal(reference.sourceJobId,source.id);
+ const result={outcome:'needs_clarification',environmentQuery:{environmentId:'prd',queryId:'investigate',parameters:['补列']},handoff:{artifacts:[{kind:'report',path:file.filename}],checks:[{id:'query-needed',required:true,status:'not_run',evidence:'仍需读取新增列'}],risks:['原列沿用旧取数时间'],returnTo:'none'}};
+ let gate=await validateHandoff(current,result,root,{dataDir:root});assert.deepEqual(gate.issues,[]);
+ assert.equal(enforceHandoff(result,gate).outcome,'needs_clarification');
+ assert.deepEqual(current.reportFiles,undefined);
+ gate=await validateHandoff(current,{...result,reportAssessment:{decision:'deliver',fileId:file.id}},root,{dataDir:root});assert.ok(gate.issues.length);
  const context=await reportConversationContext(root,state,source);assert.equal(context[0].availability,'available');assert.equal(context[0].messageId,'sent-file');
  for(const changed of [{visibility:'requester'},{sourceEnvironment:'uat'},{status:'running'},{chatId:'other'}]){
-  Object.assign(source,changed);await save();assert.deepEqual(await reusableReportSources(root,current,'scope'),[]);Object.assign(source,{visibility:undefined,sourceEnvironment:'prd',status:'completed',chatId:'g'});
+  Object.assign(source,changed);await save();assert.deepEqual(await reusableReportSources(root,current,'scope'),[]);assert.equal(await historicalReportReference(root,current,file.filename),null);Object.assign(source,{visibility:undefined,sourceEnvironment:'prd',status:'completed',chatId:'g'});
  }
  await save();assert.deepEqual(await reusableReportSources(root,current,'other-scope'),[]);
  await rm(path.join(root,'exports',source.id,file.filename));
  assert.equal((await reportConversationContext(root,state,source))[0].availability,'unavailable');
  assert.deepEqual(await reusableReportSources(root,current,'scope'),[]);
+ await assert.rejects(historicalReportReference(root,current,file.filename));
 });

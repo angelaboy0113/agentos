@@ -34,3 +34,11 @@ export function queryRejection(error, job) {
  const retry=recoverable&&repeated<2;
  return {code,reason,correction,retry,attempt:repeated+1,...(recoverable&&!retry?{pause:'同类申请错误连续自查后仍未修正，已暂停重复申请。'}:{})};
 }
+
+// Keep the original failed handoff diagnostic; it is not an invalid workflow stage.
+export function holdFailedHandoffQuery(result) {
+ if(result?.handoffGate?.passed!==false||!result.environmentQuery&&!result.websiteQuery&&!result.environmentSetup)return result;
+ return {...result,outcome:'blocked',environmentQuery:null,websiteQuery:null,environmentSetup:null,
+   queryRejection:{code:'HANDOFF_FAILED',reason:'交接材料尚未通过核验，本次追加查询未执行。',
+     correction:'按原handoffGate.issues核对引用或工件；历史文件只作输入参考，不能冒充本轮交付。已有证据保留，不是业务权限或网络诊断。',retry:false}};
+}

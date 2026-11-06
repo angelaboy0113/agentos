@@ -1,3 +1,4 @@
+import {historicalReportReference} from '../shared/report-context.js';
 import { hashFile } from '../shared/file-digest.js';
 import { reportFile } from '../shared/report-files.js';
 import { investigationComplete, QUESTION_GOAL_ID } from '../shared/investigation-review.js';
@@ -70,7 +71,12 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
         verifiedArtifacts.push({kind:'report',path:registered.filename,namespace:'task-report',fileId:registered.id,sourceJobId,sha256:registered.sha256,bytes:registered.bytes,verificationHash:registered.verificationHash});
         continue;
       }
-      if (item.kind === 'report' && /^report-[a-f0-9-]{36}(?:\.csv)?$/.test(item.path)) throw new Error('REPORT_UNREGISTERED');
+      if (item.kind === 'report' && /^report-[a-f0-9-]{36}(?:\.csv)?$/.test(item.path)) {
+        const reference=dataDir&&await historicalReportReference(dataDir,job,item.path);
+        if(!reference)throw new Error('REPORT_UNREGISTERED');
+        if(result.reportAssessment?.decision==='deliver'&&result.reportAssessment.fileId===reference.fileId)throw new Error('HISTORICAL_INPUT_NOT_OUTPUT');
+        verifiedArtifacts.push(reference);continue;
+      }
       const candidate = path.resolve(root, item.path);
       if (!inside(root, candidate)) throw new Error();
       const resolved = await realpath(candidate);

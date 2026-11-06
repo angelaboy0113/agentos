@@ -232,3 +232,13 @@ test('investigation purpose is complete non-SQL metadata, not a 200-character bu
  const cfg=config();cfg.environments.prd.queries.investigate={mode:'investigate',reviewed:true,description:'investigate',tables:['orders'],maxRows:5,timeoutMs:1000,parameters:[{name:'purpose',type:'string',maxLength:200}]};
  const purpose='Inspect source and verify all independent goals without dropping original requirements. '.repeat(40)+'\nKeep source and data evidence separate.';const plan=planQuery(cfg,{environmentId:'prd',queryId:'investigate',parameters:[purpose]},'demo',actor);assert.equal(plan.parameters[0],purpose);assert.equal(catalog(cfg,'demo')[0].queries.find(q=>q.queryId==='investigate').parameters[0].maxLength,undefined);assert.throws(()=>planQuery(cfg,{...request,parameters:['X'.repeat(41)]},'demo',actor));assert.throws(()=>planQuery(cfg,{environmentId:'prd',queryId:'investigate',parameters:['\u0000']},'demo',actor));
 });
+
+test('failed handoff retains its real diagnostic instead of turning into INVALID_STAGE',async t=>{
+ const {app,send}=await fixture(t,()=>decision({environmentQuery:null,requiresSourceInspection:true}));
+ await send('ou_owner');const leased=await app.store.leaseNext('r');
+ await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+ const response=await fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${leased.id}/events`,{method:'POST',headers:{authorization:`Bearer ${app.config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({type:'completed',leaseId:leased.lease.id,runnerId:'r',result:{outcome:'blocked',summary:'交接核验未通过',finalMessage:'原始交接问题：引用文件缺失',handoffGate:{passed:false,issues:['引用文件缺失']},environmentQuery:request}})});
+ assert.equal(response.status,200);const state=await app.store.read();assert.equal(state.jobs.length,1);
+ assert.equal(state.jobs[0].result.queryRejection.code,'HANDOFF_FAILED');assert.equal(state.jobs[0].result.finalMessage,'原始交接问题：引用文件缺失');
+ assert.equal(state.jobs[0].result.environmentQuery,null);assert.equal(state.jobs[0].status,'blocked');
+});
