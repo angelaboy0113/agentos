@@ -141,3 +141,5 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 
 
 汇总别名须追溯到原始字段；独立核验逐对象比对并保留关联行数来源。weighted_sum在完整保存数据上精确计算金额乘权重，配方随完整data迁移；旧版不能接续此新聚合配方。参数、核验与恢复边界见[报表核验与加权](report-provenance.md)。
+
+可选称呼规则位于 ignored 的 `config/reply-addressing.local.json`；按实例私有配置备份/迁移，不提交团队真实姓名例外到公开仓库。群成员姓名缓存仅在进程内、按profile与群隔离，重启重新读取，不需要复制缓存；已生成卡片仍由原投递状态保存。详见[提问者称呼](reply-addressing.md)。

@@ -14,6 +14,7 @@ export function controlConfig(overrides = {}) {
     retentionDays: Number(overrides.retentionDays ?? process.env.AGENTOS_RETENTION_DAYS ?? 0),
     runtimeDir: overrides.runtimeDir ?? process.env.AGENTOS_RUNTIME_DIR ?? null,
     conversationFile: overrides.conversationFile ?? process.env.AGENTOS_CONVERSATION_FILE ?? './config/conversation.local.json',
+    replyAddressingFile: overrides.replyAddressingFile ?? process.env.AGENTOS_REPLY_ADDRESSING_FILE ?? './config/reply-addressing.local.json',
     contactChannelsFile: overrides.contactChannelsFile ?? process.env.AGENTOS_CONTACT_CHANNELS_FILE ?? './config/contact-channels.local.json',
     contactsFile: overrides.contactsFile ?? process.env.AGENTOS_CONTACTS_FILE ?? './config/contacts.local.json',
     knowledgeFile: overrides.knowledgeFile ?? process.env.AGENTOS_KNOWLEDGE_FILE ?? './config/knowledge.local.json',

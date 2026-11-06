@@ -1,4 +1,5 @@
 import {publicStickerPolicy} from './success-stickers.js';
+import {addressCard,addressText} from './reply-addressing.js';
 import {readBusinessDefinitions,recordBusinessDefinitions} from '../shared/business-definitions.js';
 import {sourceEnvironmentForTier} from '../shared/source-environments.js';
 import { resolveProjectId, routeAgent, assistantInstructions } from '../shared/project-scope.js';
@@ -267,16 +268,17 @@ export class ConversationService {
         const deliveryStarted = Date.now();
         if(turn.directoryChannel){const responseIds=await this.context.contactChannels.deliver(turn);await this.update(turn.id,{status:'sent',completedAt:new Date().toISOString(),responseIds,contactImageMessageId:turn.outcome?.contactImage?responseIds[0]:null});continue;}
         const responseIds = [...(turn.responseIds ?? [])];
+        const addressee=turn.questionId&&this.context.cards?.enabled?'':await this.context.replyAddressing?.forTurn(turn)??'';
         let parts;
         if (this.context.cards?.enabled) {
-          const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, conversationCard(turn),
+          const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, addressCard(conversationCard(turn),addressee),
             cardDestination(turn), { terminal: true, immediate: true,
               resultText: Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT ? turn.response : '', terminalMention: failureNotice(conversationTerminalMention(turn),{card:conversationCard(turn),terminal:true,profile:turn.profile,chatType:turn.chatType,visibility:turn.visibility,occurredAt:turn.aiCompletedAt??turn.createdAt},this.context.projects) });
           if (cardId && !responseIds.includes(cardId)) responseIds.push(cardId);
           parts = [];
         } else {
           if(turn.visibility==='requester')throw new Error('私有卡片投递不可用，未回退公开消息');
-          parts = splitReply(turn.response);
+          parts = splitReply(addressText(turn.response,addressee));
           const mention = conversationTerminalMention(turn);
           if (mention && parts.length) parts[parts.length - 1] = `${parts.at(-1)}\n\n${mention.text}`;
         }

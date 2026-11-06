@@ -42,6 +42,7 @@ import { loadConversationSettings } from './conversation-settings.js';
 import { loadMemorySettings } from './memory.js';
 import { ConversationService, splitReply, responseMessageId } from './conversations.js';
 import { LiveCards } from './live-cards.js';
+import { ReplyAddressing, addressCard } from './reply-addressing.js';
 import { jobCard, resultSummary } from './message-cards.js';
 import { handleCardAction } from './card-actions.js';
 import { jobTerminalMention, failureNotice } from './requester-mention.js';
@@ -77,6 +78,7 @@ export async function createControlPlane(overrides = {}) {
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
   context.cards = cards;
+  context.replyAddressing = new ReplyAddressing(context);
   context.longNotices=new LongInvestigationNotices(context);context.successStickers=new SuccessStickers(context);context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();await context.successStickers.retry();};
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
@@ -669,7 +671,8 @@ export async function notifyJobEvent(context, { job, event }) {
     const key = `job:${job.id}:${attempt}`;
     // Once queued, keep the exact recipients across retries/config changes.
     const frozenMention = (await context.store.read()).cardMessages?.[key]?.terminalMention;
-    const id = await context.cards.upsert(key, jobCard(current),
+    const rendered=addressCard(jobCard(current),terminal?await context.replyAddressing?.forTurn(current)??'':'');
+    const id = await context.cards.upsert(key, rendered,
       current.visibility==='requester'?cardDestination(current):{ chatId: current.chatId, replyTo: current.chatId ? null : current.replyToMessageId, profile: current.agentProfile },
       { terminal, immediate: terminal, resultText: terminal ? current.result?.finalMessage : '',
         terminalMention: frozenMention ?? failureNotice(jobTerminalMention(current, context.projects),{card:jobCard(current),terminal,profile:current.originProfile,chatType:current.originChatType,visibility:current.visibility,occurredAt:current.updatedAt},context.projects) });

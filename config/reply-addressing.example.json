@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "profiles": ["your-bot-profile"],
+  "chatIds": ["your-authorized-group-id"],
+  "enabledSince": "2026-01-01T00:00:00Z",
+  "fallback": "老师",
+  "displayNameOverrides": {"示例姓名": "示例称呼"}
+}

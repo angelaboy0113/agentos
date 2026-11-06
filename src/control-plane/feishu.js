@@ -53,6 +53,12 @@ export class FeishuClient {
     const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:'Bearer '+await this.tenantToken()},signal:AbortSignal.timeout(30000)});const result=await response.json();
     if(!response.ok||result.code!==0)throw new Error('Cloud read failed '+String(result.code));return result.data;
   }
+  async groupMembersPage(chatId,{pageToken}={},options={}){
+    if(!/^oc_[A-Za-z0-9]+$/.test(chatId??''))throw Error('Invalid member-name scope');
+    const params=new URLSearchParams({member_id_type:'open_id',page_size:'100',...(pageToken?{page_token:pageToken}:{})});
+    const r=await fetch(`${OPEN_API}/im/v1/chats/${chatId}/members?${params}`,{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(options.timeoutMs??2000)}),d=await r.json();
+    if(!r.ok||d.code!==0||!Array.isArray(d.data?.items))throw Error('Member names unavailable');return d.data;
+  }
   async contactRequest(route,params){
     if(route!=='/open-apis/application/v6/scopes'&&!/^\/open-apis\/contact\/v3\/(?:scopes|users\/find_by_department|users\/[^/]+|departments\/[^/]+(?:\/children)?)$/.test(route))throw new Error('Invalid contact route');
     const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(30000)});

@@ -1,4 +1,5 @@
 import {isPendingEnrollment} from '../shared/enrollment-lifecycle.js';
+import {addressCard} from './reply-addressing.js';
 import { addQuestionProgress, enrollmentNotice } from './enrollment-cards.js';
 import {stateView} from '../shared/state-view.js';
 import {cardDestination} from './private-cards.js';
@@ -147,6 +148,10 @@ export function publishQuestion(context, id) {
     const snapshot = await stateView(context.store,s=>({questions:{[id]:s.questions[id]},jobs:(s.jobs??[]).filter(j=>j.questionId===id),conversations:(s.conversations??[]).filter(t=>t.questionId===id||t.id===s.questions[id]?.rootTurnId||t.id===s.questions[id]?.latestTurnId),environmentEnrollments:Object.fromEntries(Object.entries(s.environmentEnrollments??{}).filter(([,e])=>e.questionId===id)),cardMessages:{['question:'+id]:s.cardMessages?.['question:'+id]}}));
     const version = sourceVersion(snapshot, id);
     const view = questionView(snapshot, id, context.projects);
+    if(view.terminal&&context.replyAddressing){
+      const q=snapshot.questions[id],actor=snapshot.conversations.find(t=>t.id===q.latestTurnId)??snapshot.jobs.at(-1);
+      if(actor)view.card=addressCard(view.card,await context.replyAddressing.forTurn(actor));
+    }
     const key = `question:${id}`;
     // Reopening a round/attempt retains the message, but resets terminal notification delivery.
     let generation;

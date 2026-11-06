@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.73.1** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.74.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 长报表的分阶段口径保留、批量诊断与性能验收见 [查询效率](docs/report-efficiency.md)。
 
@@ -9,6 +9,8 @@
 已保存数据的一对多关联、配置文本展开及恢复见 [数据集关联](docs/dataset-relations.md)。
 
 多系统知识助手专用分支的部署与迁移见 [多系统助手说明](docs/system-assistants.md)。
+
+可选的群成员姓名称呼与例外配置见[提问者称呼](docs/reply-addressing.md)。
 
 第一次部署请按顺序阅读：
 

@@ -11,6 +11,7 @@ try {
   if (!files.length) throw new Error('No AgentOS tests found');
   const child = spawn(process.execPath, ['--test', ...files], { cwd: root, stdio: 'inherit', env: { ...process.env,
     AGENTOS_ENVIRONMENTS_FILE: path.join(directory, 'environments.local.json'),
-    AGENTOS_CONVERSATION_FILE: path.join(directory, 'conversation.local.json'), AGENTOS_MEMORY_FILE: path.join(directory, 'memory.local.json') } });
+    AGENTOS_CONVERSATION_FILE: path.join(directory, 'conversation.local.json'), AGENTOS_MEMORY_FILE: path.join(directory, 'memory.local.json'),
+    AGENTOS_REPLY_ADDRESSING_FILE: path.join(directory,'reply-addressing.local.json') } });
   process.exitCode = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code) => resolve(code ?? 1)); });
 } finally { await rm(directory, { recursive: true, force: true }); }

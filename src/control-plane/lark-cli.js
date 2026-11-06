@@ -119,6 +119,12 @@ export class LarkCliFeishuClient {
   }
 
   async chatInfo(chatId,options={}){await mkdir(this.cwd,{recursive:true});const r=await runLarkCli(['api','GET','/open-apis/im/v1/chats/'+encodeURIComponent(chatId),'--as','bot','--params',JSON.stringify({user_id_type:'open_id'}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});if(!r.data)throw new Error('Chat information unavailable');return r.data;}
+  async groupMembersPage(chatId,{pageToken}={},options={}){
+    if(!/^oc_[A-Za-z0-9]+$/.test(chatId??'')||!options.profile)throw Error('Invalid member-name scope');
+    await mkdir(this.cwd,{recursive:true});
+    const r=await runLarkCli(['api','GET','/open-apis/im/v1/chats/'+chatId+'/members','--as','bot','--params',JSON.stringify({member_id_type:'open_id',page_size:100,...(pageToken?{page_token:pageToken}:{})}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:options.timeoutMs??2000});
+    if(!r.data||!Array.isArray(r.data.items))throw Error('Member names unavailable');return r.data;
+  }
   async getMessage(messageId,options={}){
     await mkdir(this.cwd,{recursive:true});
     const r=await runLarkCli(['api','GET','/open-apis/im/v1/messages/'+encodeURIComponent(messageId),'--as','bot','--params',JSON.stringify({user_id_type:'open_id'}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
