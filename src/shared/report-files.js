@@ -12,7 +12,7 @@ export async function reportFile(dataDir,jobId,item,{includeContent=true}={}){
  if(await hashFile(file)!==item.sha256)throw new Error('报表文件校验失败');
  if(!/^[a-f0-9]{64}$/.test(item.verificationHash??''))throw new Error('报表尚未通过最终核验，不能作为正式文件交付');
  const receiptPath=path.join(path.dirname(actual),item.id+'.verification.json'),receiptInfo=await lstat(receiptPath);
- if(!receiptInfo.isFile()||receiptInfo.isSymbolicLink()||receiptInfo.size>64000)throw new Error('报表核验记录无效');
+ if(!receiptInfo.isFile()||receiptInfo.isSymbolicLink())throw new Error('报表核验记录无效');
  const body=await readFile(receiptPath);if(createHash('sha256').update(body).digest('hex')!==item.verificationHash)throw new Error('报表核验记录摘要不符');
  const receipt=JSON.parse(body.toString());
  if(receipt.version!==1||receipt.status!=='verified'||receipt.file?.sha256!==item.sha256||receipt.file?.id!==item.id||receipt.coverage?.rowCount!==item.rowCount)throw new Error('报表核验记录与文件不符');

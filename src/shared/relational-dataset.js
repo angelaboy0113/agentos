@@ -1,3 +1,4 @@
+import {transformTextDataset} from './text-dataset.js';
 import {createHash} from 'node:crypto';
 import {normalizeCalendarPeriod} from './period-dataset.js';
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -15,7 +16,9 @@ export async function transformDataset(tool,args,load,{check=async()=>{},maxRows
  const inputs=[];for(const ref of refs){await check();const d=await load(ref);if(!d?.complete||!Array.isArray(d.rows))fail('只可使用完整数据集，不能用预览或不完整来源');inputs.push(d);}
  let rows=[],columns=[],numericColumns=[],audit={};
  const add=row=>{if(rows.length>=maxRows)fail('派生数据超过当前管理员明确授权行数，未发布部分结果');rows.push(row);};
- if(tool==='project_dataset'){
+ const textResult=await transformTextDataset(tool,args,inputs[0],check);
+ if(textResult){({rows,columns,numericColumns,audit}=textResult);if(rows.length>maxRows)fail('派生数据超过当前管理员明确授权行数');
+ }else if(tool==='project_dataset'){
   const d=inputs[0],fs=args.fields;if(!Array.isArray(fs)||!fs.length||fs.some(f=>!f||typeof f!=='object')||new Set(fs.map(f=>f.as)).size!==fs.length||fs.some(f=>!safe(f.as)))fail('投影需真实字段及唯一输出别名');fs.forEach(f=>col(d,f.column));
   for(const row of d.rows){await check();add(Object.fromEntries(fs.map(f=>[f.as,row[f.column]])));}columns=fs.map(f=>f.as);numericColumns=fs.filter(f=>d.numericColumns?.includes(f.column)).map(f=>f.as);audit={inputRows:d.rows.length,outputRows:rows.length};
  }else if(tool==='normalize_period_dataset'){
@@ -66,7 +69,8 @@ export async function transformDataset(tool,args,load,{check=async()=>{},maxRows
     if(f.type==='decimal'){if(!/^-?\d+(?:\.\d+)?$/.test(String(v)))fail('数值比较必须为精确十进制字符串');const [a,b='']=String(v).replace(/^-/,'').split('.');return {negative:String(v).startsWith('-'),digits:a.replace(/^0+(?=\d)/,''),fraction:b};}return String(v);};
    const cmp=(a,b)=>{if(f.type!=='decimal')return a<b?-1:a>b?1:0;const width=Math.max(a.fraction.length,b.fraction.length),x=BigInt((a.negative?'-':'')+a.digits+a.fraction.padEnd(width,'0')),y=BigInt((b.negative?'-':'')+b.digits+b.fraction.padEnd(width,'0'));return x<y?-1:x>y?1:0;};
    if(f.op==='in'&&!Array.isArray(f.value))fail('in需值数组');const values=['is_null','not_null'].includes(f.op)?[]:(f.op==='in'?f.value:[f.value]).map(comparable);
-   return row=>{const v=row[f.column];if(f.op==='is_null')return v===null;if(f.op==='not_null')return v!==null;if(v===null)return false;const a=comparable(v);if(f.op==='in')return values.some(b=>cmp(a,b)===0);const c=cmp(a,values[0]);return f.op==='='?c===0:f.op==='!='?c!==0:f.op==='>'?c>0:f.op==='>='?c>=0:f.op==='<'?c<0:c<=0;};});
+   const membership=f.op==='in'&&f.type!=='decimal'?new Set(values):null;
+   return row=>{const v=row[f.column];if(f.op==='is_null')return v===null;if(f.op==='not_null')return v!==null;if(v===null)return false;const a=comparable(v);if(f.op==='in')return membership?membership.has(a):values.some(b=>cmp(a,b)===0);const c=cmp(a,values[0]);return f.op==='='?c===0:f.op==='!='?c!==0:f.op==='>'?c>0:f.op==='>='?c>=0:f.op==='<'?c<0:c<=0;};});
   for(const row of d.rows){await check();if(args.match==='all'?predicates.every(p=>p(row)):predicates.some(p=>p(row)))add({...row});}columns=d.columns;numericColumns=d.numericColumns??[];audit={inputRows:d.rows.length,outputRows:rows.length,excludedRows:d.rows.length-rows.length};
  }else fail('不支持的数据转换');
  const readAt=inputs.map(d=>d.readAt).sort()[0],readThroughAt=inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),ids=[...new Set(inputs.map(d=>d.snapshotId))].sort();

@@ -110,7 +110,7 @@ export function groupCountStatement(args,tables,q){
 }
 
 const aggregateExpression = (item, tables, types, q, aliases = new Map()) => {
-  if (!item || !['sum','avg','min','max','count','count_distinct'].includes(item.op)) throw new QueryInputError('QUERY_INPUT','aggregate op仅支持sum、avg、min、max、count、count_distinct。');
+  if (!item || !['sum','avg','min','max','count','count_distinct'].includes(item.op)) throw new QueryInputError('QUERY_INPUT','aggregate op仅支持sum、avg、min、max、count、count_distinct。完整文本多值合并使用summarize_dataset的distinct_text，状态字典使用map_values_dataset，不需要额外SQL函数权限。');
   const table = item.table;
   const alias = aliases.get(table) ?? '';
   if (item.op === 'count' && item.column == null) return 'COUNT(*)';
@@ -253,6 +253,8 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
 
   if(e.kind==='mysql'&&q.exportMaxRows)spec.push(
    {tool:'row_dataset',args:{table:'schema表',columns:['完整实际字段'],orderBy:['稳定唯一主键'],filters:[]},description:'读取原始完整行，不分组或去重；按稳定唯一键排序后完整分页保存datasetRef。JSON以完整字符串保留（不截断），随后expand_dataset拆行。全量filters=[]，范围仍按原授权；预览不是完整数据。'},
+   {tool:'summarize_dataset',args:{datasetRef:'完整来源',keyColumns:['实际对象复合键'],fields:[{column:'来源列',as:'输出列',op:'distinct_text/assert_same',nulls:'keep/exclude/error',format:'distinct_text选json/joined',separator:'joined时明确分隔符'}],rowKey:'可选组合键输出列',evidence:'原问题要求的行粒度及聚合依据'},description:'在完整已有数据集按复合键生成每对象一行。distinct_text完整去重、稳定排序并输出全部文本值，不截断；json保留null/空字符串区别，joined用于显示。assert_same核对同组字段全部一致后保留唯一原值，适合重复展开的整单金额、时间、状态，不对整单金额重复求和；冲突明确报错。纯本地、不重查数据库，配方可恢复、刷新与重放核验。字段语义须按项目源码确认，不能以对象类型或相似名称替代原问题要求的业务分类。'},
+   {tool:'map_values_dataset',args:{datasetRef:'完整来源',fields:[{column:'状态等原字段',as:'新增中文标签列',entries:[{from:'原值',to:'源码字典标签'}],unknown:'keep/empty/error',nulls:'keep/error',evidence:'实际已核实的项目字典或源码位置'}]},description:'固定字典映射已有完整数据，新建标签列并保留原字段，不执行表达式；未知值明确按规则处理并审计，不能猜测中文状态。映射规则由项目源码/配置提供，OS不写死业务枚举。保留原时间与可重放配方。'},
    {tool:'project_dataset',args:{datasetRef:'完整来源',fields:[{column:'实际来源列',as:'输出别名'}]},description:'保留所有行，仅投影或重命名已有列，不改值、不去重，不生成文件；跨来源统一对象/期间列名后union_dataset，保留取数时间、数值类型和可重放依赖。'},
    {tool:'normalize_period_dataset',args:{datasetRef:'完整来源',fields:[{column:'实际期间列',yearColumn:'可选分列年份',as:'新增统一期间列',unit:'month/day',nulls:'error/keep'}]},description:'在完整数据上新增标准期间列，不改原列。月支持YYYYMM、数值YYYYMM、YYYY-MM、YYYY-M或分列年/月；日支持YYYYMMDD/YYYY-MM-DD。非法日期报错，空值明确保留或报错；保留来源时间及可重放配方。跨来源先用project_dataset统一对象键别名和期间，再union_dataset，不需要任意SQL转换。'},
    {tool:'select_period_dataset',args:{datasetRef:'完整来源',keyColumns:['对象实际复合键'],periodColumn:'期间列',unit:'month/day',select:'first/last',ties:'all/error',nulls:'error/exclude',nullEvidence:'exclude时提供依据'},description:'按对象复合键选最早或最晚有效期间的原始整行，不按金额非零猜发生、不取全表最大日期。自动按日历比较混合期间格式；并列需明确全保留或报错，不任意选首行。可先规范各来源期间并union去重，再为每户选最后有效业务月份；再按对象+标准月份join_dataset到完整period_dataset余额网格，主对象left关联保留无发生对象。金额来源和决定末期的业务来源须分别核实，不默认所有金额来源都决定末期。配方支持恢复、刷新及文件核验，未发生与未知不得混淆。'},
@@ -271,14 +273,14 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     if (!spec.some(x => x.tool === tool) || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('不支持的工具或参数');
     if (tool.startsWith('browser_')) { if (!browser) throw new Error('当前范围未启用浏览器'); return browser.run(tool,args); }
     // Local immutable dataset work has no wall-clock cutoff; checks retain cancellation/auth.
-    const localOnly=['inspect_reusable_report','list_reusable_datasets','reuse_dataset','expand_dataset','join_dataset','union_dataset','filter_dataset','normalize_period_dataset','select_period_dataset','project_dataset','period_dataset','compose_report','finalize_report','enrich_dataset','compare_datasets','inspect_report','inspect_dataset','list_datasets'].includes(tool);
+    const localOnly=['inspect_reusable_report','list_reusable_datasets','reuse_dataset','expand_dataset','join_dataset','union_dataset','filter_dataset','normalize_period_dataset','select_period_dataset','project_dataset','summarize_dataset','map_values_dataset','period_dataset','compose_report','finalize_report','enrich_dataset','compare_datasets','inspect_report','inspect_dataset','list_datasets'].includes(tool);
     let timer;
     try {
       const operation=(async () => {
         if(tool==='list_reusable_datasets'){const sources=await reuseSources();const all=sources.flatMap(s=>s.datasets.map(d=>({sourceJobId:s.jobId,questionId:s.questionId,...d})));const offset=args.offset??0,limit=args.limit??20;if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>20)throw new QueryInputError('QUERY_INPUT','复用目录分页offset>=0，limit为1至20；按nextOffset继续');return {reports:offset===0?sources.flatMap(s=>s.reports.map(r=>({sourceJobId:s.jobId,...r}))):[],datasets:all.slice(offset,offset+limit),totalCount:all.length,nextOffset:offset+limit<all.length?offset+limit:null};}
         if(tool==='inspect_reusable_report'){await adapters.authorize?.();return inspectReusableReport(adapters.dataDir,adapters.reportJob,datasets.storage.scope,args);}
         if(tool==='reuse_dataset'){await adapters.authorize?.();return importReportDataset(datasets,args,await reuseSources(),adapters.dataDir);}
-        if(['expand_dataset','join_dataset','union_dataset','filter_dataset','normalize_period_dataset','select_period_dataset','project_dataset'].includes(tool))return datasets.transform(tool,args);
+        if(['expand_dataset','join_dataset','union_dataset','filter_dataset','normalize_period_dataset','select_period_dataset','project_dataset','summarize_dataset','map_values_dataset'].includes(tool))return datasets.transform(tool,args);
         if(tool==='list_datasets')return datasets.list(args);
         if(tool==='compare_datasets')return datasets.compare(args);
         if(tool==='period_dataset')return datasets.period(args);
@@ -378,8 +380,9 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         const [rows] = await read(c,{ sql: statement.sql, timeout: q.timeoutMs }, statement.params);
         return { table: args.table, rows: rows.slice(0, q.maxRows).map(r => Object.fromEntries(statement.columns.map(k => [k, sanitizedValue(r[k], secrets)]))), truncated: rows.length > q.maxRows };
       })();
-      if(localOnly)return await operation;
-      return await Promise.race([operation,new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['inspect_reusable_report','list_reusable_datasets','reuse_dataset','row_dataset','expand_dataset','join_dataset','union_dataset','filter_dataset','normalize_period_dataset','select_period_dataset','project_dataset','group_dataset','linked_group_dataset','period_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','inspect_report','inspect_dataset','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
+      const paginatedExport = ['row_dataset','group_dataset','linked_group_dataset','refresh_report'].includes(tool);
+      if(localOnly || paginatedExport)return await operation;
+      return await Promise.race([operation,new Promise((_, reject) => { timer = setTimeout(() => { active = false; conn?.destroy(); conn = null; reject(new Error('环境工具超时')); }, ['inspect_reusable_report','list_reusable_datasets','reuse_dataset','row_dataset','expand_dataset','join_dataset','union_dataset','filter_dataset','normalize_period_dataset','select_period_dataset','project_dataset','summarize_dataset','map_values_dataset','group_dataset','linked_group_dataset','period_dataset','compose_report','finalize_report','refresh_report','enrich_dataset','compare_datasets','inspect_report','inspect_dataset','list_datasets'].includes(tool)?q.exportTimeoutMs??30000:q.timeoutMs); })]);
     } catch (error) { if(error instanceof ReportInspectionError)throw new QueryInputError(error.code,error.message); if(error instanceof DatasetCapacityError)throw new QueryInputError(error.code,error.message); if(error instanceof ReportInputError||error?.code==='REPORT_INPUT')throw new QueryInputError('REPORT_INPUT',error.message); if (error instanceof QueryInputError) throw error; throw safeExecutionError(error); }
     finally { clearTimeout(timer); }
   };
