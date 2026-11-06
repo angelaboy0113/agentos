@@ -5,7 +5,7 @@ const turn={profile:'one',chatId:'oc_group',senderId:'ou_a',createdAt:'2026-02-0
 const context=feishu=>({config:{},feishu});
 test('display-name policy supports overrides, ordinary/compound names and unknown names without gender or identity rules',()=>{
  const p=addressingSettings(policy);
- for(const [name,want] of [['特定姓名','专用称呼'],['王小明','小明老师'],['王明','王明老师'],['欧阳明','欧阳明老师'],['司马思颖','司马思颖老师'],['Atreus','Atreus老师'],['李老师','李老师'],['','老师'],['<at user_id=x>','老师']])assert.equal(salutation(name,p),want);
+ for(const [name,want] of [['特定姓名','专用称呼'],['王小明','小明老师'],['王明','王明老师'],['欧阳明','欧阳明老师'],['司马思颖','司马思颖老师'],['Atreus','Atreus老师'],['小太阳','小太阳老师'],['李老师','李老师'],['','老师'],['<at user_id=x>','老师']])assert.equal(salutation(name,p),want);
  assert.equal(salutation('特定姓名',p),'专用称呼'); // Same display name, independent of ID.
  assert.throws(()=>addressingSettings({...policy,enabledSince:'yesterday'}));
  assert.throws(()=>addressingSettings({...policy,displayNameOverrides:{x:'<at>'}}));
@@ -61,5 +61,5 @@ test('actual conversation and terminal question-card paths address the latest as
 });
 test('table-only cards get a separate greeting rather than altering a flow footer or business cells',()=>{
  const table={tag:'table',rows:[{amount:'100.00'}]},footer={tag:'markdown',text_size:'notation',content:'流程：开发'};
- const x=addressCard({body:{elements:[table,footer]}},'小明老师');assert.equal(x.body.elements[0].content,'小明老师：');assert.deepEqual(x.body.elements.slice(1),[table,footer]);assert.equal(addressText('## 结论','小明老师'),'小明老师，\n\n## 结论');
+ const metrics={tag:'column_set',columns:[{elements:[{tag:'markdown',content:'**16 分钟**'}]},{elements:[{tag:'markdown',content:'**20 次**'}]}]};const x=addressCard({body:{elements:[table,metrics,footer]}},'小明老师');assert.equal(x.body.elements[0].content,'小明老师：');assert.deepEqual(x.body.elements.slice(1),[table,metrics,footer]);assert.equal(addressText('## 结论','小明老师'),'小明老师，\n\n## 结论');
 });

@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 
 const clean = value => typeof value === 'string' && value.length <= 80 && !/[<>\[\]{}\r\n\u0000-\u001f]/.test(value) ? value.normalize('NFKC').trim() : '';
 const compoundSurnames = /^(?:欧阳|司马|上官|诸葛|东方|皇甫|尉迟|公孙|慕容|司徒|司空|夏侯|令狐|宇文|长孙|南宫|万俟|闻人|澹台|公羊|赫连|申屠|端木|独孤|仲孙|钟离|濮阳|宗政|太史|太叔|闾丘|东郭|呼延|羊舌|百里|第五)/;
+const singleSurnames = new Set('赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄江童颜郭梅盛林钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫房裘缪解应宗丁宣邓郁单杭洪包左石崔吉龚程嵇邢裴陆荣翁荀羊甄曲封芮储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶黎赖卓蔺屠蒙池乔谭胥申冉雍桑桂濮牛寿通边燕冀浦尚农温别庄晏柴瞿阎连茹习艾鱼容向古易慎廖庾终居衡步都耿满弘匡文寇广禄阙东欧利师巩聂晁曾毋沙鞠丰关查游权盖桓公楚来覃'.split(''));
 export function addressingSettings(value = {}) {
   if(value.enabled !== undefined && typeof value.enabled !== 'boolean') throw Error('Invalid reply addressing switch');
   for(const key of ['profiles','chatIds']) if(value[key] !== undefined && (!Array.isArray(value[key]) || value[key].some(x => typeof x !== 'string' || !x.trim()))) throw Error('Invalid reply addressing scope');
@@ -18,7 +19,7 @@ export function salutation(name, settings) {
   if(!name)return settings.fallback;
   if(Object.hasOwn(settings.displayNameOverrides,name))return clean(settings.displayNameOverrides[name]);
   if(name.endsWith('老师'))return name;
-  const short=/^[\u3400-\u9fff]{3}$/.test(name)&&!compoundSurnames.test(name)?name.slice(1):name;
+  const short=/^[\u3400-\u9fff]{3}$/.test(name)&&singleSurnames.has(name[0])&&!compoundSurnames.test(name)?name.slice(1):name;
   return short+'老师';
 }
 export function addressText(text, name) {
@@ -34,7 +35,9 @@ export function addressCard(card, name) {
     for(const value of Object.values(node))if(Array.isArray(value)){for(const item of value)if(visit(item))return true;}else if(value&&typeof value==='object'&&visit(value))return true;
     return false;
   }
-  if(!visit(copy.body)&&Array.isArray(copy.body?.elements))copy.body.elements.unshift({tag:'markdown',content:name+'：'});
+  const first=copy.body?.elements?.[0];
+  const answer=first?.tag==='markdown'||first?.tag==='column_set'&&first.columns?.length===1?first:null;
+  if((!answer||!visit(answer))&&Array.isArray(copy.body?.elements))copy.body.elements.unshift({tag:'markdown',content:name+'：'});
   return copy;
 }
 export class ReplyAddressing {
