@@ -1,3 +1,4 @@
+import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
 import {browserLoginState} from '../shared/browser-login-state.js';
 import {randomUUID} from 'node:crypto';
 import {chromeTransport} from './chrome-transport.js';
@@ -39,6 +40,7 @@ export class SharedChromeBrowser{
  async submitCredentials(job,e,cred,{force=false}={}){return this.serial(async()=>{
   await this.allowed(job,e,true);const s=await this.state(job,e);
   if(s.credentialAttempted&&!force)return {authenticated:false,attempted:false};
+  if(e.loginNavigation){const status=await this.snapshot(job,e,s,'browser_snapshot',{});if(status.pageReady===true&&!status.loginRequired)return {...status,authenticated:true,attempted:false};const navigation=validateLoginNavigation(e.loginNavigation);for(const step of navigation.steps){const request={baseUrl:s.baseUrl,usernameLabel:navigation.usernameLabel,entryUrl:navigation.entryUrl,step};const result=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${loginNavigationPage.toString()})(${JSON.stringify(request)}))`});if(result.error)throw Error(result.error);if(result.ready)break;await this.wait(150);}const result=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${loginNavigationPage.toString()})(${JSON.stringify({baseUrl:s.baseUrl,usernameLabel:navigation.usernameLabel})}))`});if(!result.ready)throw Error(result.error??'登录账号身份入口尚未就绪，未填写凭据');}
   s.credentialAttempted=true;
   const request={baseUrl:s.baseUrl,username:cred.username,password:cred.password};
   const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${chromeLoginPage.toString()})(${JSON.stringify(request)}))`});

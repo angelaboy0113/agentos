@@ -1,3 +1,4 @@
+import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
 import {websiteControls,controlMetadata,websiteFields} from '../shared/website-controls.js';
 export {controlMetadata} from '../shared/website-controls.js';
 import {waitForCaptureReady,screenshotSecretSelector} from '../shared/website-capture.js';
@@ -78,7 +79,8 @@ export class WebsiteBrowser {
   const current=new URL(s.page.url()),base=new URL(e.baseUrl),prefix=base.pathname.replace(/\/$/,'');
   const authPath=/\/(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[/?#]|$)/i.test(current.pathname+current.hash);
   if(current.origin!==base.origin||(!authPath&&!(current.pathname===prefix||current.pathname.startsWith(prefix+'/'))))throw new Error('浏览器已离开本次批准的登录范围');
-  const before=await this.loginStatus(s);
+  let before=await this.loginStatus(s);
+  if(!before.pageReady&&e.loginNavigation){const navigation=validateLoginNavigation(e.loginNavigation);for(const step of navigation.steps){const result=await s.page.evaluate(loginNavigationPage,{baseUrl:e.baseUrl,usernameLabel:navigation.usernameLabel,entryUrl:navigation.entryUrl,step});if(result.error)throw Error(result.error);if(result.ready)break;await s.page.waitForTimeout(150);}const result=await s.page.evaluate(loginNavigationPage,{baseUrl:e.baseUrl,usernameLabel:navigation.usernameLabel});if(!result.ready)throw Error(result.error??'登录账号身份入口尚未就绪，未填写凭据');before=await this.loginStatus(s);}
   if(before.pageReady)return {...before,authenticated:true,attempted:false};
   const policy=createHash('sha256').update(JSON.stringify([e.projectId,e.tier,e.baseUrl,e.credentialRef,job.environmentAccess?.queryId,e.queries?.[job.environmentAccess?.queryId]?.readEndpoints??[]])).digest('hex');
   const correctedPolicy=s.authAttemptPolicy!==undefined&&s.authAttemptPolicy!==policy;

@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-**成品版本：v1.71.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.72.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 长报表的分阶段口径保留、批量诊断与性能验收见 [查询效率](docs/report-efficiency.md)。
 
@@ -386,3 +386,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 报表核验关联键、失败参数恢复与维度未匹配排查见 [报表修复与证据接续](docs/report-repair.md)。
 
 原生飞书表格分批读取现可按同版本全覆盖自动组装为任务输入，并从保存结果恢复，供同任务数据库核对；详见 [分页输入与接续](docs/native-cloud-sheet-inputs.md)。缺页、版本变化或重叠冲突不会被当作完整输入，无新增权限或整任务截止。
+
+多身份登录页可通过管理员配置的精确入口步骤选择正确账号身份，再读取Keychain提交；见[登录身份导航](docs/login-navigation.md)。不由模型选择角色，不放宽业务写请求。

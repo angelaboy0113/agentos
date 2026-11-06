@@ -1,3 +1,4 @@
+import {validateLoginNavigation} from './login-navigation.js';
 import {validateTct} from './tct-policy.js';
 import { validateSshTransport } from './ssh-transport-policy.js';
 import { canonicalWebsite, validateWebsiteAliases } from './website-aliases.js';
@@ -21,7 +22,7 @@ export async function loadEnvironments(file = environmentFile()) {
   if(v.executionPolicy?.mongodbQueryTimeoutMs!==undefined&&(!Number.isSafeInteger(v.executionPolicy.mongodbQueryTimeoutMs)||v.executionPolicy.mongodbQueryTimeoutMs<100))throw new Error('MongoDB单次查询时限须为有效毫秒数');
   validateWebsiteAliases(v);
   for (const [key, e] of Object.entries(v.environments)) {
-    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization','transport','applicationRoot','authSource','readConcern','tct','sharedReadBinding'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'mongodb', 'nacos', 'website','tct'].includes(e.kind)
+    if (Object.keys(e).some((k) => !['projectId','tier','kind','credentialRef','ownerOpenIdsByProfile','membersRead','queries','host','port','database','tls','baseUrl','accountPolicy','businessAccountAuthorization','transport','applicationRoot','loginNavigation','authSource','readConcern','tct','sharedReadBinding'].includes(k)) || !id(key) || !id(e.projectId) || !['uat', 'prd'].includes(e.tier) || !['mysql', 'mongodb', 'nacos', 'website','tct'].includes(e.kind)
       || !id(e.credentialRef) || typeof e.membersRead !== 'boolean' || !e.ownerOpenIdsByProfile || !e.queries) throw new Error('环境配置字段无效');
     if(e.sharedReadBinding!==undefined){const b=e.sharedReadBinding;if(e.kind!=='website'||!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).length!==2||!Object.hasOwn(b,'sourceEnvironmentId')||!Object.hasOwn(b,'sourceConfigHash')||!id(b.sourceEnvironmentId)||b.sourceEnvironmentId===key||!/^([a-f0-9]{64})$/.test(b.sourceConfigHash))throw new Error('共享网站来源审计字段无效');}
     if(e.applicationRoot!==undefined&&(e.kind!=='website'||typeof e.applicationRoot!=='boolean'))throw new Error('applicationRoot仅能用于网站应用入口且必须为布尔值');
@@ -29,6 +30,7 @@ export async function loadEnvironments(file = environmentFile()) {
     if(e.kind==='tct')validateTct(e);else if(e.tct!==undefined)throw Error('tct仅用于调度环境');
     validateAccountPolicy(e);
     if(e.transport){if(!['mysql','mongodb'].includes(e.kind))throw new Error('SSH传输仅支持已登记数据库');validateSshTransport(e.transport);}
+    if(e.loginNavigation!==undefined){if(e.kind!=='website')throw Error('登录导航只适用于网站');validateLoginNavigation(e.loginNavigation);}
     if(e.kind==='website')websiteUrl(e.baseUrl);
     if (Object.values(e.ownerOpenIdsByProfile).some((ids) => !Array.isArray(ids) || ids.some((x) => !/^ou_[A-Za-z0-9]+$/.test(x)))) throw new Error('环境审批人配置无效');
     if(e.kind==='mongodb'&&(!e.transport||!/^[a-zA-Z0-9.:-]+$/.test(e.host)||!Number.isInteger(e.port)||e.port<1||e.port>65535||!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(e.database)||!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(e.authSource??e.database)))throw new Error('MongoDB必须指定固定数据库、认证库及SSH远程执行，不支持本机连接');
