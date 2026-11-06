@@ -1,3 +1,4 @@
+import {jobCard} from '../src/control-plane/message-cards.js';
 import test from'node:test';import assert from'node:assert/strict';import{mkdtemp,rm,readFile,writeFile}from'node:fs/promises';import path from'node:path';import os from'node:os';import{createHash}from'node:crypto';
 import{ReportDatasets}from'../src/runner/report-datasets.js';import{createEnvironmentTools}from'../src/runner/environment-tools.js';
 import{deliveredCsvDataset,formatReportValue,appendReportColumns,appendReportFile}from'../src/shared/report-append.js';
@@ -18,7 +19,7 @@ async function fixture(t,projectId='A',profile='bot-A',environment='prd'){
 }
 test('month formatting validates civil dates/times, mixed months, leap years and ambiguity without SQL conversion',()=>{
  for(const v of ['202601',202601,'2026-01','2026-1'])assert.equal(formatReportValue(v,{kind:'month_compact',inputType:'month'}),'202601');
- assert.equal(formatReportValue('2024-02-29 23:59:59.000',format),'202402');assert.equal(formatReportValue('2025-12-31',{kind:'month_compact',inputType:'civil_day'}),'202512');assert.equal(formatReportValue('20260101',{kind:'month_compact',inputType:'civil_day'}),'202601');
+ assert.equal(formatReportValue('2024-02-29 23:59:59.000',format),'202402');assert.equal(formatReportValue('2024-02-29 23:59:59.000',{kind:'day_compact',inputType:'civil_datetime'}),'20240229');assert.throws(()=>formatReportValue('202601',{kind:'day_compact',inputType:'month'}));assert.equal(formatReportValue('2025-12-31',{kind:'month_compact',inputType:'civil_day'}),'202512');assert.equal(formatReportValue('20260101',{kind:'month_compact',inputType:'civil_day'}),'202601');
  for(const v of ['2026-02-29 00:00:00','2026-13-01 00:00:00','2026-01-01 24:00:00','2026-01-01T00:00:00Z','2026-01-01T00:00:00+08:00',20260101,''])assert.throws(()=>formatReportValue(v,format));
 });
 test('left append preserves duplicate input rows/order/large text and separately accounts missing/null/outside',()=>{
@@ -61,4 +62,11 @@ test('parallel systems and environments keep supplement stores and immutable ori
 });
 test('copying unchanged CSV does not automatically complete a file modification substep',async t=>{
  const f=await fixture(t),out=await reviseReportFile(f.root,f.job,f.attachment,{attachmentId:'input',requirement:'文件修改仍需补充字段'});assert.equal(out.changed,false);assert.equal(verifiedFileStepComplete('revise_report_file',out),false);assert.equal(verifiedFileStepComplete('finalize_report',{}),false);
+});
+
+test('only an accepted verified delivery can render a user-requested closed card grey',()=>{
+ const f={id:'report-file',sha256:'a'.repeat(64),verificationHash:'b'.repeat(64)};
+ const job={id:'job',status:'completed',stage:'developer',taskIntent:'analysis',projectName:'synthetic',events:[],createdAt:new Date().toISOString(),reportFiles:[f],reportReviews:{[f.id]:{status:'accepted',verificationHash:f.verificationHash}},result:{outcome:'ready',finalMessage:'文件已真实交付，按用户要求关闭自动执行',deliveryClosure:{status:'verified_and_closed',source:'maintainer_verified_delivery',messageId:'om_verified',fileId:f.id,sha256:f.sha256,verificationHash:f.verificationHash}}};
+ assert.equal(jobCard(job).header.template,'grey');
+ for(const altered of [{...job,status:'blocked'},{...job,reportReviews:{}},{...job,result:{...job.result,deliveryClosure:{...job.result.deliveryClosure,messageId:''}}}])assert.notEqual(jobCard(altered).header.template,'grey');
 });

@@ -87,7 +87,14 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
     blocked: ['任务受阻 / 未通过', 'red'], failed: ['执行失败', 'red'], cancelled: ['已取消 / 已停止', 'grey'],
     cancelling: ['正在停止', 'orange'], resubmitted: ['补充已提交', 'blue'] };
   const terminalState = ['completed', 'blocked', 'failed', 'cancelled'].includes(job.status);
-  const [label, color] = !terminalState&&job.result?.modelCapacityWaiting ? [job.result.modelCapacityState==='access_check_failed'?'恢复范围待复核 · 现场保留':'模型繁忙 · 等待自动恢复','orange'] : job.status==='completed'&&job.result?.outcome==='needs_clarification' ? ['等待补齐信息 · 尚未完成','orange'] : expired ? ['查询申请已过期 · 可重新申请', 'orange'] : !terminalState && job.result?.browserActionRequired === 'automation' ? ['等待本机浏览器授权 · 放行后自动继续', 'orange'] : !terminalState && job.result?.browserLoginRequired && ['request_blocked','access_check_failed'].includes(job.result.browserLoginState) ? ['登录链路待恢复 · 原任务保留', 'orange'] : !terminalState && job.result?.browserLoginRequired ? ['恢复网页登录 · 登录后自动继续', 'orange'] : job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
+  // Persisted and verified external delivery, explicitly closed at the user's request.
+  // The model result schema cannot create this maintenance receipt.
+  const closure=job.result?.deliveryClosure;
+  const deliveredAndClosed=job.status==='completed'&&job.result?.outcome==='ready'&&closure?.status==='verified_and_closed'
+    &&closure.source==='maintainer_verified_delivery'&&/^om_[A-Za-z0-9]+$/.test(closure.messageId??'')
+    &&job.reportFiles?.some(f=>f.id===closure.fileId&&f.sha256===closure.sha256&&f.verificationHash===closure.verificationHash
+      &&job.reportReviews?.[f.id]?.status==='accepted'&&job.reportReviews[f.id].verificationHash===f.verificationHash);
+  const [label, color] = deliveredAndClosed ? ['已交付 · 已关闭','grey'] : !terminalState&&job.result?.modelCapacityWaiting ? [job.result.modelCapacityState==='access_check_failed'?'恢复范围待复核 · 现场保留':'模型繁忙 · 等待自动恢复','orange'] : job.status==='completed'&&job.result?.outcome==='needs_clarification' ? ['等待补齐信息 · 尚未完成','orange'] : expired ? ['查询申请已过期 · 可重新申请', 'orange'] : !terminalState && job.result?.browserActionRequired === 'automation' ? ['等待本机浏览器授权 · 放行后自动继续', 'orange'] : !terminalState && job.result?.browserLoginRequired && ['request_blocked','access_check_failed'].includes(job.result.browserLoginState) ? ['登录链路待恢复 · 原任务保留', 'orange'] : !terminalState && job.result?.browserLoginRequired ? ['恢复网页登录 · 登录后自动继续', 'orange'] : job.taskIntent === 'analysis' && job.result?.outcome === 'partial' && ['completed', 'awaiting_approval'].includes(job.status)
     ? ['部分分析完成 · 有待核实', 'orange'] : labels[job.status] ?? ['等待更新', 'grey'];
   const active = ['running', 'queued', 'cancelling'].includes(job.status);
   const events = job.events ?? [];

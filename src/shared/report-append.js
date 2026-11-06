@@ -21,15 +21,15 @@ export function deliveredCsvDataset(attachment,bytes,args,job){
 }
 
 export function formatReportValue(value,format){
- if(!keys(format,['kind','inputType'])||format.kind!=='month_compact'||!['month','civil_day','civil_datetime'].includes(format.inputType))fail('格式转换须明确month_compact及month/civil_day/civil_datetime；时间戳须先明确时区，不能猜测');
- if(format.inputType==='month')return normalizeCalendarPeriod(value,'month').replace('-','');
+ if(!keys(format,['kind','inputType'])||!['month_compact','day_compact'].includes(format.kind)||!['month','civil_day','civil_datetime'].includes(format.inputType))fail('格式转换须明确month_compact/day_compact及month/civil_day/civil_datetime；时间戳须先明确时区，不能猜测');
+ if(format.inputType==='month'){if(format.kind==='day_compact')fail('仅有月份不能补造具体日期');return normalizeCalendarPeriod(value,'month').replace('-','');}
  if(typeof value!=='string')fail('民用日期必须是明确字符串，不能猜测数值时间戳');
  let day=value;
  if(format.inputType==='civil_datetime'){
   const m=value.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?$/);
   if(!m||+m[2]>23||+m[3]>59||+m[4]>59)fail('民用日期时间无效或含时区歧义，不能截前六位掩盖错误');day=m[1];
  }
- return normalizeCalendarPeriod(day,'day').slice(0,7).replace('-','');
+ const normalized=normalizeCalendarPeriod(day,'day');return format.kind==='day_compact'?normalized.replaceAll('-',''):normalized.slice(0,7).replace('-','');
 }
 
 export function appendReportColumns(input,supplement,args){
