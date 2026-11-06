@@ -1,6 +1,8 @@
 # Angel AgentOS
 
-**成品版本：v1.74.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.75.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+
+已交付文件的原话题追问、读取与派生修改见[文件接续](docs/delivered-file-followup.md)。
 
 长报表的分阶段口径保留、批量诊断与性能验收见 [查询效率](docs/report-efficiency.md)。
 

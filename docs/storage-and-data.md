@@ -1,5 +1,7 @@
 # AgentOS 文件、数据与日志位置
 
+已交付文件作为同可见问题链输入接续，派生版本与原文件绑定、独立保留；见[文件接续](delivered-file-followup.md)。
+
 1.52.0长任务与查询规则见[完整查询与大结果接续](long-query-continuity.md)：原范围自动复核续期、无整批查询截止、历史数据不按24小时失效、大结果保存续读；不改变只读权限及完整文件核验。
 
 1.51.0数据集信封新增createdAt，仅表示工件创建，原readAt不变；旧工件缺少时不补造。calendar-v3统计配方与civil_day/month筛选随原任务datasets完整备份，旧程序不能重放新配方。目录及预览展示改进、回退兼容边界见[报表效率与接续](report-efficiency.md)。

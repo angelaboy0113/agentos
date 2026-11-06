@@ -188,7 +188,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       if(result.loginRequired) return {loginRequired:true,summary:result.message??result.stage,checkpoint:{steps,results,lastAuthorizedAt},rows:[],partial:true};
       result = await resultStore.present(choice.tool,result,TOOL_RESULT_LIMIT,{persist:e.kind==='tct'&&['tasks','task_detail','task_batches','groups'].includes(choice.tool)});
       results.push({ tool: choice.tool, result }); steps.push(`${choice.tool}：${result.stage ?? '已执行'}`);
-      if(result.exportFile&&['finalize_report','refresh_report'].includes(choice.tool)){pendingInputs.clear();unresolvedInput=false;summary='当前文件已通过程序核验，返回源码Agent按原问题审阅；不在工具层追加历史对账。';complete=true;break;}
+      if(result.exportFile&&['finalize_report','refresh_report','revise_report_file'].includes(choice.tool)){pendingInputs.clear();unresolvedInput=false;summary='当前文件已通过程序核验，返回源码Agent按原问题审阅；不在工具层追加历史对账。';complete=true;break;}
       if(result.websiteMismatch){summary='网站入口不匹配，尚未核实目标业务数据。请结合本环境源码、部署配置和原问题重新发现正确入口，不复用此错误入口，不要求用户扩大权限。';complete=false;break;}
       const hash = fingerprint({ tool: choice.tool, result });
       stalled = seen.has(hash) ? stalled + 1 : 0; seen.add(hash);

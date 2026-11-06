@@ -23,6 +23,7 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  const sourceJobId=item.sourceJobId??job.id;
  const verified=await reportFile(dataDir,sourceJobId,item);
  const receipt=JSON.parse(await readFile(path.join(path.dirname(verified.file),item.id+'.verification.json'),'utf8'));
+ if(receipt.revision)return (await import('./report-revision.js')).inspectRevision(dataDir,job,item,receipt,{fileId,section,offset,limit,columns:requestedColumns});
  const directory=path.dirname(verified.file),datasetRoot=path.join(directory,'datasets');
  if((await lstat(datasetRoot)).isSymbolicLink())fail('报表数据集目录不能是符号链接');
  const names=receipt.datasetRef?[receipt.datasetRef+'.json']:(await readdir(datasetRoot)).filter(n=>/^dataset-[a-f0-9-]{36}\.json$/.test(n));

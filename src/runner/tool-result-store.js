@@ -65,7 +65,7 @@ export class ToolResultStore{
 // Failure to save diagnostics must never replace the original error classification.
 export async function persistToolInputFailure(store,tool,args,error){
  const failure={tool,error:{code:error.code,message:error.message},executed:error.executed===true};
- if(!['finalize_report','refresh_report','enrich_dataset','relate_dataset','compose_report','summarize_dataset'].includes(tool))return failure;
+ if(!['finalize_report','refresh_report','revise_report_file','enrich_dataset','relate_dataset','compose_report','summarize_dataset'].includes(tool))return failure;
  try{const saved=await store.present(tool,{failed:true,executed:failure.executed,arguments:args,error:failure.error},24000,{persist:true});failure.error.resultRef=saved.resultRef;}
  catch{failure.error.diagnosticStorageUnavailable=true;}
  return failure;

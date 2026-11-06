@@ -504,13 +504,15 @@ async function route(context) {
     const job = await store.getJob(decodeURIComponent(attachmentMatch[1]));
     const attachment = job?.attachments.find((item) => item.id === decodeURIComponent(attachmentMatch[2]));
     if (!attachment) return json(response, 404, { ok: false, error: 'Attachment not found' });
-    const info = await stat(attachment.path);
+    const inputPath=attachment.source?.kind==='delivered-report'
+      ? (await (await import('../shared/report-followup.js')).boundReportInput(await store.read(),job,attachment,config.dataDir)).file : attachment.path;
+    const info = await stat(inputPath);
     response.writeHead(200, {
       'content-type': attachment.contentType ?? 'application/octet-stream',
       'content-length': info.size,
       'content-disposition': `attachment; filename="${attachment.id}"`,
     });
-    return createReadStream(attachment.path).pipe(response);
+    return createReadStream(inputPath).pipe(response);
   }
 
   const jobMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)$/);

@@ -1,4 +1,5 @@
 import {nativeInputDataset} from '../shared/feishu-cloud-sheet.js';
+import {reviseReportFile} from '../shared/report-revision.js';
 import {cleanWebsiteText} from '../shared/website-policy.js';
 import {mongoInputDiagnostic} from './mongo-input-diagnostic.js';
 import {createTctTools} from './tct-tools.js';
@@ -292,6 +293,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   if(['mysql','mongodb'].includes(e.kind)&&q.exportMaxRows){const final=spec.find(x=>x.tool==='finalize_report');spec.push({...final,tool:'refresh_report',description:'参数与finalize_report相同。仅当当前口径变更或取数时点超窗需要重算时使用：预检已有来源recipe及派生依赖，在一个新只读事务里集中刷新完整来源、独立基准、维度和对象范围，再重做草稿并核验。不能执行保存SQL；旧数据无recipe或含临时in_set须先补齐。历史快照差异本身不要求重算。返回新文件供原问题审阅，不自动发群。'});}
   if(['mysql','mongodb'].includes(e.kind)&&q.exportMaxRows)spec.push({tool:'inspect_report',args:{fileId:'本任务已登记的report-ID',section:'可选summary/columns/sources/checks/scope/rows，默认summary',offset:'可选非负整数',limit:'元信息1至4；rows为正整数按输出字节分页',columns:['rows可选实际表头']},description:'只读查看与某份已登记CSV摘要和核验记录绑定的实际表头、完整公式、来源、预览、主键范围对照及全文件逐行重算校验；不查数据库，不执行路径，不用另一个数据集冒充该文件。默认摘要，长文本用section分页；逐行审阅显式section=rows、offset/limit并沿nextOffset读完，返回实际文件行号/键/单元格，不再把summary前三行当全部。新文件审阅优先使用，不重新compose或让用户上传已有CSV。'});
   if(['mysql','mongodb'].includes(e.kind)&&q.exportMaxRows&&adapters.readTaskInput&&adapters.reportJob?.attachments?.some(x=>x.source?.kind==='authorized-native-cloud-sheet'))spec.push({tool:'import_task_input',args:{attachmentId:'current task attachment ID',columns:[{index:0,as:'original_identifier',type:'string',normalization:'none'}],rowKey:'input_row'},description:'把本任务已登记的完整原生表格输入按实际0-based列索引转为持久数据集，无新查询。保留全部原始行、重复、空值和行序，不猜表头。省略type保留原类型；type=string精确转换安全整数，normalization=none保留文本前导零，integer_decimal仅在明确按整数值匹配时使用。转换记录版本和列配方；未知参数报错，不静默忽略。来源摘要/身份/范围由程序核验；用collect_dataset_values构建完整in_set查询当前已授权库，不能当SQL或独立金额基准。'});
+  if(['mysql','mongodb'].includes(e.kind)&&q.exportMaxRows&&adapters.reportJob?.attachments?.some(a=>a.source?.kind==='delivered-report'))spec.push({tool:'revise_report_file',args:{attachmentId:'已交付文件输入ID',requirement:'本次用户修改要求',columns:[{from:'原表头',label:'新表头'}],filters:[{column:'原表头',op:'eq或ne',value:'精确字符串'}],orderBy:[{column:'原表头',direction:'asc或desc'}]},description:'直接复用同问题已交付的完整CSV，选列/改表头/按字符串精确筛选/稳定字典排序，生成新核验文件；可省略columns/filters/orderBy保持对应项不变。不查询数据库、不修改原文件，逐格复算并保存来源配方和原取数窗口。禁止任意代码、改金额、猜日期或数字排序；需要新计算/最新数据时按原权限补证。之后inspect_report审阅新文件，再按正常交付流程发送。'});
   const run = async (tool, args = {}) => {
     if (!active) throw new Error('工具执行已结束');
     if (!spec.some(x => x.tool === tool) || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('不支持的工具或参数');
@@ -299,6 +301,15 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
     // A single operation cannot keep a connection alive beyond its declared timeout.
     try {
       return await (async () => {
+        if(tool==='revise_report_file'){
+          await adapters.authorize?.();const attachment=adapters.reportJob.attachments.find(a=>a.id===args.attachmentId);
+          if(!attachment)throw new ReportInputError('文件不属于当前任务');
+          // Controller rechecks the live question/profile/visibility binding before every use.
+          if(!adapters.readTaskInput)throw new ReportInputError('当前任务文件读取入口不可用');
+          const bytes=await adapters.readTaskInput(attachment.id);
+          if(createHash('sha256').update(bytes).digest('hex')!==attachment.source?.sha256)throw new ReportInputError('原文件内容与登记摘要不一致');
+          const result=await reviseReportFile(adapters.dataDir,adapters.reportJob,attachment,args);await adapters.authorize?.();return result;
+        }
         if (e.kind === 'nacos') {
           if (tool === 'connection') { const v = JSON.parse(await nacos('/v1/auth/login', {}, true)); if (typeof v.accessToken !== 'string' || !v.accessToken) throw new Error('Nacos 认证未成功'); token = v.accessToken; return { stage: 'Nacos 网络与登录成功', databaseConnection: '尚未测试，需要独立只读数据库入口' }; }
           if (tool === 'discover') {
