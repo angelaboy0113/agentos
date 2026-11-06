@@ -29,12 +29,18 @@ export function reviewedPathMatches(pattern,pathname){
  const expected=pattern.split('/'),actual=pathname.split('/');if(expected.length!==actual.length)return false;
  return expected.every((segment,index)=>{const type=/^\{([A-Za-z]+)\}$/.exec(segment)?.[1];return type?Object.hasOwn(readPathIds,type)&&readPathIds[type].test(actual[index]):segment===actual[index];});
 }
+// A reviewed query may name a business object with a verb inside its compound
+// name (e.g. taskExecutionSettings). Standalone mutation segments stay denied.
+function reviewedQueryObjectPath(pathname){
+ const segments=decodeURIComponent(pathname).split('/').filter(Boolean),tail=segments.at(-1)??'';
+ return reads.test(tail)&&!writeAction.test(tail.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]/g,' '))&&segments.slice(0,-1).every(s=>!writeAction.test(s));
+}
 export function websiteRequestAllowed(base, request, manualLogin=false, readEndpoints=[]) {
  let u; try {u=new URL(request.url);}catch{return false;}
  if(u.origin!==new URL(base).origin || !['GET','HEAD','POST','OPTIONS'].includes(request.method))return false;
- const parts=decodeURIComponent(u.pathname).replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
- if(parts.some(x=>writeAction.test(x)))return false;
  const reviewedEndpoint=readEndpoints.find(e=>e.reviewed===true&&e.method===request.method&&reviewedPathMatches(e.path,u.pathname));
+ const parts=decodeURIComponent(u.pathname).replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
+ if(parts.some(x=>writeAction.test(x))&&!(reviewedEndpoint&&reviewedQueryObjectPath(u.pathname)))return false;
  for(const [key,value] of u.searchParams){
    const values=reviewedEndpoint?.queryParameters?.[key];
    const fixedFilter=Object.hasOwn(reviewedEndpoint?.queryParameters??{},key)&&Array.isArray(values)&&values.includes(value);
@@ -68,7 +74,7 @@ export function validateWebsiteReadEndpoints(value){
    for(const [key,values]of Object.entries(filters))if(!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)||/^(?:action|operation|command|cmd|method|__proto__|constructor|prototype)$/i.test(key)||/password|secret|token|credential/i.test(key)||!Array.isArray(values)||!values.length||values.length>32||values.some(v=>typeof v!=='string'||!v.length||v.length>100||/[\x00-\x1f\x7f]/.test(v)))throw new Error('只读筛选仅允许审核后的固定非敏感值；不能覆盖动作或执行参数');
   }
   const parts=e.path.replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
-  if(parts.some(p=>writeAction.test(p)))throw new Error('网站只读接口不能包含修改操作');
+  if(parts.some(p=>writeAction.test(p))&&!reviewedQueryObjectPath(e.path))throw new Error('网站只读接口不能包含修改操作');
  }
  return value;
 }

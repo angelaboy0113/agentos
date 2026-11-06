@@ -1,23 +1,25 @@
+import {taskReadEnvironments,planTaskRead,assertTaskReadScope} from '../shared/integration-peers.js';
 import {planQuery,compactCatalog,catalog} from '../shared/environment-access.js';
 
-// Only the current project's already configured database reads may be proposed.
+// Preserve the original task identity while proposing registered own/peer reads.
 // The controller still issues a fresh grant and verifies the source/runtime tier.
-export function continuationCatalog(config,plan,job){
-  if(!job?.continuousInvestigation||job.taskIntent!=='analysis'||job.projectId!==plan.projectId)return [];
-  return catalog(config,job.projectId).filter(e=>e.tier===plan.tier&&['mysql','mongodb'].includes(e.kind)).flatMap(e=>{
-    const queries=e.queries.filter(q=>q.mode==='investigate'&&(()=>{try{return !planQuery(config,{environmentId:e.environmentId,queryId:q.queryId,parameters:plan.parameters},job.projectId,{profile:job.originProfile??job.agentProfile,senderId:job.senderId}).approvalRequired;}catch{return false;}})());
+export function continuationCatalog(config,plan,job,projects=null){
+  if(!job?.continuousInvestigation||job.taskIntent!=='analysis'||!projects&&job.projectId!==plan.projectId)return [];
+  if(projects){try{assertTaskReadScope(projects,job,config,plan);}catch{return [];}}
+  return (projects?taskReadEnvironments(config,projects,job):catalog(config,job.projectId)).filter(e=>e.tier===plan.tier&&['mysql','mongodb'].includes(e.kind)).flatMap(e=>{
+    const queries=e.queries.filter(q=>q.mode==='investigate'&&(()=>{try{return !(projects?planTaskRead(config,projects,job,{environmentId:e.environmentId,queryId:q.queryId,parameters:plan.parameters}):planQuery(config,{environmentId:e.environmentId,queryId:q.queryId,parameters:plan.parameters},job.projectId,{profile:job.originProfile??job.agentProfile,senderId:job.senderId})).approvalRequired;}catch{return false;}})());
     return queries.length?[{...e,queries}]:[];
   });
 }
 export function continuationSpec(entries){return entries.length?[{
   tool:'continue_environment',args:{environmentId:'exact next database environmentId in continuationCatalog',queryId:'exact queryId',parameters:['brief single-line purpose with known tables, keys, filters and formulas'],repairResultRef:'optional: latest saved finalize_report REPORT_INPUT resultRef when the missing independent evidence is in another authorized database'},
-  description:'当前来源已取得成果，剩余目标需要另一个已登记数据库且规则/参数已明确时，优先本工具直接接续，不要finish后让源码模型重新规划相同步骤。先保存完整数据集；程序关闭当前步骤后重新校验范围和权限，再领取下一步，不执行本工具中的数据库查询。不能用于猜口径、切换系统/测试生产、跳过尚未解决的工具失败或声明原问题完成；唯一允许的未解决输入接续是finalize_report的已保存REPORT_INPUT：明确repairResultRef去另一已授权库补独立证据，原核验仍未通过。源码不足时finish complete=false返回源码调查。'
+  description:'当前来源已取得成果，剩余目标需要另一个已登记数据库且规则/参数已明确时，优先本工具直接接续，不要finish后让源码模型重新规划相同步骤。先保存完整数据集；程序关闭当前步骤后重新校验范围和权限，再领取下一步，不执行本工具中的数据库查询。不能用于猜口径、访问目录外系统或切换测试生产、跳过尚未解决的工具失败或声明原问题完成；唯一允许的未解决输入接续是finalize_report的已保存REPORT_INPUT：明确repairResultRef去另一已授权库补独立证据，原核验仍未通过。源码不足时finish complete=false返回源码调查。'
 }]:[];}
-export function validateContinuation(config,plan,job,args){
-  const entries=continuationCatalog(config,plan,job),entry=entries.find(e=>e.environmentId===args?.environmentId);
-  if(!entry?.queries.some(q=>q.queryId===args.queryId))throw new Error('下一步仅能选择同系统同环境已登记的数据库只读模板');
+export function validateContinuation(config,plan,job,args,projects=null){
+  const entries=continuationCatalog(config,plan,job,projects),entry=entries.find(e=>e.environmentId===args?.environmentId);
+  if(!entry?.queries.some(q=>q.queryId===args.queryId))throw new Error('下一步仅能选择原话题已授权且同运行环境的数据库只读模板');
   const request={environmentId:args.environmentId,queryId:args.queryId,parameters:args.parameters,goalIds:null};
-  const grant=planQuery(config,request,job.projectId,{profile:job.originProfile??job.agentProfile,senderId:job.senderId});
+  const grant=projects?planTaskRead(config,projects,job,request):planQuery(config,request,job.projectId,{profile:job.originProfile??job.agentProfile,senderId:job.senderId});
   if(grant.approvalRequired)throw new Error('下一步仍需实际授权');
   return request;
 }
