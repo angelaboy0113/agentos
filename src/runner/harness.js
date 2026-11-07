@@ -32,7 +32,7 @@ export function handoffContext(job) {
   return (job.context ?? []).slice(-8).map(({ stage, result = {} }) => ({ stage,
     outcome: result.outcome, environmentEvidence: result.environmentEvidence, schemaEvidence:result.schemaEvidence, evidenceRecords: result.evidenceRecords, toolResultCatalog: result.toolResultCatalog, workspace: result.workspace,
     harness: result.harness, investigation: result.investigation, investigationPause: result.investigationPause,
-    runtimeDiscoveries: result.runtimeDiscoveries, websiteMismatch: result.websiteMismatch,
+    runtimeDiscoveries: result.runtimeDiscoveries, websiteMismatch: result.websiteMismatch,websiteFinding:result.websiteFinding,
     handoff: result.handoff,
     verifiedArtifacts: result.verifiedArtifacts,
     verification: result.verification?.map(({ command, code }) => ({ command, code })),

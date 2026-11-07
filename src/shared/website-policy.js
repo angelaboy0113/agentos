@@ -39,6 +39,8 @@ export function websiteRequestAllowed(base, request, manualLogin=false, readEndp
  let u; try {u=new URL(request.url);}catch{return false;}
  if(u.origin!==new URL(base).origin || !['GET','HEAD','POST','OPTIONS'].includes(request.method))return false;
  const reviewedEndpoint=readEndpoints.find(e=>e.reviewed===true&&e.method===request.method&&reviewedPathMatches(e.path,u.pathname));
+ // Explicit reviewed method bindings take precedence over generic read-shaped fallbacks.
+ if(!reviewedEndpoint&&!['HEAD','OPTIONS'].includes(request.method)&&readEndpoints.some(e=>e.reviewed===true&&reviewedPathMatches(e.path,u.pathname)))return false;
  const parts=decodeURIComponent(u.pathname).replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
  if(parts.some(x=>writeAction.test(x))&&!(reviewedEndpoint&&reviewedQueryObjectPath(u.pathname)))return false;
  for(const [key,value] of u.searchParams){
