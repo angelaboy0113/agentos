@@ -1,7 +1,7 @@
 import {recordReportFiles,recordReportReview} from './report-acceptance.js';
 import {interruptedInvestigation} from './investigation-budget.js';
 import { continuousReviewDecision, reviewDecision } from './investigation-review.js';
-import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint } from './environment-access.js';
+import { loadEnvironments, verifyApprovedPlan, verifyCompletedPlan, planQuery, fingerprint, renewWebsitePlan, WEBSITE_RENEW_LEAD_MS } from './environment-access.js';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import { mkdir, readFile, rename, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -251,8 +251,26 @@ export class JsonStore {
     return this.transact((state) => {
       const job = requireJob(state, id);
       if (job.status !== 'running' || job.lease?.id !== identity.leaseId || job.lease?.runnerId !== identity.runnerId || !(Date.parse(job.lease?.expiresAt) > Date.now())) throw new Error('查询租约已失效');
-      verifyApprovedPlan(config, job.environmentAccess ?? {});
-      const plan = job.environmentAccess, resume = job.browserResumeClaim;
+      let plan = job.environmentAccess;
+      const resume = job.browserResumeClaim;
+      const sameWebsiteScope = job.taskIntent === 'analysis' && plan?.kind === 'website'
+        && plan.projectId === job.projectId && plan.approvalProfile === job.originProfile;
+      const renewalRequested = identity.renewScopeHash !== undefined;
+      if (renewalRequested && (!sameWebsiteScope || !plan.startedAt || identity.renewScopeHash !== plan.scopeHash)) {
+        throw Object.assign(new Error('网页续签请求已失效或与当前范围不一致'), {statusCode:409});
+      }
+      const renewalDue = Date.parse(plan?.expiresAt) <= Date.now() + (renewalRequested ? WEBSITE_RENEW_LEAD_MS : 0);
+      if (sameWebsiteScope && renewalDue && (renewalRequested || !plan.startedAt)) {
+        const previousScopeHash = plan.scopeHash;
+        plan = job.environmentAccess = renewWebsitePlan(config, plan);
+        if (renewalRequested) {
+          job.events.push({id:createId('EVT'), type:'environment_query_started', at:new Date().toISOString(),
+            scopeHash:plan.scopeHash, previousScopeHash, leaseId:job.lease.id});
+          return structuredClone(plan);
+        }
+      }
+      verifyApprovedPlan(config, plan ?? {});
+      if (renewalRequested) return structuredClone(plan);
       if (!plan.approvedBy) throw new Error('查询尚未批准');
       const continuing = plan.kind === 'website' && plan.startedAt && resume?.scopeHash === plan.scopeHash && resume?.startedAt === plan.startedAt;
       if (plan.startedAt && !continuing) throw new Error('[QUERY_ALREADY_STARTED] 查询已经执行；没有可用的登录接续凭证');

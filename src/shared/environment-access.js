@@ -42,6 +42,9 @@ export function catalog(config, projectId) {
   return Object.entries(config.environments).filter(([, e]) => e.projectId === projectId && (e.kind !== 'website' || canonicalWebsite(config, projectId, e.tier, e.baseUrl) === websiteUrl(e.baseUrl))).map(([environmentId, e]) => ({ environmentId, tier: e.tier, kind: e.kind,
     queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据'] } : {}), ...(q.exportMaxRows?{exportMaxRows:q.exportMaxRows,exportTimeoutMs:q.exportTimeoutMs??30000,exportSnapshotWindowMs:q.exportSnapshotWindowMs??300000,exportDataBudgetBytes:q.exportDataBudgetBytes??null}:{}), parameters: q.mode==='investigate'?q.parameters.map(({maxLength,...p})=>p):q.parameters, maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin,entryUrl:e.baseUrl} : e.kind === 'mysql' ? { tables: q.tables } : { namespaces: q.namespaces } } : {}) })) }));
 }
+const READ_GRANT_MS = 15 * 60_000;
+export const WEBSITE_RENEW_LEAD_MS = 45_000; // One browser tool request.
+
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const original = config.environments[request?.environmentId];
   if(original?.projectId===projectId && original.kind==='website'){
@@ -62,7 +65,7 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
     if (typeof v !== 'string' || !v.length || v.length > Math.min(p.maxLength ?? 100, 200) || /[\x00-\x1f\x7f]/.test(v)) throw Object.assign(new Error('查询文本参数无效'),{queryDiagnostic:{code:'TEXT_PARAMETER',index:i,maxLength:Math.min(p.maxLength??100,200),length:typeof v==='string'?v.length:null,reason:typeof v!=='string'?'type':!v.length?'empty':/[\x00-\x1f\x7f]/.test(v)?'control_characters':'length'}});
     return v;
   });
-  const scope = { expiresAt: new Date(now + 15 * 60000).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: q.timeoutMs };
+  const scope = { expiresAt: new Date(now + READ_GRANT_MS).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: q.timeoutMs };
   const approvalRequired = false;
   return { ...scope, description: q.description + (q.mode === 'investigate' ? `；范围：${e.kind === 'website' ? new URL(e.baseUrl).origin : e.kind === 'nacos' ? q.namespaces.map(x => x || 'public').join(', ') : q.tables.join(', ')}；按证据推进，无固定调用次数上限；连续3次无新增证据暂停` : ''), tier: e.tier, kind: e.kind, scopeHash: fingerprint(scope),
     approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: 'policy:read-only', approvedAt: new Date(now).toISOString() };
@@ -81,9 +84,23 @@ export function verifyPlan(config, plan, now = Date.now()) {
 function verifyPlanIntegrity(config, plan) {
   const e = config.environments[plan.environmentId];
   if (!e || fingerprint(e) !== plan.configHash || !Number.isFinite(Date.parse(plan.expiresAt))) throw new Error('查询授权已过期或配置已变更，请重新申请');
-  const scope = Object.fromEntries(['expiresAt','approvalProfile','environmentId','queryId','projectId','parameters','configHash','maxRows','timeoutMs'].map((k) => [k, plan[k]]));
+  const scope = planScope(plan);
   if (fingerprint(scope) !== plan.scopeHash || e.projectId !== plan.projectId) throw new Error('查询范围与批准内容不一致');
   return e;
+}
+
+function planScope(plan) {
+  return Object.fromEntries(['expiresAt','approvalProfile','environmentId','queryId','projectId','parameters','configHash','maxRows','timeoutMs'].map(key => [key, plan[key]]));
+}
+
+export function renewWebsitePlan(config, plan, now = Date.now()) {
+  const environment = verifyApproval(verifyPlanIntegrity(config, plan), plan);
+  if (environment.kind !== 'website' || plan.kind !== 'website'
+    || plan.approvedBy !== 'policy:read-only' || plan.approvalRequired) {
+    throw new Error('仅原策略授权的只读网页范围可自动续签');
+  }
+  const renewed = { ...plan, expiresAt: new Date(now + READ_GRANT_MS).toISOString(), approvedAt: new Date(now).toISOString() };
+  return { ...renewed, scopeHash: fingerprint(planScope(renewed)) };
 }
 
 function verifyApproval(e, plan) {

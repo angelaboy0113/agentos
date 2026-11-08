@@ -71,10 +71,11 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
 }
 async function runInvestigation(plan, emit, adapters) {
   const load = adapters.load ?? loadEnvironments;
-  let cfg = await load(), e = verifyApprovedPlan(cfg, plan), q = e.queries[plan.queryId];
+  const authorize = async () => { await adapters.beforeAuthorization?.(); return verifyApprovedPlan(await load(), plan); };
+  const e = await authorize(), q = e.queries[plan.queryId];
   if (q.mode !== 'investigate') throw new Error('未批准工具排查范围');
   const cred = e.kind==='website'||adapters.preferReuse ? {} : await (adapters.credential ?? credential)(e.credentialRef);
-  const makeTools=async()=>{const authorize=async()=>verifyApprovedPlan(await load(),plan),base=await (adapters.tools??createEnvironmentTools)(e,q,cred,{reportJob:adapters.reportJob,dataDir:adapters.dataDir,exportDirectory:adapters.exportDirectory,originalQuestion:adapters.investigationContext?.originalQuestion,schemaState:adapters.session?.state.schema,loadCredential:adapters.preferReuse?()=>(adapters.credential??credential)(e.credentialRef):undefined,authorize});
+  const makeTools=async()=>{const base=await (adapters.tools??createEnvironmentTools)(e,q,cred,{reportJob:adapters.reportJob,dataDir:adapters.dataDir,exportDirectory:adapters.exportDirectory,originalQuestion:adapters.investigationContext?.originalQuestion,schemaState:adapters.session?.state.schema,loadCredential:adapters.preferReuse?()=>(adapters.credential??credential)(e.credentialRef):undefined,authorize});
     const source=sourceQueryTools(adapters.sourceQueryContext,{authorize,secrets:[cred.username,cred.password]});const merged={...base,spec:[...base.spec,...source.spec],run:async(tool,args)=>{try{return await (source.spec.some(s=>s.tool===tool)?source.run(tool,args):base.run(tool,args));}catch(error){if(error instanceof SourceEvidenceInputError)throw new QueryInputError(error.code,error.message);throw error;}}};const scheduled=evidenceTools(merged,adapters.session,{authorize});return e.kind==='mysql'?batchReadTools(scheduled,{authorize}):scheduled;};
   let tools=await makeTools();const toolTotals={executedTools:0,reusedEvidence:0},keepStats=()=>{const s=tools.stats?.();if(s){toolTotals.executedTools+=s.executedTools;toolTotals.reusedEvidence+=s.reusedEvidence;}};let plannerMs=0,toolMs=0,modelTurns=0,plannerInputBytes=0;const runTool=async(tool,args)=>{const began=Date.now();try{return await tools.run(tool,args);}finally{toolMs+=Date.now()-began;}};
   let planner; const steps = [...(adapters.checkpoint?.steps??[])], results = [...(adapters.checkpoint?.results??[]),...(adapters.session?.state.records??[]).map(r=>({tool:r.tool,restored:true,result:{...r.result,reused:true,evidenceReadAt:r.readAt,evidenceEpoch:r.epoch}}))]; let summary = '', complete = false, unresolvedInput = false, stalled = 0, stopReason = '';
@@ -98,7 +99,7 @@ async function runInvestigation(plan, emit, adapters) {
       diagnosticStage = 'planning';
       if(i>1) await emit({type:'progress',phase:'tool_activity',activity:{current:'Codex 正在规划下一步查询',total:results.length,completed:results.length,recent:steps.slice(-3).map(text=>({text}))}});
       // Recheck scope/expiry before every tool, not just at job claim.
-      try { cfg = await load(); e = verifyApprovedPlan(cfg, plan); }
+      try { await authorize(); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
       const choice = i === 0 && !planner.reused ? { tool: adapters.preferReuse&&tools.spec.some(x=>x.tool==='list_reusable_datasets')?'list_reusable_datasets':'connection', arguments: '{}' } : i===1&&!planner.reused&&tools.spec.some(x=>x.tool==='list_datasets')?{tool:'list_datasets',arguments:'{}'}:await nextPlan({ purpose: plan.parameters[0], investigationContext:adapters.investigationContext, sourceQueryContext:publicSourceQueryContext(adapters.sourceQueryContext,[cred.username,cred.password]), tools: tools.spec, results: results.slice(-12), progress: { toolCount: results.length, consecutiveNoProgress: stalled }, instruction: '优先修正investigationContext.corrections中的未解决校验原因；工具warnings提示全关联未匹配或整列为空时，先核对源码真实关联条件；inspect_dataset会返回草稿所需检查项。不因为REPORT_INPUT重查整套数据。list_datasets有nextOffset时继续分页找已有成果。优先用一次聚合或重复组合查询关闭核心缺口；只读取与问题相关的表结构。先前结果仍在本会话历史中。' });
       if (choice.tool === 'finish') {
@@ -115,7 +116,7 @@ async function runInvestigation(plan, emit, adapters) {
       let args; try { if (typeof choice.arguments !== 'string') throw new Error(); args = JSON.parse(choice.arguments); } catch { throw new Error('工具参数格式不正确，已停止'); }
       lastArgumentKeys=args&&typeof args==='object'?Object.keys(args).filter(k=>['datasetRef','ref','startLine','leftRef','rightRef','leftKey','rightKey','table','columns','filters','sourceColumn','targetColumn','lookups','keyColumn','groupColumns','aggregates'].includes(k)).slice(0,12):[];
       if (!tools.spec.some(x => x.tool === choice.tool)) throw new Error('未开放该环境工具');
-      try { verifyApprovedPlan(await load(), plan); }
+      try { await authorize(); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
       lastAuthorizedAt = new Date().toISOString();
       await emit({ type: 'progress', phase: 'tool_activity', activity: { current: `只读工具：${choice.tool}`, total: results.filter(x=>!x.restored).length+(choice.tool==='read_batch'?0:1), completed: results.filter(x=>!x.restored).length, recent: steps.slice(-3).map(text => ({ text })) } });

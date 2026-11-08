@@ -2,7 +2,7 @@ import {stateView} from '../shared/state-view.js';
 import { canonicalWebsite } from '../shared/website-aliases.js';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
-import { environmentFile, loadEnvironments, planQuery, verifyApprovedPlan } from '../shared/environment-access.js';
+import { environmentFile, loadEnvironments, renewWebsitePlan, verifyApprovedPlan } from '../shared/environment-access.js';
 import { websiteUrl, websiteKey } from '../shared/website-policy.js';
 let updates=Promise.resolve();
 const polling=new WeakMap();
@@ -30,20 +30,28 @@ async function resumeWebsiteLogins(context){
  const jobs=await stateView(context.store,s=>(s.jobs??[]).filter(j=>j.status==='awaiting_clarification'&&j.result?.browserLoginRequired===true&&j.environmentAccess?.kind==='website'));
  for(const job of jobs){
   try{
-   const cfg=await loadEnvironments(),e=cfg.environments[job.environmentAccess.environmentId];if(!e)continue;
-   await context.websiteCredentials?.autoLogin(job,e);
-   if(!await context.websiteBrowser.loginReady(job,e))continue;
+   const cfg=await loadEnvironments();
+   const plan=job.environmentAccess;
+   let usable=plan;
+   try{verifyApprovedPlan(cfg,plan);}
+   catch(error){if(error.code!=='ENVIRONMENT_AUTH_EXPIRED')throw error;usable=renewWebsitePlan(cfg,plan);}
+   const e=cfg.environments[plan.environmentId];
+   if(!await context.websiteBrowser.loginReady(job,e)){
+    if(!await context.websiteCredentials?.autoLogin(job,e))continue;
+    if(!await context.websiteBrowser.loginReady(job,e))continue;
+   }
    await context.store.transact(state=>{
     const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired)return;
-    let valid=true;try{verifyApprovedPlan(cfg,current.environmentAccess);}catch{valid=false;}
+    if(current.environmentAccess?.scopeHash!==plan.scopeHash||current.environmentAccess?.startedAt!==plan.startedAt)return;
+    verifyApprovedPlan(cfg,usable);
     current.browserCheckpoint=current.result.browserCheckpoint;
     delete current.browserResumeClaim;
-    if(valid){
+    if(usable===plan){
      // A one-use continuation issued only by the login detector, not by the Runner.
      current.browserResumeClaim={scopeHash:current.environmentAccess.scopeHash,startedAt:current.environmentAccess.startedAt};
      current.status='queued';current.result=null;
     }
-    else{const old=current.environmentAccess;const plan=planQuery(cfg,{environmentId:old.environmentId,queryId:old.queryId,parameters:old.parameters},current.projectId,{profile:current.originProfile,senderId:current.senderId});current.environmentAccess=plan;current.status=plan.approvalRequired?'awaiting_environment_approval':'queued';current.result=null;}
+    else{const {startedAt,...fresh}=usable;current.environmentAccess=fresh;current.status='queued';current.result=null;}
     current.updatedAt=new Date().toISOString();current.events.push({type:'browser_login_resumed',at:current.updatedAt});
     const question=state.questions?.[current.questionId];if(question)question.generation++;
    });
