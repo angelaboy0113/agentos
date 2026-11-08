@@ -8,7 +8,7 @@ const stages = Object.freeze({
   'browser.login-result': '核验浏览器登录', 'browser.open-config': '打开配置列表',
   'browser.click': '点击页面控件', 'browser.search': '搜索页面', 'browser.snapshot': '读取页面', 'browser.operation': '浏览器操作',
   'browser.reuse-session': '复用已登录页面',
-  relate_dataset:'关联并展开已保存数据',period_dataset:'补齐期间并计算分组累计',group_dataset:'分组查询与保存数据',linked_group_dataset:'关联分组查询与保存数据',inspect_dataset:'读取任务内数据集',list_datasets:'列出任务内数据集',enrich_dataset:'组合业务维度',compare_datasets:'核对数据集差异',inspect_report:'读取文件绑定审阅证据',refresh_report:'集中刷新与重算报表',compose_report:'生成清单草稿',finalize_report:'核验最终清单',read_source_evidence:'读取已核验源码',
+  extend_dimension:'补齐显式报表维度',relate_dataset:'关联并展开已保存数据',period_dataset:'补齐期间并计算分组累计',group_dataset:'分组查询与保存数据',linked_group_dataset:'关联分组查询与保存数据',inspect_dataset:'读取任务内数据集',list_datasets:'列出任务内数据集',enrich_dataset:'组合业务维度',compare_datasets:'核对数据集差异',inspect_report:'读取文件绑定审阅证据',refresh_report:'集中刷新与重算报表',compose_report:'生成清单草稿',finalize_report:'核验最终清单',read_source_evidence:'读取已核验源码',
   'tct.login':'调度平台登录','tct.read':'调度平台读取',groups:'读取调度分组',tasks:'读取定时任务',task_detail:'读取定时任务规则',task_batches:'读取任务执行批次',
   connection: '环境连接检查', discover: '发现配置', read_config: '读取配置',
   browser_open: '打开后台浏览器页面', browser_click: '点击页面控件',
@@ -17,6 +17,9 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['BROWSER_AUTOMATION', /Chrome自动化不可用|Apple.?事件JavaScript|Apple.?Events.*(?:denied|not allowed)|not authorized to send Apple events/i, '本机浏览器自动化', '当前进程未能使用Chrome自动化；需要核对macOS自动化许可和Chrome的Apple事件JavaScript设置，不是网站密码错误。', '由本机维护者在当前运行身份下核对系统许可；保留原任务及已保存凭据，许可恢复后沿原范围继续。'],
+  ['BROWSER_EXECUTABLE', /Executable doesn.t exist|browserType.*executable|browser executable.*(?:missing|not found)/i, '浏览器运行环境', '当前浏览器运行环境缺少所需可执行文件，尚未开始网站认证。', '维护者核对所选浏览器模式及其安装路径；不要求用户重发密码，也不自动切换身份或关闭权限校验。'],
+  ['MODEL_UNAVAILABLE', /model is not supported.*(?:ChatGPT|account)|not supported when using Codex with a ChatGPT account|model.{0,80}(?:does not exist|not found)/i, '模型可用范围', '本轮选定模型被当前账号或服务拒绝，不能据此判断数据库或业务异常。', '核对本实例的模型配置入口及账号可用范围，保留任务和已有证据；不会自动更换模型或全局设置。'],
  ['DATABASE_NOT_FOUND',/ER_BAD_DB_ERROR/,'目标数据库核验','已配置的数据库在目标服务器上不存在，当前数据查询尚未完成。','核对当前系统、环境与实际发布配置中的库名；保留已有证据，不创建数据库或改用其它环境，也无需盲目重输密码。'],
  ['DATABASE_OBJECT_MISSING',/ER_NO_SUCH_TABLE/,'目标表核验','目标表在当前数据库中不存在，不能据此解释为业务记录为空。','核对当前环境、源码版本和真实表结构，保留其它有效结果，不创建表或跨库猜测。'],
  ['MONGO_AMOUNT_TYPE',/MONGO_AMOUNT_TYPE/,'MongoDB金额类型核验','金额字段含非数值BSON类型，直接数值聚合未通过；不能把数字字符串静默算成零。','保留完整明细并核对类型，使用精确十进制整理及独立原值分组核验；无效值不能丢弃。'],

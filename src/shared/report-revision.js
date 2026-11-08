@@ -29,19 +29,25 @@ const cell=v=>'"'+String(v).replaceAll('"','""')+'"';
 export const encodeReportCsv=(headers,rows)=>Buffer.from('\uFEFF'+[headers,...rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n');
 const encode=encodeReportCsv;
 export function projectReport(input,args){
- if(!keys(args,['attachmentId','columns','filters','orderBy','requirement'])||typeof args.requirement!=='string'||!args.requirement.trim())fail('明确本次文件修改要求，不能执行任意代码或修改单元格数值');
- const columns=args.columns??input.headers.map(from=>({from,label:from}));
- if(!Array.isArray(columns)||!columns.length||columns.some(c=>!keys(c,['from','label'])||!input.headers.includes(c.from)||typeof c.label!=='string'||!c.label.trim()||/^[\s\uFEFF]*[=+@-]/.test(c.label))||new Set(columns.map(c=>c.label)).size!==columns.length)fail('列必须来自原文件，输出表头唯一且非空');
+ if(!keys(args,['attachmentId','columns','annotations','filters','orderBy','requirement'])||typeof args.requirement!=='string'||!args.requirement.trim())fail('明确本次文件修改要求，不能执行任意代码或修改单元格数值');
+ const projected=args.columns??input.headers.map(from=>({from,label:from}));
+ if(args.annotations!==undefined&&(!Array.isArray(args.annotations)||args.annotations.some(a=>!keys(a,['label','constant']))))fail('annotations须为明确的备注列名/文字数组');
+ const columns=Array.isArray(projected)?[...projected,...(args.annotations??[]).map(a=>({...a,kind:'annotation'}))]:projected;
+ const annotation=c=>c?.kind==='annotation';
+ if(!Array.isArray(columns)||!columns.length||columns.some(c=>!keys(c,['from','label','kind','constant'])||typeof c.label!=='string'||!c.label.trim()||/^[\s\uFEFF]*[=+@-]/.test(c.label)||(annotation(c)?c.from!==undefined||typeof c.constant!=='string'||!c.constant||/^[\s\uFEFF]*[=+@-]/.test(c.constant)||input.headers.includes(c.label)||!args.requirement.includes(c.label)||!args.requirement.includes(c.constant):c.kind!==undefined||c.constant!==undefined||!input.headers.includes(c.from)))||new Set(columns.map(c=>c.label)).size!==columns.length)fail('列须为原文件字段或用户明确给出的新文本备注；不覆盖原列、不执行公式，表头唯一');
  const filters=args.filters??[],order=args.orderBy??[];
  if(!Array.isArray(filters)||filters.some(f=>!keys(f,['column','op','value'])||!input.headers.includes(f.column)||!['eq','ne'].includes(f.op)||typeof f.value!=='string'))fail('筛选只接受实际列和明确的字符串eq/ne，不猜测日期或数字');
  if(!Array.isArray(order)||order.some(o=>!keys(o,['column','direction'])||!input.headers.includes(o.column)||!['asc','desc'].includes(o.direction)))fail('排序只接受实际列和asc/desc，按原字符串排序');
  const index=new Map(input.headers.map((c,i)=>[c,i]));
  const selected=input.rows.filter(r=>filters.every(f=>f.op==='eq'?r[index.get(f.column)]===f.value:r[index.get(f.column)]!==f.value));
  selected.sort((a,b)=>{for(const o of order){const x=a[index.get(o.column)],y=b[index.get(o.column)];if(x!==y)return(x<y?-1:1)*(o.direction==='asc'?1:-1);}return 0;});
- return {headers:columns.map(c=>c.label),rows:selected.map(r=>columns.map(c=>r[index.get(c.from)])),recipe:{columns,filters,orderBy:order,requirement:args.requirement}};
+ return {headers:columns.map(c=>c.label),rows:selected.map(r=>columns.map(c=>c.kind==='annotation'?c.constant:r[index.get(c.from)])),recipe:{columns,filters,orderBy:order,requirement:args.requirement}};
 }
 
 export async function reviseReportFile(dataDir,job,attachment,args){
+ if(!args||typeof args!=='object'||args.columns!==undefined&&!Array.isArray(args.columns)||args.annotations!==undefined&&!Array.isArray(args.annotations))fail('columns/annotations须为明确数组，未修改文件');
+ const annotations=[...(args.columns??[]).filter(c=>c?.kind==='annotation'),...(args.annotations??[])],request=job.originalQuestion??job.instruction??'';
+ if(annotations.some(c=>!c||typeof c.label!=='string'||typeof c.constant!=='string'||!request.includes(c.label)||!request.includes(c.constant)))fail('文本备注的列名和值必须由原始用户明确给出，不能用模型生成的requirement自行授权');
  const s=attachment?.source;
  if(!/^[A-Za-z0-9_-]{1,100}$/.test(job.id??''))fail('任务输出标识无效');
  if(s?.kind!=='delivered-report'||attachment.id!==args.attachmentId||s.projectId!==job.projectId||s.chatId!==job.chatId||s.originProfile!==job.originProfile)fail('文件不属于当前任务身份/项目/群');
@@ -54,9 +60,9 @@ export async function reviseReportFile(dataDir,job,attachment,args){
  const id='report-'+randomUUID(),filename=id+'.csv',bytes=encode(output.headers,output.rows);
  const originalReceipt=JSON.parse(await readFile(path.join(path.dirname(source.file),s.report.id+'.verification.json'),'utf8'));
  const receipt={version:1,status:'verified',file:{id,sha256:hash(bytes)},coverage:{rowCount:output.rows.length},
-  columnRules:output.headers.map(label=>({label,definition:'原文件单元格投影；没有新增计算',evidence:s.report.id})),
+  columnRules:output.headers.map(label=>({label,definition:annotations.some(c=>c.label===label)?'用户明确指定的文本备注；不是新业务取数':'原文件单元格投影；没有新增计算',evidence:s.report.id})),
   readWindow:originalReceipt.readWindow??null,
-  revision:{version:1,sourceJobId:s.sourceJobId,sourceFile:s.report,recipe:output.recipe,originalRowCount:input.rows.length,
+  revision:{version:annotations.length?3:1,sourceJobId:s.sourceJobId,sourceFile:s.report,recipe:output.recipe,originalRowCount:input.rows.length,
    rule:'文件重排/筛选/选列，数值逐格来自原始已核验CSV；不证明最新业务数据或新的金额口径。'}};
  const receiptBytes=Buffer.from(JSON.stringify(receipt)),directory=path.join(dataDir,'exports',job.id);
  await mkdir(directory,{recursive:true});
@@ -74,7 +80,8 @@ export async function reviseReportFile(dataDir,job,attachment,args){
 
 export async function inspectRevision(dataDir,job,item,receipt,args,visited=new Set()){
  const r=receipt.revision,key=(item.sourceJobId??job.id)+':'+item.id;
- if(visited.has(key)||![1,2].includes(r?.version))fail('文件修订来源循环或版本无效');visited.add(key);
+ if(visited.has(key)||![1,2,3].includes(r?.version))fail('文件修订来源循环或版本无效');visited.add(key);
+ if(r.version===1&&r.recipe?.columns?.some(c=>c.kind==='annotation'))fail('旧投影配方不能冒充新文本备注版本');
  const source=await reportFile(dataDir,r.sourceJobId,r.sourceFile),sourceReceipt=JSON.parse(await readFile(path.join(path.dirname(source.file),r.sourceFile.id+'.verification.json'),'utf8'));
  if(sourceReceipt.revision)await inspectRevision(dataDir,{id:r.sourceJobId},r.sourceFile,sourceReceipt,{section:'summary'},visited);
  else {const {inspectReport}=await import('./report-inspection.js');await inspectReport(dataDir,{id:r.sourceJobId,reportFiles:[{...r.sourceFile,sourceJobId:r.sourceJobId}]},{fileId:r.sourceFile.id});}

@@ -426,8 +426,10 @@ async function route(context) {
           if(job.convergenceFinal)throw new Error('最终汇总阶段不能再申请网页排查');
           body.result.environmentQuery=await prepareWebsiteQuery(context,job,body.result.websiteQuery);
         }
-        if (job.taskIntent !== 'analysis' || !['developer', 'owner_report'].includes(job.stage) || !job.questionId || job.environmentAccess
-          || body.result.outcome !== 'needs_clarification') throw new Error('当前阶段不允许申请环境查询');
+        if (job.taskIntent !== 'analysis' || !['developer', 'owner_report'].includes(job.stage) || !job.questionId || job.environmentAccess)throw new Error('当前阶段不允许申请环境查询');
+        if(body.result.outcome!=='needs_clarification'){
+          const error=new Error('当前结果尚不能进入后续受控读取');error.queryDiagnostic={code:body.result.handoffGate?.passed===false?'HANDOFF_NOT_READY':'RESULT_NOT_CONTINUABLE',reason:body.result.handoffGate?.passed===false?'当前交接工件或验收证据未通过；这不是任务阶段或数据库权限不足。':'后续读取申请需要needs_clarification结果，不能将ready/blocked结果直接作为新查询授权。',correction:'保留具体handoffGate问题，区分已交付输入与本轮新输出，修正结构化交接后按原范围继续；不重新取数或扩大权限。',retry:true};throw error;
+        }
         if(job.convergenceFinal)throw new Error('最终汇总阶段不能再申请环境查询');
         const snapshot = await store.read();
         const earlier = snapshot.jobs.filter(j => j.id!==job.id && j.questionId === job.questionId && j.environmentAccess && ['running','queued','awaiting_environment_approval'].includes(j.status));

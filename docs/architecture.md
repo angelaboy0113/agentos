@@ -188,3 +188,8 @@ TCT调度作为独立environment kind，使用已审核HTTPS入口、租户/地�
 ## 群接待与故障接续（1.77.0）
 
 接待入口在原生事件层和控制面两侧校验身份及话题，闲聊直接投递，业务才激活卡片；故障事件与任务事务一同持久化，接待轮询使用轻量投影，已有登录/文件/容量恢复处理器保持职责。详见[group-reception.md](group-reception.md)。
+
+
+## 显式报表维度（1.78.0）
+
+extend_dimension仅派生明确的展示维度，运行时与原始来源重放核验；SQL/Mongo共享目录，不制造业务发生记录。compose_report未知顶层参数立即返回输入错误。 详见[维度补全](dimension-extension.md)。

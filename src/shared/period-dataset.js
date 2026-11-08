@@ -1,3 +1,4 @@
+import {extendDimension} from './dimension-extension.js';
 import {datasetHash} from './dataset-json.js';
 import {buildWindowDataset} from './window-dataset.js';
 import {normalizeCalendarPeriod} from './calendar-period.js';
@@ -85,13 +86,16 @@ export async function buildPeriodDataset(args,load,{check=async()=>{},maxRows=Nu
  return {rows,columns,numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===inputs[0].snapshotId)?inputs[0].snapshotId:hash(inputs.map(d=>d.snapshotId).sort()),derivation:{kind:'period_grid',args:effectiveArgs,audit:{objects:populationMap.size,periods:periods.length,rowCount:rows.length,sources:audits},provenance}};
 }
 export async function verifyPeriodDataset(data,load,options={}){
- const kind=data?.derivation?.kind;if(!['left_lookup','period_grid','dataset_transform','dataset_summary','window_counts','dataset_relation'].includes(kind))return;
+ const kind=data?.derivation?.kind;if(!['left_lookup','period_grid','dataset_transform','dataset_summary','window_counts','dataset_relation','dimension_extension'].includes(kind))return;
  const state=options.state??(options.state={visiting:new Set(),done:new Set()}),token=options.ref??data;
  if(state.visiting.has(token))bad('期间数据依赖循环');if(state.done.has(token))return;
  state.visiting.add(token);
  try{
   const dependencies=new Map(),read=async ref=>{if(dependencies.has(ref))return dependencies.get(ref);const d=await load(ref);if(!d?.complete)bad('期间依赖缺失或不完整');await verifyPeriodDataset(d,load,{...options,state,ref});dependencies.set(ref,d);return d;};
-  if(kind==='dataset_relation'){
+  if(kind==='dimension_extension'){
+   if(data.derivation.version!==1)bad('不支持的显式维度配方版本');const rebuilt=extendDimension(data.derivation.args,await read(data.derivation.args.datasetRef));
+   for(const k of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(!sameJSON(data[k],rebuilt[k]))bad('显式维度与完整原始来源重算不一致');
+  }else if(kind==='dataset_relation'){
    if(data.derivation.version!==1)bad('不支持的关联展开配方版本');
    const rebuilt=await buildRelationalDataset(data.derivation.args,read,options);
    for(const k of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(!sameJSON(data[k],rebuilt[k]))bad('关联展开与完整原始来源重算不一致');

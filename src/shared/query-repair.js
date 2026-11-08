@@ -14,6 +14,7 @@ export function queryRejection(error, job) {
  }else if(d?.code==='REPEATED_TARGET'){
   code=d.code;reason=`AgentOS 自动收敛规则暂停了本次追加查询（不是用户拒绝，也不是权限拒绝）：${d.reason}`;
   correction='保留已有证据，针对仍未核实的核心目标缩小查询范围，或改用已登记的数据库、网页、日志、配置或源码证据路径。';recoverable=true;
+ }else if(['HANDOFF_NOT_READY','RESULT_NOT_CONTINUABLE'].includes(d?.code)){code=d.code;reason=d.code==='HANDOFF_NOT_READY'?'当前交接工件或验收证据未通过；不是任务阶段或数据库权限不足。':'后续读取申请的结构化结果状态不正确，未执行查询。';correction='保留具体交接问题，区分已交付输入与本轮新输出，修正原结果后按原范围继续，不重新取数或扩大权限。';recoverable=true;
  }else if(d?.code==='WEBSITE_TARGET_INVALID'){code=d.code;reason=d.reason;correction=d.correction;recoverable=true;
  }else if(['SOURCE_ENVIRONMENT_UNKNOWN','SOURCE_TIER_CONFIG','SOURCE_TIER_UNMAPPED','SOURCE_ENVIRONMENT_SELECTION','ENVIRONMENT_MISMATCH','WEBSITE_TIER_INVALID'].includes(d?.code)){
   code=d.code;reason=d.reason;correction=d.correction;recoverable=d.code==='WEBSITE_TIER_INVALID';

@@ -56,7 +56,7 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
   const values=d.rows.map(r=>r[key]),keys=new Set(values),unique=keys.size===values.length&&!keys.has(null)&&!keys.has('');
   if(unique&&include){const onlyReference=[...keys].filter(k=>!fileKeys.has(k)),onlyFile=[...fileKeys].filter(k=>!keys.has(k));comparisons.push({...describe(ref,key,d),onlyReferenceCount:onlyReference.length,onlyFileCount:onlyFile.length,onlyReferencePreview:onlyReference.slice(0,3).map(k=>String(k).slice(0,80)),onlyFilePreview:onlyFile.slice(0,3).map(k=>String(k).slice(0,80))});}
   if(traversed)return;
-  if(derivation?.kind==='dataset_transform'&&key===derivation.args.keyColumn)await compareScope(derivation.args.datasetRef,key,true);
+  if(['dataset_transform','dimension_extension'].includes(derivation?.kind)&&key===derivation.args.keyColumn)await compareScope(derivation.args.datasetRef,key,true);
   if(derivation?.kind==='left_lookup'&&key===derivation.keyColumn){await compareScope(derivation.datasetRef,key);for(const lookup of derivation.lookups.filter(l=>l.sourceColumn===key))await compareScope(lookup.datasetRef,lookup.targetColumn,true);}
  };
  await compareScope(receipt.coverage.populationRef,receipt.coverage.populationKey,true);for(const source of draft.sources)await compareScope(source.datasetRef,source.keyColumn);

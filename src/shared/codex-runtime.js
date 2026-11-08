@@ -14,13 +14,13 @@ export const CODEX_MODELS = [
 ];
 export const CODEX_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 
-async function readLocal(file = localFile) {
+async function readLocal(file = process.env.AGENTOS_CODEX_RUNTIME_FILE ?? localFile) {
   try { return JSON.parse(await readFile(file, 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
 }
 
 export async function loadCodexRuntimeSettings(options = {}) {
-  const local = await readLocal(options.file ?? localFile);
+  const local = await readLocal(options.file);
   const model = options.model ?? process.env.AGENTOS_CODEX_MODEL ?? local.model ?? null;
   const reasoningEffort = options.reasoningEffort ?? process.env.AGENTOS_CODEX_REASONING_EFFORT ?? local.reasoningEffort ?? null;
   validateRuntimeSelection({ model, reasoningEffort });
@@ -28,7 +28,7 @@ export async function loadCodexRuntimeSettings(options = {}) {
 }
 
 export async function saveCodexRuntimeSettings(selection, options = {}) {
-  const file = options.file ?? localFile;
+  const file = options.file ?? process.env.AGENTOS_CODEX_RUNTIME_FILE ?? localFile;
   const current = await readLocal(file);
   const model = selection.model || null;
   const reasoningEffort = selection.reasoningEffort || null;
@@ -62,7 +62,7 @@ function validateRuntimeSelection({ model, reasoningEffort }) {
 export async function resolveCodexBinary(explicit, options = {}) {
   if (explicit && explicit !== 'codex') return explicit;
   if (process.env.CODEX_BIN && process.env.CODEX_BIN !== 'codex') return process.env.CODEX_BIN;
-  const local = await readLocal(localFile);
+  const local = await readLocal();
   if (local.codexBin && local.codexBin !== 'codex') {
     try { if ((await stat(local.codexBin)).isFile()) return local.codexBin; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -113,7 +113,7 @@ export async function discoverWindowsCodexBinary(root = null) {
 
 // Scoped only to Codex children. Never changes Windows, Feishu, model or auth.
 export async function codexEnvironment(options = {}) {
-  const local = await readLocal(options.file ?? localFile);
+  const local = await readLocal(options.file);
   const proxyConfigured = Object.hasOwn(options, 'proxyUrl')
     || process.env.AGENTOS_CODEX_PROXY_URL !== undefined || Object.hasOwn(local, 'proxyUrl');
   const proxy = options.proxyUrl ?? process.env.AGENTOS_CODEX_PROXY_URL ?? local.proxyUrl;

@@ -1,3 +1,4 @@
+import {failureDetails} from '../shared/failure-diagnostic.js';
 import {cloudSheetTarget,readCloudSheet} from '../shared/feishu-cloud-sheet.js';
 import{preserveAvailableEvidence}from '../shared/available-evidence.js';
 import {websiteApplication} from '../shared/website-application.js';
@@ -80,7 +81,9 @@ async function resumeWebsiteLogins(context){
     const question=state.questions?.[current.questionId];if(question)question.generation++;
    });
   }catch(error){
-   const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserLoginState==='access_check_failed')return false;current.result.browserLoginState='access_check_failed';current.result.summary=error?.code?.startsWith('CLOUD_DOCUMENT_')?error.message:'网页登录检测或原访问范围核验未完成，不能认定密码错误；请维护者检查浏览器会话、配置和权限。';current.result.finalMessage=current.result.summary;return true;});
+   const diagnostic=failureDetails(error,{stage:'browser.login-result'});
+   const summary=error?.code?.startsWith('CLOUD_DOCUMENT_')?error.message:['BROWSER_AUTOMATION','BROWSER_EXECUTABLE'].includes(diagnostic.code)?diagnostic.cause+' '+diagnostic.next:'网页登录检测或原访问范围核验未完成，不能认定密码错误；请维护者检查浏览器会话、配置和权限。';
+   const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserLoginState==='access_check_failed'&&current.result.summary===summary&&JSON.stringify(current.result.browserLoginDiagnostic)===JSON.stringify(diagnostic))return false;current.result.browserLoginState='access_check_failed';current.result.browserLoginDiagnostic=diagnostic;current.result.summary=summary;current.result.finalMessage=summary;return true;});
    if(changed&&context.cards&&job.questionId){const {publishQuestion}=await import('./questions.js');await publishQuestion(context,job.questionId);}
   }
  }

@@ -154,3 +154,8 @@ data/local-executions保存本机实际fork的父/工作进程和租约身份，
 ## 群接待与故障接续（1.77.0）
 
 ownerPresence、receptionInbox、recoveryEvents 与任务共享控制面状态事务；仅公开状态跨助手共享，消息/卡片仍绑定原 profile/群/话题。私有 reception.local.json 需随本机私有配置备份；代码包只有脱敏示例。详见[group-reception.md](group-reception.md)。
+
+
+## 显式报表维度（1.78.0）
+
+dimension_extension v1保留原主维度引用、显式新增键和来源时间；保存恢复、refresh及文件审阅遍历同一依赖图。新模块及原始依赖必须随迁移保留，不可在旧版本上处理新配方。 详见[维度补全](dimension-extension.md)。

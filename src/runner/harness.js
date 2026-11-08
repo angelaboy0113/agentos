@@ -70,6 +70,14 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
         verifiedArtifacts.push({kind:'report',path:registered.filename,namespace:'task-report',fileId:registered.id,sourceJobId,sha256:registered.sha256,bytes:registered.bytes,verificationHash:registered.verificationHash});
         continue;
       }
+      const input=item.kind==='report'&&job.attachments?.find(a=>a.source?.kind==='delivered-report'&&[a.source.report?.id,a.source.report?.filename].includes(item.path));
+      if(input){
+        const source=input.source;
+        if(!dataDir||source.projectId!==job.projectId||source.originProfile!==job.originProfile||source.chatId!==job.chatId||source.sourceEnvironment&&source.sourceEnvironment!==job.sourceEnvironment||source.sha256!==source.report.sha256)throw Error('REPORT_INPUT_SCOPE');
+        await reportFile(dataDir,source.sourceJobId,source.report,{includeContent:false});
+        verifiedArtifacts.push({kind:'report-input',namespace:'task-input',path:source.report.filename,fileId:source.report.id,sourceJobId:source.sourceJobId,sha256:source.sha256,verificationHash:source.report.verificationHash});
+        continue;
+      }
       if (item.kind === 'report' && /^report-[a-f0-9-]{36}(?:\.csv)?$/.test(item.path)) throw new Error('REPORT_UNREGISTERED');
       const candidate = path.resolve(root, item.path);
       if (!inside(root, candidate)) throw new Error();
@@ -80,6 +88,7 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
       verifiedArtifacts.push({ kind: item.kind, path: path.relative(root, resolved).replaceAll('\\', '/'), sha256: await hashFile(resolved), bytes: info.size });
     } catch (error) { issues.push(item?.kind === 'report' && /^report-/.test(item.path ?? '') ? '登记报表的任务归属、文件或核验摘要未通过；请核对任务导出记录，不重新查询数据库' : '源码或文档工件不存在、超出工作区或属于禁止路径；请核对工件清单'); }
   }
+  if(result.outcome==='ready'&&job.tabularDelivery&&verifiedArtifacts.some(a=>a.kind==='report-input')&&!verifiedArtifacts.some(a=>a.kind==='report'))issues.push('原报表仅是输入，本轮要求的新文件尚未生成和核验');
   const seen = new Set();
   for (const check of h.checks) {
     if (!check || typeof check !== 'object') { issues.push('验收项格式无效'); continue; }
