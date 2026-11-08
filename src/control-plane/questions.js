@@ -41,7 +41,7 @@ export function attachQuestion(state, turn, event, projects) {
   const pendingSetup=mayContinue&&Object.values(state.environmentEnrollments??{}).some(e=>e.questionId===continuation.id&&isPendingEnrollment(e));
   const relatedTurn=mayContinue&&state.conversations.find(t=>t.id===continuation.latestTurnId);
   const q=mayContinue&&(activeQuestionJob(questionJob(state,continuation.id))||pendingSetup||(relatedTurn&&(pending(relatedTurn)||relatedTurn.setupPending||relatedTurn.outcome?.contactCandidates?.length)))?continuation:null;
-  const question = q ?? { id: createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
+  const question = q ?? { id: turn.reservedQuestionId ?? createId('QST'), rootTurnId: turn.id, messageId: turn.messageId, chatId: turn.chatId,
     ...(turn.directoryChannel?{directoryChannel:structuredClone(turn.directoryChannel)}:{}), ...(turn.visibility?{visibility:turn.visibility}:{}), threadRootId: event.root_id ?? turn.messageId, projectId: turn.projectId, profile: turn.profile, senderId: turn.senderId, createdAt: turn.createdAt,
     ...(turn.replyInThread ? { replyInThread: true } : {}),
     ...(related ? { parentQuestionId: related.id } : {}),
@@ -89,6 +89,8 @@ export function questionView(state, questionId, projects = {}) {
   const shown = useJob ? job : displayTurn;
   let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard(displayTurn);
   if (!useJob) card = addQuestionProgress(card, state, q, enrollment);
+  const recovery=Object.values(state.recoveryEvents??{}).filter(e=>e.questionId===q.id&&e.jobId===job?.id&&e.profile===q.profile&&e.projectId===q.projectId&&e.chatId===q.chatId&&['blocked','failed','awaiting_clarification'].includes(job?.status)&&e.failureAt===job.updatedAt&&['maintenance_required','delegated','diagnosing'].includes(e.status)).at(-1);
+  if(recovery&&card.body?.elements)card.body.elements.push({tag:'markdown',content:'**接续核查**\n'+recovery.diagnosis.message+(recovery.status==='maintenance_required'?'\n已登记维护复核；尚未自动确认修复。':'')});
   const stoppedJob = useJob && ['completed','blocked','failed','cancelled'].includes(job.status) && !job.nextJobId;
   const terminal = !enrollment && (!turn.setupPending || stoppedJob) && !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
   const label = card.header.title.content;
@@ -139,13 +141,14 @@ function sourceVersion(state, id) {
   return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId,
     state.jobs.filter((j) => j.questionId === id).map((j) => [j.id, j.status, j.updatedAt, j.events.length, j.nextJobId, j.result]),
     state.conversations.filter((t) => t.questionId === id).map((t) => [t.id, t.status, t.response, t.outcome]),
+    Object.values(state.recoveryEvents??{}).filter(e=>e.questionId===id).map(e=>[e.key,e.status,e.diagnosis]),
     Object.values(state.environmentEnrollments??{}).filter(e=>e.questionId===id).map(e=>[e.id,e.status,e.credentialReceivedAt,e.loginIssue])])).digest('hex');
 }
 const locks = new WeakMap();
 export function publishQuestion(context, id) {
   let queue = locks.get(context.store); if (!queue) { queue = new Map(); locks.set(context.store, queue); }
   const work = (queue.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
-    const snapshot = await stateView(context.store,s=>({questions:{[id]:s.questions[id]},jobs:(s.jobs??[]).filter(j=>j.questionId===id),conversations:(s.conversations??[]).filter(t=>t.questionId===id||t.id===s.questions[id]?.rootTurnId||t.id===s.questions[id]?.latestTurnId),environmentEnrollments:Object.fromEntries(Object.entries(s.environmentEnrollments??{}).filter(([,e])=>e.questionId===id)),cardMessages:{['question:'+id]:s.cardMessages?.['question:'+id]}}));
+    const snapshot = await stateView(context.store,s=>({questions:{[id]:s.questions[id]},recoveryEvents:Object.fromEntries(Object.entries(s.recoveryEvents??{}).filter(([,e])=>e.questionId===id)),jobs:(s.jobs??[]).filter(j=>j.questionId===id),conversations:(s.conversations??[]).filter(t=>t.questionId===id||t.id===s.questions[id]?.rootTurnId||t.id===s.questions[id]?.latestTurnId),environmentEnrollments:Object.fromEntries(Object.entries(s.environmentEnrollments??{}).filter(([,e])=>e.questionId===id)),cardMessages:{['question:'+id]:s.cardMessages?.['question:'+id]}}));
     const version = sourceVersion(snapshot, id);
     const view = questionView(snapshot, id, context.projects);
     if(view.terminal&&context.replyAddressing){

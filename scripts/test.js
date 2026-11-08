@@ -10,6 +10,7 @@ try {
   const files = (await readdir(path.join(root, 'test'))).filter((name) => name.endsWith('.test.js')).sort().map((name) => path.join(root, 'test', name));
   if (!files.length) throw new Error('No AgentOS tests found');
   const child = spawn(process.execPath, ['--test', ...files], { cwd: root, stdio: 'inherit', env: { ...process.env,
+    AGENTOS_RECEPTION_FILE: path.join(directory,'reception.local.json'),
     AGENTOS_ENVIRONMENTS_FILE: path.join(directory, 'environments.local.json'),
     AGENTOS_CONVERSATION_FILE: path.join(directory, 'conversation.local.json'), AGENTOS_MEMORY_FILE: path.join(directory, 'memory.local.json'),
     AGENTOS_REPLY_ADDRESSING_FILE: path.join(directory,'reply-addressing.local.json') } });

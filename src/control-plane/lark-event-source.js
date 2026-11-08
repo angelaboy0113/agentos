@@ -17,7 +17,7 @@ export class LarkEventSource {
   }
 
   async start() {
-    if (this.config.eventKey === 'card.action.trigger' || this.config.successStickers) {
+    if (this.config.eventKey === 'card.action.trigger' || this.config.successStickers || this.config.reception?.enabled) {
       await mkdir(this.callbackDirectory, { recursive: true });
       for (const name of await readdir(this.callbackDirectory)) {
         if (!name.endsWith('.json')) continue;
@@ -113,11 +113,20 @@ export class LarkEventSource {
       await writeFile(file+'.tmp',JSON.stringify(payload),{encoding:'utf8',mode:0o600});await rename(file+'.tmp',file);
       return this.deliverCallback(file);
     }
-    if (this.config.groupOnly && event.chat_type === 'p2p') return;
-    if (!isForThisBot(event, this.config.botOpenId,this.config.botAppId)) return;
+    const reception=receptionIngress(event,this.config);
+    if (this.config.groupOnly && event.chat_type === 'p2p' && !reception) return;
+    if (!isForThisBot(event, this.config.botOpenId,this.config.botAppId) && !reception) return;
     if (this.config.allowedChatIds && event.chat_type !== 'p2p' && !this.config.allowedChatIds.includes(event.chat_id)) return;
     event.agent_profile = this.config.profile ?? null;
     event.agent_role = this.config.role ?? null;
+    if(reception){
+      // Durable, text-only reception. The control plane checks exact topic/owner again.
+      if(!['text','post',undefined].includes(event.message_type))return;
+      const file=path.join(this.callbackDirectory,createHash('sha256').update(event.message_id??event.id).digest('hex')+'.json');
+      await mkdir(this.callbackDirectory,{recursive:true,mode:0o700});
+      await writeFile(file+'.tmp',JSON.stringify(event),{mode:0o600});await rename(file+'.tmp',file);
+      return this.deliverCallback(file);
+    }
     event.attachments = await this.downloadAttachments(event);
     if (event.attachments.length > 0 && isAttachmentPlaceholder(event.content, event.message_type)) {
       event.content = '';
@@ -272,3 +281,11 @@ function contentType(file) {
 }
 
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+export function receptionIngress(event,config){
+ const p=config.reception;if(!p?.enabled||!p.profiles.includes(config.profile)||event.sender_type!=='user')return false;
+ if(event.chat_type==='p2p')return event.sender_id===config.receptionOwners?.[config.profile];
+ if(event.chat_type!=='group'||!p.chatIds.includes(event.chat_id)||config.allowedChatIds&&!config.allowedChatIds.includes(event.chat_id))return false;
+ const mentions=(event.mentions??[]).flatMap(m=>[typeof m.id==='object'?m.id.open_id??m.id.app_id:m.id,m.open_id,m.user_id]).filter(Boolean);
+ return !mentions.includes(config.botOpenId)&&!mentions.includes(config.botAppId);
+}

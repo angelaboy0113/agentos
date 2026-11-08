@@ -1,3 +1,4 @@
+import {captureRecoveryEvent} from './reception-policy.js';
 import{availableEnvironmentEvidence,canReviewAlternativeSources}from './available-evidence.js';
 import{loadIntegrationProjects,assertTaskReadScope}from './integration-peers.js';
 import {comparisonTarget,requestedSourceEnvironments} from './source-comparison.js';
@@ -707,6 +708,7 @@ export class JsonStore {
         job.events.push({ id: createId('EVT'), at: job.updatedAt, type: 'analysis_handoff', nextJobId: nextJob.id });
         state.jobs.push(nextJob); job.context = [];
       }
+      captureRecoveryEvent(state,job,this.receptionPolicy,entry);
       return { job: structuredClone(job), event: entry, nextJob: nextJob ? structuredClone(nextJob) : null };
     });
   }

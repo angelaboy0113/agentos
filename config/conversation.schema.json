@@ -17,7 +17,10 @@
     "contactLookup",
     "requiresTabularDelivery",
     "definitionUpdates",
-    "replyDisposition"
+    "replyDisposition",
+    "responseStyle",
+    "receptionIntent",
+    "ownerStatusUpdate"
   ],
   "properties": {
     "requiresSourceInspection": {
@@ -301,6 +304,50 @@
         "not_applicable"
       ],
       "description": "原问题交付语义：已完整回答answered；询问环境/范围/口径等必要信息clarification；收到/好的等acknowledgement；进度说明progress；非reply动作为not_applicable。发出回复不等于回答完成。"
+    },
+    "responseStyle": {
+      "type": "string",
+      "enum": [
+        "social",
+        "standard"
+      ],
+      "description": "纯闲聊、夸奖、玩笑才social；业务、澄清、任务进度为standard"
+    },
+    "receptionIntent": {
+      "type": "string",
+      "enum": [
+        "ignore",
+        "needs_mention",
+        "owner_help"
+      ],
+      "description": "仅reception_only频道：非业务忽略、明显追加需求提示@、明确向管理员求助等待接待"
+    },
+    "ownerStatusUpdate": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "publicText",
+            "expiresAt"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "publicText": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string"
+            }
+          }
+        }
+      ]
     }
   }
 }

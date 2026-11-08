@@ -65,11 +65,13 @@ export class CodexConversationEngine {
         const idle = [...this.sessions].filter(([, item]) => !item.active).sort((a, b) => a[1].touched - b[1].touched)[0];
         if (idle) this.releaseSession(...idle);
       }
-      const role = await loadStageInstruction(input.role);
+      const restricted=['reception_only','owner_status'].includes(input.channel?.kind);
+      const role = restricted?'只作结构化接待分类或管理员公开状态整理，不可执行任何工具或业务动作。':await loadStageInstruction(input.role);
+      const rules=restricted?this.rules.slice(this.rules.lastIndexOf('## 群内接待与共享管理员状态')):this.rules;
       const thread = await this.app.request('thread/start', {
         cwd: this.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true,
         ...(runtime.model ? { model: runtime.model } : {}),
-        developerInstructions: `${this.rules}\n角色职责（仅理解与决策，不能执行工具或角色任务）：\n${role}`,
+        developerInstructions: `${rules}\n角色职责（仅理解与决策，不能执行工具或角色任务）：\n${role}`,
       });
       session = { id: thread.thread.id, model: thread.model, runtimeSignature, generation: this.app.generation, count: 0, touched: Date.now() };
       this.sessions.set(key, session);
@@ -191,6 +193,8 @@ export function validateDecision(value) {
 }
 function validateDecisionValue(value) {
   if(value?.definitionUpdates!==undefined){if(!Array.isArray(value.definitionUpdates)||value.definitionUpdates.length>12)throw new Error('Invalid definition updates');for(const u of value.definitionUpdates)validateDefinitionUpdate(u);}
+  if(value?.responseStyle!==undefined&&!['social','standard'].includes(value.responseStyle))throw Error('Invalid response style');
+  if(value?.receptionIntent!==undefined&&!['ignore','needs_mention','owner_help'].includes(value.receptionIntent))throw Error('Invalid reception intent');
   if(value?.replyDisposition!==undefined&&(!['answered','clarification','acknowledgement','progress','not_applicable'].includes(value.replyDisposition)||value.action==='reply'&&value.replyDisposition==='not_applicable'||value.action!=='reply'&&value.replyDisposition!=='not_applicable'))throw new Error('Invalid reply disposition');
   if(value.requiresTabularDelivery!==undefined&&typeof value.requiresTabularDelivery!=='boolean')throw new Error('Invalid tabular delivery decision');
   const actions = ['lookup_contact', 'reply', 'create_task', 'clarify', 'approve', 'cancel', 'bind_project', 'approve_environment', 'request_environment_setup', 'approve_environment_setup', 'approve_environment_without_tls'];

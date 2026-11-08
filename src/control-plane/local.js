@@ -33,6 +33,8 @@ async function main() {
     serverUrl: `http://${config.host}:${config.port}`,
     adminToken: config.adminToken,
     dataDir: config.dataDir,
+    reception: app.reception.policy,
+    receptionOwners: projects.humanIdentities?.[app.reception.policy.humanId]??{},
     editedMentions: (await loadConversationSettings(config.conversationFile)).editedMentions,
     watchedChatIds: [...new Set([...Object.keys(projects.chatProjectMap ?? {}), ...Object.keys(projects.chatProfileProjectMap ?? {})])].filter(id=>!projects.retiredChatIds?.includes(id)),
     cliEntry: config.feishu.cliEntry,

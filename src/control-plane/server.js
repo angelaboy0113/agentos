@@ -1,3 +1,5 @@
+import {ReceptionService} from './reception.js';
+import {loadReceptionPolicy} from '../shared/reception-policy.js';
 import {cloudSheetTarget,readCloudSheet,CloudSheetError,registerCloudSheetInput,restoreCloudSheetInput} from '../shared/feishu-cloud-sheet.js';
 import {LongInvestigationNotices} from './long-investigation-notices.js';
 import {SuccessStickers} from './success-stickers.js';
@@ -96,6 +98,7 @@ export async function createControlPlane(overrides = {}) {
   });
   const conversations = new ConversationService(context, { ...await loadConversationSettings(config.conversationFile), memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
+  const receptionPolicy=await loadReceptionPolicy(config.receptionFile);store.receptionPolicy=receptionPolicy;context.reception=new ReceptionService(context,receptionPolicy,overrides.receptionOptions);
   context.retention = new HistoryRetention(context);
   const server = http.createServer(async (request, response) => {
     try {
@@ -111,7 +114,7 @@ export async function createControlPlane(overrides = {}) {
     context.capacityRecoveryStopped=false;
     context.capacityRecoveryTimer=setInterval(()=>pollModelCapacity(context).catch(()=>console.error('[capacity-recovery] recovery deferred')),1000);context.capacityRecoveryTimer.unref();
     context.retention.start();
-    cards.start();context.longNotices.start();
+    cards.start();context.longNotices.start();context.reception.start();
     context.websiteEvidence.retry().catch(()=>console.error('[website-evidence] recovery unavailable'));
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
@@ -120,9 +123,9 @@ export async function createControlPlane(overrides = {}) {
   });
   server.once('close', () => {
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.longNotices.close(),context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.reception.close(),context.longNotices.close(),context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
-  return { server, config, projects, agents, store, conversations, cards, successStickers:context.successStickers };
+  return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
 }
 
 export async function repairStaleTerminalQuestionCards(context) {
@@ -211,7 +214,7 @@ async function route(context) {
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
-      conversationScope: 'question-profile-project-v2',
+      conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun },
       controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
@@ -557,8 +560,10 @@ export async function handleLarkCliEvent(context, event) {
   if (agent?.systemAssistant && (agent.role ?? 'developer') !== role) throw new Error('System assistant role/profile mismatch');
   const stickerResult=await context.successStickers?.handle(event);
   if(stickerResult)return stickerResult;
+  const directReception=await context.reception?.direct(event);if(directReception)return directReception;
   if (agent?.systemAssistant && event.chat_type === 'p2p') return { ignored: true, reason: 'assistant_group_only' };
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
+  const reception=await context.reception?.observe(event,agent);if(reception)return reception;
   // Group-only system assistants must route the addressee before credential
   // intake; a shared topic/root is not permission for every bot to respond.
   if(agent?.systemAssistant && event.chat_type==='group'){

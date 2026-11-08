@@ -1,3 +1,5 @@
+import {directSocial} from '../shared/reception-policy.js';
+import {requesterMentionText} from './requester-mention.js';
 import {publicStickerPolicy} from './success-stickers.js';
 import {deliveredReportInputs,boundReportInput} from '../shared/report-followup.js';
 import {addressCard,addressText} from './reply-addressing.js';
@@ -103,6 +105,7 @@ export class ConversationService {
         projectId: resolveProjectId(this.context.projects, routedChatId, profile),
         parentId: event.reply_to ?? event.root_id ?? null,
         ...(this.context.projects.topicChatIds?.includes(event.chat_id) || event.thread_id ? { replyInThread: true } : {}),
+        ...(event.owner_status_channel?{ownerStatusChannel:true}:{}),
         content: event.content ?? '', attachments: event.attachments ?? [],
         status: 'queued', createdAt: new Date().toISOString(),
         sessionKey: JSON.stringify([routedChatId, event.sender_id, profile, event.agent_role ?? 'owner_intake',
@@ -110,7 +113,11 @@ export class ConversationService {
       };
       const privateParent=Object.values(state.questions??{}).find(q=>q.visibility==='requester'&&q.chatId===turn.chatId&&q.profile===turn.profile&&q.senderId===turn.senderId&&q.projectId===turn.projectId&&[event.reply_to,event.root_id].filter(Boolean).some(id=>id===q.messageId||id===state.cardMessages?.[`question:${q.id}`]?.messageId||state.conversations.some(t=>t.questionId===q.id&&t.messageId===id)));
       if(turn.chatType==='group'&&(requestsPrivateCard(turn.content)||privateParent))turn.visibility='requester';
-      if ((this.questionCards||turn.visibility==='requester') && turn.chatType === 'group' && this.context.cards?.enabled) attachQuestion(state, turn, event, this.context.projects);
+      if ((this.questionCards||turn.visibility==='requester') && turn.chatType === 'group' && this.context.cards?.enabled){
+       if(this.context.reception?.enabled&&!turn.directoryChannel&&turn.visibility!=='requester'){
+        const preview={...state,questions:structuredClone(state.questions??{}),conversations:[...(state.conversations??[])]};attachQuestion(preview,turn,event,this.context.projects);const q=preview.questions[turn.questionId];turn.reservedQuestionId=q.id;turn.questionPreview=q;turn.deferredQuestionEvent={reply_to:event.reply_to,root_id:event.root_id};turn.receptionParentQuestionId=state.questions?.[q.id]?q.id:q.parentQuestionId??null;
+       }else attachQuestion(state,turn,event,this.context.projects);
+      }
       state.conversations.push(turn);
       return { conversation: true, turnId: turn.id, duplicate: false };
     });
@@ -175,6 +182,7 @@ export class ConversationService {
   }
 
   scheduleFeedback(turn) {
+    if(this.context.reception?.enabled&&!turn.directoryChannel)return; // No speculative progress card before social/business intent is known.
     if (this.feedback.has(turn.id) || (!this.context.cards?.enabled && turn.feedbackState) || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
     const entry = {};
     const publish=()=>{
@@ -246,14 +254,15 @@ export class ConversationService {
           if (this.stopped) { await this.update(turn.id, { status: 'queued' }); return; }
           console.error(`[conversation:${turn.id}] AI failed:`, error.message);
           await this.update(turn.id, { status: 'ready', error: error.message.slice(0, 4000),
-            response: conversationFailure(error), ...(error.contextBudget?{contextBudget:error.contextBudget}:{}),
+            response: conversationFailure(error), ...(this.context.reception?.enabled&&!turn.directoryChannel?{displayMode:'direct',questionId:turn.receptionParentQuestionId??null}:{}), ...(error.contextBudget?{contextBudget:error.contextBudget}:{}),
             timing: error.timing ?? { aiMs: Date.now() - aiStarted }, aiFailed: true });
         }
         continue;
       }
       if (turn.status === 'decided') {
         try {
-          const outcome = await this.apply(turn);
+          const appliedTurn=await this.activateQuestion(turn);
+          const outcome = await this.apply(appliedTurn);
           await this.update(turn.id, { status: 'ready', outcome, response: [turn.decision.action==='lookup_contact'||turn.directoryChannel?'':turn.decision.reply, outcome.notice].filter(Boolean).join('\n\n') });
         } catch (error) {
           await this.update(turn.id, { status: 'ready', response: `本次操作未执行：${error.message}`, actionError: error.message });
@@ -269,9 +278,9 @@ export class ConversationService {
         const deliveryStarted = Date.now();
         if(turn.directoryChannel){const responseIds=await this.context.contactChannels.deliver(turn);await this.update(turn.id,{status:'sent',completedAt:new Date().toISOString(),responseIds,contactImageMessageId:turn.outcome?.contactImage?responseIds[0]:null});continue;}
         const responseIds = [...(turn.responseIds ?? [])];
-        const addressee=turn.questionId&&this.context.cards?.enabled?'':await this.context.replyAddressing?.forTurn(turn)??'';
+        const addressee=turn.displayMode!=='direct'&&turn.questionId&&this.context.cards?.enabled?'':await this.context.replyAddressing?.forTurn(turn)??'';
         let parts;
-        if (this.context.cards?.enabled) {
+        if (this.context.cards?.enabled&&turn.displayMode!=='direct') {
           const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, addressCard(conversationCard(turn),addressee),
             cardDestination(turn), { terminal: true, immediate: true,
               resultText: Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT ? turn.response : '', terminalMention: failureNotice(conversationTerminalMention(turn),{card:conversationCard(turn),terminal:true,profile:turn.profile,chatType:turn.chatType,visibility:turn.visibility,occurredAt:turn.aiCompletedAt??turn.createdAt},this.context.projects) });
@@ -280,11 +289,12 @@ export class ConversationService {
         } else {
           if(turn.visibility==='requester')throw new Error('私有卡片投递不可用，未回退公开消息');
           parts = splitReply(addressText(turn.response,addressee));
-          const mention = conversationTerminalMention(turn);
+          if(turn.displayMode==='direct'&&turn.chatType==='group'&&parts.length)parts[0]=requesterMentionText(turn.senderId,parts[0]);
+          const mention = turn.displayMode==='direct'?null:conversationTerminalMention(turn);
           if (mention && parts.length) parts[parts.length - 1] = `${parts.at(-1)}\n\n${mention.text}`;
         }
         for (let i = turn.sentParts ?? 0; i < parts.length; i++) {
-          const result = await this.context.feishu.reply(turn.messageId, parts[i], { profile: turn.profile, replyInThread: turn.replyInThread });
+          const result = await this.context.feishu.reply(turn.messageId, parts[i], { profile: turn.profile, replyInThread: turn.replyInThread,idempotencyKey:'aos-direct-'+turn.id+'-'+i });
           const id = responseMessageId(result);
           if (id) responseIds.push(id);
           await this.update(turn.id, { sentParts: i + 1, responseIds });
@@ -311,9 +321,17 @@ export class ConversationService {
     }
   }
 
+  async activateQuestion(turn){
+   if(!turn.questionPreview&&!turn.ownerStatusChannel)return turn;
+   return this.context.store.transact(s=>{const t=s.conversations.find(x=>x.id===turn.id);if(directSocial(t)){t.displayMode='direct';t.questionId=t.receptionParentQuestionId??null;}else if(t.questionPreview){attachQuestion(s,t,t.deferredQuestionEvent??{},this.context.projects);}
+    delete t.questionPreview;delete t.reservedQuestionId;delete t.deferredQuestionEvent;return structuredClone(t);});
+  }
+
   async buildInput(turn) {
     const { projects, store } = this.context;
     const state = await store.read();
+    if(turn.ownerStatusChannel)return {requestId:turn.id,nativeSession:false,role:turn.role,currentTime:new Date().toISOString(),timeZone:this.context.reception.policy.timeZone,channel:{kind:'owner_status'},message:turn.content,history:[],jobs:[],attachments:[],currentAttachmentIds:[],project:null,publicOwnerStatus:this.context.reception.statusInput(state)};
+    if(turn.questionPreview)state.questions={...state.questions,[turn.questionPreview.id]:turn.questionPreview};
     const projectId = resolveProjectId(projects, turn.chatId, turn.profile);
     const scoped = Boolean(turn.questionId);
     const sourceContext=questionSourceContext(state,{...turn,projectId},projects.projects[projectId]);
@@ -385,12 +403,15 @@ export class ConversationService {
       knownProjects: isAdministrator(projects, turn) ? Object.entries(projects.projects).map(([id, item]) => ({ id, name: item.displayName ?? id })) : [],
       history: history.map((item) => ({ senderId: item.senderId, user: item.content, assistant: item.response, recordedAt: item.completedAt ?? item.createdAt,
         evidenceScope: 'conversation_history_not_current_filesystem', attachments: item.attachments?.map((a) => a.id) })),
+      ...(this.context.reception?.enabled?{publicOwnerStatus:this.context.reception.statusInput(state)}:{}),
       jobs, attachments, message: turn.content, currentAttachmentIds: turn.attachments.map((item) => item.id),
     }, this.memory.settings);
     return input;
   }
 
   async apply(turn) {
+    if(turn.ownerStatusChannel){const d=turn.decision;if(d.action!=='reply'||d.intent!=='none'||d.environmentQuery||d.environmentSetup||d.attachmentIds.length||d.requiresSourceInspection)throw Error('管理员状态私聊不执行任何业务或权限动作');return d.ownerStatusUpdate?this.context.reception.setOwnerStatus(turn,d.ownerStatusUpdate):{notice:''};}
+    if(turn.decision.ownerStatusUpdate)throw Error('共享状态只能由指定管理员私聊设置');
     if(turn.directoryChannel&&!['lookup_contact','reply'].includes(turn.decision.action))throw new Error('本群仅支持按姓名或工号查人，不执行开发、环境或数据库任务');
     const { store, projects } = this.context;
     let decision = turn.decision;

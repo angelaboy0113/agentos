@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "profiles": ["sample-bot"],
+  "chatIds": ["oc_REPLACE_GROUP"],
+  "humanId": "owner",
+  "since": "2026-11-08T00:00:00+08:00",
+  "timeZone": "Asia/Shanghai",
+  "helpDelayMs": 180000,
+  "reminderCooldownMs": 1800000
+}
