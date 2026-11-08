@@ -1,4 +1,4 @@
-import {receptionKey,receptionScope,topicQuestion,receptionIdentity,publicOwnerStatus,validateOwnerStatus,captureRecoveryEvent,recoveryDiagnosis} from '../shared/reception-policy.js';
+import {receptionKey,receptionScope,topicQuestion,receptionIdentity,publicOwnerStatus,validateOwnerStatus,captureRecoveryEvent,recoveryDiagnosis,receptionSensitive} from '../shared/reception-policy.js';
 import {isAdministrator} from './authorization.js';
 import {validateDecision} from './codex-conversation.js';
 import {requesterMentionText} from './requester-mention.js';
@@ -12,7 +12,7 @@ const variants={help:['老大暂时还没接话，我先接住这条求助 👀 
 export class ReceptionService{
  constructor(context,policy,{now=()=>Date.now(),intervalMs=2000,decide,verifyResume}={}){this.context=context;this.policy=policy;this.enabled=policy.enabled===true;this.now=now;this.intervalMs=intervalMs;this.decide=decide??((input,signal,options)=>context.conversations.decide(input,signal,options));this.verifyResume=verifyResume??(async j=>{if(!j.analysisSourceSnapshot?.workspace)throw Error('No fixed source snapshot');const h=await loadHarness({...j,context:[]});const old=[j.result,...(j.context??[]).map(c=>c.result)].find(r=>r?.harness?.fingerprint)?.harness;if(!old||old.fingerprint!==h.metadata.fingerprint)throw Error('Harness changed');});this.abort=new AbortController();if(this.enabled)for(const profile of policy.profiles){const senderId=receptionIdentity(context.projects,policy,profile);if(!senderId||!isAdministrator(context.projects,{senderId,profile}))throw Error('Reception owner identity must map to a trusted administrator for each profile');}}
  owner(event){const id=receptionIdentity(this.context.projects,this.policy,event.agent_profile);return Boolean(id&&id===event.sender_id&&isAdministrator(this.context.projects,{senderId:event.sender_id,profile:event.agent_profile}));}
- async direct(event){if(!this.enabled||event.chat_type!=='p2p'||!this.policy.profiles.includes(event.agent_profile)||!this.owner(event)||!['text','post',undefined].includes(event.message_type))return null;return this.context.conversations.enqueue({...event,owner_status_channel:true});}
+ async direct(event){if(!this.enabled||event.chat_type!=='p2p'||!this.policy.profiles.includes(event.agent_profile)||!this.owner(event)||!['text','post',undefined].includes(event.message_type))return null;if(receptionSensitive(event.content))return {ignored:true,reason:'credential_not_public_status'};return this.context.conversations.enqueue({...event,owner_status_channel:true});}
  async observe(event,agent){
   if(!this.enabled||event.chat_type!=='group'||!receptionScope(this.policy,{profile:event.agent_profile,chatId:event.chat_id})||agent?.allowedChatIds&&!agent.allowedChatIds.includes(event.chat_id))return null;
   const mentionIds=ids(event),addressed=[agent?.openId,agent?.appId].filter(Boolean).some(id=>mentionIds.includes(id));
@@ -98,7 +98,7 @@ export class ReceptionService{
  }
  async recoveryNotice(e,diagnosis,resumed){
   const state=await this.view(),job=state.jobs.find(j=>j.id===e.jobId);if(!job||!this.valid(state,e))return;
-  const key=receptionKey(['recovery',e.profile,e.questionId,diagnosis.kind]);
+  const key=receptionKey(['recovery',e.profile,e.questionId,e.failureGeneration??e.generation,diagnosis.kind]);
   if(state.receptionInbox?.[key])return;
   const text=this.text('recovery',key)+'\n'+diagnosis.message+(resumed?'\n已接回原任务继续执行。':diagnosis.action==='maintenance_required'?'\n这次已登记为待维护复核，尚未声称修复完成。':'');
   await this.context.store.transact(s=>{s.receptionInbox??={};s.receptionInbox[key]??={...e,key,senderId:job.senderId,replyTo:e.replyTo,kind:'recovery',status:'reminding',dueAt:this.now(),createdAt:iso(this.now())};});

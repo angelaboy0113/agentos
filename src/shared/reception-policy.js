@@ -9,8 +9,12 @@ export function validateReceptionPolicy(v){
  return {...v};
 }
 export function receptionScope(policy,record){return Boolean(policy?.enabled&&policy.profiles.includes(record.profile??record.originProfile??record.agentProfile)&&policy.chatIds.includes(record.chatId)&&record.visibility!=='requester');}
-export function topicQuestion(s,event){const refs=[event.reply_to,event.root_id].filter(Boolean);if(!refs.length)return null;
- return Object.values(s.questions??{}).reverse().find(q=>q.profile===event.agent_profile&&q.chatId===event.chat_id&&q.visibility!=='requester'&&!q.closedAt&&refs.some(ref=>q.messageId===ref||q.threadRootId===ref||s.cardMessages?.['question:'+q.id]?.messageId===ref||(s.conversations??[]).some(t=>t.questionId===q.id&&(t.messageId===ref||t.responseIds?.includes(ref)))));
+export function topicQuestion(s,event){
+ const questions=Object.values(s.questions??{}).filter(q=>q.chatId===event.chat_id&&q.visibility!=='requester'&&!q.closedAt),refs=[event.reply_to,event.root_id].filter(Boolean);
+ // Resolve the actual topic/card owner before profile filtering, so four receivers
+ // cannot all claim the same root after several assistants have spoken there.
+ for(const ref of refs){const exact=questions.filter(q=>q.messageId===ref||s.cardMessages?.['question:'+q.id]?.messageId===ref||(s.conversations??[]).some(t=>t.questionId===q.id&&(t.messageId===ref||t.responseIds?.includes(ref))));if(exact.length)return exact.length===1&&exact[0].profile===event.agent_profile?exact[0]:null;}
+ const candidates=questions.filter(q=>refs.includes(q.threadRootId));return candidates.length===1&&candidates[0].profile===event.agent_profile?candidates[0]:null;
 }
 export function receptionIdentity(projects,policy,profile){return projects.humanIdentities?.[policy.humanId]?.[profile]??null;}
 export function publicOwnerStatus(s,policy,now=Date.now()){const v=s.ownerPresence?.[policy.humanId];return v&&Date.parse(v.expiresAt)>now?{available:v.available,publicText:v.publicText,expiresAt:v.expiresAt,timeZone:policy.timeZone}:null;}
@@ -35,3 +39,5 @@ export function captureRecoveryEvent(s,job,policy,event={}){
  const key=receptionKey([q.profile,q.chatId,q.projectId,q.id,job.id,event.id??job.updatedAt]);s.recoveryEvents??={};s.recoveryEvents[key]??={key,jobId:job.id,questionId:q.id,profile:q.profile,projectId:q.projectId,chatId:q.chatId,replyTo:q.messageId,generation:q.generation,failureAt:job.updatedAt,status:'queued',createdAt:job.updatedAt,diagnosis:recoveryDiagnosis(job)};return key;
 }
 export function directSocial(turn){const d=turn.decision;return turn.ownerStatusChannel||turn.visibility!=='requester'&&d?.responseStyle==='social'&&d.action==='reply'&&d.intent==='none'&&!d.requiresSourceInspection&&!d.environmentQuery&&!d.environmentSetup&&!d.contactLookup&&!d.attachmentIds?.length&&!d.requiresTabularDelivery;}
+
+export const receptionSensitive=text=>/(?:password|passwd|secret|token|密码|口令|验证码)\s*[:：=]?\s*\S+|[A-Za-z0-9!@#$%^&*]{24,}/i.test(String(text??''));
