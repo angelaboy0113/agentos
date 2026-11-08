@@ -10,6 +10,9 @@ import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { jobActionVersion } from '../src/control-plane/message-cards.js';
 import { publishQuestion } from '../src/control-plane/questions.js';
 import { memorySources } from '../src/control-plane/memory.js';
+import { controlPost } from '../src/runner/control-client.js';
+import { failureDiagnostic } from '../src/shared/failure-diagnostic.js';
+import { preserveContinuousEnvironmentEvidence } from '../src/runner/index.js';
 const config = () => ({ version: 1, environments: { prd: { projectId: 'demo', tier: 'prd', kind: 'mysql', host: '127.0.0.1', port: 3306, database: 'demo', credentialRef: 'demo_readonly', membersRead: false,
   ownerOpenIdsByProfile: { owner: ['ou_owner'] }, queries: { order: { reviewed: true, description: '按订单号查询状态', sql: 'SELECT order_id, status FROM orders WHERE order_id = ?',
     parameters: [{ name: 'orderId', type: 'string', maxLength: 40 }], outputColumns: ['order_id', 'status'], maxRows: 5, timeoutMs: 1000 } } } } });
@@ -31,7 +34,7 @@ async function fixture(t, responder = () => decision()) {
   t.after(async () => { await new Promise(resolve => setImmediate(resolve));
     for (const q of Object.keys((await app.store.read()).questions ?? {})) await publishQuestion(context, q);
     if (app.server.listening) await new Promise(resolve => { app.server.closeAllConnections(); app.server.close(resolve); });
-    await app.conversations.stop(); await app.cards.stop(); if (previous === undefined) delete process.env.AGENTOS_ENVIRONMENTS_FILE; else process.env.AGENTOS_ENVIRONMENTS_FILE = previous; await rm(dir, { recursive: true, force: true }); });
+    await app.conversations.stop(); await app.cards.stop(); if (previous === undefined) delete process.env.AGENTOS_ENVIRONMENTS_FILE; else process.env.AGENTOS_ENVIRONMENTS_FILE = previous; await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }); });
   return { app, context, calls, send, cfg, dir };
 }
 test('reviewed read-only queries auto-authorize for members in UAT and PRD', () => {
@@ -73,6 +76,48 @@ test('expired tool grant accepts only a promptly returned result gathered while 
   assert.throws(() => verifyCompletedPlan(cfg, plan, evidence, Date.parse(plan.expiresAt) + 10 * 60000 + 1));
   cfg.environments.prd.host = 'changed';
   assert.throws(() => verifyCompletedPlan(cfg, plan, evidence, Date.parse(plan.expiresAt) + 1));
+});
+
+test('expired website lookup returns its diagnostic and prior findings even when no exports exist', async t => {
+  const { app, cfg } = await fixture(t);
+  cfg.environments.web = {
+    projectId: 'demo', tier: 'prd', kind: 'website', baseUrl: 'https://example.com/app/',
+    credentialRef: 'web-test', membersRead: false, ownerOpenIdsByProfile: { owner: ['ou_owner'] },
+    queries: { investigate: { reviewed: true, mode: 'investigate', description: '核对页面',
+      browser: true, maxRows: 20, timeoutMs: 1000, parameters: [{ name: 'purpose', type: 'string' }] } },
+  };
+  await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE, JSON.stringify(cfg));
+  const started = Date.now() - 16 * 60_000;
+  const plan = planQuery(await loadEnvironments(), { environmentId: 'web', queryId: 'investigate', parameters: ['核对页面'] }, 'demo', actor, started);
+  const { job } = await app.store.createJob({ projectId: 'demo', chatId: 'group', senderId: actor.senderId,
+    originProfile: actor.profile, stage: 'developer', workflow: 'single_developer', taskIntent: 'analysis',
+    instruction: '核对页面', environmentAccess: { ...plan, startedAt: new Date(started).toISOString() } });
+  const leased = await app.store.leaseNext('r');
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  const serverUrl = `http://127.0.0.1:${app.server.address().port}`;
+  const identity = { leaseId: leased.lease.id, runnerId: 'r' };
+  const reply = await fetch(`${serverUrl}/api/v1/jobs/${job.id}/website-tool`, {
+    method: 'POST', headers: { authorization: `Bearer ${app.config.runnerToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ ...identity, tool: 'browser_snapshot', args: {} }),
+  });
+  assert.equal(reply.status, 403);
+  const diagnostic = failureDiagnostic((await reply.json()).error);
+  assert.match(diagnostic, /^错误码：ENVIRONMENT_AUTH_EXPIRED/m);
+
+  const result = preserveContinuousEnvironmentEvidence({ context: [{ kind: 'analysis_turn', result: {
+    finalMessage: '已核验源码中的截止日规则', summary: '已核验源码', handoffGate: { passed: true },
+    verifiedArtifacts: [{ kind: 'code', path: 'Budget.java' }],
+    handoff: { checks: [{ status: 'passed' }] },
+  } }] }, { outcome: 'blocked', finalMessage: diagnostic });
+  assert.deepEqual(result.exportFiles, []);
+  const route = `/api/v1/jobs/${job.id}/events`;
+  const control = { serverUrl, runnerToken: app.config.runnerToken };
+  await assert.rejects(controlPost(control, route, { ...identity, type: 'completed',
+    result: { ...result, exportFiles: [{ id: 'unverified' }] } }), /RESULT_GRACE_EXPIRED/);
+  const completed = await controlPost(control, route, { ...identity, type: 'completed', result });
+  assert.equal(completed.job.status, 'blocked');
+  assert.match(completed.job.result.finalMessage, /已核验源码中的截止日规则/);
+  assert.equal(completed.job.result.environmentFailure.code, 'ENVIRONMENT_AUTH_EXPIRED');
 });
 test('configuration accepts PRD read policy but rejects secrets, SQL writes and unreviewed templates', async (t) => {
   const { dir } = await fixture(t); const file = path.join(dir, 'invalid.json');

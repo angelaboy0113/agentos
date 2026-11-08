@@ -440,8 +440,12 @@ async function route(context) {
       routing = { ...agentRouting(context, 'developer'), reviewInvestigation: true };
     }
     if(body.type==='completed'&&body.result?.exportFiles!==undefined){
-      verifyCompletedPlan(await loadEnvironments(),job.environmentAccess??{},body.result.environmentEvidence);
-      body.result.exportFiles=await validateReportFiles(config.dataDir,job.id,body.result.exportFiles);
+      const files=body.result.exportFiles;
+      // An empty list carries no new export evidence and must not block a diagnostic result.
+      if(!Array.isArray(files)||files.length>0){
+        verifyCompletedPlan(await loadEnvironments(),job.environmentAccess??{},body.result.environmentEvidence);
+        body.result.exportFiles=await validateReportFiles(config.dataDir,job.id,files);
+      }
     }
     let committedEvent;
     const result=await commitControl(context,async()=>{committedEvent=await store.appendEvent(job.id,body,routing);return {ok:true,job:committedEvent.job};});

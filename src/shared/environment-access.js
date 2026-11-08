@@ -68,7 +68,12 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
     approvalRequired, approvalOwnerIds: [...(e.ownerOpenIdsByProfile[actor.profile] ?? [])], approvedBy: 'policy:read-only', approvedAt: new Date(now).toISOString() };
 }
 export function verifyPlan(config, plan, now = Date.now()) {
-  if (!Number.isFinite(Date.parse(plan.expiresAt)) || Date.parse(plan.expiresAt) <= now) throw new Error('查询授权已过期或配置已变更，请重新申请');
+  const expiresAt = Date.parse(plan.expiresAt);
+  if (Number.isFinite(expiresAt) && expiresAt <= now) {
+    throw Object.assign(new Error('[ENVIRONMENT_AUTH_EXPIRED] 查询授权已过期'), {
+      code: 'ENVIRONMENT_AUTH_EXPIRED', statusCode: 403,
+    });
+  }
   const e = verifyPlanIntegrity(config, plan);
   return e;
 }
