@@ -94,13 +94,14 @@
           <label><span>统计内容</span><select id="usage-scope"><option value="business">业务提问与追问</option><option value="all">全部公开互动（不含敏感消息）</option></select></label>
           <label><span>人员合并</span><select id="usage-grouping"><option value="name">按姓名合并展示</option><option value="identity">按机器人身份分别统计</option></select></label>
           <label><span>管理员</span><select id="usage-admin"><option value="true">排除管理员</option><option value="false">包含管理员</option></select></label>
+          <button class="primary-button" id="usage-export">导出 Excel</button>
           <button class="text-button" id="usage-week">上个完整周（六至五）</button><button class="text-button" id="usage-clear">全部留存日期</button>
         </div>
-        <div class="metrics"><article><span>提问与互动</span><strong id="usage-messages">—</strong></article><article><span>参与人员</span><strong id="usage-people">—</strong></article><article><span>话题内追问</span><strong id="usage-followups">—</strong></article><article><span>统计时区</span><strong>北京时间</strong></article></div>
+        <div class="metrics"><article><span>提问与互动</span><strong id="usage-messages">—</strong></article><article><span>参与人员</span><strong id="usage-people">—</strong></article><article><span>话题内追问</span><strong id="usage-followups">—</strong></article><article><span>有效提问积分</span><strong id="usage-points">—</strong><small>每次有效业务提问或追问 +1</small></article></div>
         <p class="setting-note" id="usage-method"></p>
-        <div class="overview-grid"><section class="panel table-panel"><div class="panel-heading"><h3>活跃伙伴榜 · 点击查看个人记录</h3></div><div class="table-wrap"><table><thead><tr><th>排名</th><th>人员</th><th>提问 / 追问</th><th>使用助手</th></tr></thead><tbody id="usage-ranking"></tbody></table></div></section>
+        <div class="overview-grid"><section class="panel table-panel"><div class="panel-heading"><h3>活跃伙伴榜 · 点击查看个人记录</h3></div><div class="table-wrap"><table><thead><tr><th>排名</th><th>人员</th><th>积分</th><th>提问 / 追问</th><th>使用助手</th></tr></thead><tbody id="usage-ranking"></tbody></table></div></section>
         <section class="panel"><div class="panel-heading"><h3>助手与日期分布</h3></div><div id="usage-distribution"></div></section></div>
-        <section class="panel table-panel"><div class="panel-heading"><h3 id="usage-person-title">全部人员记录</h3><button class="text-button" id="usage-person-clear">查看所有人员</button></div><div class="table-wrap"><table><thead><tr><th>人员 / 问题</th><th>助手 / 环境</th><th>状态</th><th>提问时间</th></tr></thead><tbody id="usage-records"></tbody></table></div><div class="panel-heading"><button class="text-button" id="usage-prev">上一页</button><span id="usage-page"></span><button class="text-button" id="usage-next">下一页</button></div></section>
+        <section class="panel table-panel"><div class="panel-heading"><h3 id="usage-person-title">全部人员记录</h3><button class="text-button" id="usage-person-clear">查看所有人员</button></div><div class="table-wrap"><table><thead><tr><th>人员 / 问题</th><th>助手 / 环境</th><th>积分</th><th>状态</th><th>提问时间</th></tr></thead><tbody id="usage-records"></tbody></table></div><div class="panel-heading"><button class="text-button" id="usage-prev">上一页</button><span id="usage-page"></span><button class="text-button" id="usage-next">下一页</button></div></section>
       </section>
 
       <section class="view" id="view-knowledge">

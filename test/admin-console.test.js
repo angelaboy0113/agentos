@@ -62,6 +62,11 @@ test('local admin console serves task records and safely updates runtime setting
   }
 
   assert.equal((await fetch(`${base}/api/v1/admin/usage`)).status,401);
+  assert.equal((await fetch(`${base}/api/v1/admin/usage/export.xlsx`)).status,401);
+  const exported=await fetch(`${base}/api/v1/admin/usage/export.xlsx`,{headers:{cookie}});
+  assert.equal(exported.status,200);assert.match(exported.headers.get('content-type'),/spreadsheetml/);assert.equal(Buffer.from(await exported.arrayBuffer()).subarray(0,2).toString(),'PK');
+  assert.equal((await fetch(`${base}/api/v1/admin/usage/export.xlsx?end=invalid`,{headers:{cookie}})).status,400);
+
   const usageResponse=await fetch(`${base}/api/v1/admin/usage`,{headers:{cookie}});
   assert.equal(usageResponse.status,200);assert.equal((await usageResponse.json()).usage.summary.messages,0);
   assert.equal((await fetch(`${base}/api/v1/admin/usage?start=2026-02-30`,{headers:{cookie}})).status,400);

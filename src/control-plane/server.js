@@ -48,6 +48,7 @@ import { ReplyAddressing, addressCard } from './reply-addressing.js';
 import { jobCard, resultSummary } from './message-cards.js';
 import { handleCardAction } from './card-actions.js';
 import { jobTerminalMention, failureNotice } from './requester-mention.js';
+import {usageWorkbook} from './admin-usage-export.js';
 import { adminUsage, AdminUsageDirectory } from './admin-usage.js';
 import { adminOverview, adminRecordDetail, adminRecords } from './admin-view.js';
 import { CODEX_MODELS, CODEX_REASONING_EFFORTS, loadCodexRuntimeSettings, saveCodexRuntimeSettings } from '../shared/codex-runtime.js';
@@ -162,6 +163,18 @@ async function route(context) {
   const assetMatch = url.pathname.match(/^\/admin\/(app\.js|styles\.css)$/);
   if (request.method === 'GET' && assetMatch) return serveAdmin(context, response, assetMatch[1]);
 
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/usage/export.xlsx') {
+    requireAdminSession(context, request, false);
+    context.adminUsageExports=(context.adminUsageExports??0)+1;
+    try {
+      const state=await store.read(),names=await context.adminUsageDirectory.names(state);
+      let usage;try { usage=adminUsage(state,Object.fromEntries(url.searchParams),{projects:context.projects,names,allRecords:true}); }
+      catch { return json(response,400,{ok:false,error:'统计日期或时区无效'}); }
+      const workbook=usageWorkbook(usage,{person:url.searchParams.get('person')});
+      response.writeHead(200,{'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','content-disposition':'attachment; filename="AgentOS-usage.xlsx"','cache-control':'no-store','x-content-type-options':'nosniff'});
+      await workbook.xlsx.write(response);response.end();return;
+    } finally { context.adminUsageExports--; }
+  }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/usage') {
     requireAdminSession(context, request, false);
     const state = await store.read();
@@ -222,7 +235,7 @@ async function route(context) {
   }
 
   if (request.method === 'GET' && url.pathname === '/health') {
-    return json(response, 200, { ok: true, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
+    return json(response, 200, { ok: true, adminUsageExports:context.adminUsageExports??0, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun },
