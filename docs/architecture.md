@@ -201,3 +201,5 @@ extend_dimension仅派生明确的展示维度，运行时与原始来源重放�
 
 ### 1.80.0 积分与Excel导出
 使用统计按有效业务用户消息派生1分，不增加积分账本、不改变历史清理或权限；积分依筛选及留存范围计算。新增受本机会话保护的usage/export.xlsx，以单份状态快照导出全量匹配记录及口径，ExcelJS固定依赖随锁文件迁移。health.adminUsageExports标记在途导出，发布前须自然归零；详见admin-console.md。
+
+网页调查提供固定参数 browser_inspect，复用当前授权页面和控件引用投影布局/可见字段数；动态展开控件与面板按共享语义识别，不开放任意JS、控制台缓存或隐藏值，见 website-expansion.md。

@@ -1,3 +1,5 @@
+import {controlMetadata} from '../shared/website-controls.js';
+import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
 import {browserLoginState} from '../shared/browser-login-state.js';
 import {randomUUID} from 'node:crypto';
@@ -20,7 +22,7 @@ export class SharedChromeBrowser{
  async snapshot(job,e,s,tool,args){
   await this.allowed(job,e,s.waiting);
   const request={baseUrl:s.baseUrl,token:s.token,tool,args};
-  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify({...(${chromePage.toString()})(${JSON.stringify(request)}),...(${browserLoginState.toString()})()})`});
+  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify({...(${chromePage.toString()})(${JSON.stringify(request)},{metadata:${controlMetadata.toString()},inspect:${inspectWebsiteControl.toString()}}),...(${browserLoginState.toString()})()})`});
   if(raw.error)throw new Error(raw.error);
   s.waiting=raw.loginRequired===true||raw.loginState==='loading';if(!s.waiting)s.credentialAttempted=false;
   if(raw.pageText)raw.pageText=cleanWebsiteText(raw.pageText);
@@ -28,7 +30,7 @@ export class SharedChromeBrowser{
   return raw;
  }
  run(job,e,tool,args={}){return this.serial(async()=>{
-  if(!['connection','browser_open','browser_snapshot','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
   await this.allowed(job,e);const s=await this.state(job,e);
   let r=await this.snapshot(job,e,s,tool,args);
   if(r.acted)r=await this.snapshot(job,e,s,'browser_snapshot',{});

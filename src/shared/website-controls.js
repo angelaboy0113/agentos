@@ -1,5 +1,5 @@
 // Fixed DOM adapter shared by all applications; no model-supplied selectors or scripts.
-export const websiteControls='.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
+export const websiteControls='.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
 export function controlMetadata(el,{readNavigationSelectors=[]}={}){
  const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
  if(!visible||el.disabled||el.getAttribute('aria-disabled')==='true'||el.matches('.disabled,.is-disabled,.ant-picker-cell-disabled,.ant-calendar-disabled-cell')||el.closest('.ant-calendar-disabled-cell,.ant-picker-cell-disabled')||el.closest('[contenteditable="true"],[data-sensitive],[data-agentos-secret]'))return {visible:false};
@@ -9,6 +9,12 @@ export function controlMetadata(el,{readNavigationSelectors=[]}={}){
  const primaryLabel=reviewedNavigation?(el.getAttribute('aria-label')||el.getAttribute('title')||el.querySelector(':scope > h1,:scope > h2,:scope > h3,:scope > h4,:scope > p')?.innerText):null;
  const title=el.matches('[role="menuitem"],[role="treeitem"]')?el.querySelector(':scope > .el-submenu__title,:scope > .ant-menu-submenu-title'):null;
  let label=(primaryLabel||(title??el).innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+ const localExpansion=/^(?:展开|收起)(?:全部|筛选|筛选条件|更多)?(?:\s*[（(](?:还有|共)?\s*\d+\s*(?:项|个)?[）)])?\s*[⌄⌃▾▴▼▲∨∧]?$/.test(label)||/^(?:expand|collapse)(?: all| filters)?(?:\s*\(\d+\))?$/i.test(label);
+ const customContainer=['div','i'].includes(tag)&&!el.matches('[role],.el-submenu__title,.ant-menu-submenu-title,.ant-card-hoverable,.el-date-editor,.ant-picker,.ant-calendar-picker');
+ const localInteractive=el.matches('button,[role=button],[aria-expanded]')||el.hasAttribute('onclick')||getComputedStyle(el).cursor==='pointer';
+ // Never turn a container/ordinary paragraph into an action because its descendants contain a label.
+ if(customContainer&&!reviewedNavigation&&!(el.matches('.ant-table-row-expand-icon,.el-table__expand-icon')||panelCandidate(el)||localExpansion&&localInteractive&&el.querySelectorAll('button,a,input,select,[role=button]').length===0))return {visible:true,label,type:null};
+ function panelCandidate(node){return node.matches('.el-collapse-item__header,.ant-collapse-header');}
  const fieldGroup=el.closest('.el-form-item,.ant-form-item,.el-col,.ant-col,[role="group"],label');
  const singleField=fieldGroup&&[...fieldGroup.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(x=>x.getClientRects().length).length===1;
  const localLabel=singleField?fieldGroup.innerText?.trim():'';
@@ -43,8 +49,9 @@ export function controlMetadata(el,{readNavigationSelectors=[]}={}){
  else if(option||calendar&&el.matches('button,td,[role="gridcell"]')||pagination){type='read-action';kind=option?'option':calendar?'calendar':'pagination';}
  else if(navigation){type='read-action';kind='navigation';}
  else if(tag==='a'||row||el.matches('[role="combobox"],[aria-haspopup="listbox"],[aria-haspopup="dialog"]')){type='read-action';}
+ else if(localExpansion){type='read-action';kind='expansion-toggle';}
  else if(/^(?:更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|重置|查询|搜索|查看|详情|刷新|展开|收起|确定|返回|下一页|上一页|search|query|view|detail|refresh|next|previous|more|reset)$/i.test(label)||/查看|详情|日志/.test(label)){type='read-action';}
- if(tag==='span'&&!picker&&!calendar&&!option&&!expansion&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
+ if(tag==='span'&&!picker&&!calendar&&!option&&!expansion&&!panel&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!localExpansion&&!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
  if(title||el.matches('[role="tab"]')&&[...el.querySelectorAll('button,[role="button"]')].some(child=>child.innerText?.trim()===label))type=null;
  // Fields, options and date cells change local query state; server writes remain independently blocked.
  const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));

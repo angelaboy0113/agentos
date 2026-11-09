@@ -86,6 +86,7 @@ export function websiteTools(job,config,environment={}){
  {tool:'report_wrong_site',args:{kind:'other_application/target_not_found/navigation_blocked',targetKind:'application/interface/record',expectedApplication:'本次需要的应用名称，不是接口名称',observedApplication:'最新页面实际标题或菜单名称',evidence:'最新页面原文片段',reason:'具体差异、未找到的目标或受阻步骤'},description:'区分不同应用、同一共享平台中尚未找到目标、导航受阻；程序刷新快照核对实际证据。ESB/网关/调度等共享平台可管理多个系统，未找到某接口不代表入口错误，不重复索取已存账号。'},
  {tool:'browser_screenshot',args:{},description:'等待接口返回和页面稳定后保存视口截图，仅遮挡凭据和显式敏感区，由控制服务发送原话题；异常页面应截图并记路径和复现步骤'},
  {tool:'browser_open',args:{},description:'查看当前业务网页'}, {tool:'browser_snapshot',args:{},description:'刷新页面文本和引用'},
+ {tool:'browser_inspect',args:{ref:'当前控件引用'},description:'读取当前控件与祖先的计算布局、展开属性和所在表单字段可见数量；用于点击前后对比和排查展开无效。不读取隐藏值、不执行JS或请求，不能传选择器。'},
  {tool:'browser_read',args:{section:'page或fields',offset:0,limit:4000,contentHash:'续读填写前页摘要，首页省略',find:'可选字面文本定位，返回匹配处上下文及nextMatchOffset，不是业务记录匹配'},description:'当前可见页面或输入框完整脱敏内容分段读取；查看长日志报文时先展开行，再沿nextOffset和contentHash读完，不以snapshot预览当完整响应。无URL/选择器/代码参数，不发新业务请求。'},
  {tool:'browser_click',args:{ref:'当前read-action引用'},description:'查看详情、日志、菜单、翻页；不能启动停止或修改'},
  {tool:'browser_key',args:{ref:'当前控件引用，或page仅用于Escape',key:'Enter/Tab/Escape/ArrowDown/ArrowUp/ArrowLeft/ArrowRight/Home/End/PageDown/PageUp/Space'},description:'日期/下拉框的键盘交互，Tab提交本地筛选输入，Escape关闭弹窗；不能执行系统快捷键'},

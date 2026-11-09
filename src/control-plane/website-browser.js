@@ -1,3 +1,4 @@
+import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
 import {websiteControls,controlMetadata,websiteFields} from '../shared/website-controls.js';
 export {controlMetadata} from '../shared/website-controls.js';
@@ -125,6 +126,7 @@ export class WebsiteBrowser {
   if(!current||!current.visible)throw new BrowserInputError('BROWSER_REF_STALE','原控件已移除或隐藏；先browser_snapshot，不重复旧操作。');
   if(current.label!==ref.rawLabel||current.type!==ref.type)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
   if(current.blocked)throw new Error('该操作可能改变业务状态，本次未执行');
+  if(tool==='browser_inspect')return {url:websitePageLocation(s.page.url()),label:cleanWebsiteText(current.label),...await ref.el.evaluate(inspectWebsiteControl)};
   const expected={browser_search:'search',browser_select:'select',browser_click:'read-action'}[tool];
   if(!['browser_key','browser_scroll'].includes(tool)&&ref.type!==expected&&!(tool==='browser_click'&&ref.type==='search'))throw new BrowserInputError('BROWSER_CONTROL_TYPE','当前引用不是该工具对应的控件；菜单和详情用browser_click，输入框用browser_search，原生下拉框用browser_select。');
   try{
