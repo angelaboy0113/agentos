@@ -199,3 +199,16 @@ test('stale refresh repairs presentation without mutation; stale mutations and f
  const audit=(await store.read()).cardCallbackAudit.at(-1);assert.equal(audit.operatorId,'someone-else');assert.equal(audit.action,'refresh');
  assert.deepEqual(await store.getJob(job.id),before);
 });
+
+test('same refresh event persists a small receipt and never refreshes again after restart or changes actor/group',async t=>{
+ const{context,create,store,feishu}=await setup(t);const{event}=await create('completed','analysis');let updates=0;feishu.updateCard=async()=>{updates++;};const e=event('refresh');
+ assert.equal((await handleCardAction(context,e)).ok,true);assert.equal(updates,1);
+ const receipts=await store.select(s=>s.effects);assert.ok(JSON.stringify(receipts).length<600);
+ const restarted={...context,store:new JsonStore(store.file)},read=restarted.store.read.bind(restarted.store);restarted.store.read=()=>{throw Error('Duplicate refresh cannot read full history');};
+ assert.equal((await handleCardAction(restarted,e)).duplicate,true);assert.equal(updates,1);restarted.store.read=read;
+ for(const changed of[{...e,operator_id:'someone-else'},{...e,chat_id:'other-group'},{...e,message_id:'other-card'}])assert.equal((await handleCardAction(restarted,changed)).ignored,true);
+});
+test('lost refresh acknowledgement while native update is pending returns duplicate receipt without concurrent rerender',async t=>{
+ const{context,create,feishu}=await setup(t);const{event}=await create('completed','analysis');let enter,release,updates=0;const entered=new Promise(r=>enter=r);feishu.updateCard=()=>{updates++;enter();return new Promise(r=>release=r);};const e=event('refresh');
+ const first=handleCardAction(context,e);await entered;const second=await handleCardAction(context,e);assert.equal(second.duplicate,true);assert.equal(updates,1);release();assert.equal((await first).ok,true);
+});

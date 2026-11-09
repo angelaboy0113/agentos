@@ -1,3 +1,5 @@
+import {createHash} from 'node:crypto';
+import {stateView} from '../shared/state-view.js';
 import { handleEnrollmentCard } from './enrollment-cards.js';
 import { routeAgent } from '../shared/project-scope.js';
 import {cardActionChat} from './private-cards.js';
@@ -37,7 +39,7 @@ export async function handleCardAction(context, event) {
   let result;
   try { result=await applyCardAction(context,event);return result; }
   finally {
-    await context.store.transact(state=>{
+    if(!result?.duplicate)await context.store.transact(state=>{
       state.cardCallbackAudit??=[];
       state.cardCallbackAudit.push({at:new Date().toISOString(),profile:event.agent_profile??null,eventId:event.event_id??null,
         messageId:event.message_id??null,operatorId:typeof event.operator_id==='string'?event.operator_id:null,
@@ -57,6 +59,9 @@ async function applyCardAction(context, event) {
   try { parsedValue = parse(event.action_value); } catch { return { ignored: true, reason:'invalid_action_payload' }; }
   if (projects.retiredChatIds?.includes(event.chat_id) && !['result_page', 'refresh'].includes(parsedValue.action)) return { ignored: true, reason: 'retired_group' };
   if (parsedValue.action === 'result_page') return handleResultPage(context, event);
+  const refreshHash=parsedValue.action==='refresh'?createHash('sha256').update(JSON.stringify([profile,event.event_id,event.operator_id,event.chat_id,event.message_id,parsedValue.action,parsedValue.version??null])).digest('hex'):null;
+  const refreshKey=`card-action:${profile}:${event.event_id}`;
+  if(refreshHash){const prior=await stateView(store,s=>s.effects?.[refreshKey]);if(prior)return prior.kind==='card-refresh-accepted'&&prior.requestHash===refreshHash?{ok:true,duplicate:true,message:'该刷新已接收，卡片投递沿原队列继续。'}:{ignored:true,reason:'event_identity_conflict'};}
   const state = await store.read();
   const entry = Object.entries(state.cardMessages ?? {}).find(([key, item]) => (key.startsWith('job:') || key.startsWith('question:'))
     && item.messageId === event.message_id && item.destination.profile === profile);
@@ -96,6 +101,8 @@ async function applyCardAction(context, event) {
     };
     if (action === 'refresh') {
       guard(state, job);
+      const accepted=await store.transact(fresh=>{const current=fresh.jobs.find(j=>j.id===job.id);if(!current)throw Error('当前任务不存在');guard(fresh,current);fresh.effects??={};const prior=fresh.effects[refreshKey];if(prior){if(prior.kind!=='card-refresh-accepted'||prior.requestHash!==refreshHash)throw Error('不支持复用不同操作的事件标识');return false;}fresh.effects[refreshKey]={kind:'card-refresh-accepted',jobId:job.id,questionId,requestHash:refreshHash,at:new Date().toISOString()};return true;});
+      if(!accepted)return {ok:true,duplicate:true,message:'该刷新已接收，卡片投递沿原队列继续。'};
       result = { job, message: '已刷新任务状态。' };
     } else if (action === 'cancel') {
       const updated = await store.cancel(job.id, event.operator_id, effectKey, guard);
