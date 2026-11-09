@@ -1,12 +1,14 @@
 # Angel AgentOS
 
+持续调查、依赖型只读计划与双助手分工见[连续调查执行](docs/continuous-inquiries.md)。
+
 无发生额仍需单列的明确展示分组见[显式报表维度补全](docs/dimension-extension.md)。
 
 群接待、管理员共享公开状态和受控故障接续见[群接待说明](docs/group-reception.md)。
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.80.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.85.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 已交付CSV追加数据库字段、显式年月转换与原列保持见[报表补列](docs/report-append.md)。
 

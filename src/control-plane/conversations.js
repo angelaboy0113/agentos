@@ -1,3 +1,4 @@
+import{jointInquiry}from '../shared/inquiry-execution.js';
 import {directSocial} from '../shared/reception-policy.js';
 import {requesterMentionText} from './requester-mention.js';
 import {publicStickerPolicy} from './success-stickers.js';
@@ -90,6 +91,7 @@ export class ConversationService {
   async enqueue(event) {
     if (!event.message_id || !event.chat_id || !event.sender_id) throw new Error('Missing message identity');
     const profile = event.agent_profile ?? null;
+    const coordination=!requestsPrivateCard(event.content??'')?jointInquiry(event,this.context.agents,this.context.projects):null;
     const directoryChannel=await this.context.contactChannels?.resolve(event.chat_id,profile,event.sender_id);
     const accepted = await this.context.store.transact((state) => {
       state.conversations ??= [];
@@ -106,6 +108,7 @@ export class ConversationService {
         parentId: event.reply_to ?? event.root_id ?? null,
         ...(this.context.projects.topicChatIds?.includes(event.chat_id) || event.thread_id ? { replyInThread: true } : {}),
         ...(event.owner_status_channel?{ownerStatusChannel:true}:{}),
+        ...(coordination?{inquiryCoordination:coordination}:{}),
         content: event.content ?? '', attachments: event.attachments ?? [],
         status: 'queued', createdAt: new Date().toISOString(),
         sessionKey: JSON.stringify([routedChatId, event.sender_id, profile, event.agent_role ?? 'owner_intake',
@@ -391,6 +394,7 @@ export class ConversationService {
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: routingCatalog(catalog(await loadEnvironments(), projectId)),
       role: turn.role, administrator: isAdministrator(projects, turn),
+      inquiryCoordination:turn.inquiryCoordination??null,
       assistantFeatures: {successSticker:publicStickerPolicy(this.context.agents,turn.profile)},
       sourcePolicy: { version: 'folder-evidence-v1', checkedNow: false,
         rule: '聊天未检查当前磁盘。历史回答、清单、旧工作区结果不代表当前文件存在或缺失。用户要求查看当前文件或实现时 requiresSourceInspection=true，创建新的只读调查；不要让用户补齐旧工作区没有带入的源码。' },
@@ -535,7 +539,7 @@ export class ConversationService {
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction,
-        tabularDelivery:decision.requiresTabularDelivery===true,
+        tabularDelivery:decision.requiresTabularDelivery===true,inquiryCoordination:turn.inquiryCoordination??null,
         currentQuestion:turn.questionId?questionObjective(await store.read(),turn.questionId):turn.content,
         originalQuestion: turn.questionId ? questionRequest(await store.read(), turn.questionId) : turn.content,
         attachments: [...(turn.resumeAttachments??[]),...attachments],

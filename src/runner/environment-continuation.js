@@ -26,13 +26,14 @@ export function validateContinuation(config,plan,job,args,projects=null){
 export const publicContinuationCatalog=entries=>compactCatalog(entries);
 
 // An accepted result is persisted before this is considered. Restart uses that
-// same record; failures and files always return to the ordinary source review.
+// same record; unresolved failures return to source review; verified files survive direct handoff.
 export function continuationSourceResult(job){
   if(job.environmentAccess||!job.continuousInvestigation||job.taskIntent!=='analysis'||job.stage!=='developer')return null;
   const last=job.context?.at(-1);
   if(last?.kind!=='environment_result')return null;
   const result=last.result;
-  if(!result?.nextEnvironmentQuery||!['partial','ready'].includes(result.outcome)||result.environmentFailure||result.exportFiles?.length||(result.toolInputErrors?.some(e=>!e.resolved)&&!validReportRepair(result,job)))return null;
+  if(!result?.nextEnvironmentQuery||!['partial','ready'].includes(result.outcome)||result.environmentFailure||(result.toolInputErrors?.some(e=>!e.resolved)&&!validReportRepair(result,job)))return null;
+  if(result.exportFiles?.some(f=>! /^[a-f0-9]{64}$/.test(f.verificationHash??'')))return null;
   const source=[...(job.context??[])].reverse().find(x=>x.kind==='analysis_turn'&&x.result?.handoffGate?.passed===true)?.result;
   if(!source||source.sourceQuestionId!==job.questionId||!source.workspace||source.workspace!==source.sourceSync?.workspace||source.investigation?.blocker)return null;
   return {...source,outcome:'needs_clarification',environmentQuery:result.nextEnvironmentQuery,websiteQuery:null,environmentSetup:null,

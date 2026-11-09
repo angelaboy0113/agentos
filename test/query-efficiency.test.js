@@ -56,10 +56,11 @@ test('unresolved tool failure cannot be bypassed by an environment handoff',asyn
  planner:async()=>({close:async()=>{},next:async()=>[ {tool:'select',arguments:'{}'}, {tool:'continue_environment',arguments:JSON.stringify(next)}, {tool:'finish',summary:'Specific input still unresolved',complete:false}][calls++]})});
  assert.equal(result.nextEnvironmentQuery,null);assert.ok(result.toolInputErrors.some(e=>!e.resolved));assert.equal(result.partial,true);
 });
-test('restart only continues persisted same-question verified source; failures and delivery return to review',()=>{
+test('restart only continues persisted same-question verified source; failures return to review and verified files survive direct handoff',()=>{
  const root={...job,context:[{kind:'analysis_turn',result:source},{kind:'environment_result',result:{outcome:'partial',nextEnvironmentQuery:next}}]};
  assert.deepEqual(continuationSourceResult(JSON.parse(JSON.stringify(root))).environmentQuery,next);
- for(const change of [{environmentFailure:{code:'TIMEOUT'}},{exportFiles:[{id:'f'}]},{toolInputErrors:[{resolved:false}]}])assert.equal(continuationSourceResult({...root,context:[root.context[0],{kind:'environment_result',result:{...root.context[1].result,...change}}]}),null);
+ for(const change of [{environmentFailure:{code:'TIMEOUT'}},{toolInputErrors:[{resolved:false}]}])assert.equal(continuationSourceResult({...root,context:[root.context[0],{kind:'environment_result',result:{...root.context[1].result,...change}}]}),null);
+ assert.deepEqual(continuationSourceResult({...root,context:[root.context[0],{kind:'environment_result',result:{...root.context[1].result,exportFiles:[{id:'verified',verificationHash:'a'.repeat(64)}]}}]}).environmentQuery,next);
  assert.equal(continuationSourceResult({...root,questionId:'foreign'}),null);
  assert.equal(continuationSourceResult({...root,environmentAccess:{}}),null);
  assert.equal(continuationSourceResult({...root,context:[{kind:'analysis_turn',result:{...source,handoffGate:{passed:false}}},root.context[1]]}),null);

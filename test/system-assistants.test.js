@@ -115,3 +115,18 @@ test('third assistant keeps project/owner isolation and six consumer plans',asyn
 });
 
  test('shared-group credential intake is gated before handlers for all unaddressed assistants',async t=>{const {app,event}=await fixture(t,()=>({}));const calls=[];const context={...app,enrollmentCredentials:{handle:async()=>{calls.push('enrollment');}},websiteCredentials:{handle:async()=>{calls.push('website');return {credentialMessage:true};}}};for(const profile of ['a','b']){const result=await handleLarkCliEvent(context,event(profile,'shared-login-'+profile,{mentions:[],content:'网站登录 账号：synthetic 密码：synthetic'}));assert.equal(result.reason,'mention_required');}assert.equal(calls.length,0);assert.equal((await handleLarkCliEvent(context,event('b','wrong-recipient',{mentions:[{id:'bot-a'}],content:'网站登录'}))).reason,'mention_required');assert.equal(calls.length,0);assert.equal((await handleLarkCliEvent(context,event('a','right-recipient',{content:'网站登录'}))).credentialMessage,true);assert.deepEqual(calls,['enrollment','website']);});
+
+test('one human message mentioning two bots creates two isolated duties and retries never duplicate jobs', async t => {
+  const {app,input,send,event}=await fixture(t,()=>({action:'create_task',intent:'analysis',instruction:'Summarize this system only',sourceEnvironment:'prd'}));
+  const mentions=[{id:{open_id:'bot-a'}},{id:{open_id:'bot-b'}}];
+  const results=await Promise.all(['a','b'].map(profile=>send(event(profile,'joint-human-message',{mentions,content:'@A @B compare annual sales',sender_id:`human-${profile}`}))));
+  const state=await app.store.read();
+  assert.equal(state.jobs.length,2);
+  assert.deepEqual(state.jobs.map(j=>[j.projectId,j.agentProfile,j.sourceEnvironment]).sort(),[['alpha','a','prd'],['beta','b','prd']]);
+  for(const job of state.jobs){assert.equal(job.inquiryCoordination.messageId,'joint-human-message');assert.equal(job.inquiryCoordination.grantsShared,false);assert.equal(job.inquiryCoordination.members.length,2);}
+  assert.ok(input.every(i=>i.inquiryCoordination?.policy==='same-message-split-by-system'));
+  await send(event('a','joint-human-message',{mentions}));
+  assert.equal((await app.store.read()).jobs.length,2);
+  await send(event('a','unmentioned',{mentions:[{id:'bot-b'}]}));
+  assert.equal((await app.store.read()).jobs.length,2);
+});

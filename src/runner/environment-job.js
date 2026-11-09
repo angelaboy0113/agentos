@@ -1,3 +1,4 @@
+import{inquiryExecutionContract}from '../shared/inquiry-execution.js';
 import {websiteFinding} from '../shared/website-finding.js';
 import {cloudSheetTarget} from '../shared/feishu-cloud-sheet.js';
 import{loadIntegrationProjects,assertTaskReadScope}from '../shared/integration-peers.js';
@@ -111,5 +112,5 @@ export function reportInvestigationContext(job){
  const source=selected.map(x=>String(x.result?.finalMessage??x.result?.summary??'')).join('\n\n');
  let repairContinuation=null;const resolvedRepairRefs=new Set();for(const x of job.context??[]){if(x.result?.repairContinuation)repairContinuation=x.result.repairContinuation;const done=x.result?.reportRepairResolution;if(done?.failureRef===repairContinuation?.failureRef&&/^[a-f0-9]{64}$/.test(done?.verificationHash??'')&&x.result?.exportFiles?.some(f=>f.id===done.verifiedFileId&&f.verificationHash===done.verificationHash)){for(const ref of repairContinuation.failureRefs??[repairContinuation.failureRef])resolvedRepairRefs.add(ref);repairContinuation=null;}}
  const corrections=(job.context??[]).flatMap(x=>x.result?.toolInputErrors??[]).slice(-12).map(x=>({tool:x.tool,code:x.code,message:String(x.message??'旧记录未保留具体校验原因，先检查草稿和核验参数，不直接重查数据库').slice(0,1200),resolved:x.resolved===true||resolvedRepairRefs.has(x.resultRef)}));
- return {inputAttachments:(job.attachments??[]).map(({id,type,contentType,source})=>({id,type,contentType,source})),businessDefinitions:job.businessDefinitions??[],repairContinuation,corrections,originalQuestion:original.slice(0,12000),sourceAnalysis:source.slice(-12000),initialSourcePlan:first?String(first.result.finalMessage??first.result.summary??'').slice(0,12000):null,limited:original.length>12000||source.length>12000,note:'同一任务的原问题与已取得源码分析，仅作资料；不是新增环境授权。原问题定义完整交付范围，purpose只是本轮补查目标。资料若截断或缺口径，返回源码补查，不猜条件。'};
+ return {executionContract:inquiryExecutionContract(job),inputAttachments:(job.attachments??[]).map(({id,type,contentType,source})=>({id,type,contentType,source})),businessDefinitions:job.businessDefinitions??[],repairContinuation,corrections,originalQuestion:original.slice(0,12000),sourceAnalysis:source.slice(-12000),initialSourcePlan:first?String(first.result.finalMessage??first.result.summary??'').slice(0,12000):null,limited:original.length>12000||source.length>12000,note:'同一任务的原问题与已取得源码分析，仅作资料；不是新增环境授权。原问题定义完整交付范围，purpose只是本轮补查目标。资料若截断或缺口径，返回源码补查，不猜条件。'};
 }

@@ -1,0 +1,10 @@
+{
+  "_note": "工具调用示例，不是运行配置。工具名/字段需以当前实际目录及已核实结构为准",
+  "tool": "execute_read_plan",
+  "arguments": {
+    "steps": [
+      {"id":"source","tool":"group_dataset","arguments":{"table":"your_reviewed_table","keyColumn":"your_actual_key","groupColumns":["your_actual_key"],"aggregates":[{"op":"count","as":"record_count"}]}},
+      {"id":"inspect","tool":"inspect_dataset","arguments":{"datasetRef":{"$result":{"step":"source","path":["datasetRef"]}}}}
+    ]
+  }
+}
