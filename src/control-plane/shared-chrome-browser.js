@@ -1,3 +1,5 @@
+import {validateBrowserTool} from '../shared/browser-tool-input.js';
+import {readWebsiteAsset} from './website-assets.js';
 import {controlMetadata} from '../shared/website-controls.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
@@ -30,8 +32,10 @@ export class SharedChromeBrowser{
   return raw;
  }
  run(job,e,tool,args={}){return this.serial(async()=>{
-  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
   await this.allowed(job,e);const s=await this.state(job,e);
+  if(tool==='browser_assets')validateBrowserTool(tool,args);
+  if(tool==='browser_assets')return readWebsiteAsset({...s,assets:s.assets??(s.assets=new Map()),job,environment:e,page:{locator:()=>({evaluateAll:fn=>this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${fn.toString()})(Array.from(document.querySelectorAll('script[src]'))))`})})}},args,this.authorize);
   let r=await this.snapshot(job,e,s,tool,args);
   if(r.acted)r=await this.snapshot(job,e,s,'browser_snapshot',{});
   for(let attempt=0;attempt<3&&['empty','loading'].includes(r.pageStatus);attempt++){await this.wait(400);r=await this.snapshot(job,e,s,'browser_snapshot',{});}

@@ -49,6 +49,9 @@
           ],
           "readNavigationSelectors": [
             ".application-card"
+          ],
+          "staticResources": [
+            "https://assets.example.invalid/static/framework.js"
           ]
         }
       }

@@ -80,3 +80,14 @@ export function validateWebsiteReadEndpoints(value){
  }
  return value;
 }
+
+// Exact public static dependencies reviewed from the application entry, not an
+// origin-wide business API grant. Never include query strings, credentials or redirects.
+export function validateWebsiteStaticResources(value){
+ if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return u.protocol!=='https:'||u.username||u.password||u.search||u.hash||/[*{}]/.test(decodeURIComponent(u.pathname))||u.href!==url||! /\.(js|css|woff2?|ttf|png|jpe?g|svg|ico)$/i.test(u.pathname);}catch{return true;}}))throw new Error('静态依赖须为审核后的精确HTTPS资源URL，不能含凭据、查询参数、通配符或业务接口');
+ return value;
+}
+export function websiteStaticResourceAllowed(base,request,resources=[]){
+ if(!Array.isArray(resources)||!resources.includes(request.url)||request.method!=='GET')return false;
+ try{const u=new URL(request.url);if(u.origin===new URL(base).origin)return false;validateWebsiteStaticResources([request.url]);const types={script:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|svg|ico)$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
+}

@@ -4,6 +4,9 @@ export class BrowserInputError extends Error {
 }
 export const correctableBrowserCodes=new Set(['BROWSER_ARGUMENTS','BROWSER_REF_STALE','BROWSER_CONTROL_TYPE','BROWSER_CONTROL_CHANGED','BROWSER_OPERATION_TIMEOUT','BROWSER_CONTENT_CHANGED']);
 export function validateBrowserTool(tool,args={}){
+ if(tool==='browser_assets'){
+  if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['ref','offset','limit','find','contentHash'].includes(k))||args.ref!==undefined&&(typeof args.ref!=='string'||!args.ref||args.ref.length>160)||args.offset!==undefined&&(!Number.isSafeInteger(args.offset)||args.offset<0)||args.limit!==undefined&&(!Number.isSafeInteger(args.limit)||args.limit<1)||args.find!==undefined&&(typeof args.find!=='string'||!args.find||args.find.length>200)||args.contentHash!==undefined&&!/^[a-f0-9]{64}$/.test(args.contentHash)||!args.ref&&Object.keys(args).length)throw new BrowserInputError('BROWSER_ARGUMENTS','browser_assets仅接受本任务脚本ref及可选offset/limit/find/contentHash；空对象读取目录，不能传URL/JS/路径');return;
+ }
  if(tool==='browser_read'){
   if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['section','offset','limit','contentHash','find'].includes(k))||!['page','fields'].includes(args.section)||!Number.isSafeInteger(args.offset)||args.offset<0||!Number.isSafeInteger(args.limit)||args.limit<1||args.contentHash!==undefined&&!/^[a-f0-9]{64}$/.test(args.contentHash)||args.find!==undefined&&(typeof args.find!=='string'||!args.find||args.find.length>200))throw new BrowserInputError('BROWSER_ARGUMENTS','browser_read仅接受当前可见page/fields、非负offset、正整数limit和可选前页contentHash；不能传URL、JS或选择器');return;
  }

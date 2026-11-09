@@ -203,3 +203,5 @@ extend_dimension仅派生明确的展示维度，运行时与原始来源重放�
 使用统计按有效业务用户消息派生1分，不增加积分账本、不改变历史清理或权限；积分依筛选及留存范围计算。新增受本机会话保护的usage/export.xlsx，以单份状态快照导出全量匹配记录及口径，ExcelJS固定依赖随锁文件迁移。health.adminUsageExports标记在途导出，发布前须自然归零；详见admin-console.md。
 
 网页调查提供固定参数 browser_inspect，复用当前授权页面和控件引用投影布局/可见字段数；动态展开控件与面板按共享语义识别，不开放任意JS、控制台缓存或隐藏值，见 website-expansion.md。
+
+部署JS取证browser_assets按原页面脚本标签与相对ESM依赖生成任务引用，独立公共GET、脱敏分页和摘要缓存；固定仓库缺功能时定位实际服务，再核对对应授权库。隔离浏览器审核精确staticResources，不将CDN作为跨系统API授权。见website-static-resources.md。

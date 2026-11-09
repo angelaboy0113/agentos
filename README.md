@@ -406,3 +406,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 本机控制台“使用统计”提供按人员、助手和日期查看公开提问/追问、排行榜与个人记录；统计仅覆盖留存记录，详情见[管理控制台](docs/admin-console.md)。
 
 查询表单动态展开与受控布局取证见[网页展开诊断](docs/website-expansion.md)。
+
+公共静态依赖、空白诊断和部署JS取证见[部署网页资源](docs/website-static-resources.md)。
