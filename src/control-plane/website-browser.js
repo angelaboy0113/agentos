@@ -73,8 +73,16 @@ export class WebsiteBrowser {
   try{await page.goto(initialTarget,{waitUntil:'domcontentloaded',timeout:30000});}catch(error){await this.release(job.id);throw error;}
   return s;
  }
+ async readAcrossNavigation(s,read){
+  try{return await read();}catch(error){
+   if(!/Execution context was destroyed|Cannot find context with specified id|Frame was detached/i.test(error.message??''))throw error;
+   await s.page.waitForLoadState('domcontentloaded',{timeout:30000});
+   if(!await this.authorize(s.job,s.waiting,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('页面跳转后原读取范围已失效');
+   return read(); // Retry this idempotent DOM read only, never clicks/login/queries.
+  }
+ }
  async loginStatus(s){
-  const state=await s.page.evaluate(browserLoginState);
+  const state=await this.readAcrossNavigation(s,()=>s.page.evaluate(browserLoginState));
   if(state.loginRequired&&s.authResult&&!state.verificationRequired&&!state.passwordChangeRequired)Object.assign(state,s.authResult);
   if(state.loginRequired){s.waiting=true;s.sawLogin=true;if(s.bootstrapFailure&&!state.credentialRejected&&!state.verificationRequired&&!state.passwordChangeRequired){const code=s.bootstrapFailure.status;Object.assign(state,code===429?{loginState:'rate_limited',rateLimited:true}:code>=500?{loginState:'service_error',serviceUnavailable:true}:{loginState:'request_error',requestFailed:true});}}
   else if(state.pageReady){if(s.waiting&&s.sawLogin)s.reloadAfterLogin=true;s.waiting=false;s.credentialAttempted=false;s.authResult=null;s.bootstrapFailure=null;}
@@ -120,7 +128,7 @@ export class WebsiteBrowser {
   const s=await this.state(job,e);
   // A ref belongs to one immutable element handle in one page generation, never nth(i).
   const previous=s.operation??Promise.resolve();
-  const operation=previous.catch(()=>{}).then(()=>this.perform(s,tool,args));s.operation=operation;
+  const operation=previous.catch(()=>{}).then(()=>['connection','browser_open','browser_snapshot','browser_read','browser_assets','browser_inspect'].includes(tool)?this.readAcrossNavigation(s,()=>this.perform(s,tool,args)):this.perform(s,tool,args));s.operation=operation;
   try{return await operation;}finally{if(s.operation===operation)s.operation=null;}
  }
  async perform(s,tool,args){

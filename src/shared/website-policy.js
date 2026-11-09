@@ -31,9 +31,10 @@ export function reviewedPathMatches(pattern,pathname){
 }
 // A reviewed query may name a business object with a verb inside its compound
 // name (e.g. taskExecutionSettings). Standalone mutation segments stay denied.
-function reviewedQueryObjectPath(pathname){
+function reviewedQueryObjectPath(pathname,method){
  const segments=decodeURIComponent(pathname).split('/').filter(Boolean),tail=segments.at(-1)??'';
- return reads.test(tail)&&!writeAction.test(tail.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]/g,' '))&&segments.slice(0,-1).every(s=>!writeAction.test(s));
+ const words=tail.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]/g,' '),booleanStatus=method==='GET'&&/^(?:is|has|can)[A-Z]/.test(tail)&&!writeAction.test(words.replace(/\b(?:enable|disable)\b/gi,''));
+ return (reads.test(tail)&&!writeAction.test(words)||booleanStatus)&&segments.slice(0,-1).every(s=>!writeAction.test(s));
 }
 export function websiteRequestAllowed(base, request, manualLogin=false, readEndpoints=[]) {
  let u; try {u=new URL(request.url);}catch{return false;}
@@ -42,7 +43,7 @@ export function websiteRequestAllowed(base, request, manualLogin=false, readEndp
  // Explicit reviewed method bindings take precedence over generic read-shaped fallbacks.
  if(!reviewedEndpoint&&!['HEAD','OPTIONS'].includes(request.method)&&readEndpoints.some(e=>e.reviewed===true&&reviewedPathMatches(e.path,u.pathname)))return false;
  const parts=decodeURIComponent(u.pathname).replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
- if(parts.some(x=>writeAction.test(x))&&!(reviewedEndpoint&&reviewedQueryObjectPath(u.pathname)))return false;
+ if(parts.some(x=>writeAction.test(x))&&!(reviewedEndpoint&&reviewedQueryObjectPath(u.pathname,request.method)))return false;
  for(const [key,value] of u.searchParams){
    const values=reviewedEndpoint?.queryParameters?.[key];
    const fixedFilter=Object.hasOwn(reviewedEndpoint?.queryParameters??{},key)&&Array.isArray(values)&&values.includes(value);
@@ -83,11 +84,11 @@ export function validateWebsiteReadEndpoints(value){
 
 // Exact public static dependencies reviewed from the application entry, not an
 // origin-wide business API grant. Never include query strings, credentials or redirects.
-export function validateWebsiteStaticResources(value){
- if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return u.protocol!=='https:'||u.username||u.password||u.search||u.hash||/[*{}]/.test(decodeURIComponent(u.pathname))||u.href!==url||! /\.(js|css|woff2?|ttf|png|jpe?g|svg|ico)$/i.test(u.pathname);}catch{return true;}}))throw new Error('静态依赖须为审核后的精确HTTPS资源URL，不能含凭据、查询参数、通配符或业务接口');
+export function validateWebsiteStaticResources(value,base){
+ if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return (u.protocol!=='https:'&&(!base||u.origin!==new URL(base).origin))||u.username||u.password||u.search||u.hash||/[*{}]/.test(decodeURIComponent(u.pathname))||u.href!==url||! /\.(js|css|woff2?|ttf|png|jpe?g|svg|ico)$/i.test(u.pathname);}catch{return true;}}))throw new Error('静态依赖须为审核后的精确HTTPS资源URL，不能含凭据、查询参数、通配符或业务接口');
  return value;
 }
 export function websiteStaticResourceAllowed(base,request,resources=[]){
  if(!Array.isArray(resources)||!resources.includes(request.url)||request.method!=='GET')return false;
- try{const u=new URL(request.url);if(u.origin===new URL(base).origin)return false;validateWebsiteStaticResources([request.url]);const types={script:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|svg|ico)$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
+ try{const u=new URL(request.url);validateWebsiteStaticResources([request.url],base);const types={script:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|svg|ico)$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
 }

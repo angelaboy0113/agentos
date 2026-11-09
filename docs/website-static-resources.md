@@ -2,7 +2,7 @@
 
 页面已打开却持续loading，不等于密码错误或站点故障。隔离浏览器在未就绪结果的diagnostic返回被拦静态资源、公共资源获取失败、脚本错误类别和在途读取数；不导出控制台原文、参数、cookie或隐藏应用状态。没有增加整任务超时/轮次/调用次数截止。
 
-如果入口HTML实际引用了独立CDN上的公共JS/CSS，维护者可在当前网站审核后的调查query配置 `staticResources` 精确HTTPS URL数组。示例见website-read.example.json。必须实际核对来源与每个资源，不能把占位域当作已接通。不支持通配、凭据、查询参数、重定向或整个域名的API授权；GET还要匹配script/stylesheet/font/image类型与文件后缀。由独立公共请求获取，不带浏览器cookie、Authorization、Referer、表单数据；不接受Set-Cookie。真实业务请求仍按原同源/方法/路径/动作/租约检查。共享Chrome沿用用户浏览器网络方式，不能把本节隔离网络门控承诺扩展到它。
+如果入口HTML实际引用了独立CDN上的公共JS/CSS，维护者可在当前网站审核后的调查query配置 `staticResources` 精确HTTPS URL数组。示例见website-read.example.json。独立来源仅允许HTTPS；原应用本身使用HTTP时，可审核同源精确静态文件（例如含create字样的库文件），不能跨HTTP域绑定。必须实际核对来源与每个资源，不能把占位域当作已接通。不支持通配、凭据、查询参数、重定向或整个域名的API授权；GET还要匹配script/stylesheet/font/image类型与文件后缀。由独立公共请求获取，不带浏览器cookie、Authorization、Referer、表单数据；不接受Set-Cookie。真实业务请求仍按原同源/方法/路径/动作/租约检查。共享Chrome沿用用户浏览器网络方式，不能把本节隔离网络门控承诺扩展到它。
 
 网页目录新增 `browser_assets`：空对象返回实际页面外部JS目录；用本任务ref可沿offset/limit/contentHash分页，或find字面定位。程序仅跟踪外部script标签及读取代码中可静态识别的同应用ESM相对import/from依赖；拒绝模型URL、脚本、文件路径和其他任务引用。不读取内联脚本、任意目录或source map；不执行代码中的指令。源码完整脱敏后分页，保留原始内容摘要、读取时间与实际部署资源URL。默认一次结果至多10000字符是传输分页，不截断整体调查；沿nextOffset续读，依赖图与缓存只属于该任务当前页面实例，重启后重新取证并按摘要区分版本，不冒称恢复了旧部署快照。
 
