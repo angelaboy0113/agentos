@@ -193,3 +193,7 @@ TCT调度作为独立environment kind，使用已审核HTTPS入口、租户/地�
 ## 显式报表维度（1.78.0）
 
 extend_dimension仅派生明确的展示维度，运行时与原始来源重放核验；SQL/Mongo共享目录，不制造业务发生记录。compose_report未知顶层参数立即返回输入错误。 详见[维度补全](dimension-extension.md)。
+
+
+### 本机使用统计
+1.79.0 在既有本机控制台会话下增加 GET /api/v1/admin/usage 与使用统计菜单；从留存用户消息生成去重榜单/个人记录/助手及日期分布，不统计Job重复条目，不写运行态、不增加持久化表或改变历史保留策略。成员名短时内存缓存，按机器人和群隔离，仅作展示；详细口径和边界见 docs/admin-console.md。

@@ -48,6 +48,7 @@ import { ReplyAddressing, addressCard } from './reply-addressing.js';
 import { jobCard, resultSummary } from './message-cards.js';
 import { handleCardAction } from './card-actions.js';
 import { jobTerminalMention, failureNotice } from './requester-mention.js';
+import { adminUsage, AdminUsageDirectory } from './admin-usage.js';
 import { adminOverview, adminRecordDetail, adminRecords } from './admin-view.js';
 import { CODEX_MODELS, CODEX_REASONING_EFFORTS, loadCodexRuntimeSettings, saveCodexRuntimeSettings } from '../shared/codex-runtime.js';
 
@@ -81,6 +82,7 @@ export async function createControlPlane(overrides = {}) {
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
   context.cards = cards;
   context.replyAddressing = new ReplyAddressing(context);
+  context.adminUsageDirectory = new AdminUsageDirectory(context);
   context.longNotices=new LongInvestigationNotices(context);context.successStickers=new SuccessStickers(context);context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();await context.successStickers.retry();};
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
@@ -160,6 +162,13 @@ async function route(context) {
   const assetMatch = url.pathname.match(/^\/admin\/(app\.js|styles\.css)$/);
   if (request.method === 'GET' && assetMatch) return serveAdmin(context, response, assetMatch[1]);
 
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/usage') {
+    requireAdminSession(context, request, false);
+    const state = await store.read();
+    const names = await context.adminUsageDirectory.names(state);
+    try { return json(response, 200, {ok:true, usage:adminUsage(state,Object.fromEntries(url.searchParams),{projects:context.projects,names})}); }
+    catch { return json(response,400,{ok:false,error:'统计日期或时区无效'}); }
+  }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/overview') {
     requireAdminSession(context, request, false);
     const state = await store.read();

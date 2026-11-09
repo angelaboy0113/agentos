@@ -1,5 +1,5 @@
 const state = { overview: null, settings: null, records: [] };
-const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识' };
+const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识', usage: '使用统计' };
 const statusMap = {
   queued: ['排队中', 'warn'], running: ['执行中', 'live'], cancelling: ['停止中', 'warn'],
   completed: ['已完成', 'good'], sent: ['已回复', 'good'], failed: ['失败', 'bad'],
@@ -21,7 +21,7 @@ let searchTimer;
 document.querySelector('#record-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadRecords, 220); });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeDrawer();
-  if (/^[1234]$/.test(event.key) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) showView(['overview', 'records', 'settings', 'knowledge'][Number(event.key) - 1]);
+  if (/^[12345]$/.test(event.key) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) showView(['overview', 'records', 'settings', 'knowledge', 'usage'][Number(event.key) - 1]);
 });
 
 async function api(path, options = {}) {
@@ -97,8 +97,8 @@ async function openRecord(id) {
 }
 
 function closeDrawer() { document.querySelector('#record-drawer').classList.remove('open'); document.querySelector('#record-drawer').setAttribute('aria-hidden', 'true'); document.querySelector('#drawer-backdrop').hidden = true; }
-function showView(name) { document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); if (name === 'knowledge') loadKnowledge(); }
-function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
+function showView(name) { document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'usage') loadUsage(); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); if (name === 'knowledge') loadKnowledge(); }
+function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if (current === 'usage') loadUsage(); else if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
 function bindRecordButtons(root) { root.querySelectorAll('[data-record]').forEach((item) => item.addEventListener('click', () => openRecord(item.dataset.record))); }
 
 function recordRow(item) { const status = statusInfo(item.status); return `<button class="record-row" data-record="${escapeHtml(item.id)}"><span class="record-icon">${item.kind === 'job' ? '任' : '答'}</span><span class="record-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.projectName)} · ${escapeHtml(stageMap[item.stage] ?? item.stage ?? '普通回复')}</small></span><span class="record-meta"><span class="pill ${status[1]}">${status[0]}</span><small>${dateTime(item.createdAt)}</small></span></button>`; }
@@ -146,3 +146,27 @@ async function changeKnowledge(id,action) {
   if(action==='resolve'&&!confirm('确认已经核对此版本的内容？采用此版本不会延长原证据有效期。'))return;
   try {await api(`/api/v1/admin/knowledge/${encodeURIComponent(id)}/${action}`,{method:'POST',headers:{'x-agentos-admin':'1'},body:'{}'});closeDrawer();await loadKnowledge();toast('知识状态已更新');}catch(error){toast(error.message);}
 }
+
+let usagePerson='',usagePage=1,usageSeq=0,usageData;
+const assistantNames={};
+function assistantLabel(key){return assistantNames[key]||key;}
+for(const id of ['usage-start','usage-end','usage-profile','usage-scope','usage-grouping','usage-admin'])document.querySelector('#'+id).addEventListener('change',()=>{usagePage=1;usagePerson='';loadUsage();});
+document.querySelector('#usage-week').onclick=()=>{const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Shanghai'}));now.setHours(0,0,0,0);const days=(now.getDay()+1)%7;now.setDate(now.getDate()-days);const end=new Date(now);end.setDate(end.getDate()-1);const start=new Date(now);start.setDate(start.getDate()-7);const date=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;document.querySelector('#usage-start').value=date(start);document.querySelector('#usage-end').value=date(end);usagePage=1;loadUsage();};
+document.querySelector('#usage-clear').onclick=()=>{document.querySelector('#usage-start').value='';document.querySelector('#usage-end').value='';usagePage=1;loadUsage();};
+document.querySelector('#usage-person-clear').onclick=()=>{usagePerson='';usagePage=1;loadUsage();};
+document.querySelector('#usage-prev').onclick=()=>{if(usagePage>1){usagePage--;loadUsage();}};
+document.querySelector('#usage-next').onclick=()=>{if(usagePage<(usageData?.pagination.pages||0)){usagePage++;loadUsage();}};
+async function loadUsage(){const seq=++usageSeq;const params=new URLSearchParams({start:value('usage-start'),end:value('usage-end'),profile:value('usage-profile'),scope:value('usage-scope'),grouping:value('usage-grouping'),excludeAdmin:value('usage-admin'),person:usagePerson,page:String(usagePage)});
+ try{const {usage:u}=await api('/api/v1/admin/usage?'+params);if(seq!==usageSeq)return;usageData=u;
+ for(const a of u.profileOptions??[])assistantNames[a.key]=a.label;
+ const select=document.querySelector('#usage-profile');for(const a of u.profileOptions??u.assistants)if(![...select.options].some(o=>o.value===a.key)){const o=document.createElement('option');o.value=a.key;o.textContent=assistantLabel(a.key);select.append(o);}
+ setText('usage-messages',u.summary.messages);setText('usage-people',u.summary.people);setText('usage-followups',u.summary.followups);
+ setText('usage-method',u.method+' 留存策略 '+u.coverage.retentionDays+' 天；最早留存 '+(u.coverage.firstAt?dateTime(u.coverage.firstAt):'暂无')+'。榜单不作绩效评价。');
+ document.querySelector('#usage-ranking').innerHTML=u.ranking.map(p=>`<tr data-person="${escapeHtml(p.key)}"><td>${p.rank<=3?['🥇','🥈','🥉'][p.rank-1]:p.rank}</td><td>${escapeHtml(p.name)}</td><td>${p.count} / ${p.followups}</td><td>${escapeHtml(Object.entries(p.profiles).map(([k,v])=>assistantLabel(k)+' '+v).join(' · '))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">没有符合条件的记录</td></tr>';
+ document.querySelectorAll('[data-person]').forEach(el=>el.onclick=()=>{usagePerson=el.dataset.person;usagePage=1;loadUsage();});
+ const distribution=(items)=>items.map(x=>`<div class="usage-bar"><span>${escapeHtml(assistantLabel(x.key))}</span><meter min="0" max="${Math.max(1,u.summary.messages)}" value="${x.count}"></meter><strong>${x.count}</strong></div>`).join('');
+ document.querySelector('#usage-distribution').innerHTML=distribution(u.assistants)+'<hr>'+distribution(u.timeline);
+ setText('usage-person-title',usagePerson?(u.ranking.find(p=>p.key===usagePerson)?.name||'所选人员')+'的记录':'全部人员记录');
+ document.querySelector('#usage-records').innerHTML=u.records.map(r=>`<tr data-record="${escapeHtml(r.recordId)}"><td class="task-cell"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.title)}</small></td><td>${escapeHtml(assistantLabel(r.profile))}<small>${escapeHtml(r.sourceEnvironment||'未记录环境')}</small></td><td>${escapeHtml(statusInfo(r.status)[0])}</td><td>${escapeHtml(dateTime(r.createdAt))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">暂无记录</td></tr>';bindRecordButtons(document.querySelector('#usage-records'));
+ setText('usage-page',`${u.pagination.total} 条 · 第 ${u.pagination.page} / ${Math.max(1,u.pagination.pages)} 页`);document.querySelector('#usage-prev').disabled=usagePage<=1;document.querySelector('#usage-next').disabled=usagePage>=u.pagination.pages;markUpdated();
+ }catch(e){if(seq===usageSeq)toast(e.message);}}

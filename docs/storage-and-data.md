@@ -159,3 +159,7 @@ ownerPresence、receptionInbox、recoveryEvents 与任务共享控制面状态�
 ## 显式报表维度（1.78.0）
 
 dimension_extension v1保留原主维度引用、显式新增键和来源时间；保存恢复、refresh及文件审阅遍历同一依赖图。新模块及原始依赖必须随迁移保留，不可在旧版本上处理新配方。 详见[维度补全](dimension-extension.md)。
+
+
+### 本机使用统计
+1.79.0 在既有本机控制台会话下增加 GET /api/v1/admin/usage 与使用统计菜单；从留存用户消息生成去重榜单/个人记录/助手及日期分布，不统计Job重复条目，不写运行态、不增加持久化表或改变历史保留策略。成员名短时内存缓存，按机器人和群隔离，仅作展示；详细口径和边界见 docs/admin-console.md。

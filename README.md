@@ -6,7 +6,7 @@
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.78.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.79.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 已交付CSV追加数据库字段、显式年月转换与原列保持见[报表补列](docs/report-append.md)。
 
@@ -402,3 +402,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 多身份登录页可通过管理员配置的精确入口步骤选择正确账号身份，再读取Keychain提交；见[登录身份导航](docs/login-navigation.md)。不由模型选择角色，不放宽业务写请求。
 
 关联系统目录现明确区分系统已接入与原话题已允许协查；已授权关联数据库支持原身份快速接续与返回。固定只读接口审阅支持含复合业务对象名称的查询路径，不放开执行、删除或重发。见[协查配置与边界](docs/integration-peers.md)。
+
+本机控制台“使用统计”提供按人员、助手和日期查看公开提问/追问、排行榜与个人记录；统计仅覆盖留存记录，详情见[管理控制台](docs/admin-console.md)。
