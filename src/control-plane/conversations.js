@@ -1,4 +1,4 @@
-import{jointInquiry}from '../shared/inquiry-execution.js';
+import{jointInquiry,jointInquiryFromAcceptedTurns}from '../shared/inquiry-execution.js';
 import {directSocial} from '../shared/reception-policy.js';
 import {requesterMentionText} from './requester-mention.js';
 import {publicStickerPolicy} from './success-stickers.js';
@@ -61,6 +61,10 @@ export class ConversationService {
     this.decide = options.decide ?? ((input, signal, detail) => this.engine.decide(input, { ...detail, signal }));
     this.concurrency = options.concurrency ?? 3;
     this.feedbackMs = options.feedbackMs ?? 3000;
+    // Separate Feishu bot consumers can project the same message about one
+    // second apart. A short fan-in window avoids starting the first model turn
+    // before the sibling event arrives; it is scheduling, not a task deadline.
+    this.jointInquiryCoalesceMs=options.jointInquiryCoalesceMs??1500;
     this.workers = new Map();
     this.feedback = new Map();
     this.stopped = false;
@@ -122,6 +126,8 @@ export class ConversationService {
        }else attachQuestion(state,turn,event,this.context.projects);
       }
       state.conversations.push(turn);
+      const merged=coordination??(!requestsPrivateCard(turn.content)?jointInquiryFromAcceptedTurns(state.conversations,turn,this.context.agents,this.context.projects):null);
+      if(merged)for(const related of state.conversations)if(related.messageId===turn.messageId&&related.chatId===turn.chatId&&related.senderId===turn.senderId&&related.chatType==='group')related.inquiryCoordination=structuredClone(merged);
       return { conversation: true, turnId: turn.id, duplicate: false };
     });
     this.wake();
@@ -234,6 +240,12 @@ export class ConversationService {
       const turn = await stateView(this.context.store,state=>(state.conversations ?? []).find((item) => this.key(item) === key && ['queued', 'decided', 'ready'].includes(item.status)));
       if (!turn || (turn.retryAt && Date.parse(turn.retryAt) > Date.now())) return;
       if (turn.status === 'queued') {
+        if(!turn.coordinationCoalesced&&turn.chatType==='group'&&turn.visibility!=='requester'&&this.context.agents?.agents?.[turn.profile]?.systemAssistant){
+          const remaining=Math.max(0,this.jointInquiryCoalesceMs-(Date.now()-Date.parse(turn.createdAt)));
+          if(remaining)await new Promise(resolve=>setTimeout(resolve,remaining));
+          await this.update(turn.id,{coordinationCoalesced:true});
+          continue;
+        }
         const aiStarted = Date.now();
         await this.update(turn.id, { status: 'thinking', aiStartedAt: new Date(aiStarted).toISOString(),
           queueMs: aiStarted - Date.parse(turn.createdAt) });
@@ -332,6 +344,8 @@ export class ConversationService {
   async buildInput(turn) {
     const { projects, store } = this.context;
     const state = await store.read();
+    const persistedTurn=state.conversations?.find(item=>item.id===turn.id);
+    if(persistedTurn?.inquiryCoordination)turn={...turn,inquiryCoordination:persistedTurn.inquiryCoordination};
     if(turn.ownerStatusChannel)return {requestId:turn.id,nativeSession:false,role:turn.role,currentTime:new Date().toISOString(),timeZone:this.context.reception.policy.timeZone,channel:{kind:'owner_status'},message:turn.content,history:[],jobs:[],attachments:[],currentAttachmentIds:[],project:null,publicOwnerStatus:this.context.reception.statusInput(state)};
     if(turn.questionPreview)state.questions={...state.questions,[turn.questionPreview.id]:turn.questionPreview};
     const projectId = resolveProjectId(projects, turn.chatId, turn.profile);

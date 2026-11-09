@@ -131,6 +131,18 @@ test('one human message mentioning two bots creates two isolated duties and retr
   assert.equal((await app.store.read()).jobs.length,2);
 });
 
+test('consumer-local mention projections merge by trusted accepted message before either job is planned',async t=>{
+  const {app,input,event}=await fixture(t,()=>({action:'create_task',intent:'analysis',instruction:'仅核实本系统贡献',sourceEnvironment:'prd'}));
+  const base={mentions:[],sender_id:'same-human',content:'@A @B summarize both systems'};
+  await Promise.all(['a','b'].map(profile=>handleLarkCliEvent(app,event(profile,'projected-joint-message',{...base,mentions:[{id:`bot-${profile}`}]}))));
+  await app.conversations.idle();
+  const state=await app.store.read();
+  assert.equal(state.jobs.length,2);
+  assert.ok(input.every(i=>i.inquiryCoordination?.detectedBy==='accepted-assistant-events'));
+  assert.ok(state.jobs.every(j=>j.inquiryCoordination?.members.length===2&&j.inquiryCoordination.grantsShared===false));
+  assert.deepEqual(state.jobs.map(j=>j.projectId).sort(),['alpha','beta']);
+});
+
 test('unmentioned bot routing never copies the complete historical state',async t=>{
  const {app,event}=await fixture(t,()=>({}));app.store.read=()=>{throw Error('No full state copy allowed for ignored messages');};
  const result=await handleLarkCliEvent(app,event('a','ignored-no-copy',{mentions:[{id:'bot-b'}]}));assert.equal(result.ignored,true);
