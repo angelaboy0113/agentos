@@ -408,3 +408,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 查询表单动态展开与受控布局取证见[网页展开诊断](docs/website-expansion.md)。
 
 公共静态依赖、空白诊断和部署JS取证见[部署网页资源](docs/website-static-resources.md)。
+
+blank、崩溃/关闭页及加载与登录分型见[原网页恢复](docs/website-recovery.md)。

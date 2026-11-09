@@ -49,13 +49,15 @@ export class WebsiteBrowser {
   const initialTarget=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);
   if(this.pages.has(job.id)){
    const existing=this.pages.get(job.id);
-   if(websiteSessionKey(e.projectId,e.tier,e.baseUrl)!==websiteSessionKey(existing.environment.projectId,existing.environment.tier,existing.environment.baseUrl)||e.baseUrl!==existing.environment.baseUrl||initialTarget!==existing.initialTarget)await this.release(job.id);
+   if(existing.page.isClosed()||existing.crashed||websiteSessionKey(e.projectId,e.tier,e.baseUrl)!==websiteSessionKey(existing.environment.projectId,existing.environment.tier,existing.environment.baseUrl)||e.baseUrl!==existing.environment.baseUrl||initialTarget!==existing.initialTarget)await this.release(job.id);
    else {existing.job=job;existing.environment=e;return existing;}
   }
   const session=await this.session(e),page=await session.context.newPage();
-  const s={job,page,session,environment:e,initialTarget,refPrefix:randomUUID(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
+  const s={job,page,session,environment:e,initialTarget,refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
+  page.on('crash',()=>{s.crashed=true;});
   page.on('pageerror',error=>s.pageErrors.add(/^[A-Za-z]+Error$/.test(error.name)?error.name:'RuntimeError'));
   page.on('request',request=>{
+   if(request.resourceType()==='script')s.observedScripts.add(request.url());
    if(['xhr','fetch','document'].includes(request.resourceType())&&new URL(request.url()).origin===new URL(s.environment.baseUrl).origin){s.pendingReads.add(request);s.lastReadActivity=Date.now();}
   });
   const settled=request=>{if(s.pendingReads.delete(request))s.lastReadActivity=Date.now();};
@@ -79,7 +81,7 @@ export class WebsiteBrowser {
   if(s.blockedLoginReads.size&&state.loginRequired&&!state.credentialRejected)state.blockedRequests=[...s.blockedLoginReads].slice(-8);
   return {...state,diagnostic:{credentialAttempted:s.credentialAttempted===true,authRequestObserved:s.authPostSeen===true,authResult:s.authResult?.loginState??null,blockedRequests:[...s.blockedLoginReads].slice(-8),bootstrapFailure:s.bootstrapFailure??null}};
  }
- async needsLogin(s){const state=await this.loginStatus(s);return state.loginRequired||!state.pageReady;}
+ async needsLogin(s){const state=await this.loginStatus(s);return state.loginRequired;}
  async loginStatusFor(job,e){return this.loginStatus(await this.state(job,e));}
  async loginReady(job,e){const s=await this.state(job,e);return (await this.loginStatus(s)).pageReady===true;}
  async submitCredentials(job,e,cred,{force=false}={}){
@@ -122,6 +124,14 @@ export class WebsiteBrowser {
   try{return await operation;}finally{if(s.operation===operation)s.operation=null;}
  }
  async perform(s,tool,args){
+  const blank=s.page.url()==='about:blank';
+  if(blank||tool==='browser_recover'){
+   if(!await this.authorize(s.job,s.waiting,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前任务没有有效恢复范围');
+   const status=blank?null:await this.loginStatus(s);
+   if(!blank&&status?.loginRequired)return {...status,stage:'页面在等待认证，沿用已有登录恢复；本次不重新提交凭据'};
+   if(blank||!status.pageReady&&!s.pendingReads.size&&!s.blockedResources.size&&!s.resourceFailures.size){s.assets?.clear();s.observedScripts.clear();await s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});s.lastRecovery={at:new Date().toISOString(),kind:blank?'blank-reopened':'quiet-empty-reloaded',target:websitePageLocation(s.initialTarget)};}
+   else if(!status.pageReady)return {stage:'保留当前加载与故障证据，尚未重复导航',pageStatus:'loading',partial:true,url:websitePageLocation(s.page.url()),diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size},next:s.pendingReads.size?'当前有读取进行中，检查后续快照，不重复点击或打开':'核对实际静态依赖或使用browser_assets继续部署源码取证；不把资源失败当作密码错误'};
+  }
   if(tool==='browser_assets')return readWebsiteAsset(s,args,this.authorize,this.publicFetch);
   const login=await this.loginStatus(s);
   if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
@@ -129,7 +139,7 @@ export class WebsiteBrowser {
   if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded'});}
   if(tool==='browser_read')return this.readVisible(s,args);
-  if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot')return this.snapshot(s);
+  if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot'||tool==='browser_recover')return {...await this.snapshot(s),...(s.lastRecovery?{recovery:s.lastRecovery}:{})};
   if(tool==='browser_key'&&args.ref==='page'){await s.page.keyboard.press('Escape');return this.snapshot(s);}
   if(tool==='browser_scroll'&&args.ref==='page'){await s.page.evaluate(direction=>window.scrollBy(direction==='left'?-600:direction==='right'?600:0,direction==='up'?-600:direction==='down'?600:0),args.direction);return this.snapshot(s);}
   const ref=s.refs.get(args.ref);if(!ref)throw new BrowserInputError('BROWSER_REF_STALE','页面引用已过期；先browser_snapshot，再使用新引用。');
@@ -174,7 +184,7 @@ export class WebsiteBrowser {
    s.refs.set(ref,{el,type:info.type,rawLabel:info.label});controls.push({ref,type:info.type,label,kind:info.kind,...(info.options?{options:info.options}:{})});
   }
   const fields=await s.page.evaluate(websiteFields,{secretSelector:screenshotSecretSelector});
-  const loading=await s.page.locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));
+  const loading=!text.trim()||s.pendingReads.size>0||await s.page.locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));
   return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,controlsLimited:controls.length>=300,url:websitePageLocation(s.page.url()),pageText:cleanWebsiteText(text),fields:fields.slice(0,100),fieldsLimited:fields.length>100,controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
  }
  async screenshot(s){

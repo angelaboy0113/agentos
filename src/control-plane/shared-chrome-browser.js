@@ -8,7 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {chromeTransport} from './chrome-transport.js';
 import {chromePage} from './chrome-page.js';
 import {chromeLoginPage} from './chrome-login-page.js';
-import {cleanWebsiteText,websiteUrl} from '../shared/website-policy.js';
+import {cleanWebsiteText,websiteUrl,websiteNavigationTarget} from '../shared/website-policy.js';
 export class SharedChromeBrowser{
  constructor(authorize=async()=>true,transport=chromeTransport,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))){this.wait=wait;this.authorize=authorize;this.transport=transport;this.pages=new Map();this.queue=Promise.resolve();}
  serial(fn){const p=this.queue.then(fn);this.queue=p.catch(()=>{});return p;}
@@ -32,8 +32,13 @@ export class SharedChromeBrowser{
   return raw;
  }
  run(job,e,tool,args={}){return this.serial(async()=>{
-  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_recover','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
   await this.allowed(job,e);const s=await this.state(job,e);
+  if(tool==='browser_recover'){
+   validateBrowserTool(tool,args);let status;try{status=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:'JSON.stringify({blank:location.href==="about:blank",url:location.origin+location.pathname})'});}catch(error){if(!/原Chrome标签页已关闭/.test(error.message))throw error;this.pages.delete(job.id);const reopened=await this.state(job,e);return this.snapshot(job,e,reopened,'browser_snapshot',{});}
+   if(status.blank){const target=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`location.assign(${JSON.stringify(target)});JSON.stringify({recovering:true})`});await this.wait(400);}
+   return this.snapshot(job,e,s,'browser_snapshot',{});
+  }
   if(tool==='browser_assets')validateBrowserTool(tool,args);
   if(tool==='browser_assets')return readWebsiteAsset({...s,assets:s.assets??(s.assets=new Map()),job,environment:e,page:{locator:()=>({evaluateAll:fn=>this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify((${fn.toString()})(Array.from(document.querySelectorAll('script[src]'))))`})})}},args,this.authorize);
   let r=await this.snapshot(job,e,s,tool,args);
