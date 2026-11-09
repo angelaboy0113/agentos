@@ -79,7 +79,15 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  if(Buffer.byteLength(JSON.stringify(result))>22000){result.populationAudit.comparisons=result.populationAudit.comparisons.map(c=>({...c,queryDefinition:null,onlyReferencePreview:[],onlyFilePreview:[],detailsPaged:true}));}
  if(Buffer.byteLength(JSON.stringify(result))>22000){result.columns=result.columns.slice(0,4);result.columnPaging={totalCount:columns.length,shownCount:result.columns.length,nextOffset:4,tool:'inspect_report',section:'columns'};}
  if(Buffer.byteLength(JSON.stringify(result))>22000){result.headers=result.headers.slice(0,12);result.headersLimited=true;}
- if(Buffer.byteLength(JSON.stringify(result))>22000)fail('审阅摘要超限，请使用分段查看');return result;
+ if(Buffer.byteLength(JSON.stringify(result))>22000){
+  result.sources=result.sources.slice(0,3);result.sourcePaging={totalCount:sourceList.length,shownCount:result.sources.length,nextOffset:result.sources.length<sourceList.length?result.sources.length:null,tool:'inspect_report',section:'sources'};
+  result.checks=result.checks.slice(0,4);result.checkPaging={totalCount:checks.length,shownCount:result.checks.length,nextOffset:result.checks.length<checks.length?result.checks.length:null,tool:'inspect_report',section:'checks'};
+  result.populationAudit={selected:{datasetRef:populationAudit.selected.datasetRef,keyColumn:populationAudit.selected.keyColumn,rowCount:populationAudit.selected.rowCount},comparisons:populationAudit.comparisons.slice(0,2).map(({datasetRef,keyColumn,rowCount,onlyReferenceCount,onlyFileCount})=>({datasetRef,keyColumn,rowCount,onlyReferenceCount,onlyFileCount})),note:'完整范围证据已保存；摘要超限时只展示结论，用inspect_report的scope分页读取细节。'};
+ }
+ if(Buffer.byteLength(JSON.stringify(result))>22000){
+  return {binding,status:'verified',delivery:result.delivery,headers:result.headers.slice(0,12),headersLimited:data.columns.length>12,calculationAudit:audit,coverage:{populationRef:receipt.coverage.populationRef,populationKey:receipt.coverage.populationKey,rowCount:receipt.coverage.rowCount},paging:{columns:{totalCount:columns.length,tool:'inspect_report',section:'columns'},sources:{totalCount:sourceList.length,tool:'inspect_report',section:'sources'},scope:{totalCount:comparisons.length,tool:'inspect_report',section:'scope'},checks:{totalCount:checks.length,tool:'inspect_report',section:'checks'},rows:{totalCount:rows.length,tool:'inspect_report',section:'rows'}},limited:true,note:'实际CSV、固定配方、来源范围和校验记录已全部验证通过。完整证据较大，此处提供有界摘要；按需用inspect_report分页读取，不重复查询业务数据。'};
+ }
+ return result;
 }
 export async function reportReviewEvidence(dataDir,job){
  const item=job.reportFiles?.filter(f=>f.verificationHash).at(-1);if(!item)return null;
