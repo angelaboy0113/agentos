@@ -2,17 +2,18 @@ import { parseAllDocuments } from 'yaml';
 import { websiteUrl } from '../shared/website-policy.js';
 const sensitive = /password|passwd|secret|token|credential|private.?key|username/i;
 // Parse data only: no custom tags, merges, environment variables, files or evaluation.
-function configurationValues(source) {
+export function configurationValues(source, { rejectConflicts = false } = {}) {
   if (Buffer.byteLength(source) > 1024 * 1024) throw new Error('配置过大，未解析');
   const values = new Map();
+  const put = (key, value) => { if(rejectConflicts && values.has(key) && values.get(key)!==value)throw new Error("配置键存在冲突，未猜测覆盖顺序"); values.set(key,value); };
   const collect = (v, prefix = '', depth = 0) => {
     if (depth > 30 || values.size > 10000) throw new Error('配置结构超过限制');
     if (v && typeof v === 'object') { for (const [k, x] of Object.entries(v)) if (!['__proto__','prototype','constructor'].includes(k)) collect(x, prefix ? `${prefix}.${k}` : k, depth + 1); }
-    else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') values.set(prefix, String(v));
+    else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') put(prefix, String(v));
   };
   // Properties and YAML are distinct formats. Never fall back to raw text after malformed YAML.
   if (/^\s*[^#!\s][^\n=:]*\s*=/m.test(source) && !/^\s*\w+:\s*$/m.test(source)) {
-    for (const line of source.split(/\r?\n/)) { const m = /^\s*([^#!\s][^=]*?)\s*=\s*(.*)$/.exec(line); if (m) values.set(m[1], m[2]); }
+    for (const line of source.split(/\r?\n/)) { const m = /^\s*([^#!\s][^=]*?)\s*=\s*(.*)$/.exec(line); if (m) put(m[1], m[2]); }
   } else {
     const docs = parseAllDocuments(source, { schema: 'core', merge: false, uniqueKeys: true });
     if (docs.length > 10 || docs.some(d => d.errors.length || d.warnings.length)) throw new Error('配置格式无法安全解析');

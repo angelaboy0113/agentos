@@ -207,3 +207,5 @@ extend_dimension仅派生明确的展示维度，运行时与原始来源重放�
 部署JS取证browser_assets按原页面脚本标签与相对ESM依赖生成任务引用，独立公共GET、脱敏分页和摘要缓存；固定仓库缺功能时定位实际服务，再核对对应授权库。隔离浏览器审核精确staticResources，不将CDN作为跨系统API授权。见website-static-resources.md。
 
 网页恢复保留原批准目标与身份，隔离进行中读取/静态阻断/认证状态；部署脚本目录追加本任务实际加载的异步JS，返回HTML不能当源码。详见website-recovery.md。
+
+Nacos 的审核运行配置投影见[配置投影](config-projection.md)：精确键/类型、来源摘要和缺失分类；发现服务目标不扩大原授权。

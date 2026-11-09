@@ -13,7 +13,8 @@ import { createHash } from 'node:crypto';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { createNacosBrowser } from './environment-browser.js';
 import { boundedFetch, checkAccountGrants } from './environment-connector.js';
-import { databaseEndpoints, schedulerConfiguration } from './config-endpoints.js';
+import {projectConfigValues} from '../shared/config-projection.js';
+import { databaseEndpoints, schedulerConfiguration,configurationValues } from './config-endpoints.js';
 const secretName = /password|passwd|secret|token|credential|private.?key|身份证|手机号|银行卡/i;
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 const numericTypes = new Set(['tinyint','smallint','mediumint','int','integer','bigint','decimal','numeric','float','double','real']);
@@ -256,6 +257,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   const spec = e.kind === 'nacos' ? [
     { tool: 'connection', args: {}, description: '测试固定 Nacos 入口的 HTTP 登录，凭据留在本机' },
     { tool: 'discover', args: {}, description: '列出批准的命名空间内最多100条配置的引用和名称，不返回正文' },
+    ...(q.configKeys?[{tool:'read_config_values',args:{ref:'本次discover返回的配置引用',keys:['可选：工具目录允许的精确键'],referenceRefs:['可选：同命名空间、实际discover引用；变量依赖来源，不猜优先级']},description:'按审核类型返回非敏感运行配置值及来源摘要；允许键：'+JSON.stringify(q.configKeys)+'。不返回全文/凭据，不跟随URL访问，不默认扩大数据权限。缺失/冲突/敏感引用分别记录。'}]:[]),
     { tool: 'read_runtime_config', args: { ref: '从discover返回的ref' }, description: '读取已发现配置中的XXL-JOB管理台地址、启用开关和执行器名称；不返回正文或凭据。定时任务排查使用此工具，发现入口后由原问题继续网页调查。' },
     { tool: 'read_config', args: { ref: '从discover返回的ref' }, description: '读取一个已发现配置并解析同文件变量，仅返回数据库端点与解析状态' }
   ] : e.kind==='mongodb'?mongoToolSpec(q):[
@@ -325,8 +327,16 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
             }
             return { configs: [...configs].map(([ref, x]) => ({ ref, namespace: bounded(x.namespace, secrets), dataId: bounded(x.dataId, secrets), group: bounded(x.group, secrets) })), truncated };
           }
-          const x = configs.get(args.ref); if (!x) throw new Error('仅可读取本次发现的配置引用');
+          const x = configs.get(args.ref); if (!x) { if(tool==='read_config_values')throw new QueryInputError('CONFIG_PROJECTION_INPUT','配置引用已失效或未发现，请重新discover后选择');throw new Error('仅可读取本次发现的配置引用'); }
           const content = await nacos('/v1/cs/configs', { tenant: x.namespace, group: x.group, dataId: x.dataId });
+          if(tool==='read_config_values'){
+            if(!q.configKeys||Object.keys(args).some(k=>!['ref','keys','referenceRefs'].includes(k)))throw new QueryInputError('CONFIG_PROJECTION_INPUT','仅可按已审核配置键读取，不能传URL/正文/脚本');
+            const refs=args.referenceRefs??[];if(!Array.isArray(refs)||refs.length>20||new Set(refs).size!==refs.length)throw new QueryInputError('CONFIG_PROJECTION_INPUT','依赖来源必须是同命名空间的已发现配置引用');
+            const source={...x,contentHash:createHash('sha256').update(content).digest('hex')},documents=[{values:configurationValues(content,{rejectConflicts:true}),source}];
+            for(const ref of refs){const other=configs.get(ref);if(!other||other.namespace!==x.namespace||ref===args.ref)throw new QueryInputError('CONFIG_PROJECTION_INPUT','依赖引用不属于原命名空间或重复');const text=await nacos('/v1/cs/configs',{tenant:other.namespace,group:other.group,dataId:other.dataId});documents.push({values:configurationValues(text,{rejectConflicts:true}),source:{...other,contentHash:createHash('sha256').update(text).digest('hex')}});}
+            let entries;try{entries=projectConfigValues(documents,q.configKeys,args.keys,[...secrets,token]);}catch(error){throw new QueryInputError('CONFIG_PROJECTION_INPUT',error.message);}
+            return{config:args.ref,configValues:entries,rows:entries,partial:entries.some(x=>x.status!=='found'),stage:'已读取审核的非敏感配置投影；地址尚未访问，未取得外部数据授权',source};
+          }
           if (tool === 'read_runtime_config') {
             const runtime = schedulerConfiguration(content);
             const source = { ...x, contentHash: createHash('sha256').update(content).digest('hex') };

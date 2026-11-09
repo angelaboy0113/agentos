@@ -1,0 +1,9 @@
+{
+  "_instruction": "将configKeys合入已审核Nacos环境的queries.investigate；实际键需由部署维护者审阅，勿登记凭据键",
+  "configKeys": {
+    "integration.receive-url": "http_endpoint",
+    "logging.store-name": "identifier",
+    "logging.partition-format": "format",
+    "feature.enabled": "boolean"
+  }
+}
