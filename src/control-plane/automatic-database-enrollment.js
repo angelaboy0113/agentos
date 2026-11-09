@@ -1,22 +1,14 @@
 import { readFile,writeFile,mkdir,rename,rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { environmentFile,loadEnvironments,fingerprint,isEnvironmentOwner } from '../shared/environment-access.js';
 import { CONNECTION_SQL } from '../shared/database-account-policy.js';
 import { credential,boundedFetch,mysqlRead } from '../runner/environment-connector.js';
 import { databaseCredential } from '../runner/config-endpoints.js';
+import {saveKeychainCredential} from '../shared/keychain-credential.js';
 const sha=x=>createHash('sha256').update(x).digest('hex');
 async function saveCredential(ref,value) {
- const helper=fileURLToPath(new URL('../../scripts/keychain-credential.py',import.meta.url));
- await new Promise((resolve,reject)=>{
-  const p=spawn('/usr/bin/python3',[helper,'set-json',ref],{stdio:['pipe','ignore','ignore']});
-  const timer=setTimeout(()=>{p.kill();reject(new Error('本机凭据保存超时'));},10000);
-  p.once('error',()=>{clearTimeout(timer);reject(new Error('本机凭据不可保存'));});
-  p.once('exit',code=>{clearTimeout(timer);code?reject(new Error('本机凭据不可保存')):resolve();});
-  p.stdin.on('error',()=>{});p.stdin.end(JSON.stringify(value));
- });
+ await saveKeychainCredential(ref,value);
 }
 export async function automaticDatabaseEnrollment(context, enrollment, adapters={}) {
  const file=adapters.file??environmentFile();const original=await readFile(file);const config=await loadEnvironments(file);

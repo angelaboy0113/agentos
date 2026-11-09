@@ -12,16 +12,19 @@ import {chromePage} from './chrome-page.js';
 import {chromeLoginPage} from './chrome-login-page.js';
 import {cleanWebsiteText,websiteUrl,websiteNavigationTarget} from '../shared/website-policy.js';
 export class SharedChromeBrowser{
- constructor(authorize=async()=>true,transport=chromeTransport,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))){this.wait=wait;this.authorize=authorize;this.transport=transport;this.pages=new Map();this.queue=Promise.resolve();}
+ constructor(authorize=async()=>true,transport=chromeTransport,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))){this.wait=wait;this.authorize=authorize;this.transport=transport;this.pages=new Map();this.sessions=new Map();this.queue=Promise.resolve();}
  serial(fn){const p=this.queue.then(fn);this.queue=p.catch(()=>{});return p;}
  async allowed(job,e,waiting=false){
   const r={url:()=>websiteUrl(e.baseUrl),method:()=> 'GET',resourceType:()=> 'document'};
   if(!await this.authorize(job,waiting,r))throw new Error('当前问题没有有效网页访问授权');
  }
  async state(job,e){
+  const now=Date.now();for(const [key,value] of this.sessions)if(value.releasedAt&&now-value.releasedAt>6*60*60*1000)this.sessions.delete(key);
   let s=this.pages.get(job.id);if(s){if(s.baseUrl!==websiteUrl(e.baseUrl))throw new Error('任务入口已变化，需要重新申请');return s;}
-  const tab=await this.transport({operation:'find',baseUrl:websiteUrl(e.baseUrl),exclude:[...this.pages.values()].map(s=>s.tabId)});
-  s={...tab,token:randomUUID().replaceAll('-',''),baseUrl:websiteUrl(e.baseUrl),waiting:false};this.pages.set(job.id,s);return s;
+  const lineage=[job.questionId??job.id,job.originProfile,job.projectId,e.tier,websiteUrl(e.baseUrl)].map(v=>String(v??'')).join('\u0000');
+  s=this.sessions.get(lineage);if(s){try{const status=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:'JSON.stringify({blank:location.href==="about:blank"})'});if(status.blank){const target=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`location.assign(${JSON.stringify(target)});JSON.stringify({recovering:true})`});await this.wait(400);}delete s.releasedAt;this.pages.set(job.id,s);return s;}catch(error){if(!/原Chrome标签页已关闭/.test(error.message))throw error;this.sessions.delete(lineage);}}
+  const tab=await this.transport({operation:'find',baseUrl:websiteUrl(e.baseUrl),exclude:[...this.sessions.values()].map(s=>s.tabId)});
+  s={...tab,token:randomUUID().replaceAll('-',''),baseUrl:websiteUrl(e.baseUrl),waiting:false,lineage};this.pages.set(job.id,s);this.sessions.set(lineage,s);return s;
  }
  async snapshot(job,e,s,tool,args){
   await this.allowed(job,e,s.waiting);
@@ -65,6 +68,6 @@ export class SharedChromeBrowser{
  });}
  loginReady(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return (await this.snapshot(job,e,s,'browser_snapshot',{})).pageReady===true;});}
  loginStatusFor(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return this.snapshot(job,e,s,'browser_snapshot',{});});}
- async release(id){this.pages.delete(id);}
- async close(){this.pages.clear();} // Never close or quit the user's browser.
+ async release(id){const session=this.pages.get(id);this.pages.delete(id);if(session)session.releasedAt=Date.now();} // Keep the scoped lineage session for a continuation job.
+ async close(){this.pages.clear();this.sessions.clear();} // Never close or quit the user's browser.
 }

@@ -21,6 +21,13 @@ test('registered file inspection is local, authorized and never opens a database
  try{const r=await tools.run('inspect_report',{fileId:f.file.id});assert.equal(r.binding.fileId,f.file.id);assert.equal(r.calculationAudit.status,'passed');await assert.rejects(tools.run('inspect_report',{fileId:'foreign'}),e=>e.code==='REPORT_INSPECTION');assert.ok(authorizations>=1);}finally{await tools.close();}
 });
 
+test('a file finalized in the current tool phase is immediately inspectable before controller persistence',async t=>{
+ const f=await fixture(t);const {phaseReportRegistry}=await import('../src/runner/environment-tools.js');const registry=phaseReportRegistry({id:f.id,reportFiles:[]});
+ await assert.rejects(inspectReport(f.root,registry.view,{fileId:f.file.id}),/未登记/);
+ registry.register({exportFile:f.file});registry.register({exportFile:f.file});
+ const inspected=await inspectReport(f.root,registry.view,{fileId:f.file.id});assert.equal(inspected.binding.fileId,f.file.id);assert.equal(registry.view.reportFiles.length,1);
+});
+
 test('scope inspection follows direct business-key lookups and exposes omitted master objects',async t=>{
  const f=await fixture(t),master=await f.d.collect({sql:'SELECT active inventory objects',params:[],columns:['object_id','name']},async()=>[[{object_id:'1',name:'A'},{object_id:'2',name:'B'},{object_id:'3',name:'C'}]]);
  const enriched=await f.d.enrich({datasetRef:f.data.datasetRef,keyColumn:'id',lookups:[{name:'names',datasetRef:master.datasetRef,sourceColumn:'id',targetColumn:'object_id',fields:[{column:'name',as:'name'}],missing:'empty'}]});

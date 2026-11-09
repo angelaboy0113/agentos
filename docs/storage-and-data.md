@@ -26,6 +26,11 @@
 |---|---|---:|---:|
 | `src/` | Control Plane、Runner、Codex 连接和持久化源码 | 否 | 是 |
 | `config/*.example.json`、`config/roles/` | 可复制示例、角色规则和协议 schema | 脱敏后否 | 是 |
+| `AGENTOS_CREDENTIAL_VAULT_DIR` | 运行用户专用 AES-GCM 凭据库；主密钥与密文权限分别为 `0600`，目录 `0700`；不记录引用名和密文内容到日志 | 是 | 否 |
+
+新录入凭据直接写本机加密库；旧 Keychain 凭据可由 `scripts/migrate-keychain-credentials.mjs` 一次迁移。迁移只输出数量，不输出引用名、账号或密码。密文库与主密钥不得进入 Git、聊天或迁移公开包；加密备份必须同时保留两者。
+
+报表文件在 `finalize_report`/`refresh_report` 返回后立即注册到当前工具阶段，下一次 `inspect_report` 可直接核验。跨 job 仍只认控制面已持久化的本任务文件，不放开其他任务路径。
 | `config/*.local.json` | 真实项目路径、群 ID、机器人/真人 ID、网络出口 | 是 | 否 |
 | `.env` | 可选环境变量和令牌 | 严重敏感 | 否 |
 | `docs/`、`scripts/`、`test/` | 设计、部署、维护、辅助脚本和回归测试 | 否 | 是 |

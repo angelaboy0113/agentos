@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 config/*.local.json
+config/.credential-vault/
 
 # Runtime state: conversations, jobs, attachments, copied credentials, logs and worktrees
 data/

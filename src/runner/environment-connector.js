@@ -6,10 +6,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { loadEnvironments, verifyApprovedPlan, fingerprint } from '../shared/environment-access.js';
+import {readCredential} from '../shared/credential-vault.js';
 const exec = promisify(execFile);
 const helper = fileURLToPath(new URL('../../scripts/keychain-credential.py', import.meta.url));
 export async function credential(ref) {
-  try { const { stdout } = await exec('python3', [helper, 'get', ref], { timeout: 10000, maxBuffer: 16000 }); return JSON.parse(stdout); }
+  try { return await readCredential(ref,async()=>{const { stdout } = await exec('/usr/bin/python3', [helper, 'get', ref], { timeout: 10000, maxBuffer: 16000 }); return JSON.parse(stdout);}); }
   catch { throw new Error('本机凭据不可读取；请在 Mac 本机完成安全录入或解锁钥匙串'); }
 }
 const clean = (value, secrets = []) => {

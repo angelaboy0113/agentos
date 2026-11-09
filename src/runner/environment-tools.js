@@ -212,11 +212,17 @@ export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map(),
  return {...base,...(cursor?{cursor,batchSize:50}:groupNames.length>12?{batchSize:Math.max(5,Math.floor(1000/(groupNames.length+base.columns.length)))}:{}),sql:projected?projected+` ORDER BY ${order.join(', ')}`:base.sql.replace(/^SELECT /,`SELECT ${quoted.join(', ')}, `)+` GROUP BY ${quoted.join(', ')} ORDER BY ${order.join(', ')}`,columns:[...groupNames,...base.columns],...(args.rowKey?{rowKey:{column:args.rowKey,fields:groupNames}}:{}),numericColumns:args.aggregates.filter(a=>['sum','avg','count','count_distinct'].includes(a.op)||numericTypes.has(types.get(a.table??args.table)?.get(a.column))).map(a=>a.as)};
 }
 
+export function phaseReportRegistry(job){const view={...(job??{id:'none'}),reportFiles:[...(job?.reportFiles??[])]};return{view,register(result){const file=result?.exportFile;if(file?.id&&!view.reportFiles.some(item=>item.id===file.id))view.reportFiles.push(file);return result;}};}
+
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   if(e.kind==='tct')return createTctTools(e,q,cred,adapters);
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), primaryKeys=new Map(), valueSets = new Map();
   const datasets=new ReportDatasets({deploymentScope:{projectId:adapters.reportJob?.projectId,environment:adapters.reportJob?.sourceEnvironment??e.tier},reuseQueries:true,dataBudgetBytes:q.exportDataBudgetBytes??Number.MAX_SAFE_INTEGER,snapshotWindowMs:q.exportSnapshotWindowMs??null,originalQuestion:adapters.originalQuestion,datasetScopes:adapters.datasetScopes,scope:createHash('sha256').update(JSON.stringify(e)).digest('hex'),secrets,maxRows:q.exportMaxRows,previewRows:q.maxRows,directory:adapters.exportDirectory,authorize:adapters.authorize,active:()=>active,onProgress:adapters.onProgress});
+  // The controller persists exportFiles after this tool phase returns. Keep a
+  // phase-local view as well so a freshly finalized file can be inspected in
+  // the very next tool call without weakening the cross-job file boundary.
+  const reportRegistry=phaseReportRegistry(adapters.reportJob),reportView=reportRegistry.view,registerReport=result=>reportRegistry.register(result);
   const mongo=e.kind==='mongodb'?createMongoBackend(e,q,cred,{...adapters,datasets,valueSets}):null;
   const request = adapters.fetch ?? boundedFetch;
   const readCache = new Map(); let readCacheBytes = 0;
@@ -370,15 +376,15 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         if(tool==='extend_dimension')return datasets.extendDimension(args);
         if(tool==='relate_dataset')return datasets.relate(args);
         if(tool==='enrich_dataset')return datasets.enrich(args);
-        if(tool==='inspect_report'){await adapters.authorize?.();return inspectReport(adapters.dataDir,adapters.reportJob??{id:'none',reportFiles:[]},args);}
+        if(tool==='inspect_report'){await adapters.authorize?.();return inspectReport(adapters.dataDir,reportView,args);}
         if(tool==='summarize_dataset')return datasets.summarize(args);
         if(tool==='transform_dataset')return datasets.transform(args);
         if(tool==='inspect_dataset')return datasets.inspect(args);
-        if(tool==='finalize_report')return datasets.finalize(args);
-        if(tool==='refresh_report')return datasets.refresh(args,{
+        if(tool==='finalize_report')return registerReport(await datasets.finalize(args));
+        if(tool==='refresh_report')return registerReport(await datasets.refresh(args,{
          begin:async()=>{if(mongo){mongo.close();return;}const c=await mysql();await adapters.authorize?.();await c.rollback();readCache.clear();readCacheBytes=0;await c.query('START TRANSACTION READ ONLY');},
          reload:async(recipe,source)=>{if(source.scope&&source.scope!==createHash('sha256').update(JSON.stringify(e)).digest('hex')){if(!adapters.reloadDataset)throw new ReportInputError('跨来源刷新需要当前授权路由，不能在错误数据库重放');return adapters.reloadDataset(recipe,source);}if(recipe.tool==='mongo_dataset'){if(!mongo)throw new ReportInputError('Mongo来源必须由其授权入口刷新');return mongo.reload(recipe.args);}for(const table of [recipe.args.table,recipe.args.leftTable,recipe.args.rightTable].filter(Boolean)){let cursor;do{const page=await run('schema',{table,...(cursor!==undefined?{cursor}:{})});cursor=page.nextCursor;}while(cursor!==null&&cursor!==undefined);}return run(recipe.tool,structuredClone(recipe.args));}
-        });
+        }));
         if(mongo)return mongo.run(tool,args);
         if(tool==='indexes'){tableColumns(tables,args.table,q);const c=await mysql();const [rows]=await c.execute({sql:'SHOW INDEX FROM `'+args.table+'`',timeout:q.timeoutMs},[]);return {rows,stage:'只读索引元数据；用于选择查询条件，不证明业务结果'};}
         if(tool==='explain_query'){
