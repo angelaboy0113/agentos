@@ -152,8 +152,10 @@ export function publishQuestion(context, id) {
     const version = sourceVersion(snapshot, id);
     const view = questionView(snapshot, id, context.projects);
     if(view.terminal&&context.replyAddressing){
-      const q=snapshot.questions[id],actor=snapshot.conversations.find(t=>t.id===q.latestTurnId)??snapshot.jobs.at(-1);
-      if(actor)view.card=addressCard(view.card,await context.replyAddressing.forTurn(actor));
+      // The question owns its addressee. Credential/approval helpers may advance
+      // latestTurnId without becoming the requester or changing task authority.
+      const requester=snapshot.questions[id];
+      view.card=addressCard(view.card,await context.replyAddressing.forTurn(requester));
     }
     const key = `question:${id}`;
     // Reopening a round/attempt retains the message, but resets terminal notification delivery.
