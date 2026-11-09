@@ -40,7 +40,7 @@ function questionEvidence(prior, supplied = []) {
 export class JsonStore {
   constructor(file) {
     this.file = path.resolve(file);
-    this.queue = Promise.resolve();this.readMetrics={full:0,selected:0,loads:0};
+    this.queue = Promise.resolve();this.readMetrics={full:0,selected:0,loads:0,jsonCopies:0};
     this.transactionContext=new AsyncLocalStorage();this.runnerHeartbeats=new Map();
   }
 
@@ -82,7 +82,16 @@ export class JsonStore {
     }catch(error){if(error.code==='ENOENT'){this.cache=null;return emptyState();}throw error;}}
   }
   async select(select){this.readMetrics.selected++;return structuredClone(select(await this.snapshot()));}
-  async read(){this.readMetrics.full++;return structuredClone(await this.snapshot());}
+  async read(){
+    this.readMetrics.full++;
+    const state=await this.snapshot();
+    // The authoritative snapshot already has a JSON representation. Parsing it
+    // avoids V8 ValueSerializer's additional object graph/buffer at every full
+    // detached read, while retaining the existing no-shared-mutation contract.
+    const raw=this.cache?.state===state?this.cache.raw:null;
+    if(typeof raw==='string'){this.readMetrics.jsonCopies++;return JSON.parse(raw);}
+    return structuredClone(state);
+  }
   async write(state) {
     const raw=JSON.stringify(state)+'\n';
     // Only skip an unchanged transaction if the authoritative file still matches the cached revision.

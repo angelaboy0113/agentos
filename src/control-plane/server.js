@@ -604,7 +604,6 @@ export async function handleLarkCliEvent(context, event) {
   const mentionIds = mentions.flatMap((item) => [item.id?.open_id ?? item.id?.app_id ?? item.id, item.open_id, item.user_id]).filter(Boolean);
   const botIds=[agent?.openId,agent?.appId].filter(Boolean);
   const addressed = event.chat_type === 'p2p' || botIds.some(id=>mentionIds.includes(id));
-  const state = await context.store.read();
   if (event.chat_type === 'group' && !addressed) return { ignored: true, reason: 'mention_required' };
   if (mentionIds.length && botIds.length && !botIds.some(id=>mentionIds.includes(id))) return { ignored: true };
   return context.conversations.enqueue({

@@ -1,3 +1,4 @@
+import {stateView} from '../shared/state-view.js';
 import {receptionKey,receptionScope,topicQuestion,receptionIdentity,publicOwnerStatus,validateOwnerStatus,captureRecoveryEvent,recoveryDiagnosis,receptionSensitive} from '../shared/reception-policy.js';
 import {isAdministrator} from './authorization.js';
 import {validateDecision} from './codex-conversation.js';
@@ -38,7 +39,7 @@ export class ReceptionService{
  async tick(){if(this.closed||!this.enabled)return;if(this.running)return this.running;this.running=this.run();try{await this.running;}finally{this.running=null;}}
  valid(s,e){const q=s.questions?.[e.questionId];return q&&!q.closedAt&&q.visibility!=='requester'&&q.profile===e.profile&&q.chatId===e.chatId&&q.projectId===e.projectId&&(e.generation===undefined||q.generation===e.generation)&&receptionScope(this.policy,e);}
  async classify(entry){
-  const result=validateDecision(await this.decide({requestId:entry.key,nativeSession:false,role:'owner_intake',message:entry.content,history:[],jobs:[],attachments:[],currentAttachmentIds:[],project:{id:entry.projectId},channel:{kind:'reception_only',ownerMentioned:entry.ownerMentioned,allowedActions:['reply'],rule:'仅分类，不启动业务、不调用工具；未@管理员不能分类owner_help。普通讨论/收到/我看看/闲聊为ignore。'},publicOwnerStatus:this.statusInput(await this.context.store.read())},this.abort.signal,{sessionKey:'reception:'+entry.key}));
+  const result=validateDecision(await this.decide({requestId:entry.key,nativeSession:false,role:'owner_intake',message:entry.content,history:[],jobs:[],attachments:[],currentAttachmentIds:[],project:{id:entry.projectId},channel:{kind:'reception_only',ownerMentioned:entry.ownerMentioned,allowedActions:['reply'],rule:'仅分类，不启动业务、不调用工具；未@管理员不能分类owner_help。普通讨论/收到/我看看/闲聊为ignore。'},publicOwnerStatus:await stateView(this.context.store,s=>this.statusInput(s))},this.abort.signal,{sessionKey:'reception:'+entry.key}));
   if(result.action!=='reply'||result.intent!=='none'||result.requiresSourceInspection||result.environmentQuery||result.environmentSetup||result.attachmentIds.length)throw Error('Reception cannot execute business actions');
   const kind=result.receptionIntent??'ignore';return kind==='owner_help'&&!entry.ownerMentioned?'ignore':kind;
  }
@@ -87,7 +88,7 @@ export class ReceptionService{
  async patchInbox(key,fields){await this.context.store.transact(s=>{if(s.receptionInbox?.[key])Object.assign(s.receptionInbox[key],fields);});}
  async patchRecovery(key,fields){await this.context.store.transact(s=>{if(s.recoveryEvents?.[key])Object.assign(s.recoveryEvents[key],fields);});}
  async sendInbox(entry,text){
-  const fresh=await this.context.store.read(),e=fresh.receptionInbox?.[entry.key];if(!e||!this.valid(fresh,e)||!['waiting','reminding'].includes(e.status)||e.notice?.messageId)return;
+  const fresh=await stateView(this.context.store,s=>{const e=s.receptionInbox?.[entry.key];return {receptionInbox:e?{[entry.key]:e}:{},questions:e?{[e.questionId]:s.questions?.[e.questionId]}:{}};}),e=fresh.receptionInbox?.[entry.key];if(!e||!this.valid(fresh,e)||!['waiting','reminding'].includes(e.status)||e.notice?.messageId)return;
   const name=e.notice?'':await this.context.replyAddressing?.forTurn({...e,chatType:'group'})??'';
   const addressed=name?addressText(text.replace(/^老师，/,''),name):text;
   const notice=e.notice??{text:requesterMentionText(e.senderId,addressed),replyTo:e.replyTo,idempotencyKey:'aos-reception-'+e.key.slice(0,32),firstAttemptAt:this.now()};
@@ -102,6 +103,6 @@ export class ReceptionService{
   if(state.receptionInbox?.[key])return;
   const text=this.text('recovery',key)+'\n'+diagnosis.message+(resumed?'\n已接回原任务继续执行。':diagnosis.action==='maintenance_required'?'\n这次已登记为待维护复核，尚未声称修复完成。':'');
   await this.context.store.transact(s=>{s.receptionInbox??={};s.receptionInbox[key]??={...e,key,senderId:job.senderId,replyTo:e.replyTo,kind:'recovery',status:'reminding',dueAt:this.now(),createdAt:iso(this.now())};});
-  await this.sendInbox((await this.context.store.read()).receptionInbox[key],text);
+  await this.sendInbox(await stateView(this.context.store,s=>s.receptionInbox[key]),text);
  }
 }

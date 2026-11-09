@@ -231,8 +231,7 @@ export class ConversationService {
 
   async process(key) {
     while (!this.stopped) {
-      const state = await this.context.store.read();
-      const turn = (state.conversations ?? []).find((item) => this.key(item) === key && ['queued', 'decided', 'ready'].includes(item.status));
+      const turn = await stateView(this.context.store,state=>(state.conversations ?? []).find((item) => this.key(item) === key && ['queued', 'decided', 'ready'].includes(item.status)));
       if (!turn || (turn.retryAt && Date.parse(turn.retryAt) > Date.now())) return;
       if (turn.status === 'queued') {
         const aiStarted = Date.now();

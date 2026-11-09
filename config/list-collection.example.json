@@ -1,0 +1,8 @@
+{
+  "tool": "summarize_dataset",
+  "arguments": {
+    "datasetRef": "<complete left-joined parent-and-label rows>",
+    "groupColumns": ["parent_id", "parent_code", "parent_name"],
+    "aggregates": [{"op":"collect_text","column":"label","as":"labels","format":"join","separator":"; ","distinct":true,"order":"source","nulls":"exclude"}]
+  }
+}

@@ -130,3 +130,8 @@ test('one human message mentioning two bots creates two isolated duties and retr
   await send(event('a','unmentioned',{mentions:[{id:'bot-b'}]}));
   assert.equal((await app.store.read()).jobs.length,2);
 });
+
+test('unmentioned bot routing never copies the complete historical state',async t=>{
+ const {app,event}=await fixture(t,()=>({}));app.store.read=()=>{throw Error('No full state copy allowed for ignored messages');};
+ const result=await handleLarkCliEvent(app,event('a','ignored-no-copy',{mentions:[{id:'bot-b'}]}));assert.equal(result.ignored,true);
+});
