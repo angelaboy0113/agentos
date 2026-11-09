@@ -66,7 +66,7 @@
 |---|---|---|
 | 系统临时目录 `agentos-chat-<数据目录哈希>/` | 常驻只读聊天线程的工作目录 | 重启会重建线程；不要当长期状态或业务源码 |
 | 当前用户 `~/.codex/` 或系统凭据库 | Codex 配置和登录缓存 | `auth.json` 等同密码，绝不提交或复制给陌生人 |
-| macOS Keychain `com.angel.agentos.environment.<网站引用>` | 网站负责人回复等待登录卡片时提交的账号密码 | AgentOS 状态、卡片和日志只保存非敏感凭据引用；原始群消息仍按企业飞书留存策略保存 |
+| macOS Keychain `com.angel.agentos.environment.<网站引用>` | 仅旧版本遗留凭据的一次迁移来源 | 正式连接器不会隐式读取；由维护者显式迁入 AES-GCM 本机加密库后使用，避免无人值守任务弹系统密码框 |
 | 当前用户 `~/.lark-cli/` | lark-cli 原始 profile 与认证 | 运行时会复制到 `data/lark-cli-config/`，两处都敏感 |
 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AngelAgentOS` | Windows 当前用户登录后启动项 | 不是系统服务，也不是 Codex 登录 |
 | 业务仓库 `.git/worktrees/` 元数据 | 关联 `data/worktrees/` 中的工作树 | 清理工作树必须回到对应业务仓执行 Git worktree 命令 |
@@ -95,9 +95,9 @@ git check-ignore .env config\projects.local.json config\agents.local.json config
 
 ## 可选环境查询边界
 
-详见[受控环境查询](environment-access.md)和[只读排查自动授权](read-only-auto-authorization.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前 Mac 用户 Keychain。UAT/PRD 受控只读查询由策略自动授权，修改操作仍需管理员审批。查询原始结果归属原问题卡片，不注入个人共享记忆；显式启用团队知识后，仅对完成且有证据的分析提炼不含具体案例数据的通用说明，独立保存。真实环境验收须在本机配置后完成。
+详见[受控环境查询](environment-access.md)和[只读排查自动授权](read-only-auto-authorization.md)。环境配置仅存在 ignored 的 `config/environments.local.json`，凭据保存在当前运行用户的 AES-GCM 本机加密库；旧 Keychain 只作显式一次迁移来源。UAT/PRD 受控只读查询由策略自动授权，修改操作仍需管理员审批。查询原始结果归属原问题卡片，不注入个人共享记忆；显式启用团队知识后，仅对完成且有证据的分析提炼不含具体案例数据的通用说明，独立保存。真实环境验收须在本机配置后完成。
 
-通用网站等待登录时，只有该网站环境在当前机器人 profile 下配置的负责人可以直接回复对应任务卡提交账号密码。控制面用卡片或同一话题绑定具体网站，在普通对话入库之前消费凭据消息，不把正文写入 `data/agentos.json`；Keychain 保存后仅使用凭据引用。AgentOS 无法删除飞书服务端群消息，群成员可见范围和留存按企业飞书策略执行。固定登录脚本只在已批准网站 origin、应用路径或同源认证路径填写表单，验证码和 MFA 不保存也不绕过。详见[日常 Chrome 登录态复用](shared-chrome.md)。
+通用网站等待登录时，只有该网站环境在当前机器人 profile 下配置的负责人可以直接回复对应任务卡提交账号密码。控制面用卡片或同一话题绑定具体网站，在普通对话入库之前消费凭据消息，不把正文写入 `data/agentos.json`；AES-GCM 本机加密库保存后仅使用凭据引用。正式连接器加密库缺项时明确返回维护缺口，不触发交互式 macOS Keychain 读取。AgentOS 无法删除飞书服务端群消息，群成员可见范围和留存按企业飞书策略执行。固定登录脚本只在已批准网站 origin、应用路径或同源认证路径填写表单，验证码和 MFA 不保存也不绕过。详见[日常 Chrome 登录态复用](shared-chrome.md)。
 
 ## 环境源码快照
 

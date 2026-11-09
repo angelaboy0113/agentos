@@ -13,4 +13,13 @@ async function load(directory){const file=path.join(directory,'credentials.enc')
 async function store(directory,entries){const secret=await key(directory),iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',secret,iv);cipher.setAAD(Buffer.from('AgentOS credential vault v1'));const ciphertext=Buffer.concat([cipher.update(JSON.stringify(entries)),cipher.final()]),body=JSON.stringify({version:1,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:ciphertext.toString('base64')}),file=path.join(directory,'credentials.enc'),temp=file+'.tmp-'+process.pid+'-'+randomBytes(4).toString('hex');try{await writeFile(temp,body,{flag:'wx',mode:0o600});await rename(temp,file);await chmod(file,0o600);}catch(error){await rm(temp,{force:true});throw error;}}
 export async function saveEncryptedCredential(ref,value,{directory=credentialVaultDirectory()}={}){const clean=validate(ref,value);return serial(async()=>{const entries=await load(directory);entries[ref]=clean;await store(directory,entries);});}
 export async function readEncryptedCredential(ref,{directory=credentialVaultDirectory()}={}){if(!validRef.test(ref))throw new Error('本机凭据引用无效');const value=(await load(directory))[ref];if(!value)throw Object.assign(new Error('本机加密凭据尚未迁移'),{code:'CREDENTIAL_NOT_FOUND'});return validate(ref,value);}
-export async function readCredential(ref,keychainRead,{directory=credentialVaultDirectory()}={}){try{return await readEncryptedCredential(ref,{directory});}catch(error){if(error.code!=='CREDENTIAL_NOT_FOUND')throw error;}const value=validate(ref,await keychainRead());await saveEncryptedCredential(ref,value,{directory});return value;}
+export async function readCredential(ref,keychainRead,{directory=credentialVaultDirectory(),allowLegacyKeychain=false}={}){
+ try{return await readEncryptedCredential(ref,{directory});}
+ catch(error){
+  if(error.code!=='CREDENTIAL_NOT_FOUND'||!allowLegacyKeychain)throw error;
+ }
+ if(typeof keychainRead!=='function')throw Object.assign(new Error('本机加密凭据尚未迁移'),{code:'CREDENTIAL_NOT_FOUND'});
+ const value=validate(ref,await keychainRead());
+ await saveEncryptedCredential(ref,value,{directory});
+ return value;
+}

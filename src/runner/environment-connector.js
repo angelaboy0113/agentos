@@ -2,16 +2,14 @@ import {sshMysqlConnection} from './ssh-mysql.js';
 import { accountMode } from '../shared/database-account-policy.js';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { databaseEndpoints } from './config-endpoints.js';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
 import { loadEnvironments, verifyApprovedPlan, fingerprint } from '../shared/environment-access.js';
-import {readCredential} from '../shared/credential-vault.js';
-const exec = promisify(execFile);
-const helper = fileURLToPath(new URL('../../scripts/keychain-credential.py', import.meta.url));
+import {readEncryptedCredential} from '../shared/credential-vault.js';
 export async function credential(ref) {
-  try { return await readCredential(ref,async()=>{const { stdout } = await exec('/usr/bin/python3', [helper, 'get', ref], { timeout: 10000, maxBuffer: 16000 }); return JSON.parse(stdout);}); }
-  catch { throw new Error('本机凭据不可读取；请在 Mac 本机完成安全录入或解锁钥匙串'); }
+  try { return await readEncryptedCredential(ref); }
+  catch (error) {
+    if(error?.code==='CREDENTIAL_NOT_FOUND')throw new Error(`本机加密凭据尚未迁移（引用：${ref}）；请由维护者运行受控迁移或隐藏录入，不会弹出 macOS 钥匙串确认`);
+    throw new Error('本机加密凭据不可读取或完整性校验失败；请由维护者核对本机加密库');
+  }
 }
 const clean = (value, secrets = []) => {
   let s = String(value ?? '').slice(0, 500);
