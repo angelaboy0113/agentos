@@ -93,11 +93,20 @@ export async function reportReviewEvidence(dataDir,job){
  const item=job.reportFiles?.filter(f=>f.verificationHash).at(-1);if(!item)return null;
  try{
   const primary=await inspectReport(dataDir,job,{fileId:item.id});
-  primary.relatedReports=[];
+  primary.relatedReports=[];let reviewBytes=Buffer.byteLength(JSON.stringify(primary));
   for(const file of (job.reportFiles??[]).filter(f=>f.verificationHash&&f.id!==item.id)){
-   try{const r=await inspectReport(dataDir,job,{fileId:file.id});primary.relatedReports.push({status:r.status,binding:r.binding,headers:r.headers,calculationAudit:r.calculationAudit,populationAudit:r.populationAudit});}
+   // The final source-review phase cannot call environment tools directly.  Carry
+   // the same bounded, hash-bound summary for every component file so a
+   // multi-file report does not lose its columns, sources or checks merely
+   // because another file happened to be finalized last.
+   try{const r=await inspectReport(dataDir,job,{fileId:file.id}),bytes=Buffer.byteLength(JSON.stringify(r));
+    if(reviewBytes+bytes<=96000){primary.relatedReports.push(r);reviewBytes+=bytes;}
+    else primary.relatedReports.push({status:r.status,binding:r.binding,headers:r.headers,calculationAudit:r.calculationAudit,populationAudit:r.populationAudit,limited:true,note:'多文件审阅包达到有界上下文预算；该文件的哈希、表头、全文件计算审计和范围审计仍已预载。'});
+   }
    catch{primary.relatedReports.push({status:'unavailable',binding:{fileId:file.id}});}
   }
+  primary.reviewAccess={mode:'controller_preloaded',sourceStageToolRequired:false,
+   note:'每份文件已由控制面按fileId、哈希、配方和实际CSV预载有界审阅资料；源码汇总阶段不需要也不能再次调用环境inspect_report。'};
   return primary;
  }catch{return {status:'unavailable',binding:{fileId:item.id},note:'本机文件审阅校验失败；这是读取/绑定缺口，不是已证实的计算公式错误。请用inspect_report核对该文件，不能要求用户提供本机已有CSV或重复取数。'};}
 }

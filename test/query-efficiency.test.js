@@ -123,7 +123,7 @@ test('explicit text delivery omits irrelevant file workflow while file requests 
  const base={...job,tabularDelivery:false,originalQuestion:'查当前指标，用文字方式回复，无需csv文档。',context:[]};
  const text=await buildPrompt(base,{}, {instruction:'readonly',metadata:{}},source.sourceSync,[],source.workspace);
  const file=await buildPrompt({...base,tabularDelivery:true,originalQuestion:'导出完整CSV'}, {}, {instruction:'readonly',metadata:{}},source.sourceSync,[],source.workspace);
- assert.match(text,/数据仍须完整、精确和独立核验/);assert.doesNotMatch(text,/上方evidence是程序按文件ID/);assert.match(file,/上方evidence是程序按文件ID/);assert.ok(Buffer.byteLength(text)<Buffer.byteLength(file)-4000);
+ assert.match(text,/数据仍须完整、精确和独立核验/);assert.doesNotMatch(text,/上方evidence是控制面按每份文件ID/);assert.match(file,/上方evidence是控制面按每份文件ID/);assert.ok(Buffer.byteLength(text)<Buffer.byteLength(file)-4000);
 });
 
 test('planner is closed even when readonly tool cleanup fails',async()=>{
