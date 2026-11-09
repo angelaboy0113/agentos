@@ -77,7 +77,7 @@ export function validateWebsiteReadEndpoints(value){
    for(const [key,values]of Object.entries(filters))if(!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)||/^(?:action|operation|command|cmd|method|__proto__|constructor|prototype)$/i.test(key)||/password|secret|token|credential/i.test(key)||!Array.isArray(values)||!values.length||values.length>32||values.some(v=>typeof v!=='string'||!v.length||v.length>100||/[\x00-\x1f\x7f]/.test(v)))throw new Error('只读筛选仅允许审核后的固定非敏感值；不能覆盖动作或执行参数');
   }
   const parts=e.path.replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
-  if(parts.some(p=>writeAction.test(p))&&!reviewedQueryObjectPath(e.path))throw new Error('网站只读接口不能包含修改操作');
+  if(parts.some(p=>writeAction.test(p))&&!reviewedQueryObjectPath(e.path,e.method))throw new Error('网站只读接口不能包含修改操作');
  }
  return value;
 }
