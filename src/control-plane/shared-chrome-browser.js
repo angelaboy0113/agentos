@@ -1,3 +1,5 @@
+import {chromeFrameDocument} from './website-frames.js';
+import {BrowserInputError} from '../shared/browser-tool-input.js';
 import {validateBrowserTool} from '../shared/browser-tool-input.js';
 import {readWebsiteAsset} from './website-assets.js';
 import {controlMetadata} from '../shared/website-controls.js';
@@ -24,15 +26,16 @@ export class SharedChromeBrowser{
  async snapshot(job,e,s,tool,args){
   await this.allowed(job,e,s.waiting);
   const request={baseUrl:s.baseUrl,token:s.token,tool,args};
-  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`JSON.stringify({...(${chromePage.toString()})(${JSON.stringify(request)},{metadata:${controlMetadata.toString()},inspect:${inspectWebsiteControl.toString()}}),...(${browserLoginState.toString()})()})`});
-  if(raw.error)throw new Error(raw.error);
+  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`(()=>{const selected=(${chromeFrameDocument.toString()})(${JSON.stringify(request)});if(selected.result)return JSON.stringify(selected.result);return JSON.stringify({...(${chromePage.toString()})(${JSON.stringify(request)},{document:selected.document,metadata:${controlMetadata.toString()},inspect:${inspectWebsiteControl.toString()}}),...(${browserLoginState.toString()})(selected.document)})})()`});
+  if(raw.error){if(raw.code)throw new BrowserInputError(raw.code,raw.error);throw new Error(raw.error);}
   s.waiting=raw.loginRequired===true||raw.loginState==='loading';if(!s.waiting)s.credentialAttempted=false;
   if(raw.pageText)raw.pageText=cleanWebsiteText(raw.pageText);
   if(raw.controls)raw.controls=raw.controls.map(c=>({...c,label:cleanWebsiteText(c.label),...(c.options?{options:c.options.map(o=>({...o,label:cleanWebsiteText(o.label)}))}:{})}));
   return raw;
  }
  run(job,e,tool,args={}){return this.serial(async()=>{
-  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_recover','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_frames','browser_frame','browser_recover','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(['browser_frames','browser_frame'].includes(tool))validateBrowserTool(tool,args);
   await this.allowed(job,e);const s=await this.state(job,e);
   if(tool==='browser_recover'){
    validateBrowserTool(tool,args);let status;try{status=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:'JSON.stringify({blank:location.href==="about:blank",url:location.origin+location.pathname})'});}catch(error){if(!/原Chrome标签页已关闭/.test(error.message))throw error;this.pages.delete(job.id);const reopened=await this.state(job,e);return this.snapshot(job,e,reopened,'browser_snapshot',{});}

@@ -1,5 +1,6 @@
 // Fixed DOM probe: returns categories only, never account/password/token values or server text.
-export function browserLoginState(){
+export function browserLoginState(targetDocument){
+ const document=targetDocument??globalThis.document,location=document.location;
  const visible=e=>!!e?.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'&&getComputedStyle(e).display!=='none';
  const passwords=[...document.querySelectorAll('input[type="password"]')].filter(visible);
  const authPath=/\/(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[/?#]|$)/i.test(location.pathname+location.hash);

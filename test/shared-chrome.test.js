@@ -8,7 +8,7 @@ import {failureDiagnostic} from '../src/shared/failure-diagnostic.js';
 const e={baseUrl:'https://business.example/app/',projectId:'p',tier:'uat'};
 test('daily Chrome reuses scoped tabs with per-job locks and rechecks authorization; never closes user tabs',async()=>{
  const calls=[];let permitted=true;
- const b=new SharedChromeBrowser(async()=>permitted,async q=>{calls.push(q);if(q.operation==='execute')assert.match(q.script,/^JSON.stringify/);return q.operation==='find'?{tabId:String(calls.length),windowId:'1'}:{pageText:'Page password=hidden',controls:[]};});
+ const b=new SharedChromeBrowser(async()=>permitted,async q=>{calls.push(q);if(q.operation==='execute'){assert.match(q.script,/JSON.stringify/);assert.match(q.script,/chromeFrameDocument/);}return q.operation==='find'?{tabId:String(calls.length),windowId:'1'}:{pageText:'Page password=hidden',controls:[]};});
  const r=await b.run({id:'a'},e,'connection');assert.doesNotMatch(r.pageText,/password=hidden/);
  await b.run({id:'a'},e,'browser_snapshot');assert.equal(calls.filter(x=>x.operation==='find').length,1);
  await b.run({id:'b'},e,'connection');assert.equal(calls.filter(x=>x.operation==='find')[1].exclude.length,1);

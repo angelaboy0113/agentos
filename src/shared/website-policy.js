@@ -85,7 +85,7 @@ export function validateWebsiteReadEndpoints(value){
 // Exact public static dependencies reviewed from the application entry, not an
 // origin-wide business API grant. Never include query strings, credentials or redirects.
 export function validateWebsiteStaticResources(value,base){
- if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return (u.protocol!=='https:'&&(!base||u.origin!==new URL(base).origin))||u.username||u.password||u.search||u.hash||/[*{}]/.test(decodeURIComponent(u.pathname))||u.href!==url||! /\.(js|css|woff2?|ttf|png|jpe?g|svg|ico)$/i.test(u.pathname);}catch{return true;}}))throw new Error('静态依赖须为审核后的精确HTTPS资源URL，不能含凭据、查询参数、通配符或业务接口');
+ if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return (u.protocol!=='https:'&&(!base||u.origin!==new URL(base).origin))||u.username||u.password||u.search||u.hash||/[*{}]/.test(decodeURIComponent(u.pathname))||u.href!==url||! /\.(js|css|woff2?|ttf|png|jpe?g|svg|ico)$/i.test(u.pathname);}catch{return true;}}))throw new Error('静态依赖须为审核后的精确资源URL（同源HTTP或HTTPS，跨源仅HTTPS），不能含凭据、查询参数、通配符或业务接口');
  return value;
 }
 export function websiteStaticResourceAllowed(base,request,resources=[]){

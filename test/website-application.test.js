@@ -36,5 +36,5 @@ test('saved credentials are reused by a fresh service after restart without aski
 
 test('confirmed login readiness resets only the completed episode, enabling saved credentials at the next expiry',async()=>{
  const browser=new WebsiteBrowser('/private/tmp/unused-browser');let ready=true;const state={page:{evaluate:async()=>({pageReady:ready,loginRequired:!ready,loginState:ready?'ready':'login_required'})},blockedLoginReads:new Set(),waiting:true,sawLogin:true,credentialAttempted:true,authResult:{loginState:'rejected'}};
- await browser.loginStatus(state);assert.equal(state.credentialAttempted,false);assert.equal(state.authResult,null);assert.equal(state.reloadAfterLogin,true);ready=false;state.credentialAttempted=true;await browser.loginStatus(state);assert.equal(state.credentialAttempted,true);
+ await browser.loginStatus(state);assert.equal(state.credentialAttempted,false);assert.equal(state.authResult,null);assert.equal(state.reloadAfterLogin,false);ready=false;state.credentialAttempted=true;await browser.loginStatus(state);assert.equal(state.credentialAttempted,true);
 });

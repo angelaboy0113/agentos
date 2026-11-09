@@ -1,6 +1,7 @@
 // Executed as a fixed program in the approved page. No model-provided JavaScript.
 export function chromePage(request, adapters={}) {
  const {baseUrl,token,tool,args={}}=request;
+ const document=adapters.document??globalThis.document,location=document.location,window=document.defaultView;
  const base=new URL(baseUrl), current=new URL(location.href);
  const prefix=base.pathname.replace(/\/$/,'');
  const visible=el=>!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
@@ -15,7 +16,8 @@ export function chromePage(request, adapters={}) {
  const expansionInfo=el=>{const info=adapters.metadata?.(el);return info?.type&&['expansion-toggle','panel'].includes(info.kind)?info:null;};
  const label=el=>{
   const expansion=expansionInfo(el);if(expansion)return expansion.label;
-  const text=(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+  let text=(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+  if(/^(?:搜\s*索|查\s*询|重\s*置)$/.test(text))text=text.replace(/\s/g,'');
   return isRow(el)&&text?`行详情：${text}`:text;
  };
  function type(el){
@@ -39,7 +41,7 @@ export function chromePage(request, adapters={}) {
  }
  const key='__agentos_read_'+token;
  const state=window[key];
- if(!['connection','browser_open','browser_snapshot'].includes(tool)){
+ if(!['connection','browser_open','browser_snapshot','browser_frame'].includes(tool)){
   const ref=state?.refs?.[args.ref];
   if(!ref||state.url!==location.href||!ref.el.isConnected||type(ref.el)!==ref.type||label(ref.el)!==ref.label||ref.el.getAttribute('href')!==ref.href)return {error:'页面引用已变化，请重新获取页面'};
   const el=ref.el;
@@ -53,7 +55,7 @@ export function chromePage(request, adapters={}) {
   state.refs={};return {acted:true};
  }
  if(credentialFormVisible)return {loginRequired:true,credentialFormVisible:true,verificationRequired:false,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在此Chrome页面完成，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
- const refs={},controls=[],generation=(state?.generation??0)+1;let n=0;
+ const generationKey='__agentos_generation_'+token,refs={},controls=[],generation=(globalThis.window[generationKey]??0)+1;globalThis.window[generationKey]=generation;let n=0;
  for(const el of [...document.querySelectorAll('div,span,i,.el-collapse-item__header,.ant-collapse-header,a,[role=link],button,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]')].slice(0,500)){
   const t=type(el);if(!t)continue;const ref=token+'-'+generation+'-'+n++;
   const text=label(el);refs[ref]={el,type:t,label:text,href:el.getAttribute('href')};
