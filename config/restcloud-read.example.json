@@ -64,6 +64,21 @@
               "method": "GET",
               "path": "/restcloud/rest/core/monitor/log/details",
               "reviewed": true
+            },
+            {
+              "method": "GET",
+              "path": "/restcloud/rest/base/files/list/{objectId}",
+              "reviewed": true
+            },
+            {
+              "method": "GET",
+              "path": "/restcloud/rest/core/services/getResponseSampleConfig/{objectId}",
+              "reviewed": true
+            },
+            {
+              "method": "GET",
+              "path": "/restcloud/rest/core/services/{objectId}",
+              "reviewed": true
             }
           ],
           "readNavigationSelectors": [

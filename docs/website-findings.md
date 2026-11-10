@@ -1,4 +1,8 @@
-# 网页调查入口判断与接续（1.95.0）
+# 网页调查入口判断与接续（1.96.1）
+
+RestCloud 配置定义、响应样例和关联附件列表使用记录 ID 结尾，不能仅按 URL 最后一个词判断是否读取。已审核的部署可复用 `config/restcloud-read.example.json` 中三个 GET 模板：`/restcloud/rest/core/services/{objectId}`、`/restcloud/rest/core/services/getResponseSampleConfig/{objectId}`、`/restcloud/rest/base/files/list/{objectId}`。objectId 只接受完整24位十六进制 ID，无需逐条记录增加白名单。沿用系统/环境、同源及固定方法校验，不开放附件下载、上传、业务写入或接口执行。部署前核对实际前端加载用途及真实响应，再安装到已有入口；不扩大跨系统授权。
+
+这是已有 typed path 能力的配置目录补齐，不需要取消浏览器请求门控。缺失入口应记录具体路径并由维护接续原问题，不重问已保存的密码。读到响应样例不证明 SAP 内部科目范围，平台未保存的证据仍需明确说明。验证包含多记录 ID、伪 ID、附加路径、写方法和操作参数；正式原题结果单独验收。
 
 隔离浏览器新增 `browser_diagnostics {}`：即使当前页空白或loading，也可读取本任务页面最近64条脱敏运行/控制台错误元数据及请求路径/HTTP状态；不返回控制台原文、响应正文、认证头、查询参数、存储或密码，也不触发新业务请求。这是有界诊断元数据，不是完整应用日志或业务结果。公开脚本位置可结合已有 `browser_assets` 沿同一任务继续核查，不能因只读工具没有任意JS就声称没有诊断入口。
 
