@@ -1,4 +1,6 @@
-# 网页调查入口判断与接续（1.94.0）
+# 网页调查入口判断与接续（1.94.1）
+
+独立实例使用 `scripts/run-system-instance.mjs --start` 启动时，加密库固定为该实例 `runtime/secure/credential-vault`。维护终端测试必须与正式启动器路径一致；不能仅在 shell 导出变量后读取成功就声称服务可用。旧默认 `config/.credential-vault` 如有记录，先私有备份并逐引用核对有效账号角色，再受控迁移；不把整库或秘密提交 Git。
 
 业务工具发现登录过期时，控制面先按原任务的系统、环境和凭据引用恢复认证，再返回当前页面快照；不会重放触发过期的点击或查询。验证码、扫码、明确认证拒绝保留真实等待状态。已保存凭据缺项单独报告 `CREDENTIAL_UNAVAILABLE`，不把 token 过期当密码错误。Keychain 仅一次迁移使用，可设置 `AGENTOS_KEYCHAIN_NO_UI=1` 禁止后台迁移弹框；日常使用本机加密保险库。
 

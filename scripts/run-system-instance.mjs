@@ -45,6 +45,7 @@ Object.assign(process.env, {
   AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),
   AGENTOS_DATA_DIR: path.join(runtime, 'data'), AGENTOS_RUNNER_WORKTREE_ROOT: path.join(runtime, 'data', 'worktrees'),
+  AGENTOS_CREDENTIAL_VAULT_DIR: path.join(runtime, 'secure', 'credential-vault'),
   AGENTOS_BROWSER_MODE: 'isolated', AGENTOS_RUNNER_CONCURRENCY: String(instance.concurrency ?? 3),
   LARKSUITE_CLI_CONFIG_DIR: path.dirname(authFile), AGENTOS_LARK_CONFIG_FILE: authFile,
   AGENTOS_EVENT_CONFIG_ROOT: path.join(runtime, 'cli'),

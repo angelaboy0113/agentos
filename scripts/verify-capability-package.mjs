@@ -7,6 +7,7 @@ const required=['test/card-actions.test.js','test/state-copy.test.js','test/list
 required.unshift('src/shared/credential-vault.js','scripts/credential-read.mjs','scripts/migrate-keychain-credentials.mjs','test/credential-vault.test.js');
 required.unshift('docs/mongo-record-scope.md','test/idle-poll-projection.test.js');
 required.unshift('config/website-login-preferences.example.json');
+required.unshift('test/instance-vault-start.test.js');
 for(const name of required){const info=await lstat(path.join(root,name));if(!info.isFile()||info.isSymbolicLink())throw new Error('Missing/unsafe package member: '+name);}
 for(const name of ['config/multi-repository-project.example.json','config/capabilities.example.json','config/task-result.schema.json','package.json','package-lock.json'])JSON.parse(await readFile(path.join(root,name),'utf8'));
 const pkg=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')),lock=JSON.parse(await readFile(path.join(root,'package-lock.json'),'utf8'));
