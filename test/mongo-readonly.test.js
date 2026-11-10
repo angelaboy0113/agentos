@@ -3,6 +3,26 @@ import policy from '../src/runner/ssh-mongo-worker.cjs';import {createEnvironmen
 import {createRequire} from 'node:module';import {transformDataset} from '../src/shared/dataset-transform.js';
 const q={mode:'investigate',reviewed:true,description:'synthetic scoped Mongo read',collections:['Evidence*'],parameters:[{name:'purpose',type:'string'}],maxRows:5,timeoutMs:1000,exportMaxRows:'all'};
 const e={kind:'mongodb',projectId:'alpha',tier:'prd',credentialRef:'mongo_ref',host:'db.example',port:27017,database:'Example-PRD',authSource:'admin',membersRead:true,ownerOpenIdsByProfile:{bot:['ou_owner']},queries:{investigate:q},transport:{mode:'ssh-remote-execution',host:'jump.example',port:22,credentialRef:'ssh_ref',knownHostsFile:'/tmp/hosts'}};
+test('fixed Mongo record scope is additive, typed and visible; caller cannot replace it',async t=>{
+ const dir=await temp(t),requiredFilters=[{column:'parentId',op:'=',type:'objectId',value:'0123456789abcdef01234567'}],scoped={...q,requiredFilters},calls=[];
+ const tools=await createEnvironmentTools(e,scoped,{username:'synthetic',password:'hidden'},{exportDirectory:dir,mongoConnection:async()=>({destroy(){},request:async(op,args)=>{calls.push({op,args});return {rows:[],complete:true};}})});
+ const args={collections:['Evidence202601'],columns:['id'],filters:[{column:'parentId',op:'=',type:'objectId',value:'1123456789abcdef01234567'}]};
+ await tools.run('select',args);assert.deepEqual(calls[0].args.filters,[...requiredFilters,...args.filters]);assert.equal(args.filters.length,1);
+ const remote=policy.scopedArgs(calls[0].args,scoped);assert.deepEqual(policy.pipeline(remote)[0].$match,policy.filters([...requiredFilters,...requiredFilters,...args.filters]));
+ assert.ok(tools.spec.find(x=>x.tool==='schema').description.includes('parentId'));await tools.close();
+ const file=path.join(dir,'config.json');await writeFile(file,JSON.stringify({version:1,environments:{mongo:{...e,queries:{investigate:scoped}}}}));assert.ok(await loadEnvironments(file));
+ for(const bad of [[],[{column:'parentId',op:'in',type:'string',value:['x']}],[{column:'parentId',op:'=',type:'objectId',value:'bad'}],[{column:'password',op:'=',type:'string',value:'x'}]]){
+ await writeFile(file,JSON.stringify({version:1,environments:{mongo:{...e,queries:{investigate:{...q,requiredFilters:bad}}}}}));await assert.rejects(loadEnvironments(file));}
+});
+test('actual remote worker applies fixed scope to schema, reads and explain independently of local tools',async t=>{
+ const dir=await temp(t),require=createRequire(import.meta.url),driver=require.resolve('mongodb'),stub=path.join(dir,'scoped-driver.cjs'),worker=path.join(dir,'worker.cjs');
+ await writeFile(stub,`const actual=require(${JSON.stringify(driver)});class MongoClient{async connect(){}async close(){}db(){return{command:async()=>({authInfo:{authenticatedUsers:[{}],authenticatedUserPrivileges:[{actions:['find']}]}}),listCollections:()=>({toArray:async()=>[{name:'Evidence'}]}),collection:()=>({aggregate:p=>{if(p[0].$match.$and[0].tenant.$eq!=='alpha')throw Error('MISSING_SCOPE');return{hasNext:async()=>false,close:async()=>{},toArray:async()=>[],explain:async()=>({scopeApplied:true})};}})}}}module.exports={...actual,MongoClient};`);
+ const source=await readFile(new URL('../src/runner/ssh-mongo-worker.cjs',import.meta.url),'utf8');await writeFile(worker,source.replace("require('mongodb')",'require('+JSON.stringify(stub)+')'));
+ const child=spawn(process.execPath,[worker],{stdio:['pipe','pipe','pipe']});let out='';child.stdout.on('data',x=>out+=x);child.stderr.resume();const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);});
+ const scope={host:'db.example',port:27017,database:'example',username:'synthetic',password:'hidden',collections:['Evidence'],requiredFilters:[{column:'tenant',op:'=',type:'string',value:'alpha'}],timeoutMs:1000};
+ child.stdin.end([{id:1,connection:scope},...['schema','read','explain'].map((op,i)=>({id:i+2,op,args:{collections:['Evidence'],columns:['id'],filters:[]},timeout:1000}))].map(x=>JSON.stringify(x)).join('\n')+'\n');
+ assert.equal(await done,0);assert.deepEqual(out.trim().split('\n').map(x=>JSON.parse(x).ok),[true,true,true,true]);
+});
 async function temp(t){const dir=await mkdtemp(path.join(os.tmpdir(),'mongo-readonly-'));t.after(()=>rm(dir,{recursive:true,force:true}));return dir;}
 test('Mongo entry requires fixed SSH database scope, reviewed read tools and normal project authorization',async t=>{
  const dir=await temp(t),file=path.join(dir,'config.json');async function load(change){await writeFile(file,JSON.stringify({version:1,environments:{mongo:{...e,...change}}}));return loadEnvironments(file);}

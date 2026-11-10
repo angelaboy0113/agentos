@@ -15,7 +15,7 @@ export function mergeMongoGroups(rows,args){
  if(!groups.size&&!args.groupColumns.length){const row={__mongo_group_types:'[]'};for(const item of args.aggregates)row[item.as]=['count','count_distinct','sum'].includes(item.op)?'0':null;groups.set('[]',{row});}
  return [...groups.values()].map(x=>x.row).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
-export function mongoToolSpec(q){return [
+export function mongoToolSpec(q){const spec=[
  {tool:'connection',args:{},description:'MongoDB SSH远程连接及实际账号权限元数据；只读命令白名单，不把业务账号声称为数据库只读账号。'},
  {tool:'collections',args:{},description:'完整列出当前数据库、已授权名称范围内的实际集合；集合缺失不能默认为无发生额。'},
  {tool:'schema',args:{collection:'实际集合名'},description:'前100条文档字段与BSON类型普查，仅为抽样结构，不证明所有文档都有该字段。'},
@@ -24,7 +24,7 @@ export function mongoToolSpec(q){return [
  {tool:'select',args:{collections:['实际集合名'],columns:['字段'],filters:[{column:'字段',op:'=|>|>=|<|<=|in|in_set|is_null|is_missing|is_not_null',type:'string|date|objectId|int64|decimal|boolean',value:'标量；date必须ISO8601含Z或明确时区偏移，in_set引用完整集合'}]},description:`同一授权数据库内显式集合的有限预览，最多${q.maxRows}行。空值与字段不存在分别标记，不将样本当全集。`},
  {tool:'group_dataset',args:{collections:['所有实际月份集合'],groupColumns:['实际分组字段'],aggregates:[{op:'count|min|max|sum|count_distinct',column:'count以外实际字段',as:'结果别名'}],filters:[],cohort:{datasetRef:'可选：完整主对象数据集',columns:['对象ID字段'],column:'Mongo关联字段',type:'string|objectId|int64',nulls:'exclude|error'}},description:'显式月份集合先合并后分组，完整游标读取，不设总行数截停；每个集合必须实际存在。也可只传columns读取完整原始记录。count_distinct须单独一项且跨集合去重；sum遇到真实空值拒绝猜零。cohort从已保存完整数据集恢复全部键，配方可重放，不依赖临时setRef。分库/跨月读取不宣称事务快照。'},
  {tool:'count',args:{collections:['实际集合名'],filters:[],cohort:'与group_dataset相同'},description:'独立固定COUNT，完整集合与相同筛选，不用预览行数作业务总数。'}
-];}
+];return spec.map(item=>q.requiredFilters?{...item,description:item.description+' 管理员固定记录范围自动与查询条件AND合并，不能覆盖：'+JSON.stringify(q.requiredFilters)}:item);}
 export function createMongoBackend(e,q,cred,{datasets,valueSets,...adapters}){
  const redact=value=>typeof value==='string'?[cred.username,cred.password].filter(Boolean).reduce((s,secret)=>s.split(secret).join('[已隐藏]'),value):value;
  let connection;const connect=async()=>connection??=await (adapters.mongoConnection??sshMongoConnection)(e,q,cred,adapters);
@@ -32,7 +32,7 @@ export function createMongoBackend(e,q,cred,{datasets,valueSets,...adapters}){
  const original=structuredClone(args),copy=structuredClone(args);if(copy.collection){copy.collections=[copy.collection];delete copy.collection;}
  const cohort=copy.cohort;delete copy.cohort;if(cohort){if(!policy.field(cohort.column)||!Array.isArray(cohort.columns)||!cohort.columns.length||!['error','exclude'].includes(cohort.nulls))input('cohort需要实际字段和明确空值处理');const d=await datasets.restore(cohort.datasetRef);if(!d?.complete||cohort.columns.some(c=>!d.columns.includes(c)))input('cohort需要本任务完整数据集及真实字段');const values=new Set();for(const row of d.rows)for(const column of cohort.columns){const v=row[column];if(v===null||v===undefined||v===''){if(cohort.nulls==='error')input('主对象集合存在空键；不能丢失后猜零');continue;}values.add(String(v));}if(!values.size)input('主对象集合为空；先核对业务范围，不能隐式查询全部记录');copy.filters=[...(copy.filters??[]),{column:cohort.column,op:'in',type:cohort.type,value:[...values]}];}
  copy.filters=(copy.filters??[]).map(f=>{if(f.op!=='in_set')return f;const set=valueSets.get(f.value);if(!set||set.truncated||!set.values.length)input('in_set只能使用本轮完整集合；跨轮优先使用可重放cohort');return {...f,op:'in',value:[...set.values]};});
- policy.validateArgs(copy,q.collections);return {copy,original};
+ policy.validateArgs(copy,q.collections);return {copy:policy.scopedArgs(copy,q),original};
  }
  async function run(tool,args={}){
  await datasets.check();const conn=await connect();

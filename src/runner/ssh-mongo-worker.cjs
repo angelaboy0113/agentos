@@ -24,6 +24,10 @@ function filters(items){
  if(f.op==='in'&&(!Array.isArray(f.value)||!f.value.length))fail('MONGO_FILTERS');and.push({[f.column]:{[ops[f.op]]:f.op==='in'?f.value.map(v=>scalar(v,f.type)):scalar(f.value,f.type)}});
  }return and.length?{$and:and}:{};
 }
+function scopedArgs(args,scope){
+ const required=scope.requiredFilters??[];filters(required);
+ return {...args,filters:[...required,...(args.filters??[])]};
+}
 function normalize(value){
  if(value===undefined||value===null)return null;if(value instanceof Date)return value.toISOString();if(value instanceof ObjectId||Long.isLong(value)||value instanceof Decimal128)return value.toString();
  if(typeof value==='number'){if(!Number.isFinite(value))fail('MONGO_NONFINITE');if(Number.isInteger(value)&&!Number.isSafeInteger(value))fail('MONGO_INTEGER_PRECISION');return String(value);}if(typeof value==='boolean')return value?'true':'false';if(typeof value==='string')return value;
@@ -58,9 +62,9 @@ async function main(){
  if(x.op==='connection'){let hello;try{hello=await db.command({hello:1});}catch(error){if(error.code!==59)throw error;hello=await db.command({isMaster:1});}const policy=checkPrivileges(await db.command({connectionStatus:1,showPrivileges:true}),scope.accountPolicy);result={...policy,serverTime:normalize(hello.localTime),maxWireVersion:hello.maxWireVersion,transport:'ssh-remote-execution',readConcern:scope.readConcern??'local',sameTransactionSnapshot:false};}
  else if(x.op==='collections'){const list=await db.listCollections({},{nameOnly:true,authorizedCollections:true,maxTimeMS:timeout}).toArray();result={collections:list.map(x=>x.name).filter(n=>permitted(n,scope.collections)).sort(),complete:true};}
  else if(x.op==='cursor_next')result=await page(a.cursor);else if(x.op==='cursor_close'){const item=cursors.get(a.cursor);if(!item)fail('MONGO_CURSOR');await item.cursor.close();cursors.delete(a.cursor);result={closed:true};}
- else{validateArgs(a,scope.collections);const names=new Set((await db.listCollections({},{nameOnly:true,authorizedCollections:true,maxTimeMS:timeout}).toArray()).map(x=>x.name));if(a.collections.some(c=>!names.has(c)))fail('MONGO_COLLECTION_MISSING');const col=db.collection(a.collections[0]);
+ else{validateArgs(a,scope.collections);Object.assign(a,scopedArgs(a,scope));const names=new Set((await db.listCollections({},{nameOnly:true,authorizedCollections:true,maxTimeMS:timeout}).toArray()).map(x=>x.name));if(a.collections.some(c=>!names.has(c)))fail('MONGO_COLLECTION_MISSING');const col=db.collection(a.collections[0]);
  if(x.op==='indexes'){if(a.collections.length!==1)fail('MONGO_ARGUMENTS');result={indexes:normalize(await col.listIndexes({maxTimeMS:timeout}).toArray())};}
- else if(x.op==='schema'){if(a.collections.length!==1)fail('MONGO_ARGUMENTS');const rows=await col.aggregate([{$limit:100},{$project:{fields:{$objectToArray:'$$ROOT'}}},{$unwind:'$fields'},{$group:{_id:{name:'$fields.k',type:{$type:'$fields.v'}},sampleCount:{$sum:1}}}],{maxTimeMS:timeout}).toArray();result={fields:rows.filter(x=>field(x._id.name)).map(x=>({name:x._id.name,type:x._id.type,sampleCount:normalize(x.sampleCount)})),sampled:true,sampleLimit:100,schemaComplete:false};}
+ else if(x.op==='schema'){if(a.collections.length!==1)fail('MONGO_ARGUMENTS');const rows=await col.aggregate([{$match:filters(a.filters)},{$limit:100},{$project:{fields:{$objectToArray:'$$ROOT'}}},{$unwind:'$fields'},{$group:{_id:{name:'$fields.k',type:{$type:'$fields.v'}},sampleCount:{$sum:1}}}],{maxTimeMS:timeout}).toArray();result={fields:rows.filter(x=>field(x._id.name)).map(x=>({name:x._id.name,type:x._id.type,sampleCount:normalize(x.sampleCount)})),sampled:true,sampleLimit:100,schemaComplete:false};}
  else if(x.op==='explain'){result={plan:normalize(await col.aggregate(pipeline(a),{maxTimeMS:timeout,allowDiskUse:true,readConcern:{level:scope.readConcern??'local'}}).explain('queryPlanner')),businessQueryExecuted:false};}
  else if(x.op==='read'){const typeAudits=[];for(const column of [...new Set((a.filters??[]).filter(f=>f.type==='date').map(f=>f.column))]){const base=filters(a.filters.filter(f=>f.column!==column)),types=await col.aggregate([{$match:base},{$group:{_id:{$type:'$'+column},n:{$sum:1}}}],{maxTimeMS:timeout,readConcern:{level:scope.readConcern??'local'}}).toArray();if(types.some(t=>t._id!=='date'))fail('MONGO_DATE_TYPE_AMBIGUOUS');typeAudits.push({column,types:normalize(types),checkedAt:new Date().toISOString()});}const cursor=col.aggregate(pipeline(a),{maxTimeMS:timeout,batchSize:500,allowDiskUse:true,readConcern:{level:scope.readConcern??'local'}});const token=randomUUID();cursors.set(token,{cursor,args:a});result={...await page(token),typeAudits};}
  else fail('MONGO_READONLY_OPERATION');}
@@ -68,4 +72,4 @@ async function main(){
  }catch(error){send({id:x?.id,ok:false,...diagnostics(error),errno:Number.isInteger(error.code)?error.code:undefined});}});});
  rl.on('close',()=>queue.finally(async()=>{for(const x of cursors.values())await x.cursor.close().catch(()=>{});await client?.close();}));process.on('SIGTERM',()=>{client?.close().finally(()=>process.exit(0));});
 }
-module.exports={field,permitted,scalar,filters,pipeline,normalize,validateArgs,checkPrivileges};if(require.main===module)main();
+module.exports={field,permitted,scalar,filters,scopedArgs,pipeline,normalize,validateArgs,checkPrivileges};if(require.main===module)main();

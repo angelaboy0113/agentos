@@ -2,6 +2,8 @@
 
 一份清单多值字段归并与同题验收规则见[完整清单交付](docs/list-delivery.md)。
 
+已授权主记录、逐图结果和审核快照接入及后台轮询内存说明见[Mongo记录范围](docs/mongo-record-scope.md)。
+
 持续调查、依赖型只读计划与双助手分工见[连续调查执行](docs/continuous-inquiries.md)。
 
 无发生额仍需单列的明确展示分组见[显式报表维度补全](docs/dimension-extension.md)。

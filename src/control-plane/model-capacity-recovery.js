@@ -3,10 +3,11 @@ import {capacityScope}from '../shared/model-capacity-wait.js';
 import {loadHarness}from '../runner/harness.js';
 import {loadEnvironments}from '../shared/environment-access.js';import {renewReadPlan}from '../shared/read-plan-renewal.js';
 import {publishQuestion}from './questions.js';
+import {stateView}from '../shared/state-view.js';
 const polling=new WeakMap();
 export function pollModelCapacity(context,{now=Date.now(),load=loadEnvironments,publish=publishQuestion}={}){
  if(polling.has(context))return polling.get(context);
- const work=(async()=>{const snapshot=await context.store.read();for(const original of snapshot.jobs??[]){
+ const work=(async()=>{const snapshot=await stateView(context.store,s=>({jobs:(s.jobs??[]).filter(j=>j.status==='awaiting_clarification'&&j.result?.modelCapacityWaiting&&j.result.modelCapacityState!=='access_check_failed'&&Number.isFinite(Date.parse(j.result.modelRecovery?.nextAttemptAt))&&Date.parse(j.result.modelRecovery.nextAttemptAt)<=now)}));for(const original of snapshot.jobs??[]){
   if(context.capacityRecoveryStopped)return;
   if(original.status!=='awaiting_clarification'||!original.result?.modelCapacityWaiting||original.result.modelCapacityState==='access_check_failed'||Date.parse(original.result.modelRecovery?.nextAttemptAt)>now)continue;
   if(!Number.isFinite(Date.parse(original.result.modelRecovery?.nextAttemptAt)))continue;

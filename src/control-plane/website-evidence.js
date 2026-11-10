@@ -5,6 +5,7 @@ import {realDirectory} from '../shared/retention.js';
 import {privateRecipient} from './private-cards.js';
 import {messageIdOf} from './live-cards.js';
 import {screenshotRequested} from '../shared/browser-tool-input.js';
+import {stateView} from '../shared/state-view.js';
 export {screenshotRequested};
 // Control-plane generated manifests only; never accept Runner-supplied filesystem paths.
 export async function websiteEvidenceFile(dataDir,jobId,item){
@@ -27,15 +28,15 @@ export class WebsiteEvidenceDelivery {
    state.websiteEvidenceDeliveries[key]??={sourceJobId:job.id,questionId:job.questionId,questionGeneration:q?.generation,item,destination:{messageId,profile:q?.profile??current.originProfile??current.agentProfile,replyInThread:q?.replyInThread??current.originReplyInThread??false,privateRecipient:privateRecipient(state,current)},createdAt:new Date().toISOString()};
   });
   // Failed delivery stays in an outbox; it must never repeat a webpage action.
-  void this.retry().catch(()=>{});const entry=(await this.context.store.read()).websiteEvidenceDeliveries?.[key];return {delivery:entry?.messageId?'sent':'pending',messageId:entry?.messageId??null};
+  void this.retry().catch(()=>{});const entry=await stateView(this.context.store,s=>s.websiteEvidenceDeliveries?.[key]);return {delivery:entry?.messageId?'sent':'pending',messageId:entry?.messageId??null};
  }
  async status(job){
-  const state=await this.context.store.read(),q=state.questions?.[job.questionId];
+  const state=await stateView(this.context.store,s=>({questions:{[job.questionId]:s.questions?.[job.questionId]},websiteEvidenceDeliveries:Object.fromEntries(Object.entries(s.websiteEvidenceDeliveries??{}).filter(([,e])=>e.sourceJobId===job.id))})),q=state.questions?.[job.questionId];
   return Object.values(state.websiteEvidenceDeliveries??{}).filter(e=>e.sourceJobId===job.id&&(!job.questionId||e.messageId||e.questionGeneration===q?.generation)&&!e.superseded).map(e=>({...e.item,delivery:e.messageId?'sent':'pending',messageId:e.messageId??null}));
  }
  async retry(){
   if(this.closed||typeof this.context.feishu.replyImage!=='function')return;
-  const state=await this.context.store.read();
+  const state=await stateView(this.context.store,s=>({websiteEvidenceDeliveries:Object.fromEntries(Object.entries(s.websiteEvidenceDeliveries??{}).filter(([,e])=>!e.messageId&&!e.superseded&&Date.now()>=(e.retryAt??0)))}));
   for(const [key,entry]of Object.entries(state.websiteEvidenceDeliveries??{}))if(!entry.messageId&&!entry.superseded&&Date.now()>=(entry.retryAt??0)&&!this.workers.has(key)){
    const work=this.deliver(key,entry);this.workers.set(key,work);work.finally(()=>this.workers.delete(key)).catch(()=>{});
   }
@@ -43,7 +44,7 @@ export class WebsiteEvidenceDelivery {
  }
  async deliver(key,entry){
   try{
-   const state=await this.context.store.read(),job=state.jobs.find(j=>j.id===entry.sourceJobId),q=state.questions?.[entry.questionId];
+   const state=await stateView(this.context.store,s=>({jobs:s.jobs.filter(j=>j.id===entry.sourceJobId),questions:{[entry.questionId]:s.questions?.[entry.questionId]}})),job=state.jobs.find(j=>j.id===entry.sourceJobId),q=state.questions?.[entry.questionId];
    if(!job||!screenshotRequested(job)||job.status==='cancelled'||entry.questionId&&(!q||q.generation!==entry.questionGeneration)){await this.context.store.transact(s=>{s.websiteEvidenceDeliveries[key].superseded=true;});return;}
    const recipient=privateRecipient(state,job);if(recipient!==entry.destination.privateRecipient)throw new Error('Evidence recipient changed');
    const file=await websiteEvidenceFile(this.context.config.dataDir,entry.sourceJobId,entry.item);
