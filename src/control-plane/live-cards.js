@@ -70,7 +70,7 @@ export class LiveCards {
     if (this.closed) return;
     if(this.retrying)return this.retrying;
     const work=(async()=>{
-      const keys=await stateView(this.store,s=>Object.entries(s.cardMessages??{}).filter(([,v])=>(v.retiredMessageIds?.length||v.revision!==v.deliveredRevision||(v.terminalMention&&!v.mentionDelivered))&&Date.now()>=(v.retryAt??0)).map(([key])=>key));
+      const keys=await stateView(this.store,s=>Object.entries(s.cardMessages??{}).filter(([,v])=>v.error!=='原消息已撤回，停止更新'&&(v.retiredMessageIds?.length||v.revision!==v.deliveredRevision||(v.terminalMention&&!v.mentionDelivered))&&Date.now()>=(v.retryAt??0)).map(([key])=>key));
       if(this.afterRetry)this.afterRetry().catch(()=>{});
       for(const key of keys)this.flush(key).catch(()=>{});
     })();this.retrying=work;try{await work;}finally{this.retrying=null;}
@@ -97,6 +97,7 @@ export class LiveCards {
   async deliver(key, force) {
     await this.cleanupPrivate(key);
     let entry = await stateView(this.store,s=>s.cardMessages?.[key]);
+    if (entry?.error==='原消息已撤回，停止更新') return entry.messageId;
     if (!entry || (entry.revision === entry.deliveredRevision && (!entry.terminalMention || entry.mentionDelivered))) return entry?.messageId;
     // A local maintenance hold prevents external edits while operator approval is pending.
     if (entry.messageId) {

@@ -28,6 +28,18 @@ async function setup(t, overrides = {}) {
 }
 const chat = (fields = {}) => ({ id: 'chat1', role: 'owner_intake', status: 'thinking', createdAt: new Date().toISOString(), ...fields });
 
+test('withdrawn delivery target stays retired across newer revisions and forced retries', async t => {
+  const { cards, store, calls } = await setup(t);
+  await store.transact(s => { s.cardMessages = { 'question:gone': {
+    messageId: 'withdrawn-card', destination, error: '原消息已撤回，停止更新',
+    revision: 9, deliveredRevision: 7, terminal: true, terminalMention: 'done', mentionDelivered: false,
+  } }; });
+  await cards.retry(); await cards.flush('question:gone', true);
+  assert.equal(calls.length, 0);
+  const entry = (await store.read()).cardMessages['question:gone'];
+  assert.equal(entry.deliveredRevision, 7); assert.equal(entry.mentionDelivered, false);
+});
+
 test('only real tool events count once; no reasoning, outputs or arguments are exposed', () => {
   const activity = new ExecutionActivity();
   assert.equal(activity.accept({ type: 'item.completed', item: { id: 'r', type: 'reasoning', text: 'PRIVATE' } }), null);
