@@ -1,4 +1,4 @@
-import{jointInquiry,jointInquiryFromAcceptedTurns}from '../shared/inquiry-execution.js';
+import{jointInquiry,jointInquiryFromAcceptedTurns,sameTrustedHuman}from '../shared/inquiry-execution.js';
 import {directSocial} from '../shared/reception-policy.js';
 import {requesterMentionText} from './requester-mention.js';
 import {publicStickerPolicy} from './success-stickers.js';
@@ -127,7 +127,7 @@ export class ConversationService {
       }
       state.conversations.push(turn);
       const merged=coordination??(!requestsPrivateCard(turn.content)?jointInquiryFromAcceptedTurns(state.conversations,turn,this.context.agents,this.context.projects):null);
-      if(merged)for(const related of state.conversations)if(related.messageId===turn.messageId&&related.chatId===turn.chatId&&related.senderId===turn.senderId&&related.chatType==='group')related.inquiryCoordination=structuredClone(merged);
+      if(merged)for(const related of state.conversations)if(related.messageId===turn.messageId&&related.chatId===turn.chatId&&sameTrustedHuman(this.context.projects,related,turn)&&related.chatType==='group')related.inquiryCoordination=structuredClone(merged);
       return { conversation: true, turnId: turn.id, duplicate: false };
     });
     this.wake();

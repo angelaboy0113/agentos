@@ -40,17 +40,18 @@ test('every execution stage retains its original system bot; old role routing st
   assert.ok(plans.every(p => p.role === 'developer' && p.allowedChatIds[0] === 'shared' && p.groupOnly === true));
 });
 
-async function fixture(t, decide) {
+async function fixture(t, decide, configureProjects=()=>{}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'agentos-systems-'));
   const input = [], replies = [];
   const scoped = structuredClone(projects);
+  configureProjects(scoped);
   const md = path.join(dir, 'assistant.md');
   await writeFile(md, 'ONLY_ALPHA_RULE');
   scoped.projects.alpha.assistantInstructionsFile = md;
   const app = await createControlPlane({
     dataDir: dir, storeFile: path.join(dir, 'state.json'), projectsFile: path.join(dir, 'projects.json'),
     conversationFile: path.join(dir, 'conversation.json'), contactsFile: path.join(dir, 'contacts.json'),
-    knowledgeFile: path.join(dir, 'knowledge.json'), memoryFile: path.join(dir, 'memory.json'),
+    knowledgeFile: path.join(dir, 'knowledge.json'), memoryFile: path.join(dir, 'memory.json'), receptionFile:path.join(dir,'reception.json'),
     projects: scoped, agents: { agents },
     feishuClient: { reply: async (id, text, options) => { replies.push({ id, text, options }); return { data: { message_id: `reply-${replies.length}` } }; } },
     conversationResponder: async value => { input.push(value); return { reply: '回答', action: 'reply', intent: 'none', instruction: '', jobId: '', projectId: '', attachmentIds: [], ...decide(value) }; },
@@ -132,9 +133,9 @@ test('one human message mentioning two bots creates two isolated duties and retr
 });
 
 test('consumer-local mention projections merge by trusted accepted message before either job is planned',async t=>{
-  const {app,input,event}=await fixture(t,()=>({action:'create_task',intent:'analysis',instruction:'仅核实本系统贡献',sourceEnvironment:'prd'}));
-  const base={mentions:[],sender_id:'same-human',content:'@A @B summarize both systems'};
-  await Promise.all(['a','b'].map(profile=>handleLarkCliEvent(app,event(profile,'projected-joint-message',{...base,mentions:[{id:`bot-${profile}`}]}))));
+  const {app,input,event}=await fixture(t,()=>({action:'create_task',intent:'analysis',instruction:'仅核实本系统贡献',sourceEnvironment:'prd'}),scoped=>{scoped.humanIdentities={groupOwner:{a:'admin-a',b:'admin-b'}};});
+  const base={mentions:[],content:'@A @B summarize both systems'};
+  await Promise.all(['a','b'].map(profile=>handleLarkCliEvent(app,event(profile,'projected-joint-message',{...base,sender_id:`admin-${profile}`,mentions:[{id:`bot-${profile}`}]}))));
   await app.conversations.idle();
   const state=await app.store.read();
   assert.equal(state.jobs.length,2);
