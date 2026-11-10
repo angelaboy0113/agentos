@@ -37,3 +37,7 @@ RestCloud某版本展开日志使用固定 `GET /restcloud/rest/core/monitor/log
 验证：`node --test test/website-finding.test.js test/website-target.test.js`；然后运行 `npm run check` 和 `node scripts/verify-capability-package.mjs`。测试覆盖共享平台、真错应用、缺失/伪造证据、登录/加载、导航拦截、隔离任务受控快照、旧结果与交接。实际业务记录、原卡投递及部署另行验收，不能与合成测试混同。macOS本机实施；其它平台/OS与完整跨机迁移未因此自动通过。
 
 迁移包含本模块、测试、本文与示例；私有环境/Keychain/任务证据仍走原私有迁移。兼容回退保留已有websiteFinding审计，不能回灌旧业务状态；只有自然空闲才按实例流程发布或回退。
+
+数据行的状态文案（如启用）与操作按钮分别分类。行操作未出现在快照时，隔离浏览器可对kind=row的当前引用调用browser_context_menu打开右键菜单，然后从新快照选择已允许的查看/详情；不能把数据行状态当写入授权，写按钮及实际请求仍受原权限校验。共享Chrome尚未支持该工具。
+
+无文字链接图标先提供inspect/label-trigger引用供悬停。只依据本控件关联的可见可访问性提示，或一次悬停新出现且唯一的可见tooltip建立临时观察；不借用其他图标或多个歧义提示。提示与元素均须仍连接、文字不变，执行前重新分类；编辑/删除提示仍拦截。tooltip本体不是按钮，不可点击。无可确认提示则保持不可点击，不按SVG名称猜操作。

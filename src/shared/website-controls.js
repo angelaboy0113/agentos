@@ -1,8 +1,9 @@
 // Fixed DOM adapter shared by all applications; no model-supplied selectors or scripts.
 export const websiteControls='.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
 export function controlMetadataBatch({elements,options,limit=Infinity}={elements:null}){
- function metadata(el,{readNavigationSelectors=[]}={}){
+ function metadata(el,{readNavigationSelectors=[],hoverTooltip=null}={}){
  const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
+ if(el.matches('[role="tooltip"]'))return {visible,type:null};
  if(!visible||el.disabled||el.getAttribute('aria-disabled')==='true'||el.matches('.disabled,.is-disabled,.ant-picker-cell-disabled,.ant-calendar-disabled-cell')||el.closest('.ant-calendar-disabled-cell,.ant-picker-cell-disabled')||el.closest('[contenteditable="true"],[data-sensitive],[data-agentos-secret]'))return {visible:false};
  const tag=el.tagName.toLowerCase(),calendar=el.closest('.el-picker-panel,.ant-picker-panel,.ant-calendar-picker-container,.ant-calendar,[role="grid"]'),option=el.matches('[role="option"],.el-select-dropdown__item,.ant-select-item-option'),pagination=el.closest('.el-pagination,.ant-pagination,[role="navigation"][aria-label*="pag" i]');
  const row=el.matches('tr[data-row-key],[role="row"][data-row-key]');
@@ -10,6 +11,15 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  const primaryLabel=reviewedNavigation?(el.getAttribute('aria-label')||el.getAttribute('title')||el.querySelector(':scope > h1,:scope > h2,:scope > h3,:scope > h4,:scope > p')?.innerText):null;
  const title=el.matches('[role="menuitem"],[role="treeitem"]')?el.querySelector(':scope > .el-submenu__title,:scope > .ant-menu-submenu-title'):null;
  let label=(primaryLabel||(title??el).innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
+ // Icon-only links are inspectable, never clickable until their own visible
+ // accessibility tooltip supplies an action label. Do not borrow another icon's tooltip.
+ if(tag==='a'&&!(primaryLabel||(title??el).innerText||el.getAttribute('aria-label')||el.getAttribute('title')||'').trim()){
+  label='';
+  const described=[el,...el.querySelectorAll('[aria-describedby]')].flatMap(n=>(n.getAttribute('aria-describedby')||'').split(/\s+/)).filter(Boolean);
+  if(hoverTooltip?.element===el&&hoverTooltip.tooltip?.isConnected&&hoverTooltip.tooltip.getAttribute('role')==='tooltip'&&hoverTooltip.tooltip.getClientRects().length&&getComputedStyle(hoverTooltip.tooltip).visibility!=='hidden'&&hoverTooltip.tooltip.innerText.trim()===hoverTooltip.label)label=hoverTooltip.label;
+  label=label||described.map(id=>document.getElementById(id)).filter(n=>n?.getAttribute('role')==='tooltip'&&n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden').map(n=>n.innerText.trim()).join(' ').slice(0,100);
+  if(!label&&el.querySelector('svg,img,[class*="icon"]'))return {visible:true,label:'悬停识别图标操作'+(el.closest('tr,[role="row"]')?'：'+el.closest('tr,[role="row"]').innerText.trim().slice(0,60):''),type:'inspect',kind:'label-trigger',blocked:false};
+ }
  if(/^(?:搜\s*索|查\s*询|重\s*置)$/.test(label))label=label.replace(/\s/g,'');
  // A hover-only menu reference does not authorize clicking an unlabeled icon.
  // Its visible options are independently classified after opening the menu.
@@ -40,7 +50,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  if(!label)return {visible:true,label,type:null};
  const mutation=/立即执行|执行一次|单次执行|立即运行|运行一次|重放|重发|重新发送|试运行|测试接口|接口测试|新增|创建|保存|修改|编辑|删除|启动|停止|触发|重跑|终止|发布|启用|禁用|提交|支付|注销|退出|作废|驳回|撤回|取消订单|关闭订单|确认收货|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|cancel|resend|replay)\b/i;
  const navigation=reviewedNavigation||el.matches('.ant-card-hoverable,[role="link"],[role="menuitem"],[role="treeitem"],[role="tab"],.el-submenu__title,.ant-menu-submenu-title');
- let type=null,kind='action';
+ let type=null,kind=row?'row':'action';
  if(tag==='input'){
   const identity=[label,el.name,el.id,el.placeholder,el.getAttribute('aria-label')].join(' ');
   if(/password|passwd|secret|token|credential|authorization|api.?key|app.?key|密码|令牌|密钥/i.test(identity))return {visible:true,label,type:null};
@@ -59,7 +69,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  if(tag==='span'&&!picker&&!calendar&&!option&&!expansion&&!panel&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!localExpansion&&!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
  if(title||el.matches('[role="tab"]')&&[...el.querySelectorAll('button,[role="button"]')].some(child=>child.innerText?.trim()===label))type=null;
  // Fields, options and date cells change local query state; server writes remain independently blocked.
- const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
+ const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion','row'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
  if(blocked)type=null;
  return {visible:true,label:row?'行详情：'+label:label,type,kind,blocked,...(type==='select'?{options:[...el.options].slice(0,100).map(x=>({value:x.value,label:x.textContent}))}:{})};
 }

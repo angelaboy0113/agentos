@@ -197,14 +197,28 @@ export class WebsiteBrowser {
   if(tool==='browser_key'&&args.ref==='page'){await s.page.keyboard.press('Escape');return this.snapshot(s);}
   if(tool==='browser_scroll'&&args.ref==='page'){await s.page.evaluate(direction=>window.scrollBy(direction==='left'?-600:direction==='right'?600:0,direction==='up'?-600:direction==='down'?600:0),args.direction);return this.snapshot(s);}
   const ref=s.refs.get(args.ref);if(!ref)throw new BrowserInputError('BROWSER_REF_STALE','页面引用已过期；先browser_snapshot，再使用新引用。');
-  const current=await ref.el.evaluate(controlMetadata,{readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}).catch(()=>null);
+  const current=await ref.el.evaluate(controlMetadata,{hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}).catch(()=>null);
   if(!current||!current.visible)throw new BrowserInputError('BROWSER_REF_STALE','原控件已移除或隐藏；先browser_snapshot，不重复旧操作。');
   if(current.label!==ref.rawLabel||current.type!==ref.type)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
   if(current.blocked)throw new Error('该操作可能改变业务状态，本次未执行');
   if(tool==='browser_inspect')return {url:websitePageLocation(s.page.url()),label:cleanWebsiteText(current.label),...await ref.el.evaluate(inspectWebsiteControl)};
+  if(tool==='browser_context_menu'){
+   if(current.kind!=='row')throw new BrowserInputError('BROWSER_CONTROL_TYPE','仅可打开当前快照数据行的上下文菜单，不执行任何菜单项。');
+   await ref.el.click({button:'right',timeout:8000});return this.snapshot(s);
+  }
   if(tool==='browser_hover'){
-   if(ref.type!=='inspect'||current.kind!=='menu-trigger')throw new BrowserInputError('BROWSER_CONTROL_TYPE','只能悬停当前快照登记的菜单触发器；不点击未知操作。');
-   await ref.el.hover({timeout:8000});return this.snapshot(s);
+   if(ref.type!=='inspect'||!['menu-trigger','label-trigger'].includes(current.kind))throw new BrowserInputError('BROWSER_CONTROL_TYPE','只能悬停当前快照登记的菜单或图标提示触发器；不点击未知操作。');
+   const prior=await websiteDOM(s).locator('[role="tooltip"]:visible').elementHandles(),owned=!!s.hoverTooltip;
+   for(const handle of [s.hoverTooltip?.element,s.hoverTooltip?.tooltip])await handle?.dispose().catch(()=>{});s.hoverTooltip=null;
+   const texts=await Promise.all(prior.map(h=>h.innerText()));await ref.el.hover({timeout:8000});
+   // Wait only for the local hover animation, never replay a business request.
+   await s.page.waitForTimeout(400);
+   const tips=await websiteDOM(s).locator('[role="tooltip"]:visible').elementHandles();
+   if(tips.length===1){const label=(await tips[0].innerText()).trim();let existing=false;for(let i=0;i<prior.length;i++)if(await tips[0].evaluate((el,old)=>el===old,prior[i])&&texts[i].trim()===label)existing=true;
+    if(label&&label.length<=100&&(!existing||owned))s.hoverTooltip={element:await ref.el.evaluateHandle(el=>el),tooltip:tips[0],label};
+   }
+   for(const handle of [...prior,...tips.filter(h=>h!==s.hoverTooltip?.tooltip)])await handle.dispose();
+   return this.snapshot(s);
   }
   if(ref.type==='inspect')throw new BrowserInputError('BROWSER_CONTROL_TYPE','该引用只允许检查或悬停，不能点击、输入或按键执行。');
   const expected={browser_search:'search',browser_select:'select',browser_click:'read-action'}[tool];
@@ -232,10 +246,11 @@ export class WebsiteBrowser {
   return {section,url:websitePageLocation(s.page.url()),contentHash:hash,offset:begin,text:part,...(find?{matchOffset,nextMatchOffset:nextMatchOffset<0?null:nextMatchOffset,literalMatchOnly:true}:{}),totalCharacters:text.length,nextOffset,endOfContent:nextOffset===null,complete:begin===0&&nextOffset===null,note:'仅当前已授权页面的可见脱敏内容，分页不是历史快照；沿contentHash和nextOffset续读，变化时重新开始。无新的业务请求或写入。'};
  }
  async snapshot(s){
+  if(s.hoverTooltip&&!await s.hoverTooltip.element.evaluate(el=>el.isConnected).catch(()=>false)){for(const h of [s.hoverTooltip.element,s.hoverTooltip.tooltip])await h.dispose().catch(()=>{});s.hoverTooltip=null;}
   await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;
   const text=await websiteDOM(s).locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden],[data-sensitive],[data-agentos-secret]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
   const handles=await websiteDOM(s).locator([websiteControls,...(s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[])].join(',')).filter({visible:true}).elementHandles();
-  const metadata=await websiteDOM(s).evaluate(controlMetadataBatch,{elements:handles,limit:300,options:{readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}});
+  const metadata=await websiteDOM(s).evaluate(controlMetadataBatch,{elements:handles,limit:300,options:{hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}});
   const controls=[];
   for(const [i,el]of handles.entries()){
    const info=controls.length<300?metadata[i]:null;
