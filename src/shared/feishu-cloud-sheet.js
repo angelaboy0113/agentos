@@ -3,6 +3,7 @@ import {exactText} from './dataset-transform.js';
 import {createHash} from 'node:crypto';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 // Platform adapter: explicit task document only, GET-only, originating bot identity.
 export function cloudSheetTarget(value){
  try{const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.port||!/(?:^|\.)(?:feishu\.cn|larksuite\.com)$/.test(u.hostname))return null;
@@ -23,7 +24,14 @@ async function parseUploadedCloudFile(title,bytes){
  const extension=extensionOf(title),plain={txt:'text/plain',md:'text/markdown',csv:'text/csv',tsv:'text/tab-separated-values',json:'application/json',xml:'application/xml',yaml:'application/yaml',yml:'application/yaml'};
  if(extension==='docx'){
   let result;try{result=await mammoth.extractRawText({buffer:bytes});}catch{throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','Word 文件无法按 DOCX 结构读取；已保留真实格式错误，未当作空文档或网页登录失败。');}
-  return {extension,contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',content:result.value,structure:{warnings:result.messages.map(x=>String(x.message??x)).slice(0,50)}};
+  let zip;try{zip=await JSZip.loadAsync(bytes);}catch{throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','Word 文件压缩结构无效；已保留真实格式错误，未当作空文档。');}
+  const embeddedImages=[];
+  for(const name of Object.keys(zip.files).sort()){
+   const match=/^word\/media\/[^/]+\.(png|jpe?g)$/i.exec(name),entry=zip.files[name];if(!match||entry.dir)continue;
+   const data=await entry.async('nodebuffer'),extension=match[1].toLowerCase()==='jpeg'?'jpg':match[1].toLowerCase(),contentType=extension==='png'?'image/png':'image/jpeg';
+   embeddedImages.push({name,extension,contentType,bytes:data,sha256:createHash('sha256').update(data).digest('hex')});
+  }
+  return {extension,contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',content:result.value,embeddedImages,structure:{warnings:result.messages.map(x=>String(x.message??x)).slice(0,50),embeddedImageCount:embeddedImages.length,embeddedImageNames:embeddedImages.map(x=>x.name)}};
  }
  if(extension==='xlsx'){
   const workbook=new ExcelJS.Workbook();try{await workbook.xlsx.load(bytes);}catch{throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','Excel 文件无法按 XLSX 结构读取；未当作空表。');}
@@ -53,7 +61,7 @@ export async function readCloudSheet(client,job,environment,tool,args={}){
   if(documentType==='file'){
    let bytes;try{bytes=await client.cloudDownload(token,{profile:job.originProfile});}catch(error){const message=String(error.message??'');const scope=/app_scope_not_applied|99991672|99991679/i.test(message);throw new CloudSheetError(scope?'CLOUD_DOCUMENT_SCOPE':'CLOUD_DOCUMENT_ACCESS',scope?'机器人应用缺少云空间文件只读/下载权限；请维护者为当前机器人申请 drive:drive:readonly。不是个人会话问题。':'当前机器人无法读取该文件；请确认文件已共享给对应机器人，且文件没有被删除或同时限制下载与预览。');}
    const parsed=await parseUploadedCloudFile(title,bytes);
-   return {nativeDocument:true,documentType,title,readAt:new Date().toISOString(),identity:'originating_bot',fileToken:token,fileBytes:bytes,contentType:parsed.contentType,extension:parsed.extension,content:parsed.content,structure:parsed.structure,note:'内容来自原机器人通过飞书原生文件接口下载的同一文件；原始字节将按当前任务、系统、环境和机器人身份登记，未使用个人网页登录。'};
+   return {nativeDocument:true,documentType,title,readAt:new Date().toISOString(),identity:'originating_bot',fileToken:token,fileBytes:bytes,contentType:parsed.contentType,extension:parsed.extension,content:parsed.content,embeddedImages:parsed.embeddedImages??[],structure:parsed.structure,note:'内容来自原机器人通过飞书原生文件接口下载的同一文件；原始字节将按当前任务、系统、环境和机器人身份登记，未使用个人网页登录。'};
   }
   const blocks=[];let pageToken='';const seen=new Set();
   do{
@@ -121,9 +129,17 @@ export async function registerCloudDocumentInput(store,dataDir,job,environment,r
  const file=path.join(dir,id+extension);try{if((await lstat(file)).isSymbolicLink())throw Error('Linked cloud input file');}catch(error){if(error.code!=='ENOENT')throw error;}
  try{await writeFile(file,fileBytes,{mode:0o600,flag:'wx'});}catch(error){if(error.code!=='EEXIST'||createHash('sha256').update(await readFile(file)).digest('hex')!==sha256)throw error;}
  const attachment={id,type:'file',contentType:result.contentType??'application/json',path:file,source:{kind:result.documentType==='file'?'authorized-native-cloud-file':'authorized-native-cloud-document',originProfile:job.originProfile,projectId:job.projectId,tier:environment.tier,jobId:job.id,documentType:result.documentType,title:result.title??null,token:result.fileToken??result.documentToken,readAt:result.readAt,sha256}};
- const accepted=await store.transact(state=>{const current=state.jobs.find(x=>x.id===job.id);if(!job.lease?.id||current?.status!=='running'||!current.lease?.id||current.lease.id!==job.lease.id||current.originProfile!==job.originProfile||current.projectId!==job.projectId||job.environmentAccess?.scopeHash&&current.environmentAccess?.scopeHash!==job.environmentAccess.scopeHash)throw Error('Cloud input task or lease changed');current.attachments??=[];const previous=current.attachments.find(x=>x.id===id);if(previous&&(previous.source.sha256!==sha256||previous.path!==file||previous.source.originProfile!==job.originProfile))throw Error('Cloud input binding changed');if(!previous)current.attachments.push(attachment);return previous??attachment;});
- const {fileBytes:_fileBytes,blocks:_blocks,...metadata}=result;
- return {...metadata,complete:true,inputAttachment:{id,type:accepted.type,contentType:accepted.contentType,source:accepted.source},note:result.note+' 原始文件已作为当前任务输入持久化；后续阶段可直接读取该 attachmentId，不要求用户重传。'};
+ const imageAttachments=[];
+ for(const image of result.embeddedImages??[]){
+  if(!Buffer.isBuffer(image.bytes)||!['image/png','image/jpeg'].includes(image.contentType)||createHash('sha256').update(image.bytes).digest('hex')!==image.sha256)throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','Word 内嵌图片结构或摘要无效，不能当作视觉证据。');
+  const imageId='ATT-cloud-image-'+createHash('sha256').update(JSON.stringify([binding,image.name,image.sha256])).digest('hex'),imageFile=path.join(dir,imageId+'.'+image.extension);
+  try{if((await lstat(imageFile)).isSymbolicLink())throw Error('Linked cloud image input');}catch(error){if(error.code!=='ENOENT')throw error;}
+  try{await writeFile(imageFile,image.bytes,{mode:0o600,flag:'wx'});}catch(error){if(error.code!=='EEXIST'||createHash('sha256').update(await readFile(imageFile)).digest('hex')!==image.sha256)throw error;}
+  imageAttachments.push({id:imageId,type:'image',contentType:image.contentType,path:imageFile,source:{kind:'authorized-native-cloud-file-image',originProfile:job.originProfile,projectId:job.projectId,tier:environment.tier,jobId:job.id,documentType:result.documentType,title:result.title??null,token:result.fileToken??result.documentToken,parentAttachmentId:id,entryName:image.name,readAt:result.readAt,sha256:image.sha256}});
+ }
+ const accepted=await store.transact(state=>{const current=state.jobs.find(x=>x.id===job.id);if(!job.lease?.id||current?.status!=='running'||!current.lease?.id||current.lease.id!==job.lease.id||current.originProfile!==job.originProfile||current.projectId!==job.projectId||job.environmentAccess?.scopeHash&&current.environmentAccess?.scopeHash!==job.environmentAccess.scopeHash)throw Error('Cloud input task or lease changed');current.attachments??=[];const previous=current.attachments.find(x=>x.id===id);if(previous&&(previous.source.sha256!==sha256||previous.path!==file||previous.source.originProfile!==job.originProfile))throw Error('Cloud input binding changed');if(!previous)current.attachments.push(attachment);const consumed=new Set((current.consumedVisualInputs??[]).flatMap(x=>x.ids??[])),pending=[];for(const image of imageAttachments){const old=current.attachments.find(x=>x.id===image.id);if(old&&(old.source.sha256!==image.source.sha256||old.path!==image.path||old.source.parentAttachmentId!==id))throw Error('Cloud image input binding changed');if(!old)current.attachments.push(image);if(!consumed.has(image.id))pending.push(image.id);}if(pending.length)current.unseenVisualInputIds=[...new Set([...(current.unseenVisualInputIds??[]),...pending])];return {file:previous??attachment,images:imageAttachments};});
+ const {fileBytes:_fileBytes,blocks:_blocks,embeddedImages:_embeddedImages,...metadata}=result;
+ return {...metadata,complete:true,inputAttachment:{id,type:accepted.file.type,contentType:accepted.file.contentType,source:accepted.file.source},embeddedImageInputs:accepted.images.map(x=>({id:x.id,type:x.type,contentType:x.contentType,source:x.source})),note:result.note+` 原始文件已作为当前任务输入持久化；${accepted.images.length?`其中 ${accepted.images.length} 张受支持的内嵌图片也已按同一机器人身份登记为视觉输入；`:'未发现受支持的 PNG/JPEG 内嵌图片；'}后续阶段可直接读取这些 attachmentId，不要求用户重传。`};
 }
 
 export async function restoreCloudSheetInput(store,dataDir,job,environment,args={}){

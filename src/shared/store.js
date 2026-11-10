@@ -326,6 +326,7 @@ export class JsonStore {
       if(plan.sourcePreparationRecovery&&plan.sourcePreparationKeys?.length){progress.stagnant=0;progress.preparationSeen=[...new Set([...(progress.preparationSeen??[]),...plan.sourcePreparationKeys])].slice(-64);progress.preparationRecoveries=(progress.preparationRecoveries??0)+1;}
       if(plan.toolCorrectionKeys?.length){progress.stagnant=0;progress.toolCorrections=[...new Set([...(progress.toolCorrections??[]),...plan.toolCorrectionKeys])];}
       progress.verified=[...new Set([...(progress.verified??[]),...verified])].slice(0,64);job.investigationProgress=progress;
+      if(job.unseenVisualInputIds?.length){job.consumedVisualInputs??=[];job.consumedVisualInputs.push({at:new Date().toISOString(),ids:[...job.unseenVisualInputIds],threadId:sourceResult.threadId??null});delete job.unseenVisualInputIds;}
       delete job.modelCheckpoint;
       delete job.modelRecovery;
       job.environmentAccess = structuredClone(plan);
@@ -423,6 +424,7 @@ export class JsonStore {
       const decision = continuousReviewDecision(job, result);
       if (!decision.continue) return { job: structuredClone(job), continued: false, terminalResult: structuredClone(result), reason: decision.reason ?? null };
       recordReportReview(job,result);
+      if(job.unseenVisualInputIds?.length){job.consumedVisualInputs??=[];job.consumedVisualInputs.push({at:new Date().toISOString(),ids:[...job.unseenVisualInputIds],threadId:result.threadId??null});delete job.unseenVisualInputIds;}
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(result) }]);
       job.updatedAt = new Date().toISOString();
       job.events.push({ id: createId('EVT'), type: 'continuous_analysis_continued', at: job.updatedAt });
@@ -439,6 +441,7 @@ export class JsonStore {
       job.analysisSourceSnapshots??={};job.analysisSourceSnapshots[current]=structuredClone(snapshot);
       job.sourceEnvironmentEvidence??={};job.sourceEnvironmentEvidence[current]=structuredClone({environment:current,workspace:result.workspace,sourceSync:result.sourceSync,summary:result.summary,finalMessage:result.finalMessage,verifiedArtifacts:result.verifiedArtifacts,handoffGate:result.handoffGate});
       job.context=compactContext([...job.context,{stage:job.stage,kind:'analysis_turn',result:structuredClone({...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:null})}]);
+      if(job.unseenVisualInputIds?.length){job.consumedVisualInputs??=[];job.consumedVisualInputs.push({at:new Date().toISOString(),ids:[...job.unseenVisualInputIds],threadId:result.threadId??null});delete job.unseenVisualInputIds;}
       job.sourceEnvironmentThreads??={};if(result.threadId)job.sourceEnvironmentThreads[current]={questionId:job.questionId,workspace:result.workspace,threadId:result.threadId};
       job.analysisContinuations??={};if(job.analysisContinuation)job.analysisContinuations[current]=job.analysisContinuation;
       if(job.analysisContinuations[target])job.analysisContinuation=job.analysisContinuations[target];else delete job.analysisContinuation;
@@ -608,6 +611,7 @@ export class JsonStore {
           || !event.result.verifiedArtifacts?.length || !event.result.handoff?.risks?.length
           || !event.result.sourceSync?.repositories?.length)) throw new Error('Invalid partial analysis evidence');
         if(job.environmentAccess&&event.result?.exportFiles?.length)recordReportFiles(job,event.result.exportFiles,state.questions?.[job.questionId]?.generation);
+        if(!job.environmentAccess&&job.unseenVisualInputIds?.length){job.consumedVisualInputs??=[];job.consumedVisualInputs.push({at:new Date().toISOString(),ids:[...job.unseenVisualInputIds],threadId:event.result?.threadId??null});delete job.unseenVisualInputIds;}
         recordReportReview(job,event.result);
         if(!event.result?.modelCapacityWaiting){delete job.modelCheckpoint;delete job.modelRecovery;}
         job.result = event.result ?? null;

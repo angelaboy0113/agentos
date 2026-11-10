@@ -170,6 +170,31 @@ test('continuous environment evidence stays on the same job and final completion
   assert.equal((await store.read()).jobs.length, 1);
 });
 
+test('newly registered visual inputs stay pending until a source result consumes them', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agentos-visual-lifecycle-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const old = process.env.AGENTOS_ENVIRONMENTS_FILE;
+  process.env.AGENTOS_ENVIRONMENTS_FILE = path.join(directory, 'environments.json');
+  t.after(() => { if (old) process.env.AGENTOS_ENVIRONMENTS_FILE = old; else delete process.env.AGENTOS_ENVIRONMENTS_FILE; });
+  const environments = { version: 1, environments: { uat: { projectId: 'demo', tier: 'uat', kind: 'mysql', host: 'db.test', port: 3306,
+    database: 'demo', credentialRef: 'uat', membersRead: true, ownerOpenIdsByProfile: { owner: ['ou_admin'] },
+    queries: { investigate: { reviewed: true, mode: 'investigate', description: '只读核对订单', tables: ['orders'], maxRows: 20,
+      timeoutMs: 5000, parameters: [{ name: 'purpose', type: 'string', maxLength: 200 }] } } } } };
+  await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE, JSON.stringify(environments));
+  const store = new JsonStore(path.join(directory, 'state.json'));
+  const { job } = await store.createJob({ projectId: 'demo', questionId: 'QST-visual', chatId: 'group', senderId: 'member', originProfile: 'owner',
+    taskIntent: 'analysis', workflow: 'continuous_analysis', stage: 'developer', instruction: '核对截图', continuousInvestigation: true });
+  const leased = await store.leaseNext('runner'), identity = { runnerId: 'runner', leaseId: leased.lease.id };
+  await store.transact(state => { state.jobs.find(x => x.id === job.id).unseenVisualInputIds = ['ATT-image']; });
+  assert.deepEqual((await store.getJob(job.id)).unseenVisualInputIds, ['ATT-image']);
+  const plan = planQuery(environments, { environmentId: 'uat', queryId: 'investigate', parameters: ['核对订单'] }, 'demo', { profile: 'owner', senderId: 'member' });
+  const started = await store.beginContinuousEnvironment(job.id, identity, plan,
+    { outcome: 'needs_clarification', finalMessage: '截图已读取，需要数据库证据', environmentQuery: {}, threadId: 'fresh-thread' });
+  assert.equal(started.unseenVisualInputIds, undefined);
+  assert.deepEqual(started.consumedVisualInputs.at(-1).ids, ['ATT-image']);
+  assert.equal(started.consumedVisualInputs.at(-1).threadId, 'fresh-thread');
+});
+
 test('store checkpoints one partial analysis turn on the same lease and rejects unchanged repetition', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'agentos-continuous-review-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

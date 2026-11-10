@@ -262,6 +262,10 @@ export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = fal
 
 export function analysisThreadId(job, workspace) {
   if(job.taskIntent!=='analysis')return null;
+ // A resumed Codex thread cannot receive newly discovered images. Start one
+ // fresh source turn with the full preserved context and immutable visual
+ // attachments, then ordinary continuation may resume that new thread.
+ if(job.unseenVisualInputIds?.length)return null;
   if(job.modelCheckpoint?.stage==='source'&&job.analysisContinuation?.questionId===job.questionId&&job.analysisContinuation.workspace===workspace)return job.analysisContinuation.threadId;
   if(job.stage!=='developer')return null;
   if(job.analysisContinuation&&job.analysisContinuation.questionId===job.questionId&&job.analysisContinuation.workspace===workspace)return job.analysisContinuation.threadId;
