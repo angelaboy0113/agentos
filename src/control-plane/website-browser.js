@@ -3,6 +3,7 @@ import {readWebsiteAsset} from './website-assets.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
 import {websiteControls,controlMetadata,websiteFields} from '../shared/website-controls.js';
+import {pageDiagnostic,websiteDiagnostics} from '../shared/website-diagnostics.js';
 export {controlMetadata} from '../shared/website-controls.js';
 import {waitForCaptureReady,screenshotSecretSelector} from '../shared/website-capture.js';
 import {browserLoginState,authResponseState} from '../shared/browser-login-state.js';
@@ -65,7 +66,8 @@ export class WebsiteBrowser {
   const session=await this.session(e),page=await session.context.newPage();
   const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),authHandled:new WeakSet(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
   page.on('crash',()=>{s.crashed=true;});
-  page.on('pageerror',error=>s.pageErrors.add(/^[A-Za-z]+Error$/.test(error.name)?error.name:'RuntimeError'));
+  page.on('pageerror',error=>{s.pageErrors.add(/^[A-Za-z]+Error$/.test(error.name)?error.name:'RuntimeError');pageDiagnostic(s,{name:error.name,message:error.message});});
+  page.on('console',message=>{if(['error','warning'].includes(message.type())){const loc=message.location();pageDiagnostic(s,{kind:'console-'+message.type(),source:loc.url,line:loc.lineNumber,column:loc.columnNumber,message:message.text()});}});
   page.on('request',request=>{
    if(request.resourceType()==='script')s.observedScripts.add(request.url());
    if(['xhr','fetch','document'].includes(request.resourceType())&&new URL(request.url()).origin===new URL(s.environment.baseUrl).origin){s.pendingReads.add(request);s.lastReadActivity=Date.now();}
@@ -79,6 +81,7 @@ export class WebsiteBrowser {
     if(!s.authHandled.has(req))await this.acceptAuthentication(s,response);return;
    }
    const reviewed=s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readEndpoints??[];
+   if(['xhr','fetch','document','script','stylesheet'].includes(req.resourceType()))pageDiagnostic(s,{kind:'response',source:response.url(),method:req.method(),status:response.status()});
    if(s.waiting&&response.status()>=400&&['xhr','fetch'].includes(req.resourceType())&&reviewed.some(x=>x.method===req.method()&&reviewedPathMatches(x.path,url.pathname)))s.bootstrapFailure={method:req.method(),path:url.pathname,status:response.status()};
   });
   page.setDefaultTimeout(10000);page.on('download',d=>d.cancel().catch(()=>{}));page.on('popup',p=>p.close().catch(()=>{}));page.on('dialog',d=>d.dismiss().catch(()=>{}));
@@ -168,10 +171,11 @@ export class WebsiteBrowser {
   const s=await this.state(job,e);
   // A ref belongs to one immutable element handle in one page generation, never nth(i).
   const previous=s.operation??Promise.resolve();
-  const operation=previous.catch(()=>{}).then(async()=>{if(tool!=='browser_frames'&&tool!=='browser_frame'&&tool!=='browser_recover')await assertWebsiteFrame(s);const result=await (['connection','browser_open','browser_snapshot','browser_read','browser_assets','browser_inspect','browser_frames'].includes(tool)?this.readAcrossNavigation(s,()=>this.perform(s,tool,args)):this.perform(s,tool,args));if(tool!=='browser_frames'&&tool!=='browser_recover')await assertWebsiteFrame(s);return result;});s.operation=operation;
+  const operation=previous.catch(()=>{}).then(async()=>{if(tool!=='browser_frames'&&tool!=='browser_frame'&&tool!=='browser_recover'&&tool!=='browser_diagnostics')await assertWebsiteFrame(s);const result=await (['connection','browser_open','browser_snapshot','browser_read','browser_assets','browser_inspect','browser_frames'].includes(tool)?this.readAcrossNavigation(s,()=>this.perform(s,tool,args)):this.perform(s,tool,args));if(tool!=='browser_frames'&&tool!=='browser_recover'&&tool!=='browser_diagnostics')await assertWebsiteFrame(s);return result;});s.operation=operation;
   try{return await operation;}finally{if(s.operation===operation)s.operation=null;}
  }
  async perform(s,tool,args){
+  if(tool==='browser_diagnostics')return websiteDiagnostics(s);
   if(tool==='browser_frames')return websiteFrames(s);
   if(tool==='browser_frame'){await websiteFrames(s,args.ref);return this.snapshot(s);}
   const blank=s.page.url()==='about:blank';
@@ -198,6 +202,10 @@ export class WebsiteBrowser {
   if(current.label!==ref.rawLabel||current.type!==ref.type)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
   if(current.blocked)throw new Error('该操作可能改变业务状态，本次未执行');
   if(tool==='browser_inspect')return {url:websitePageLocation(s.page.url()),label:cleanWebsiteText(current.label),...await ref.el.evaluate(inspectWebsiteControl)};
+  if(tool==='browser_hover'){
+   if(ref.type!=='inspect'||current.kind!=='menu-trigger')throw new BrowserInputError('BROWSER_CONTROL_TYPE','只能悬停当前快照登记的菜单触发器；不点击未知操作。');
+   await ref.el.hover({timeout:8000});return this.snapshot(s);
+  }
   const expected={browser_search:'search',browser_select:'select',browser_click:'read-action'}[tool];
   if(!['browser_key','browser_scroll'].includes(tool)&&ref.type!==expected&&!(tool==='browser_click'&&ref.type==='search'))throw new BrowserInputError('BROWSER_CONTROL_TYPE','当前引用不是该工具对应的控件；菜单和详情用browser_click，输入框用browser_search，原生下拉框用browser_select。');
   try{

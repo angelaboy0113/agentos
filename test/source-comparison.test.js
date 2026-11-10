@@ -15,6 +15,10 @@ test('explicit original dual environment request permits only unambiguous regist
  assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'sit',originalQuestion:'比较SIT和PRD'},{...project,analysisEnvironments:{sit:{},other:{runtimeTier:'uat'},prd:{}}}),['sit']);
  assert.throws(()=>comparisonTarget({sourceEnvironment:'sit',originalQuestion:'查测试'},project,{environmentId:'prd',reason:'模型想切换'}));
 });
+test('contrasting behavior requests both named environments without requiring an explicit comparison keyword',()=>{
+ for(const text of ['生产环境下人工订单页面有关闭的按键，但是我在sit环境的人工订单页面并没有看到关闭这个操作按键，所以人工订单页面可以关闭订单吗','UAT页面可以导出，但是生产页面没有导出入口','PRD has the expected control but SIT does not','SIT能查询，而在PRD看不到结果'])assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'sit',originalQuestion:text},project),['sit','prd']);
+ for(const text of ['只查SIT，不查PRD，但是我想核对按钮','只查生产，测试不涉及，但是页面打不开','SIT接口叫prod，但是这不是生产访问请求'])assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'sit',originalQuestion:text},project),['sit']);
+});
 async function pinned(t){const dir=await mkdtemp(path.join(os.tmpdir(),'comparison-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new JsonStore(path.join(dir,'state.json'));const {job}=await store.createJob({projectId:'p',questionId:'q',taskIntent:'analysis',continuousInvestigation:true,stage:'developer',sourceEnvironment:'sit',instruction:'比较SIT和PRD',originProfile:'bot',chatId:'group'});const leased=await store.leaseNext('runner'),identity={runnerId:'runner',leaseId:leased.lease.id};return {dir,store,job,identity};}
 const snapshot=env=>({policy:'isolated-environment-source-v1',cacheKey:env+'-fixed',environment:env,workspace:'/immutable/'+env,repositories:[{path:'service',branch:env,commit:env+'-sha'}]});
 const result=(job,env)=>({outcome:'needs_clarification',workspace:snapshot(env).workspace,sourceSync:snapshot(env),sourceQuestionId:job.questionId,handoffGate:{passed:true},threadId:'thread-'+env,summary:env+' verified rules',verifiedArtifacts:[{kind:'code',path:'service/Rule.java'}]});

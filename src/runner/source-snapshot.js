@@ -201,7 +201,7 @@ export async function verifySnapshot(project,report){
 
 // Explicit repository selection avoids downloading every system's ancestry for
 // simple current-file questions. Only the pinned commit is fetched, never tip.
-export async function prepareSnapshotHistory(project,report,{repositories:requested=report.repositories.map(r=>r.path)}={}){
+export async function prepareSnapshotHistory(project,report,{repositories:requested=report.repositories.map(r=>r.path),fetchHistory=git}={}){
  const prepared=await settings(project,report.environment,{sourceOptional:true});
  if(!Array.isArray(requested)||!requested.length||new Set(requested).size!==requested.length||requested.some(p=>!report.repositories.some(r=>r.path===p)))throw new Error('历史请求只能选择当前问题快照内的明确仓库');
  return withSnapshotLock(prepared.snapshotRoot,async check=>{
@@ -216,16 +216,23 @@ export async function prepareSnapshotHistory(project,report,{repositories:reques
     const configured=prepared.repos.find(r=>r.path===proof.path&&r.branch===proof.branch);
     const origin=await git(configured.cwd,['remote','get-url','origin']).catch(()=>null);
     if(origin&&origin!==actual)throw new Error('配置仓库来源变化，未补取其它来源历史');
-    const wasShallow=await git(cwd,['rev-parse','--is-shallow-repository'])==='true';
+    const wasShallow=await git(cwd,['rev-parse','--is-shallow-repository'])==='true';let fetchDiagnostic;
     if(wasShallow){
      if(!origin)throw new Error('来源仓库不可用；当前源码保留，尚未补取祖先历史');
-     await git(cwd,['fetch','--unshallow','--no-tags','--no-recurse-submodules','origin',proof.commit]);
+     try{await fetchHistory(cwd,['fetch','--unshallow','--no-tags','--no-recurse-submodules','origin',proof.commit]);}
+     catch(error){
+      // A transport/process can fail after Git has published the complete
+      // shallow boundary. Verify the actual ancestry and immutable worktree
+      // below instead of permanently treating the cache as incomplete.
+      if(await git(cwd,['rev-parse','--is-shallow-repository'])!=='false')throw error;
+      fetchDiagnostic={code:error.code??'SOURCE_GIT_UNAVAILABLE',reason:error.message};
+     }
     }
     check();await verifyIndependentGit(cwd);
     if(await git(cwd,['rev-parse','--is-shallow-repository'])!=='false')throw new Error('上游仍为浅仓，祖先历史不完整');
     await git(cwd,['rev-list','--objects','--missing=error','--quiet',proof.commit]);
     const commits=Number(await git(cwd,['rev-list','--count',proof.commit]));
-    results.push({...proof,status:'complete',scope:'fixed-commit-ancestors',commits,reused:!wasShallow,checkedAt:new Date().toISOString()});
+    results.push({...proof,status:'complete',scope:'fixed-commit-ancestors',commits,reused:!wasShallow,checkedAt:new Date().toISOString(),...(fetchDiagnostic?{fetchDiagnostic}:{})});
    }catch(error){results.push({...proof,status:'unavailable',code:error.code??'SOURCE_HISTORY_UNAVAILABLE',reason:error.message,recovery:'恢复原来源/认证后重试同一固定提交；当前源码证据仍保留，不切换版本。'});}
   }
   check();await verifySnapshotUnlocked(project,report);

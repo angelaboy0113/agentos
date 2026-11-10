@@ -10,6 +10,9 @@ export function controlMetadata(el,{readNavigationSelectors=[]}={}){
  const title=el.matches('[role="menuitem"],[role="treeitem"]')?el.querySelector(':scope > .el-submenu__title,:scope > .ant-menu-submenu-title'):null;
  let label=(primaryLabel||(title??el).innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
  if(/^(?:搜\s*索|查\s*询|重\s*置)$/.test(label))label=label.replace(/\s/g,'');
+ // A hover-only menu reference does not authorize clicking an unlabeled icon.
+ // Its visible options are independently classified after opening the menu.
+ if(el.matches('.el-dropdown,.ant-dropdown-trigger,[aria-haspopup="menu"]'))return {visible:true,label:label||'悬停展开菜单',type:'inspect',kind:'menu-trigger',blocked:false};
  const localExpansion=/^(?:展开|收起)(?:全部|筛选|筛选条件|更多)?(?:\s*[（(](?:还有|共)?\s*\d+\s*(?:项|个)?[）)])?\s*[⌄⌃▾▴▼▲∨∧]?$/.test(label)||/^(?:expand|collapse)(?: all| filters)?(?:\s*\(\d+\))?$/i.test(label);
  const customContainer=['div','i'].includes(tag)&&!el.matches('[role],.el-submenu__title,.ant-menu-submenu-title,.ant-card-hoverable,.el-date-editor,.ant-picker,.ant-calendar-picker');
  const localInteractive=el.matches('button,[role=button],[aria-expanded]')||el.hasAttribute('onclick')||getComputedStyle(el).cursor==='pointer';

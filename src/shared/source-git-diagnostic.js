@@ -25,7 +25,10 @@ export function classifySourceGitError(error, operation) {
     : /object[^\n]*(corrupt|missing)|bad object|invalid object|unable to read[^\n]*object|pack[^\n]*(corrupt|mismatch)/i.test(text) ? 'SOURCE_GIT_OBJECTS'
     : /could not resolve (?:host|proxy)|failed to connect|connection (reset|timed out|refused)|remote end hung up|unexpected disconnect|early EOF|empty reply from server|recv failure|send failure|HTTP\/2.*(?:stream|closed|error)|curl (?:16|18|28|35|52|55|56|92)\b|TLS|SSL|HTTP[^\n]*\b(429|5\d\d)\b|requested URL returned error: (429|5\d\d)/i.test(text) ? 'SOURCE_GIT_NETWORK'
     : 'SOURCE_GIT_UNAVAILABLE';
-  return {code, operation, retryable: ['fetch', 'ls-remote'].includes(operation) && ['SOURCE_GIT_NETWORK', 'SOURCE_GIT_TIMEOUT'].includes(code),
+  // An unclassified remote-read failure may also be transient. Retry only
+  // these idempotent reads under the existing bounded request policy, retain
+  // the unknown classification, and never replay local mutations or business.
+  return {code, operation, retryable: ['fetch', 'ls-remote'].includes(operation) && ['SOURCE_GIT_NETWORK', 'SOURCE_GIT_TIMEOUT', 'SOURCE_GIT_UNAVAILABLE'].includes(code),
     exitCode: Number.isInteger(error.code) ? error.code : null};
 }
 export function sourceGitError(details) {

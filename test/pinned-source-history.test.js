@@ -19,6 +19,13 @@ async function fixture(t,id='system-a',environment='qa-custom'){
  const project={id,repoPath:source,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(base,'cache'),analysisEnvironments:{[environment]:{repositories:[{path:'service',branch:'business'}]}}};
  return {base,origin,writer,source,repo,project,environment,commit};
 }
+test('fetch errors after publishing complete ancestry retain diagnostics but independently validate the fixed cache',async t=>{
+ const f=await fixture(t),report=await syncSnapshot(f.project,f.environment),cwd=path.join(report.workspace,'service');
+ const result=await prepareSnapshotHistory(f.project,report,{fetchHistory:async(dir,args)=>{await git(dir,...args);throw Object.assign(Error('synthetic post-fetch process failure'),{code:'SOURCE_GIT_UNAVAILABLE'});}});
+ assert.equal(result.repositories[0].status,'complete');assert.equal(result.repositories[0].commits,2);assert.equal(result.repositories[0].fetchDiagnostic.code,'SOURCE_GIT_UNAVAILABLE');
+ await verifySnapshot(f.project,report);assert.equal(await git(cwd,'rev-parse','HEAD'),report.repositories[0].commit);
+ const reused=await prepareSnapshotHistory(f.project,report,{fetchHistory:()=>assert.fail('complete history must be reused')});assert.equal(reused.repositories[0].reused,true);
+});
 test('two systems and arbitrary environments hydrate pinned ancestors concurrently without selecting a newer tip',async t=>{
  const [a,b]=await Promise.all([fixture(t,'tpm','uat'),fixture(t,'ltx','sit')]);
  for(const f of [a,b]){

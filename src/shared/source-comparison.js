@@ -3,8 +3,12 @@ import {sourceRuntimeTier} from './source-environments.js';
 export function requestedSourceEnvironments(job,project){
  const current=job.sourceEnvironment??project?.defaultSourceEnvironment,text=String(job.originalQuestion??'').toLowerCase();
  const test=/(?:\bsit\b|\buat\b|\btest(?:ing)?\b|测试(?:机|环境)?)/.test(text),prod=/(?:\bprd\b|\bprod(?:uction)?\b|生产(?:机|环境)?)/.test(text);
- const paired=/(?:测试(?:机|环境)?|\bsit\b|\buat\b|\btest(?:ing)?\b)[^。！？\n]{0,20}(?:和|与|及|、|and|versus|vs\.?|&|\/)[^。！？\n]{0,20}(?:生产(?:机|环境)?|\bprd\b|\bprod(?:uction)?\b)|(?:生产(?:机|环境)?|\bprd\b|\bprod(?:uction)?\b)[^。！？\n]{0,20}(?:和|与|及|、|and|versus|vs\.?|&|\/)[^。！？\n]{0,20}(?:测试(?:机|环境)?|\bsit\b|\buat\b|\btest(?:ing)?\b)|(?:分别|两个环境|两套环境|两边|两者|是否一致|不一致|both|compare|比较|对比|差异)/i.test(text);
- const excluded=/(?:不要|不查|不含|不涉及|不包含|排除|无需|仅|只)(?:看|查|读|调查|核对|分析)?\s*(?:sit|uat|test|prd|prod|测试|生产)|\b(?:not|except|exclude|only)\s+(?:sit|uat|test|prd|prod)/i.test(text);
+ const paired=/(?:测试(?:机|环境)?|\bsit\b|\buat\b|\btest(?:ing)?\b)[^。！？\n]{0,20}(?:和|与|及|、|and|versus|vs\.?|&|\/)[^。！？\n]{0,20}(?:生产(?:机|环境)?|\bprd\b|\bprod(?:uction)?\b)|(?:生产(?:机|环境)?|\bprd\b|\bprod(?:uction)?\b)[^。！？\n]{0,20}(?:和|与|及|、|and|versus|vs\.?|&|\/)[^。！？\n]{0,20}(?:测试(?:机|环境)?|\bsit\b|\buat\b|\btest(?:ing)?\b)|(?:分别|两个环境|两套环境|两边|两者|是否一致|不一致|both|compare|比较|对比|差异)/i.test(text)
+  // Contrasting the behavior of two explicitly named environments is itself
+  // a comparison; users need not also say “compare” or “两边”. Keep exclusions
+  // authoritative and do not infer an environment from generated plans.
+  || /(?:但是|但我|而在|却|不一样|\bbut\b|\bwhereas\b|\bwhile\b)/i.test(text);
+ const excluded=/(?:不要|不查|不含|不涉及|不包含|排除|无需|仅|只)(?:看|查|读|调查|核对|分析)?\s*(?:sit|uat|test|prd|prod|测试|生产)|(?:并不|不)(?:要求|需要)(?:访问|查询|核对)?\s*(?:sit|uat|test|prd|prod|测试|生产)|(?:不是|不代表|不表示)\s*(?:sit|uat|test|prd|prod|测试|生产)|\b(?:not|except|exclude|only)\s+(?:sit|uat|test|prd|prod)/i.test(text);
  if(!test||!prod||!paired||excluded||/(?:测试(?:机|环境)?|生产(?:机|环境)?|\bsit\b|\bprd\b)\s*(?:不涉及|不查|排除)/i.test(text)||project?.analysisSourceMode!=='isolated')return current?[current]:[];
  const tiers=Object.keys(project.analysisEnvironments??{}).map(id=>[id,sourceRuntimeTier(project,id)]),selected=['uat','prd'].map(t=>tiers.filter(([id,tier])=>tier===t));
  if(selected.some(list=>list.length!==1))return current?[current]:[];
