@@ -5,7 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { JsonStore } from '../src/shared/store.js';
 import { jobCard } from '../src/control-plane/message-cards.js';
-import { failureDiagnostic, safeExecutionError } from '../src/shared/failure-diagnostic.js';
+import { failureDiagnostic, safeExecutionError,failureDetails } from '../src/shared/failure-diagnostic.js';
+test('unknown exceptions retain safe type and code location through IPC without raw messages',()=>{
+ const error=new TypeError('password=synthetic-secret');error.stack='TypeError: synthetic-secret\n at src/runner/environment-tools.js:221:5';
+ const d=failureDetails(safeExecutionError(failureDetails(error)));
+ assert.equal(d.errorName,'TypeError');assert.equal(d.sourceLocation,'src/runner/environment-tools.js:221:5');assert.doesNotMatch(JSON.stringify(d),/synthetic-secret/);
+ assert.equal(failureDetails({code:'TASK_WORKER_MEMORY'}).code,'TASK_WORKER_MEMORY');
+ assert.equal(failureDetails(Error('查询授权已过期或配置已变更，请重新申请')).code,'QUERY_SCOPE_CHANGED');
+ assert.equal(failureDetails({code:'CREDENTIAL_NOT_FOUND'}).code,'CREDENTIAL_UNAVAILABLE');
+});
 test('claimed environment partial results survive completion without source-analysis artifacts', async t => {
  const dir = await mkdtemp(path.join(os.tmpdir(), 'env-partial-')); t.after(()=>rm(dir,{recursive:true,force:true}));
  const store = new JsonStore(path.join(dir,'state.json'));

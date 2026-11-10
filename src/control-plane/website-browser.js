@@ -9,9 +9,9 @@ import {browserLoginState,authResponseState} from '../shared/browser-login-state
 import { randomUUID,createHash } from 'node:crypto';
 import {BrowserInputError,validateBrowserTool,websitePageLocation} from '../shared/browser-tool-input.js';
 import { chromium } from 'playwright';
-import { mkdir, chmod } from 'node:fs/promises';
+import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed } from '../shared/website-policy.js';
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
  constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch}={}){this.authorize=authorize;this.publicFetch=publicFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
@@ -22,7 +22,9 @@ export class WebsiteBrowser {
   const p=(async()=>{
    const dir=path.join(this.root,key);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.root,0o700);await chmod(dir,0o700);
    const context=await this.driver.launchPersistentContext(dir,{headless:false,acceptDownloads:false,serviceWorkers:'block',locale:'zh-CN',args:['--disable-background-networking','--force-webrtc-ip-handling-policy=disable_non_proxied_udp']});
-   const session={context,e};this.contexts.set(key,session);
+   const session={context,e,principalFile:path.join(dir,'login-preference-identity.json')};
+   try{const p=JSON.parse(await readFile(session.principalFile,'utf8'));if(p.credentialRef===e.credentialRef&&p.accountName===e.loginPreferences?.accountName)session.credentialPrincipal=p;}catch{}
+   this.contexts.set(key,session);
    await context.routeWebSocket('**/*',s=>s.close());
    await context.addInitScript(()=>{for(const key of ['RTCPeerConnection','webkitRTCPeerConnection','WebTransport'])Object.defineProperty(window,key,{value:undefined,configurable:false});});
    await context.route('**/*',async route=>{
@@ -37,9 +39,16 @@ export class WebsiteBrowser {
      try{const response=await this.publicFetch(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const headers={'content-type':response.headers.get('content-type')??'application/octet-stream','cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
     }
     let allow=false;try{allow=websiteRequestAllowed(target.baseUrl,{url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{}
+    if(state&&websiteLoginPreferenceAllowed(target,request,state.session.credentialPrincipal))allow=true;
+    else if(state&&request.method==='POST'&&target.loginPreferences?.paths.includes(new URL(request.url).pathname))state.preferenceNeedsIdentity=true;
     if(allow&&!state)allow=false;
     if(allow&&state) {try{allow=await this.authorize(state.job,state.waiting,r);}catch{allow=false;}}
     if(!allow){if(state){if(['script','stylesheet','font','image'].includes(r.resourceType()))state.blockedResources.add(websitePageLocation(r.url()));state.blocked.add(`${r.method()} ${new URL(r.url()).pathname}`);if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${new URL(r.url()).pathname}`);}await route.abort().catch(()=>{});return;}
+    if(state?.environment.loginPreferences&&state?.pendingPrincipal&&r.method()==='POST'&&/\/(?:login|signin|sign-in|authenticate|auth|token)(?:\.[a-z]+)?$/i.test(new URL(r.url()).pathname)){
+     // Observe this one authentication response before a redirect can discard
+     // its body. Forward it unchanged; never retry authentication or fake it.
+     try{const response=await route.fetch({maxRedirects:0});await this.acceptAuthentication(state,response);state.authHandled.add(r);await route.fulfill({response});}catch{await route.abort().catch(()=>{});}return;
+    }
     await route.continue();
    });
    context.on('close',()=>{this.contexts.delete(key);for(const [id,s]of this.pages)if(s.session===session)this.pages.delete(id);});
@@ -54,7 +63,7 @@ export class WebsiteBrowser {
    else {existing.job=job;existing.environment=e;return existing;}
   }
   const session=await this.session(e),page=await session.context.newPage();
-  const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
+  const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),authHandled:new WeakSet(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
   page.on('crash',()=>{s.crashed=true;});
   page.on('pageerror',error=>s.pageErrors.add(/^[A-Za-z]+Error$/.test(error.name)?error.name:'RuntimeError'));
   page.on('request',request=>{
@@ -66,13 +75,23 @@ export class WebsiteBrowser {
   page.on('response',async response=>{
    const req=response.request(),url=new URL(response.url());if(url.origin!==new URL(e.baseUrl).origin)return;
    const tail=url.pathname.split('/').filter(Boolean).at(-1)??'';
-   if(req.method()==='POST'&&/^(?:login|signin|sign-in|authenticate|auth|token)(?:\.[a-z]+)?$/i.test(tail)){s.authPostSeen=true;try{s.authResult=authResponseState(response.status(),await response.json());}catch{s.authResult=authResponseState(response.status(),null);}return;}
+   if(req.method()==='POST'&&/^(?:login|signin|sign-in|authenticate|auth|token)(?:\.[a-z]+)?$/i.test(tail)){
+    if(!s.authHandled.has(req))await this.acceptAuthentication(s,response);return;
+   }
    const reviewed=s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readEndpoints??[];
    if(s.waiting&&response.status()>=400&&['xhr','fetch'].includes(req.resourceType())&&reviewed.some(x=>x.method===req.method()&&reviewedPathMatches(x.path,url.pathname)))s.bootstrapFailure={method:req.method(),path:url.pathname,status:response.status()};
   });
   page.setDefaultTimeout(10000);page.on('download',d=>d.cancel().catch(()=>{}));page.on('popup',p=>p.close().catch(()=>{}));page.on('dialog',d=>d.dismiss().catch(()=>{}));
   try{await page.goto(initialTarget,{waitUntil:'domcontentloaded',timeout:30000});}catch(error){await this.release(job.id);throw error;}
   return s;
+ }
+ async acceptAuthentication(s,response){
+  s.authPostSeen=true;let payload;try{payload=await response.json();}catch{}
+  s.authResult=authResponseState(response.status(),payload);
+  const accepted=payload?.success===true||payload?.ok===true||[0,200,'0','200','00000','000000'].includes(payload?.code)||[payload?.token,payload?.access_token,payload?.data?.token,payload?.data?.access_token].some(x=>typeof x==='string'&&x.length>0);
+  if(s.pendingPrincipal&&response.status()>=200&&response.status()<300&&!s.authResult&&accepted){s.session.credentialPrincipal=s.pendingPrincipal;try{await writeFile(s.session.principalFile,JSON.stringify(s.pendingPrincipal),{mode:0o600});}catch{}}
+  else {delete s.session.credentialPrincipal;await rm(s.session.principalFile,{force:true}).catch(()=>{});}
+  delete s.pendingPrincipal;
  }
  async readAcrossNavigation(s,read){
   try{return await read();}catch(error){
@@ -83,6 +102,11 @@ export class WebsiteBrowser {
   }
  }
  async loginStatus(s){
+  if(s.preferenceNeedsIdentity&&!s.reloginAttempted&&s.environment.loginPreferences){
+   if(!await this.authorize(s.job,true,{url:()=>s.environment.loginPreferences.loginUrl,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前任务没有有效登录恢复范围');
+   s.reloginAttempted=true;s.preferenceNeedsIdentity=false;
+   await s.page.goto(s.environment.loginPreferences.loginUrl,{waitUntil:'domcontentloaded',timeout:30000});
+  }
   await assertWebsiteFrame(s);
   const state=await this.readAcrossNavigation(s,()=>websiteDOM(s).evaluate(browserLoginState));
   if(state.loginRequired&&s.authResult&&!state.verificationRequired&&!state.passwordChangeRequired)Object.assign(state,s.authResult);
@@ -92,7 +116,21 @@ export class WebsiteBrowser {
   return {...state,diagnostic:{credentialAttempted:s.credentialAttempted===true,authRequestObserved:s.authPostSeen===true,authResult:s.authResult?.loginState??null,blockedRequests:[...s.blockedLoginReads].slice(-8),bootstrapFailure:s.bootstrapFailure??null}};
  }
  async needsLogin(s){const state=await this.loginStatus(s);return state.loginRequired;}
- async loginStatusFor(job,e){return this.loginStatus(await this.state(job,e));}
+ async loginStatusFor(job,e){
+  const s=await this.state(job,e);
+  if(s.page.url()==='about:blank'&&!s.blankRecovery){
+   if(!await this.authorize(job,true,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前任务没有有效恢复范围');
+   s.blankRecovery=s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});
+   try{await s.blankRecovery;}finally{s.blankRecovery=null;}
+  }
+  let status=await this.loginStatus(s);
+  if(status.loginState==='loading'&&!s.operation&&!s.loginRecovery&&s.pendingReads?.size===0&&s.blockedResources?.size===0&&s.resourceFailures?.size===0&&Date.now()-s.lastReadActivity>1500&&Date.now()-(s.quietLoginRecoveryAt??0)>30000){
+   s.quietLoginRecoveryAt=Date.now();s.loginRecovery=this.perform(s,'browser_recover',{});
+   try{await s.loginRecovery;}finally{s.loginRecovery=null;}
+   status=await this.loginStatus(s);
+  }
+  return status;
+ }
  async loginReady(job,e){const s=await this.state(job,e);return (await this.loginStatus(s)).pageReady===true;}
  async submitCredentials(job,e,cred,{force=false}={}){
   if(!await this.authorize(job,true,{url:()=>e.baseUrl,method:()=> 'GET',resourceType:()=> 'document'}))throw new Error('当前任务没有有效网站登录范围');
@@ -120,7 +158,7 @@ export class WebsiteBrowser {
   if(before.verificationRequired)return {...before,authenticated:false,attempted:false};
   const named=scope.getByRole('button',{name:/^(?:登\s*录|登\s*入|sign\s*in|log\s*in|submit|确定|继续)$/i}).first();
   const submit=await named.count()?named:scope.locator('button[type="submit"]:visible,input[type="submit"]:visible').first();
-  if(await submit.count()){s.credentialAttempted=true;s.authAttemptPolicy=policy;await submit.click();}else return {...before,authenticated:false,attempted:false,credentialRejected:false,submissionUnconfirmed:true,loginState:'submission_control_missing'};
+  if(await submit.count()){s.credentialAttempted=true;s.authAttemptPolicy=policy;if(e.loginPreferences)s.pendingPrincipal={credentialRef:e.credentialRef,accountName:cred.username};await submit.click();}else return {...before,authenticated:false,attempted:false,credentialRejected:false,submissionUnconfirmed:true,loginState:'submission_control_missing'};
   await s.page.waitForTimeout(1200);const status=await this.loginStatus(s);
   if(status.pageReady)s.credentialAttempted=false;
   return {...status,authenticated:status.pageReady===true,attempted:true,submissionUnconfirmed:!s.authPostSeen&&status.loginRequired};

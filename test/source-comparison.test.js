@@ -3,6 +3,11 @@ import {mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';import os from 'node
 import {requestedSourceEnvironments,comparisonTarget,requireComparisonContinuation} from '../src/shared/source-comparison.js';
 import {JsonStore} from '../src/shared/store.js';import {AgentRunner} from '../src/runner/index.js';import {analysisThreadId} from '../src/runner/codex-executor.js';import {prepareAnalysisSources} from '../src/runner/source-sync.js';import {criticalControl} from '../src/shared/control-receipts.js';
 const project={analysisSourceMode:'isolated',defaultSourceEnvironment:'sit',analysisEnvironments:{sit:{},prd:{}}};
+test('both environments explicitly described with a Chinese comparison retain independent scope',()=>{
+ for(const text of ['订单审批，SIT环境展示关闭按钮，PRD环境不展示关闭按钮是为什么，两边代码逻辑不一致吗','SIT报表有一列，PRD没有，两者为何不同','PRD导出成功，SIT导出报错，是否一致'])assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'prd',originalQuestion:text},project),['prd','sit']);
+ assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'prd',originalQuestion:'只查PRD，不查SIT，两边名字不一致'},project),['prd']);
+ assert.throws(()=>comparisonTarget({sourceEnvironment:'prd',originalQuestion:'只查PRD'},project,{environmentId:'sit',reason:'比较'}),e=>e.statusCode===403);
+});
 test('explicit original dual environment request permits only unambiguous registered tiers',()=>{
  for(const text of ['看下测试机和生产机，货需保存哪里','Compare SIT and PRD source and table mapping','核对测试环境、生产环境的定时任务'])assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'sit',originalQuestion:text},project),['sit','prd']);
  for(const text of ['仅查SIT，不查PRD','查测试环境，不要生产','check test not prod','生产查询','SIT接口名字是prod，并不要求访问生产','测试不涉及，请看生产'])assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'sit',originalQuestion:text},project),['sit']);

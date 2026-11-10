@@ -69,6 +69,14 @@ test('question card stays owned by intake bot across developer/report, mentions 
   assert.match(calls.find((c) => c.type === 'mention').text, /ou_asker/);
   assert.equal((await app.store.read()).cardMessages[`question:${qid}`].terminal, true);
 });
+test('heartbeat during terminal name lookup does not starve publication, but changed results remain fenced',async t=>{
+ const {app,context,send}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'只读检查'}));await send('heartbeat-test');
+ const job=(await app.store.read()).jobs[0];await app.store.transact(s=>{s.jobs[0].status='completed';s.jobs[0].result={outcome:'ready',finalMessage:'已核实'};});
+ context.replyAddressing={forTurn:async()=>{await app.store.transact(s=>{s.jobs[0].events.push({type:'heartbeat'});s.jobs[0].updatedAt=new Date().toISOString();});return '用户老师';}};
+ await publishQuestion(context,job.questionId);assert.equal((await app.store.read()).cardMessages['question:'+job.questionId].terminal,true);
+ context.replyAddressing={forTurn:async()=>{await app.store.transact(s=>{s.jobs[0].result={outcome:'partial',finalMessage:'新结果'};});return '用户老师';}};
+ await assert.rejects(publishQuestion(context,job.questionId),/Question changed/);
+});
 test('completed answer survives followup; new card retains parent association', async (t) => {
   const { app, send, calls } = await setup(t);
   await send('m'); const s = await app.store.read(), key = Object.keys(s.cardMessages)[0], card = s.cardMessages[key];

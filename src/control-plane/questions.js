@@ -6,7 +6,7 @@ import {cardDestination} from './private-cards.js';
 import { resultPages, withResultPage } from './result-presentation.js';
 import { createHash } from 'node:crypto';
 import { createId } from '../shared/protocol.js';
-import { conversationCard, jobCard, publicText } from './message-cards.js';
+import { conversationCard, jobCard, publicText,jobActionVersion } from './message-cards.js';
 import { conversationTerminalMention, jobTerminalMention, failureNotice } from './requester-mention.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
 export const questionTitle = text => publicText(text).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\*\*|__|~~|`/g, '').replace(/\s+/g, ' ').trim().slice(0,60) || '附件问题';
@@ -139,7 +139,9 @@ export function questionView(state, questionId, projects = {}) {
 function sourceVersion(state, id) {
   const q = state.questions[id];
   return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId,
-    state.jobs.filter((j) => j.questionId === id).map((j) => [j.id, j.status, j.updatedAt, j.events.length, j.nextJobId, j.result]),
+    // Heartbeats/progress may arrive during name lookup. They must not starve
+    // publication; question rounds, status and accepted results still fence it.
+    state.jobs.filter((j) => j.questionId === id).map((j) => [j.id, j.status, j.stage, j.nextJobId, jobActionVersion(j), j.result]),
     state.conversations.filter((t) => t.questionId === id).map((t) => [t.id, t.status, t.response, t.outcome]),
     Object.values(state.recoveryEvents??{}).filter(e=>e.questionId===id).map(e=>[e.key,e.status,e.diagnosis]),
     Object.values(state.environmentEnrollments??{}).filter(e=>e.questionId===id).map(e=>[e.id,e.status,e.credentialReceivedAt,e.loginIssue])])).digest('hex');

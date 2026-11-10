@@ -23,7 +23,7 @@ export function classifySourceGitError(error, operation) {
     : /smudge|filter-process|filter .* failed|git-lfs/i.test(text) ? 'SOURCE_GIT_FILTER'
     : /not our ref|couldn't find remote ref|repository[^\n]*not found|does not appear to be a git repository/i.test(text) ? 'SOURCE_GIT_REMOTE_UNAVAILABLE'
     : /object[^\n]*(corrupt|missing)|bad object|invalid object|unable to read[^\n]*object|pack[^\n]*(corrupt|mismatch)/i.test(text) ? 'SOURCE_GIT_OBJECTS'
-    : /could not resolve host|failed to connect|connection (reset|timed out|refused)|remote end hung up|unexpected disconnect|early EOF|TLS|SSL|HTTP[^\n]*\b(429|5\d\d)\b|requested URL returned error: (429|5\d\d)/i.test(text) ? 'SOURCE_GIT_NETWORK'
+    : /could not resolve (?:host|proxy)|failed to connect|connection (reset|timed out|refused)|remote end hung up|unexpected disconnect|early EOF|empty reply from server|recv failure|send failure|HTTP\/2.*(?:stream|closed|error)|curl (?:16|18|28|35|52|55|56|92)\b|TLS|SSL|HTTP[^\n]*\b(429|5\d\d)\b|requested URL returned error: (429|5\d\d)/i.test(text) ? 'SOURCE_GIT_NETWORK'
     : 'SOURCE_GIT_UNAVAILABLE';
   return {code, operation, retryable: ['fetch', 'ls-remote'].includes(operation) && ['SOURCE_GIT_NETWORK', 'SOURCE_GIT_TIMEOUT'].includes(code),
     exitCode: Number.isInteger(error.code) ? error.code : null};

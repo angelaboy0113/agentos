@@ -6,11 +6,36 @@ import os from 'node:os';
 import path from 'node:path';
 import {chromium} from 'playwright';
 import {WebsiteBrowser} from '../src/control-plane/website-browser.js';
-import {websiteUrl,websiteKey,websiteRequestAllowed} from '../src/shared/website-policy.js';
+import {websiteUrl,websiteKey,websiteRequestAllowed,websiteLoginPreferenceAllowed,validateLoginPreferences} from '../src/shared/website-policy.js';
 import {prepareWebsiteQuery,pollWebsiteLogins} from '../src/control-plane/website-query.js';
 import {loadEnvironments,planQuery} from '../src/shared/environment-access.js';
 import {jobCard} from '../src/control-plane/message-cards.js';
 const base='https://business.example/jobs';
+test('explicit login preference exception is account-bound, same-origin and empty-body only',()=>{
+ const e={kind:'website',baseUrl:'https://business.example/',credentialRef:'one',loginPreferences:{accountName:'admin',paths:['/prefs/lang/zh_CN'],loginUrl:'https://business.example/login'}};
+ validateLoginPreferences(e);const principal={credentialRef:'one',accountName:'admin'},request={url:'https://business.example/prefs/lang/zh_CN',method:'POST',body:''};
+ assert.equal(websiteLoginPreferenceAllowed(e,request,principal),true);
+ for(const p of [undefined,{...principal,accountName:'other'},{...principal,credentialRef:'two'}])assert.equal(websiteLoginPreferenceAllowed(e,request,p),false);
+ for(const r of [{...request,body:'{"userId":"other"}'},{...request,url:request.url+'?userId=other'},{...request,url:'https://foreign.example/prefs/lang/zh_CN'},{...request,url:'https://business.example/prefs/lang/en_US'},{...request,method:'GET'}])assert.equal(websiteLoginPreferenceAllowed(e,r,principal),false);
+ assert.equal(websiteRequestAllowed(e.baseUrl,{...request,resourceType:'fetch'}),false);
+ assert.throws(()=>validateLoginPreferences({...e,loginPreferences:{...e.loginPreferences,loginUrl:'https://foreign.example/login'}}));
+});
+test('same-origin GET static reset styles and LESS fetched by the compiler are not mutation routes',()=>{
+ for(const [file,type]of [['reset.css','stylesheet'],['theme-sip.less','xhr'],['theme.less','fetch']])assert.equal(websiteRequestAllowed(base,{url:'https://business.example/static/'+file,method:'GET',resourceType:type}),true);
+ for(const request of [{url:'https://other.example/reset.css',method:'GET',resourceType:'stylesheet'},{url:'https://business.example/reset.css',method:'POST',resourceType:'stylesheet'},{url:'https://business.example/theme.less?cmd=delete',method:'GET',resourceType:'xhr'}])assert.equal(websiteRequestAllowed(base,request),false);
+});
+test('login poll recovers a blank page in its existing authorized tab',async()=>{
+ const browser=new WebsiteBrowser('/unused',{},async()=>true),calls=[];
+ const s={initialTarget:'https://business.example/jobs/detail',page:{url:()=> 'about:blank',goto:async url=>calls.push(url)}};
+ browser.state=async()=>s;browser.loginStatus=async()=>({loginRequired:true});
+ assert.equal((await browser.loginStatusFor({},{})).loginRequired,true);assert.deepEqual(calls,[s.initialTarget]);
+ browser.authorize=async()=>false;await assert.rejects(browser.loginStatusFor({},{}),/恢复范围/);assert.equal(calls.length,1);
+});
+test('login polling recovers only quiet empty shells and never reloads active or blocked reads',async()=>{
+ const b=new WebsiteBrowser('/unused',{},async()=>true),s={page:{url:()=> 'https://business.example/'},pendingReads:new Set(),blockedResources:new Set(),resourceFailures:new Set(),lastReadActivity:0};let recoveries=0;b.state=async()=>s;b.loginStatus=async()=>({loginState:'loading'});b.perform=async()=>{recoveries++;};
+ await b.loginStatusFor({},{});await b.loginStatusFor({},{});assert.equal(recoveries,1);
+ s.quietLoginRecoveryAt=0;s.pendingReads.add('ongoing');await b.loginStatusFor({},{});assert.equal(recoveries,1);s.pendingReads.clear();s.blockedResources.add('stylesheet');await b.loginStatusFor({},{});assert.equal(recoveries,1);
+});
 test('generic website policy rejects mutation paths, foreign origins and credential URLs',()=>{
  const check=(url,method='GET',body)=>websiteRequestAllowed(base,{url:new URL(url,base).href,method,body,resourceType:'document'});
  for(const p of ['/delete','/runOnce','/job/trigger','/update.json','/save','/get?cmd=delete','https://other.example/index'])assert.equal(check(p),false,p);

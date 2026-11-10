@@ -12,7 +12,7 @@
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.93.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.94.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 已交付CSV追加数据库字段、显式年月转换与原列保持见[报表补列](docs/report-append.md)。
 

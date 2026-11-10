@@ -39,6 +39,9 @@ function reviewedQueryObjectPath(pathname,method){
 export function websiteRequestAllowed(base, request, manualLogin=false, readEndpoints=[]) {
  let u; try {u=new URL(request.url);}catch{return false;}
  if(u.origin!==new URL(base).origin || !['GET','HEAD','POST','OPTIONS'].includes(request.method))return false;
+ // Static GET dependencies are not business mutation routes (e.g. reset.css).
+ // Keep origin/method/type checks: a POST or XHR named delete.css is not exempt.
+ if(request.method==='GET'&&(['stylesheet','script','font','image'].includes(request.resourceType)||['xhr','fetch'].includes(request.resourceType)&&/\.(?:css|less)$/i.test(u.pathname))&&/\.(?:css|less|js|mjs|png|jpe?g|gif|webp|svg|ico|woff2?|ttf)$/i.test(u.pathname)&&![...u.searchParams].some(([k,v])=>writeAction.test(k)||/^(action|operation|command|cmd|method)$/i.test(k)&&writeAction.test(v)))return true;
  const reviewedEndpoint=readEndpoints.find(e=>e.reviewed===true&&e.method===request.method&&reviewedPathMatches(e.path,u.pathname));
  // Explicit reviewed method bindings take precedence over generic read-shaped fallbacks.
  if(!reviewedEndpoint&&!['HEAD','OPTIONS'].includes(request.method)&&readEndpoints.some(e=>e.reviewed===true&&reviewedPathMatches(e.path,u.pathname)))return false;
@@ -61,6 +64,18 @@ export function websiteRequestAllowed(base, request, manualLogin=false, readEndp
  }
  if(request.method==='OPTIONS')return true;
  return request.resourceType==='document'||/\.(?:js|css|png|jpg|jpeg|svg|ico|woff2?|ttf|map)$/i.test(tail)||reads.test(tail)||u.pathname==='/' || readEndpoints.some(e=>e.reviewed===true&&e.method===request.method&&reviewedPathMatches(e.path,u.pathname)) || /\/(?:api\/)?(?:menus?|permissions?|profiles?|users?\/me)$/i.test(u.pathname);
+}
+// Explicit operator-approved login UI preferences, distinct from read endpoints.
+// Only an account authenticated by this browser session may use the exception.
+export function websiteLoginPreferenceAllowed(e,request,principal){
+ const p=e.loginPreferences;if(!p||principal?.credentialRef!==e.credentialRef||principal?.accountName!==p.accountName)return false;
+ let u;try{u=new URL(request.url);}catch{return false;}
+ return u.origin===new URL(e.baseUrl).origin&&!u.search&&request.method==='POST'&&!(request.body??'').trim()&&p.paths.includes(u.pathname);
+}
+export function validateLoginPreferences(e){
+ const p=e.loginPreferences;if(p===undefined)return;
+ if(e.kind!=='website'||!p||Object.keys(p).some(k=>!['accountName','paths','loginUrl'].includes(k))||typeof p.accountName!=='string'||!p.accountName.trim()||!Array.isArray(p.paths)||!p.paths.length||p.paths.some(x=>typeof x!=='string'||!/^\/[A-Za-z0-9_./-]+$/.test(x)||x.includes('..')))throw Error('登录界面偏好例外配置无效');
+ websiteNavigationTarget(p.loginUrl,e.baseUrl);
 }
 export function cleanWebsiteText(value,limit=10000) {
  return String(value??'').replace(/\b(?:Bearer\s+)[A-Za-z0-9._~+\/-]+/gi,'[凭据已隐藏]').replace(/((?:["']?)(?:password|passwd|pwd|secret|appSecret|apiKey|appKey|token|identitytoken|access.?token|refresh.?token|authorization|cookie|密码|令牌|密钥)(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/gi,'$1[已隐藏]').slice(0,limit);

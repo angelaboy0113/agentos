@@ -2,6 +2,16 @@ import { credential } from '../runner/environment-connector.js';
 import { isEnvironmentOwner, loadEnvironments } from '../shared/environment-access.js';
 import { saveKeychainCredential } from '../shared/keychain-credential.js';
 
+// Recover authentication only. Never replay the click/query that discovered
+// expiry: a fresh snapshot lets the investigator verify its actual outcome.
+export async function recoverWebsiteToolLogin(context,job,environment,result){
+ if(!result?.loginRequired||!context.websiteCredentials?.recoverLogin)return result;
+ const recovery=await context.websiteCredentials.recoverLogin(job,environment);
+ if(!recovery.authenticated)return {...result,loginRecovery:{credentialState:recovery.credentialState,loginState:recovery.loginState??null}};
+ const snapshot=await context.websiteBrowser.run(job,environment,'browser_snapshot',{});
+ return {...snapshot,loginRecovered:true,previousOperationReplayed:false};
+}
+
 const command = /(?:网站登录|登录网站|网页登录)/i;
 const marker = /(?:网址|地址|账号|用户名|密码|(?<![A-Za-z0-9_-])(?:url|user(?:name)?|password|passwd))\s*[:：=]?\s*/ig;
 

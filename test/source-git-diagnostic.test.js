@@ -1,9 +1,17 @@
 import test from 'node:test';
+// HTTP/2 and curl transport errors must remain safely classified; no raw stderr is retained.
 import assert from 'node:assert/strict';
 import {git} from '../src/runner/source-sync.js';
 import {classifySourceGitError,snapshotFailure,sourceGitError} from '../src/shared/source-git-diagnostic.js';
 import {fetchSnapshotCommit} from '../src/runner/source-snapshot.js';
 const failure=(stderr,extra={})=>Object.assign(new Error('private command https://name:password@example.invalid'),{stderr,code:128,...extra});
+test('HTTP2 and curl transport failures are retryable only for safe remote reads',()=>{
+ for(const text of ['curl 92 HTTP/2 stream 0 was not closed cleanly','Recv failure: Connection was reset','Empty reply from server']){
+  assert.equal(classifySourceGitError(failure(text),'ls-remote').retryable,true);
+  assert.equal(classifySourceGitError(failure(text),'fetch').code,'SOURCE_GIT_NETWORK');
+  assert.equal(classifySourceGitError(failure(text),'checkout').retryable,false);
+ }
+});
 test('Git failure classification distinguishes credentials, remote, network, storage, objects and filters without retaining secrets',()=>{
  for(const [text,code] of [
   ['fatal: Authentication failed for https://secret:token@host','AUTH'],

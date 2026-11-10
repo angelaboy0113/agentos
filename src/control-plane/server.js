@@ -16,6 +16,7 @@ import {isPrivate,cardDestination} from './private-cards.js';
 import {ContactDirectory} from './contact-directory.js';
 import {WebsiteEvidenceDelivery,screenshotRequested} from './website-evidence.js';
 import {BrowserInputError} from '../shared/browser-tool-input.js';
+import {recoverWebsiteToolLogin} from './website-credentials.js';
 import {ReportDelivery} from './report-delivery.js';
 import {validateReportFiles} from '../shared/report-files.js';
 import { TeamKnowledgeService } from './team-knowledge.js';
@@ -421,7 +422,9 @@ async function route(context) {
     if(job?.status!=='running'||!job.lease?.id||body.leaseId!==job.lease.id||body.runnerId!==job.lease.runnerId)return json(response,409,{error:'Stale or foreign Runner lease'});
     const e=verifyApprovedPlan(await loadEnvironments(),job.environmentAccess??{});if(e.kind!=='website')throw new Error('Not a website grant');
     if(body.tool==='browser_screenshot'&&!screenshotRequested(job))throw new Error('当前原问题未要求截图交付');
-    let result=body.tool==='restore_cloud_sheet_input'?await restoreCloudSheetInput(store,config.dataDir,job,e,body.args):cloudSheetTarget(job.environmentAccess.websiteTarget??e.baseUrl)&&['connection','read_cloud_sheet','read_cloud_document'].includes(body.tool)?await readCloudSheet(context.feishu,job,e,body.tool,body.args):await context.websiteBrowser.run(job,e,body.tool,body.args);if(body.tool==='read_cloud_sheet')result=await registerCloudSheetInput(store,config.dataDir,job,e,result);if(body.tool==='read_cloud_document')result=await registerCloudDocumentInput(store,config.dataDir,job,e,result);if(body.tool==='browser_screenshot'&&result.screenshot)Object.assign(result.screenshot,await context.websiteEvidence.capture(job,result.screenshot));result.screenshotDeliveries=await context.websiteEvidence.status(job);return json(response,200,{result});
+    let result=body.tool==='restore_cloud_sheet_input'?await restoreCloudSheetInput(store,config.dataDir,job,e,body.args):cloudSheetTarget(job.environmentAccess.websiteTarget??e.baseUrl)&&['connection','read_cloud_sheet','read_cloud_document'].includes(body.tool)?await readCloudSheet(context.feishu,job,e,body.tool,body.args):await context.websiteBrowser.run(job,e,body.tool,body.args);
+    result=await recoverWebsiteToolLogin(context,job,e,result);
+    if(body.tool==='read_cloud_sheet')result=await registerCloudSheetInput(store,config.dataDir,job,e,result);if(body.tool==='read_cloud_document')result=await registerCloudDocumentInput(store,config.dataDir,job,e,result);if(body.tool==='browser_screenshot'&&result.screenshot)Object.assign(result.screenshot,await context.websiteEvidence.capture(job,result.screenshot));result.screenshotDeliveries=await context.websiteEvidence.status(job);return json(response,200,{result});
   }
   const eventMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)\/events$/);
   if (request.method === 'POST' && eventMatch) {

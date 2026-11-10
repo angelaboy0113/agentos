@@ -17,6 +17,10 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['SOURCE_COMPARISON_SCOPE', /SOURCE_COMPARISON_SCOPE|源码环境不在用户原始双环境请求范围内/, '双环境源码范围', '请求的另一源码环境未在原始问题范围内，或仍指向当前环境；尚未切换环境。', '按用户原始环境描述和实际目录修正接续目标，保留当前证据，不跨环境借用授权。'],
+  ['TASK_WORKER_MEMORY', /TASK_WORKER_MEMORY/, '任务执行子进程内存', '任务执行子进程报告V8堆内存耗尽，已有成果保留；并非业务记录为空。', '维护者核对状态复制和中间数据存储，按原任务已保存证据接续，不重跑已完成查询。'],
+  ['CREDENTIAL_UNAVAILABLE', /CREDENTIAL_NOT_FOUND|本机加密凭据尚未迁移|本机加密凭据不可读取|本机加密凭据库不可读取/, '已保存凭据读取', '当前入口绑定的本机凭据缺项或不可读取，尚未完成认证；不是网站密码已被拒绝。', '维护者核对原系统、环境、账号角色与凭据引用，恢复已有凭据绑定，不在聊天或日志暴露秘密。'],
+  ['QUERY_SCOPE_CHANGED', /查询授权已过期或配置已变更/, '查询范围续期与结果接收', '当前查询授权已过期或配置摘要发生变化；已有结果需要按原范围重新核对接收，不代表业务查询失败。', '保留原结果，复核当前范围和配置后接续；不得盲目重跑业务查询或绕过授权。'],
   ['BROWSER_AUTOMATION', /Chrome自动化不可用|Apple.?事件JavaScript|Apple.?Events.*(?:denied|not allowed)|not authorized to send Apple events/i, '本机浏览器自动化', '当前进程未能使用Chrome自动化；需要核对macOS自动化许可和Chrome的Apple事件JavaScript设置，不是网站密码错误。', '由本机维护者在当前运行身份下核对系统许可；保留原任务及已保存凭据，许可恢复后沿原范围继续。'],
   ['BROWSER_EXECUTABLE', /Executable doesn.t exist|browserType.*executable|browser executable.*(?:missing|not found)/i, '浏览器运行环境', '当前浏览器运行环境缺少所需可执行文件，尚未开始网站认证。', '维护者核对所选浏览器模式及其安装路径；不要求用户重发密码，也不自动切换身份或关闭权限校验。'],
   ['MODEL_UNAVAILABLE', /model is not supported.*(?:ChatGPT|account)|not supported when using Codex with a ChatGPT account|model.{0,80}(?:does not exist|not found)/i, '模型可用范围', '本轮选定模型被当前账号或服务拒绝，不能据此判断数据库或业务异常。', '核对本实例的模型配置入口及账号可用范围，保留任务和已有证据；不会自动更换模型或全局设置。'],
@@ -95,6 +99,8 @@ export function failureDetails(error,{stage}={}) {
   const diagnosticStage=[error?.diagnosticStage,error?.rpcMethod,error?.stage,stage].find(s=>Object.hasOwn(stages,s));
   const observedCode=[error?.observedCode,...chain.map(e=>e.code)].find(c=>observedCodes.has(c))??[...observedCodes].find(c=>new RegExp('\\b'+c+'\\b').test(message));
   return {code,stage:diagnosticStage??null,phase:diagnosticStage?stages[diagnosticStage]:phase,cause,next,
+    ...(['TypeError','ReferenceError','RangeError','SyntaxError'].includes(error?.errorName??error?.name)?{errorName:error.errorName??error.name}:{}),
+    ...(/^(?:src\/(?:runner|shared|control-plane)\/[a-z0-9-]+\.js:\d+:\d+)$/i.test(error?.sourceLocation??'')?{sourceLocation:error.sourceLocation}:String(error?.stack??'').match(/src\/(?:runner|shared|control-plane)\/[a-z0-9-]+\.js:\d+:\d+/i)?.[0]?{sourceLocation:String(error.stack).match(/src\/(?:runner|shared|control-plane)\/[a-z0-9-]+\.js:\d+:\d+/i)[0]}:{}),
     ...(typeof error?.platformCode==='string'&&/^(RequestLimitExceeded|AuthFailure|UnauthorizedOperation|ResourceNotFound|InvalidParameter|InternalError|FailedOperation|MissingParameter|UnsupportedOperation)(\.[A-Za-z][A-Za-z0-9]*)?$/.test(error.platformCode)?{platformCode:error.platformCode}:{}),...(['DescribeGroups','DescribeTaskRecords','DescribeTaskDetail','DescribeTaskBatchRecords'].includes(error?.apiAction)?{apiAction:error.apiAction}:{}),...(observedCode?{observedCode}:{}),...(httpStatus?{httpStatus}:{}),...(Number.isInteger(error?.exitCode)&&Math.abs(error.exitCode)<256?{exitCode:error.exitCode}:{}),...(exitSignals.has(error?.exitSignal)?{exitSignal:error.exitSignal}:{})};
 }
 export function failureDiagnostic(error) {
@@ -103,5 +109,5 @@ export function failureDiagnostic(error) {
 }
 export function safeExecutionError(error) {
   const d=failureDetails(error);
-  return Object.assign(new Error(`[${d.code}] ${failureDiagnostic(d)}`),{code:d.code,...(d.stage?{diagnosticStage:d.stage}:{}),...(d.observedCode?{observedCode:d.observedCode}:{}),...(d.httpStatus?{httpStatus:d.httpStatus}:{}),...(d.exitCode!==undefined?{exitCode:d.exitCode}:{}),...(d.exitSignal?{exitSignal:d.exitSignal}:{})});
+  return Object.assign(new Error(`[${d.code}] ${failureDiagnostic(d)}`),{code:d.code,...(d.stage?{diagnosticStage:d.stage}:{}),...(d.errorName?{errorName:d.errorName}:{}),...(d.sourceLocation?{sourceLocation:d.sourceLocation}:{}),...(d.observedCode?{observedCode:d.observedCode}:{}),...(d.httpStatus?{httpStatus:d.httpStatus}:{}),...(d.exitCode!==undefined?{exitCode:d.exitCode}:{}),...(d.exitSignal?{exitSignal:d.exitSignal}:{})});
 }

@@ -24,7 +24,12 @@ export function executeTaskProcess(job, config, emit, signal, worker = workerFil
       reject(uncertain); // Do not wait forever if the OS refuses termination.
     }); };
     signal.addEventListener('abort', abort, { once: true });
-    child.stderr.on('data', () => {}); // Worker errors return over IPC; never broadcast raw stderr.
+    let fatalMemory=false,stderrTail='';
+    child.stderr.on('data', chunk => {
+      // Classify a bounded fatal signature only; raw stderr may contain secrets.
+      stderrTail=(stderrTail+chunk.toString()).slice(-4096);
+      if(/FATAL ERROR:[^\n]*(?:heap|allocation)|JavaScript heap out of memory/i.test(stderrTail))fatalMemory=true;
+    });
     child.on('message', (message) => {
       if (message.type === 'event') outgoing = outgoing.then(() => emit(message.event)).catch(() => undefined);
       if (message.type === 'result') result = message.result;
@@ -40,7 +45,7 @@ export function executeTaskProcess(job, config, emit, signal, worker = workerFil
         error.processesExited = !terminationFailure;
         return reject(error);
       }
-      if (failure || code !== 0 || !result) return reject(failure ?? safeExecutionError({code:'TASK_WORKER_EXIT',exitCode:code,exitSignal,diagnosticStage:'task_worker'}));
+      if (failure || code !== 0 || !result) return reject(failure ?? safeExecutionError({code:fatalMemory?'TASK_WORKER_MEMORY':'TASK_WORKER_EXIT',exitCode:code,exitSignal,diagnosticStage:'task_worker'}));
       resolve(result);
     });
     registerLocalExecution(config.localExecutionRegistry,job,child.pid).then(()=>{if(!signal.aborted&&child.connected)child.send({job,config});}).catch(error=>{failure=error;abort();});

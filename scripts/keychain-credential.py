@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Mac Keychain adapter. Secrets use a hidden terminal prompt or a captured pipe, never argv."""
-import ctypes as C, json, sys, re, getpass
+import ctypes as C, json, sys, re, getpass, os
 
 def main():
     if sys.platform != 'darwin': raise RuntimeError('This credential adapter requires macOS Keychain')
     if len(sys.argv)!=3 or sys.argv[1] not in ('get','set','set-json') or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}',sys.argv[2]): raise RuntimeError('Usage: keychain-credential.py set|get reference')
     sec=C.CDLL('/System/Library/Frameworks/Security.framework/Security');cf=C.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+    if sys.argv[1]=='get' and os.environ.get('AGENTOS_KEYCHAIN_NO_UI')=='1':
+        sec.SecKeychainSetUserInteractionAllowed.argtypes=[C.c_bool]
+        sec.SecKeychainSetUserInteractionAllowed(False)
     ptr=C.c_void_p; holders=[]
     cf.CFStringCreateWithCString.argtypes=[ptr,C.c_char_p,C.c_uint32];cf.CFStringCreateWithCString.restype=ptr
     cf.CFDataCreate.argtypes=[ptr,C.c_void_p,C.c_long];cf.CFDataCreate.restype=ptr

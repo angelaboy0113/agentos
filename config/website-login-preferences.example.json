@@ -1,0 +1,7 @@
+{
+  "loginPreferences": {
+    "accountName": "your-explicitly-approved-account",
+    "loginUrl": "https://your-app.example/login",
+    "paths": ["/prefs/language/zh_CN"]
+  }
+}

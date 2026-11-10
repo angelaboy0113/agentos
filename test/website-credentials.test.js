@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WebsiteCredentialService, parseWebsiteCredentialMessage, stripCredentialMentions } from '../src/control-plane/website-credentials.js';
+import { WebsiteCredentialService, parseWebsiteCredentialMessage, stripCredentialMentions,recoverWebsiteToolLogin } from '../src/control-plane/website-credentials.js';
+
+test('expired authentication recovers the original identity then snapshots without replaying an action',async()=>{
+ const calls=[];const ctx={websiteCredentials:{recoverLogin:async(j,e)=>{calls.push(['login',j.id,e.credentialRef]);return{authenticated:true,credentialState:'available'};}},websiteBrowser:{run:async(j,e,tool,args)=>{calls.push([tool,j.id,args]);return{pageReady:true};}}};
+ const r=await recoverWebsiteToolLogin(ctx,{id:'original'},{credentialRef:'system-prd'},{loginRequired:true});
+ assert.equal(r.loginRecovered,true);assert.equal(r.previousOperationReplayed,false);assert.deepEqual(calls,[['login','original','system-prd'],['browser_snapshot','original',{}]]);
+});
+test('verification or missing credentials preserves waiting; ready pages never trigger login',async()=>{
+ let n=0;const ctx={websiteCredentials:{recoverLogin:async()=>{n++;return{authenticated:false,credentialState:'available',loginState:'verification_required'};}},websiteBrowser:{run:()=>{throw Error('must not replay');}}};
+ const wait=await recoverWebsiteToolLogin(ctx,{}, {},{loginRequired:true});assert.equal(wait.loginRequired,true);assert.equal(wait.loginRecovery.loginState,'verification_required');
+ const ready={pageReady:true};assert.equal(await recoverWebsiteToolLogin(ctx,{}, {},ready),ready);assert.equal(n,1);
+});
 
 const environment = { kind:'website', projectId:'demo', tier:'prd', baseUrl:'https://business.example/app/', credentialRef:'web-entry-test',
   ownerOpenIdsByProfile:{owner:['ou_admin']}, membersRead:false, queries:{investigate:{mode:'investigate'}} };
