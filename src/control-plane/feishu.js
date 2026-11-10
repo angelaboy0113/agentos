@@ -51,7 +51,13 @@ export class FeishuClient {
   async cloudRequest(route,params={}){
     if(!cloudReadRoute(route))throw new Error('Invalid cloud read scope');
     const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:'Bearer '+await this.tenantToken()},signal:AbortSignal.timeout(30000)});const result=await response.json();
-    if(!response.ok||result.code!==0)throw new Error('Cloud read failed '+String(result.code));return result.data;
+    if(!response.ok||result.code!==0)throw new Error(`Cloud read failed ${String(result.code)} ${String(result.msg??'').slice(0,300)}`);return result.data;
+  }
+  async cloudDownload(fileToken){
+    if(!/^[A-Za-z0-9]+$/.test(fileToken??''))throw new Error('Invalid cloud file scope');
+    const response=await fetch(`${OPEN_API}/drive/v1/medias/${encodeURIComponent(fileToken)}/download`,{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(120000)});
+    if(!response.ok){let detail='';try{const value=await response.json();detail=` ${value.code??''} ${value.msg??''}`;}catch{}throw new Error(`Cloud file download failed: HTTP ${response.status}${detail}`);}
+    return Buffer.from(await response.arrayBuffer());
   }
   async groupMembersPage(chatId,{pageToken}={},options={}){
     if(!/^oc_[A-Za-z0-9]+$/.test(chatId??''))throw Error('Invalid member-name scope');

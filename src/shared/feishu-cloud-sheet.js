@@ -1,22 +1,70 @@
 import {collectCloudSheetPage,assertCloudSheetPageSet,assembleCloudSheetPages} from './cloud-sheet-pages.js';
 import {exactText} from './dataset-transform.js';
 import {createHash} from 'node:crypto';
+import mammoth from 'mammoth';
+import ExcelJS from 'exceljs';
 // Platform adapter: explicit task document only, GET-only, originating bot identity.
 export function cloudSheetTarget(value){
  try{const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.port||!/(?:^|\.)(?:feishu\.cn|larksuite\.com)$/.test(u.hostname))return null;
- const m=/^\/(wiki|sheets)\/([A-Za-z0-9]+)\/?$/.exec(u.pathname);return m?{kind:m[1],token:m[2]}:null;}catch{return null;}
+ const m=/^\/(wiki|sheets|docx)\/([A-Za-z0-9]+)\/?$/.exec(u.pathname);return m?{kind:m[1],token:m[2]}:null;}catch{return null;}
 }
-export function cloudReadRoute(route){return route==='/open-apis/wiki/v2/spaces/get_node'||/^\/open-apis\/sheets\/v3\/spreadsheets\/[A-Za-z0-9]+\/sheets\/query$/.test(route)||/^\/open-apis\/sheets\/v2\/spreadsheets\/[A-Za-z0-9]+\/values\/[A-Za-z0-9]+(?:!|%21)[A-Z]+[0-9]+%3A[A-Z]+[0-9]+$/i.test(route);}
+export function cloudReadRoute(route){return route==='/open-apis/wiki/v2/spaces/get_node'||/^\/open-apis\/docx\/v1\/documents\/[A-Za-z0-9]+\/blocks$/.test(route)||/^\/open-apis\/sheets\/v3\/spreadsheets\/[A-Za-z0-9]+\/sheets\/query$/.test(route)||/^\/open-apis\/sheets\/v2\/spreadsheets\/[A-Za-z0-9]+\/values\/[A-Za-z0-9]+(?:!|%21)[A-Z]+[0-9]+%3A[A-Z]+[0-9]+$/i.test(route);}
 export class CloudSheetError extends Error{constructor(code,message){super(message);this.code=code;this.statusCode=400;}}
 const invalid=()=>new CloudSheetError('CLOUD_DOCUMENT_INPUT','使用当前文档元数据返回的sheetId和有效行列范围；此工具只读取本任务已批准的表格，不接受其他URL。');
 const column=n=>{let s='';for(;n;n=Math.floor((n-1)/26))s=String.fromCharCode(65+(n-1)%26)+s;return s;};
+const extensionOf=title=>{const match=/\.([A-Za-z0-9]{1,10})$/.exec(String(title??''));return match?match[1].toLowerCase():'';};
+const textDecoder=new TextDecoder('utf-8',{fatal:true});
+function documentBlocksText(blocks){
+ const lines=[];const visit=value=>{if(!value||typeof value!=='object')return;for(const [key,child] of Object.entries(value)){if(['block_id','parent_id','children','block_type'].includes(key))continue;if(key==='content'&&typeof child==='string')lines.push(child);else if(Array.isArray(child))child.forEach(visit);else if(child&&typeof child==='object')visit(child);}};
+ for(const block of blocks){const before=lines.length;visit(block);if(lines.length>before)lines.push('\n');}
+ return lines.join('').replace(/\n{3,}/g,'\n\n').trim();
+}
+async function parseUploadedCloudFile(title,bytes){
+ const extension=extensionOf(title),plain={txt:'text/plain',md:'text/markdown',csv:'text/csv',tsv:'text/tab-separated-values',json:'application/json',xml:'application/xml',yaml:'application/yaml',yml:'application/yaml'};
+ if(extension==='docx'){
+  let result;try{result=await mammoth.extractRawText({buffer:bytes});}catch{throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','Word 文件无法按 DOCX 结构读取；已保留真实格式错误，未当作空文档或网页登录失败。');}
+  return {extension,contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',content:result.value,structure:{warnings:result.messages.map(x=>String(x.message??x)).slice(0,50)}};
+ }
+ if(extension==='xlsx'){
+  const workbook=new ExcelJS.Workbook();try{await workbook.xlsx.load(bytes);}catch{throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','Excel 文件无法按 XLSX 结构读取；未当作空表。');}
+  const sheets=workbook.worksheets.map(sheet=>({title:sheet.name,rowCount:sheet.rowCount,columnCount:sheet.columnCount,values:Array.from({length:sheet.rowCount},(_,index)=>{const row=sheet.getRow(index+1);return Array.from({length:sheet.columnCount},(_,column)=>{const cell=row.getCell(column+1);return cell.text??'';});})}));
+  return {extension,contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',content:sheets.map(sheet=>`# ${sheet.title}\n`+sheet.values.map(row=>row.join('\t')).join('\n')).join('\n\n'),structure:{sheets:sheets.map(({title,rowCount,columnCount})=>({title,rowCount,columnCount})),values:sheets}};
+ }
+ if(plain[extension]){let content;try{content=textDecoder.decode(bytes);}catch{throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','文本文件不是有效 UTF-8；未替换损坏字符或当作空文件。');}return {extension,contentType:plain[extension],content,structure:null};}
+ throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT',`当前文件格式${extension?` .${extension}`:'（无扩展名）'}尚未接入结构化读取；已识别为飞书上传文件，不会错误转入个人网页会话。请维护者补充该格式解析器。`);
+}
 export async function readCloudSheet(client,job,environment,tool,args={}){
  const url=job.environmentAccess?.websiteTarget??environment.baseUrl,target=cloudSheetTarget(url);
  if(!target||environment.kind!=='website'||environment.projectId!==job.projectId||!job.originProfile)throw invalid();
- if(!['connection','read_cloud_sheet'].includes(tool)||!args||Array.isArray(args)||typeof args!=='object')throw invalid();
- const request=async(route,params={})=>{if(!cloudReadRoute(route))throw invalid();try{return await client.cloudRequest(route,params,{profile:job.originProfile});}catch(error){if(error instanceof CloudSheetError)throw error;const message=String(error.message??'');const scope=message.includes('app_scope_not_applied')||message.includes('99991672');throw new CloudSheetError(scope?'CLOUD_DOCUMENT_SCOPE':'CLOUD_DOCUMENT_ACCESS',scope?'机器人应用尚缺知识库节点或电子表格只读权限；请维护者核对应用权限。不是个人网页登录失败。':'机器人未能读取该文档；请核对文档是否对当前机器人开放、应用权限和平台网络。不需要在群里发送个人账号密码。');}};
- let token=target.token,title=null;
- if(target.kind==='wiki'){const node=(await request('/open-apis/wiki/v2/spaces/get_node',{token})).node;if(node?.obj_type!=='sheet'||!/^[A-Za-z0-9]+$/.test(node.obj_token??''))throw new CloudSheetError('CLOUD_DOCUMENT_TYPE','此知识库节点不是电子表格；未尝试用表格接口或业务网页登录读取其他类型。');token=node.obj_token;title=node.title;}
+ if(!['connection','read_cloud_sheet','read_cloud_document'].includes(tool)||!args||Array.isArray(args)||typeof args!=='object')throw invalid();
+ const request=async(route,params={})=>{if(!cloudReadRoute(route))throw invalid();try{return await client.cloudRequest(route,params,{profile:job.originProfile});}catch(error){if(error instanceof CloudSheetError)throw error;const message=String(error.message??'');const scope=/app_scope_not_applied|99991672|99991679/i.test(message);throw new CloudSheetError(scope?'CLOUD_DOCUMENT_SCOPE':'CLOUD_DOCUMENT_ACCESS',scope?'机器人应用缺少当前节点所需的知识库、电子表格或在线文档只读权限；请维护者核对应用权限。不是个人会话问题。':'机器人未能读取该文档；请核对文档是否对当前机器人开放、应用权限和平台网络。不需要在群里发送个人账号密码。');}};
+ let token=target.token,title=null,documentType=target.kind==='docx'?'docx':'sheet';
+ if(target.kind==='wiki'){
+  const node=(await request('/open-apis/wiki/v2/spaces/get_node',{token})).node;
+  if(!['sheet','file','docx'].includes(node?.obj_type)||!/^[A-Za-z0-9]+$/.test(node.obj_token??''))throw new CloudSheetError('CLOUD_DOCUMENT_TYPE','此知识库节点不是当前支持的在线表格、在线文档或上传文件；没有降级为个人网页会话。');
+  token=node.obj_token;title=node.title;documentType=node.obj_type;
+ }
+ if(documentType!=='sheet'){
+  if(tool==='connection'){
+   if(Object.keys(args).length)throw invalid();
+   return {nativeDocument:true,documentType,title,readAt:new Date().toISOString(),identity:'originating_bot',note:documentType==='file'?'这是知识库中的上传文件；用 read_cloud_document 以原机器人身份下载并读取。':'这是飞书在线文档；用 read_cloud_document 以原机器人身份读取正文。'};
+  }
+  if(tool!=='read_cloud_document'||Object.keys(args).length)throw new CloudSheetError('CLOUD_DOCUMENT_INPUT','当前节点不是电子表格；请使用 read_cloud_document，不要尝试网页登录或表格接口。');
+  if(documentType==='file'){
+   let bytes;try{bytes=await client.cloudDownload(token,{profile:job.originProfile});}catch(error){const message=String(error.message??'');const scope=/app_scope_not_applied|99991672|99991679|permission denied|HTTP 403/i.test(message);throw new CloudSheetError(scope?'CLOUD_DOCUMENT_SCOPE':'CLOUD_DOCUMENT_ACCESS',scope?'机器人应用缺少云空间文件只读/下载权限；请维护者为当前机器人申请 drive:drive:readonly。不是个人会话问题。':'当前机器人无法下载该文件；请确认文件已共享给对应机器人，且文件没有被删除或限制下载。');}
+   const parsed=await parseUploadedCloudFile(title,bytes);
+   return {nativeDocument:true,documentType,title,readAt:new Date().toISOString(),identity:'originating_bot',fileToken:token,fileBytes:bytes,contentType:parsed.contentType,extension:parsed.extension,content:parsed.content,structure:parsed.structure,note:'内容来自原机器人通过飞书原生文件接口下载的同一文件；原始字节将按当前任务、系统、环境和机器人身份登记，未使用个人网页登录。'};
+  }
+  const blocks=[];let pageToken='';const seen=new Set();
+  do{
+   if(seen.has(pageToken))throw new CloudSheetError('CLOUD_DOCUMENT_RESPONSE','在线文档分页令牌重复，不能声明完整读取。');seen.add(pageToken);
+   const page=await request(`/open-apis/docx/v1/documents/${token}/blocks`,{page_size:500,...(pageToken?{page_token:pageToken}:{})});
+   if(!Array.isArray(page.items))throw new CloudSheetError('CLOUD_DOCUMENT_RESPONSE','在线文档正文结构不完整，不能当作空文档。');blocks.push(...page.items);
+   pageToken=page.has_more?String(page.page_token??''):'';if(page.has_more&&!pageToken)throw new CloudSheetError('CLOUD_DOCUMENT_RESPONSE','在线文档分页缺少下一页令牌。');
+  }while(pageToken);
+  return {nativeDocument:true,documentType,title,readAt:new Date().toISOString(),identity:'originating_bot',documentToken:token,content:documentBlocksText(blocks),blocks,note:'已按飞书文档分页完整读取；复杂嵌入对象保留在 blocks 证据中，正文文本不等于附件、图片或公式的视觉内容。'};
+ }
+ if(tool==='read_cloud_document')throw new CloudSheetError('CLOUD_DOCUMENT_INPUT','当前节点是电子表格；请使用 read_cloud_sheet。');
  const {sheets}=await request('/open-apis/sheets/v3/spreadsheets/'+token+'/sheets/query');
  if(!Array.isArray(sheets))throw new CloudSheetError('CLOUD_DOCUMENT_RESPONSE','电子表格元数据不完整，不能当作空表。');
  if(tool==='connection'){if(Object.keys(args).length)throw invalid();return {nativeDocument:true,title,readAt:new Date().toISOString(),identity:'originating_bot',sheets:sheets.map(s=>({sheetId:s.sheet_id,title:s.title,hidden:s.hidden,rowCount:s.grid_properties?.row_count,columnCount:s.grid_properties?.column_count})),note:'完整行列范围来自表格元数据，不是非空业务记录数。用read_cloud_sheet分页读取；保留空值、重复项和原始行号，未读范围不是无数据。'}};
@@ -60,6 +108,22 @@ export async function registerCloudSheetInput(store,dataDir,job,environment,resu
  const attachment={id,type:'file',contentType:'application/json',path:file,source:{kind:'authorized-native-cloud-sheet',originProfile:job.originProfile,projectId:job.projectId,tier:environment.tier,jobId:job.id,...(result.sourceReads?{sourceReads:result.sourceReads,sameTransactionSnapshot:false}:{}),rows:result.gridRows,columns:result.gridColumns,revision:result.revision,readAt:result.readAt,range:result.range,sha256}};
  const accepted=await store.transact(state=>{const current=state.jobs.find(x=>x.id===job.id);if(!job.lease?.id||current?.status!=='running'||!current.lease?.id||current.lease.id!==job.lease.id||current.originProfile!==job.originProfile||current.projectId!==job.projectId||job.environmentAccess?.scopeHash&&current.environmentAccess?.scopeHash!==job.environmentAccess.scopeHash)throw Error('Cloud input task or lease changed');try{assertCloudSheetPageSet(current,result.cloudSheetPageSet);}catch(error){throw new CloudSheetError(error.code,error.message);}current.attachments??=[];const previous=current.attachments.find(x=>x.id===id);if(previous&&(previous.source.sha256!==sha256||previous.path!==file||previous.source.originProfile!==job.originProfile))throw Error('Cloud input binding changed');if(!previous)current.attachments.push(attachment);return previous??attachment;});
  const {values,cloudSheetPageSet,...metadata}=result;return{...metadata,complete:true,inputAttachment:{id,type:attachment.type,contentType:accepted.contentType,source:accepted.source},preview:values.slice(0,3),note:'完整原始表格已作为当前任务输入持久化，无需逐页抄录工具结果。下一数据库环境使用import_task_input导入这个attachmentId，再collect_dataset_values建立完整in_set；保留原顺序、重复与空值，尚未核验业务记录。'};
+}
+
+export async function registerCloudDocumentInput(store,dataDir,job,environment,result){
+ if(!result.nativeDocument||!['file','docx'].includes(result.documentType))return result;
+ const {mkdir,writeFile,lstat,readFile}=await import('node:fs/promises'),path=await import('node:path');
+ const fileBytes=Buffer.isBuffer(result.fileBytes)?result.fileBytes:Buffer.from(JSON.stringify({title:result.title,documentToken:result.documentToken,blocks:result.blocks,content:result.content}));
+ const sha256=createHash('sha256').update(fileBytes).digest('hex'),extension=result.documentType==='file'&&/^[a-z0-9]{1,10}$/.test(result.extension??'')?'.'+result.extension:'.json';
+ const binding=createHash('sha256').update(JSON.stringify([job.id,job.projectId,job.originProfile,environment.tier,result.documentType,result.fileToken??result.documentToken,result.title,sha256])).digest('hex'),id='ATT-cloud-'+binding;
+ const parent=path.join(dataDir,'attachments');await mkdir(parent,{recursive:true,mode:0o700});if((await lstat(parent)).isSymbolicLink())throw Error('Linked cloud input directory');
+ const dir=path.join(parent,createHash('sha256').update(job.id).digest('hex'));await mkdir(dir,{recursive:true,mode:0o700});if((await lstat(dir)).isSymbolicLink())throw Error('Linked cloud input directory');
+ const file=path.join(dir,id+extension);try{if((await lstat(file)).isSymbolicLink())throw Error('Linked cloud input file');}catch(error){if(error.code!=='ENOENT')throw error;}
+ try{await writeFile(file,fileBytes,{mode:0o600,flag:'wx'});}catch(error){if(error.code!=='EEXIST'||createHash('sha256').update(await readFile(file)).digest('hex')!==sha256)throw error;}
+ const attachment={id,type:'file',contentType:result.contentType??'application/json',path:file,source:{kind:result.documentType==='file'?'authorized-native-cloud-file':'authorized-native-cloud-document',originProfile:job.originProfile,projectId:job.projectId,tier:environment.tier,jobId:job.id,documentType:result.documentType,title:result.title??null,token:result.fileToken??result.documentToken,readAt:result.readAt,sha256}};
+ const accepted=await store.transact(state=>{const current=state.jobs.find(x=>x.id===job.id);if(!job.lease?.id||current?.status!=='running'||!current.lease?.id||current.lease.id!==job.lease.id||current.originProfile!==job.originProfile||current.projectId!==job.projectId||job.environmentAccess?.scopeHash&&current.environmentAccess?.scopeHash!==job.environmentAccess.scopeHash)throw Error('Cloud input task or lease changed');current.attachments??=[];const previous=current.attachments.find(x=>x.id===id);if(previous&&(previous.source.sha256!==sha256||previous.path!==file||previous.source.originProfile!==job.originProfile))throw Error('Cloud input binding changed');if(!previous)current.attachments.push(attachment);return previous??attachment;});
+ const {fileBytes:_fileBytes,blocks:_blocks,...metadata}=result;
+ return {...metadata,complete:true,inputAttachment:{id,type:accepted.type,contentType:accepted.contentType,source:accepted.source},note:result.note+' 原始文件已作为当前任务输入持久化；后续阶段可直接读取该 attachmentId，不要求用户重传。'};
 }
 
 export async function restoreCloudSheetInput(store,dataDir,job,environment,args={}){

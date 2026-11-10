@@ -1,9 +1,10 @@
 import {cloudReadRoute} from '../shared/feishu-cloud-sheet.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, copyFile }  from 'node:fs/promises';
+import { mkdir, copyFile, readFile, mkdtemp, rm }  from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import {stat} from 'node:fs/promises';
 
 export function resolveLarkCliEntry(explicit = '', executable = process.execPath) {
@@ -49,7 +50,7 @@ export function runLarkCli(args, options = {}) {
       if (code !== 0) return reject(new Error(`lark-cli exited ${code}: ${stderr || stdout}`));
       try {
         const result = stdout.trim() ? JSON.parse(stdout) : {};
-        if (result.ok === false || (typeof result.code === 'number' && result.code !== 0)) return reject(new Error('lark-cli API request rejected'));
+        if (result.ok === false || (typeof result.code === 'number' && result.code !== 0)) return reject(new Error(`lark-cli API request rejected: ${result.code ?? 'unknown'} ${String(result.msg ?? result.message ?? '').slice(0,300)}`));
         resolve(result);
       } catch {
         resolve({ raw: stdout.trim() });
@@ -102,6 +103,15 @@ export class LarkCliFeishuClient {
     if(!cloudReadRoute(route)||!options.profile)throw new Error('Invalid cloud read scope');
     const result=await runLarkCli(['api','GET',route,'--as','bot','--params',JSON.stringify(params),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
     if(!result.data||typeof result.data!=='object')throw new Error('Invalid cloud read response');return result.data;
+  }
+  async cloudDownload(fileToken,options={}){
+    if(!/^[A-Za-z0-9]+$/.test(fileToken??'')||!options.profile)throw new Error('Invalid cloud file scope');
+    const directory=await mkdtemp(path.join(os.tmpdir(),'agentos-cloud-download-'));
+    const output=path.join(directory,'source.download');
+    try{
+      await runLarkCli(['drive','+download','--as','bot','--file-token',fileToken,'--output',output,'--overwrite','--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:120000});
+      return await readFile(output);
+    }finally{await rm(directory,{recursive:true,force:true});}
   }
   async contactRequest(route,params,options={}){
     await mkdir(this.cwd,{recursive:true,mode:0o700});

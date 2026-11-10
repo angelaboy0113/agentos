@@ -282,7 +282,7 @@ export async function downloadAttachments(job, config, workspace, {fetchInput=fe
  const downloaded=[];
  for(const attachment of job.attachments){
   const hash=data=>createHash('sha256').update(data).digest('hex'),binding=hash(JSON.stringify([scope,attachment.id,attachment.type,attachment.contentType,attachment.originalResourceKey,attachment.path,attachment.source]));
-  const extensions={'image/png':'.png','image/jpeg':'.jpg','application/json':'.json','text/csv':'.csv','text/plain':'.txt','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'.xlsx'};
+  const extensions={'image/png':'.png','image/jpeg':'.jpg','application/json':'.json','text/csv':'.csv','text/tab-separated-values':'.tsv','text/plain':'.txt','text/markdown':'.md','application/xml':'.xml','application/yaml':'.yaml','application/vnd.openxmlformats-officedocument.wordprocessingml.document':'.docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'.xlsx'};
   const file=path.join(directory,hash(String(attachment.id))+ (extensions[attachment.contentType?.split(';')[0]]??'.bin')),manifest=file+'.input.json';let bytes,sha256,cached=false;
   try{if((await lstat(file)).isSymbolicLink()||(await lstat(manifest)).isSymbolicLink())throw new Error('Linked task input');const receipt=JSON.parse(await readFile(manifest,'utf8')),body=await readFile(file);sha256=hash(body);if(receipt.binding===binding&&receipt.sha256===sha256&&receipt.bytes===body.length&&(!attachment.source?.sha256||attachment.source.sha256===sha256)){bytes=body.length;cached=true;}}catch{}
   if(!cached){
