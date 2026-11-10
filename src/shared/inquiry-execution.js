@@ -21,7 +21,11 @@ export function jointInquiryFromAcceptedTurns(turns,current,agents,projects){
  if(current.chatType!=='group'||!current.messageId||!current.chatId||!current.senderId)return null;
  const bindings=projects.chatProfileProjectMap?.[current.chatId]??{},catalog=agents?.agents??{};
  const candidates=(turns??[]).filter(t=>t.chatType==='group'&&t.messageId===current.messageId&&t.chatId===current.chatId&&sameTrustedHuman(projects,t,current)&&t.visibility!=='requester');
- const members=[...new Map(candidates.map(t=>{const a=catalog[t.profile];if(!a?.systemAssistant||!a.profile||bindings[a.profile]!==a.projectId||t.projectId!==a.projectId||a.allowedChatIds&&!a.allowedChatIds.includes(current.chatId))return null;return[a.profile,{profile:a.profile,projectId:a.projectId,name:a.displayName??a.projectId}];}).filter(Boolean)).values()];
+ // Production agent catalogs are keyed by project (for example `ltx`) while
+ // accepted Feishu events carry the bot profile (`knowledge-ltx`). Never rely
+ // on the catalog object key: profile is the stable cross-layer identity.
+ const byProfile=new Map(Object.values(catalog).filter(a=>a?.profile).map(a=>[a.profile,a]));
+ const members=[...new Map(candidates.map(t=>{const a=byProfile.get(t.profile);if(!a?.systemAssistant||bindings[a.profile]!==a.projectId||t.projectId!==a.projectId||a.allowedChatIds&&!a.allowedChatIds.includes(current.chatId))return null;return[a.profile,{profile:a.profile,projectId:a.projectId,name:a.displayName??a.projectId}];}).filter(Boolean)).values()];
  if(members.length<2||!members.some(m=>m.profile===current.profile))return null;
  return{version:2,messageId:current.messageId,chatId:current.chatId,members,policy:'same-message-split-by-system',detectedBy:'accepted-assistant-events',grantsShared:false};
 }

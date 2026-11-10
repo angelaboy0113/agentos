@@ -134,6 +134,9 @@ test('one human message mentioning two bots creates two isolated duties and retr
 
 test('consumer-local mention projections merge by trusted accepted message before either job is planned',async t=>{
   const {app,input,event}=await fixture(t,()=>({action:'create_task',intent:'analysis',instruction:'仅核实本系统贡献',sourceEnvironment:'prd'}),scoped=>{scoped.humanIdentities={groupOwner:{a:'admin-a',b:'admin-b'}};});
+  // Match production: catalog keys are project names, not bot profiles.
+  // The event/profile binding must therefore resolve by the agent.profile field.
+  app.agents.agents={alphaProject:structuredClone(agents.a),betaProject:structuredClone(agents.b)};
   const base={mentions:[],content:'@A @B summarize both systems'};
   await Promise.all(['a','b'].map(profile=>handleLarkCliEvent(app,event(profile,'projected-joint-message',{...base,sender_id:`admin-${profile}`,mentions:[{id:`bot-${profile}`}]}))));
   await app.conversations.idle();
