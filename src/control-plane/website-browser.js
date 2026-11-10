@@ -2,7 +2,7 @@ import {websiteFrames,websiteDOM,assertWebsiteFrame} from './website-frames.js';
 import {readWebsiteAsset} from './website-assets.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
-import {websiteControls,controlMetadata,websiteFields} from '../shared/website-controls.js';
+import {websiteControls,controlMetadata,controlMetadataBatch,websiteFields} from '../shared/website-controls.js';
 import {pageDiagnostic,websiteDiagnostics} from '../shared/website-diagnostics.js';
 export {controlMetadata} from '../shared/website-controls.js';
 import {waitForCaptureReady,screenshotSecretSelector} from '../shared/website-capture.js';
@@ -206,6 +206,7 @@ export class WebsiteBrowser {
    if(ref.type!=='inspect'||current.kind!=='menu-trigger')throw new BrowserInputError('BROWSER_CONTROL_TYPE','只能悬停当前快照登记的菜单触发器；不点击未知操作。');
    await ref.el.hover({timeout:8000});return this.snapshot(s);
   }
+  if(ref.type==='inspect')throw new BrowserInputError('BROWSER_CONTROL_TYPE','该引用只允许检查或悬停，不能点击、输入或按键执行。');
   const expected={browser_search:'search',browser_select:'select',browser_click:'read-action'}[tool];
   if(!['browser_key','browser_scroll'].includes(tool)&&ref.type!==expected&&!(tool==='browser_click'&&ref.type==='search'))throw new BrowserInputError('BROWSER_CONTROL_TYPE','当前引用不是该工具对应的控件；菜单和详情用browser_click，输入框用browser_search，原生下拉框用browser_select。');
   try{
@@ -234,9 +235,10 @@ export class WebsiteBrowser {
   await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;
   const text=await websiteDOM(s).locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden],[data-sensitive],[data-agentos-secret]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
   const handles=await websiteDOM(s).locator([websiteControls,...(s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[])].join(',')).filter({visible:true}).elementHandles();
+  const metadata=await websiteDOM(s).evaluate(controlMetadataBatch,{elements:handles,limit:300,options:{readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}});
   const controls=[];
   for(const [i,el]of handles.entries()){
-   const info=controls.length<300?await el.evaluate(controlMetadata,{readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}).catch(()=>null):null;
+   const info=controls.length<300?metadata[i]:null;
    if(!info?.type||info.blocked){await el.dispose();continue;}
    const label=cleanWebsiteText(info.label).slice(0,100),ref=`${s.refPrefix}-${s.generation}-${i}`;
    s.refs.set(ref,{el,type:info.type,rawLabel:info.label});controls.push({ref,type:info.type,label,kind:info.kind,...(info.options?{options:info.options}:{})});
