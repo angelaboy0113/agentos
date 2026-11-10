@@ -1741,3 +1741,6 @@ Mongo reviewed 查询可配置 requiredFilters，管理员条件在本机和SSH�
 
 补齐 RestCloud GET 配置定义、响应样例及关联附件列表的 typed objectId 示例。复用现有校验，不再逐条记录加白名单；同源、系统环境、方法及写入边界保留。新增多 ID 与误用路径回归；实际部署、原题结果和未验证范围以本机记录为准。
 
+## 1.96.2 External evidence boundaries
+
+Clarify confirmed connected-system findings and unavailable external-system implementation or mapping evidence. Reuse existing credentials; accept authoritative interface documentation rather than requiring source code. This is shared role guidance, not new permissions or guaranteed external access.
