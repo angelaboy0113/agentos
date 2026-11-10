@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import { mkdir, copyFile, readFile, mkdtemp, rm }  from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import {stat} from 'node:fs/promises';
 
 export function resolveLarkCliEntry(explicit = '', executable = process.execPath) {
@@ -101,15 +100,23 @@ export class LarkCliFeishuClient {
 
   async cloudRequest(route,params={},options={}){
     if(!cloudReadRoute(route)||!options.profile)throw new Error('Invalid cloud read scope');
+    await mkdir(this.cwd,{recursive:true,mode:0o700});
     const result=await runLarkCli(['api','GET',route,'--as','bot','--params',JSON.stringify(params),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
     if(!result.data||typeof result.data!=='object')throw new Error('Invalid cloud read response');return result.data;
   }
   async cloudDownload(fileToken,options={}){
     if(!/^[A-Za-z0-9]+$/.test(fileToken??'')||!options.profile)throw new Error('Invalid cloud file scope');
-    const directory=await mkdtemp(path.join(os.tmpdir(),'agentos-cloud-download-'));
+    await mkdir(this.cwd,{recursive:true,mode:0o700});
+    const directory=await mkdtemp(path.join(this.cwd,'cloud-download-'));
     const output=path.join(directory,'source.download');
     try{
-      await runLarkCli(['drive','+download','--as','bot','--file-token',fileToken,'--output',output,'--overwrite','--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:120000});
+      try{
+        await runLarkCli(['drive','+download','--as','bot','--file-token',fileToken,'--output',output,'--overwrite','--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:120000});
+      }catch(error){
+        const message=String(error?.message??'');
+        if(!/current identity does not have export permission|Direct Drive download is unavailable|"subtype"\s*:\s*"permission_denied"/i.test(message))throw error;
+        await runLarkCli(['drive','+preview','--as','bot','--file-token',fileToken,'--type','source_file','--output',output,'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:120000});
+      }
       return await readFile(output);
     }finally{await rm(directory,{recursive:true,force:true});}
   }

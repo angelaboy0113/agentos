@@ -51,7 +51,7 @@ export async function readCloudSheet(client,job,environment,tool,args={}){
   }
   if(tool!=='read_cloud_document'||Object.keys(args).length)throw new CloudSheetError('CLOUD_DOCUMENT_INPUT','当前节点不是电子表格；请使用 read_cloud_document，不要尝试网页登录或表格接口。');
   if(documentType==='file'){
-   let bytes;try{bytes=await client.cloudDownload(token,{profile:job.originProfile});}catch(error){const message=String(error.message??'');const scope=/app_scope_not_applied|99991672|99991679|permission denied|HTTP 403/i.test(message);throw new CloudSheetError(scope?'CLOUD_DOCUMENT_SCOPE':'CLOUD_DOCUMENT_ACCESS',scope?'机器人应用缺少云空间文件只读/下载权限；请维护者为当前机器人申请 drive:drive:readonly。不是个人会话问题。':'当前机器人无法下载该文件；请确认文件已共享给对应机器人，且文件没有被删除或限制下载。');}
+   let bytes;try{bytes=await client.cloudDownload(token,{profile:job.originProfile});}catch(error){const message=String(error.message??'');const scope=/app_scope_not_applied|99991672|99991679/i.test(message);throw new CloudSheetError(scope?'CLOUD_DOCUMENT_SCOPE':'CLOUD_DOCUMENT_ACCESS',scope?'机器人应用缺少云空间文件只读/下载权限；请维护者为当前机器人申请 drive:drive:readonly。不是个人会话问题。':'当前机器人无法读取该文件；请确认文件已共享给对应机器人，且文件没有被删除或同时限制下载与预览。');}
    const parsed=await parseUploadedCloudFile(title,bytes);
    return {nativeDocument:true,documentType,title,readAt:new Date().toISOString(),identity:'originating_bot',fileToken:token,fileBytes:bytes,contentType:parsed.contentType,extension:parsed.extension,content:parsed.content,structure:parsed.structure,note:'内容来自原机器人通过飞书原生文件接口下载的同一文件；原始字节将按当前任务、系统、环境和机器人身份登记，未使用个人网页登录。'};
   }
