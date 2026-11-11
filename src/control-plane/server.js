@@ -241,7 +241,7 @@ async function route(context) {
     return json(response, 200, { ok: true, adminUsageExports:context.adminUsageExports??0, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
-      investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {configured:Boolean(context.backupMaintenance.file),lastRun:context.backupMaintenance.lastRun},
+      investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {enabled:context.backupMaintenance.enabled??false,lastRun:context.backupMaintenance.lastRun},
       controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,

@@ -25,18 +25,19 @@ export class BackupMaintenance {
  }
  async tick({force=false,apply=true}={}){
   if(this.closed||this.running||!this.file)return {deferred:true};
-  this.running=this.run({force,apply}).catch(e=>{this.lastRun={at:this.now().toISOString(),ok:false,deferred:Boolean(e.deferred),code:e.deferred?'MAINTENANCE_BUSY':'MAINTENANCE_FAILED'};return this.lastRun;});
+  this.runDir=null;
+  this.running=this.run({force,apply}).catch(async e=>{this.lastRun={at:this.now().toISOString(),ok:false,...e.partial,deferred:Boolean(e.deferred),code:/^MAINTENANCE_[A-Z_]+$/.test(e.message)?e.message:'MAINTENANCE_FAILED'};if(this.runDir)await atomicJson(path.join(this.runDir,'result.json'),this.lastRun);return this.lastRun;});
   try{return await this.running;}finally{this.running=null;this.referenceState=null;this.referenceChecks=null;}
  }
  async run({force,apply}){
-  let raw;try{raw=await fs.readFile(this.file);}catch(e){if(e.code==='ENOENT')return {enabled:false};throw e;}
-  const c=validateRegistry(JSON.parse(raw),this.runtime);this.config=c;if(!c.enabled)return {enabled:false};
+  let raw;try{raw=await fs.readFile(this.file);}catch(e){if(e.code==='ENOENT'){this.enabled=false;return {enabled:false};}throw e;}
+  const c=validateRegistry(JSON.parse(raw),this.runtime);this.config=c;this.enabled=c.enabled;if(!c.enabled)return {enabled:false};
   const folder=path.join(this.runtime,'maintenance-backups');await fs.mkdir(folder,{recursive:true,mode:0o700});const statusFile=path.join(folder,'status.json');let old={};try{old=JSON.parse(await fs.readFile(statusFile));}catch(e){if(e.code!=='ENOENT')throw e;}
   const day=dueKey(c,this.now()),release=c.acceptedRelease?.version===VERSION?c.acceptedRelease?.id:null;
   if(!force&&(!day||old.day===day)&&(!release||old.release===release))return {due:false};
   if(!await this.gate())return this.lastRun={at:this.now().toISOString(),ok:true,deferred:true,code:'MAINTENANCE_BUSY'};
   const runDir=path.join(c.managedRoot,'backup-maintenance-runs',this.now().toISOString().replace(/[:.]/g,'-'));
-  await fs.mkdir(runDir,{recursive:true,mode:0o700});
+  this.runDir=runDir;await fs.mkdir(runDir,{recursive:true,mode:0o700});
   const hash=createHash('sha256').update(raw).digest('hex');
   const gate=async(item,remove)=>{if(createHash('sha256').update(await fs.readFile(this.file)).digest('hex')!==hash)return false;return this.gate(item,remove);};
   const result=await compactBackups(c,{runtime:this.runtime,audit:runDir,gate,openCheck:this.openCheck,apply});

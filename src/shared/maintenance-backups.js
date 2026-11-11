@@ -48,7 +48,7 @@ export function maintenanceBusy(state,context={}){
  if((state.jobs??[]).some(j=>['queued','running','cancelling'].includes(j.status))||(state.conversations??[]).some(c=>['queued','thinking','decided','ready'].includes(c.status)))return true;
  if(context.reception?.running||context.controlReceipts?.pending?.size||(typeof context.adminUsageExports==='number'?context.adminUsageExports:context.adminUsageExports?.size))return true;
  if(['cards','reports','websiteEvidence','successStickers'].some(k=>context[k]?.workers?.size))return true;
- const inert=(group,key,value)=>context.maintenanceInert?.[group]?.[key]===sha(JSON.stringify(value));
+ const inert=(group,key,value)=>{const expected=context.maintenanceInert?.[group]?.[key];return typeof expected==='string'&&expected===sha(JSON.stringify(value));};
  if(Object.entries(state.receptionInbox??{}).some(([key,e])=>!inert('receptionInbox',key,e)&&['queued','reminding','diagnosing'].includes(e.status))||Object.entries(state.recoveryEvents??{}).some(([key,e])=>!inert('recoveryEvents',key,e)&&['queued','diagnosing'].includes(e.status)))return true;
  if(Object.entries(state.cardMessages??{}).some(([key,c])=>!inert('cardMessages',key,c)&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered)))return true;
  for(const k of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries'])if(Object.values(state[k]??{}).some(d=>!d.superseded&&!d.deliveredAt&&(!d.messageId||d.parts?.some(p=>!p.messageId))))return true;
@@ -66,7 +66,7 @@ await safePath(audit,c.managedRoot);
  const anchors=[];
  for(const p of protectedPaths)for(const kind of ['exports','control-receipts']){const base=path.join(data.get(p),kind);try{await safePath(base,c.managedRoot);anchors.push({base,kind,checkpoint:p});}catch(e){if(e.code!=='ENOENT')throw e;}}
  const index=new Map();let steps=0;
- const check=async()=>{if(!await gate())throw Object.assign(Error('MAINTENANCE_BUSY'),{deferred:true});};
+ const check=async()=>{if(!await gate())throw Object.assign(Error('MAINTENANCE_BUSY'),{deferred:true,partial:{...result}});};
  const pulse=async()=>{if(++steps%100===0)await check();};await check();
  const eligible=c.candidates.filter(x=>!protectedPaths.has(x.checkpoint));
  for(const a of eligible.length?anchors:[])for await(const f of files(a.base)){await pulse();const s=await fs.lstat(f);const key=[a.kind,path.relative(a.base,f),s.size].join('\0');if(!index.has(key))index.set(key,[]);index.get(key).push({file:f,checkpoint:a.checkpoint});}
