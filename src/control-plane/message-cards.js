@@ -66,7 +66,7 @@ export function conversationCard(turn, now = Date.now()) {
   const state = final ? (failed ? '未执行' : turn.setupCancelled ? '已停止接入' : turn.setupPending ? ({requested:'等待确认接入',scope_required:'登录成功 · 等待范围选择',opening:'正在启动登录',login_required:turn.setupLoginIssue?'登录尚未通过认证':turn.setupHasCredentials?'自动登录中 · 尚未确认成功':'等待提供登录凭据',awaiting_tls_confirmation:'等待确认连接保护'}[turn.setupStatus] ?? '等待补齐接入') : clarification ? '待补充信息 · 问题尚未完成' : '已回复') : turn.status === 'queued' ? '排队中'
     : turn.connectionWillRetry ? '连接重试中' : '正在处理';
   const color = failed ? 'red' : turn.setupPending||final&&clarification ? 'orange' : final ? 'green' : 'blue';
-  const content = final ? '' : turn.status === 'queued' ? '等待同一会话前面的消息处理完成。'
+  const content = final ? '' : turn.status === 'queued' ? '问题已收到，正在等待可用处理位置；排到后会自动继续，无需重复提问。'
     : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
@@ -106,7 +106,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   const operation = job.status === 'cancelling' ? (job.cancellationError ?? (job.cancelReason?.includes('租约过期')?'执行器失联，任务已暂停；需确认原进程退出后收尾，未自动重跑。':null) ?? '已请求停止，等待执行器确认进程退出；已有文件修改将保留。')
     : phase === 'verification' ? '正在运行项目验证命令' : phase === 'connection_retry' ? '连接异常，Codex 正在重试'
       : phase === 'model_capacity_retry' ? '当前模型服务繁忙，正在同一调查会话中自动重试'
-    : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '开发已接单，等待 Runner 进行只读调查。' : '已接单，等待 Runner 执行。')
+    : job.status === 'queued' ? (job.taskIntent === 'analysis' && job.stage === 'developer' ? '已接单，正在等待可用调查位置；排到后自动开始，无需重复提问。' : '已接单，等待 Runner 执行。')
     : activity?.current ?? 'Codex 正在准备 / 处理任务';
   const summary = expired ? '本次查询申请已过期，尚未访问环境。点击“重新申请本次查询”后，核对原范围并再次批准；不会自动执行。' : job.status === 'cancelled' ? '任务已取消，已停止继续执行。' : !active && job.result?.finalMessage
     ? job.taskIntent === 'analysis' ? '' : resultSummary(job.result.summary || job.result.finalMessage) : '';

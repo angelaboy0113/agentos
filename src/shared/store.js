@@ -555,7 +555,8 @@ export class JsonStore {
   }
 
   async leaseWork(capabilities=[]){const snapshot=await this.snapshot(),now=Date.now();return snapshot.jobs.some(j=>j.status==='queued'&&(capabilities.length===0||capabilities.includes(j.stage)))||snapshot.jobs.some(j=>j.status==='running'&&j.lease&&Date.parse(j.lease.expiresAt)<=now);}
-  async leaseNext(runnerId, capabilities = [], leaseSeconds = 120) {
+  async leaseNext(runnerId, capabilities = [], leaseSeconds = 120, {maxRunning} = {}) {
+    if(maxRunning!==undefined&&(!Number.isInteger(maxRunning)||maxRunning<1||maxRunning>8))throw Error("Invalid global Runner concurrency");
     if(!await this.leaseWork(capabilities))return null;
 
     return this.transact((state) => {
@@ -567,6 +568,7 @@ export class JsonStore {
           job.cancelReason = '执行器租约过期，等待原执行器确认退出；不自动重复执行。';
         }
       }
+      if(maxRunning!==undefined&&state.jobs.filter(j=>['running','cancelling'].includes(j.status)).length>=maxRunning)return null;
       const job = state.jobs.find((candidate) => candidate.status === 'queued' &&
         !state.jobs.some((other) => other.status === 'cancelling' && other.projectId === candidate.projectId) &&
         (capabilities.length === 0 || capabilities.includes(candidate.stage)));

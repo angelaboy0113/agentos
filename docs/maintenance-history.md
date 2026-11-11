@@ -1,3 +1,7 @@
+# 1.103.0 — configurable main heap and pressure-aware durable admission
+
+6 GiB independent main-process startup default; child worker heap flags remain isolated. Shared heap/tree-RSS hysteresis delays new turns/leases, preserves active work and result delivery, with factual scoped queue receipts. See memory-admission.md for configuration, tests, observability and platform boundaries.
+
 ## 2026-11-11 · AgentOS 1.98.2 · 结束后源码回收引用投影
 
 - 任务完成与启动时的源码缓存回收不再对每个候选复制全部任务结果，只选出忙闲和完整引用路径；删除前仍在双重锁中复核最新全状态。

@@ -224,3 +224,6 @@ Nacos 的审核运行配置投影见[配置投影](config-projection.md)：精�
 CNB build history has a separate scoped `cnb` environment provider. The runner validates exact repository/tier configuration and uses only the official history GET, projects safe metadata and persists scoped evidence. This removes browser authentication/CDN dependencies for supported history, without granting trigger/deploy or raw-log access. See [CNB history](cnb-history.md).
 
 环境执行器跨来源接续复用同任务的已存工具结果。ToolResultStore 的可信 prior authorizer 来自执行器而非模型参数，按 job context 引用、现配置指纹、同项目/tier 筛选；列表与分段读都保留来源并复核，避免 TSF→源码→CNB 循环搬运摘要。平台固定只读工具加入现有批量执行计划，每项授权和失败边界不变。
+
+
+Memory headroom and durable overload waiting: see [memory-admission.md](memory-admission.md). Independent launcher mainHeapMiB defaults to 6144; existing Runner/intake concurrency is unchanged. New work waits under memory pressure; active work is not terminated.

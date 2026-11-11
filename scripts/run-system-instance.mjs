@@ -1,3 +1,4 @@
+import {mainHeapMiB} from './instance-memory.mjs';
 import { readFile, realpath, mkdir, access } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ const mode = process.argv[2] ?? '--check';
 if (!['--check', '--start'].includes(mode)) throw new Error('Use --check or --start');
 if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('请用 Node 22 启动独立实例');
 const instance = JSON.parse(await readFile(path.join(runtime, 'instance.local.json'), 'utf8'));
+mainHeapMiB(instance);
 const branch = execFileSync('git', ['-C', program, 'branch', '--show-current'], { encoding: 'utf8' }).trim();
 if (branch !== instance.branch) throw new Error('当前分支不属于本实例，拒绝启动');
 if (!Number.isInteger(instance.port) || instance.port < 1024 || instance.port > 65535 || (instance.protectedPorts ?? []).includes(instance.port)) throw new Error('实例端口无效或与受保护实例冲突');
@@ -46,6 +48,7 @@ Object.assign(process.env, {
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),
   AGENTOS_DATA_DIR: path.join(runtime, 'data'), AGENTOS_RUNNER_WORKTREE_ROOT: path.join(runtime, 'data', 'worktrees'),
   AGENTOS_CREDENTIAL_VAULT_DIR: path.join(runtime, 'secure', 'credential-vault'),
+  ...(instance.memoryAdmissionMiB!==undefined?{AGENTOS_MEMORY_ADMISSION_MIB:String(instance.memoryAdmissionMiB)}:{}),
   AGENTOS_BROWSER_MODE: 'isolated', AGENTOS_RUNNER_CONCURRENCY: String(instance.concurrency ?? 3),
   LARKSUITE_CLI_CONFIG_DIR: path.dirname(authFile), AGENTOS_LARK_CONFIG_FILE: authFile,
   AGENTOS_EVENT_CONFIG_ROOT: path.join(runtime, 'cli'),

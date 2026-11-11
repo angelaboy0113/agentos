@@ -178,6 +178,7 @@ export class ConversationService {
       }
       for (const [key, turn] of heads) {
         if (this.workers.size >= this.concurrency) break;
+        if(turn.status==='queued'&&this.context.memoryAdmission?.check().allowed===false)continue;
         if (this.workers.has(key) || (turn.retryAt && Date.parse(turn.retryAt) > Date.now())) continue;
         const worker = this.process(key).catch((error) => console.error('[conversation-worker]', error.message))
           .finally(() => this.workers.delete(key));
@@ -191,7 +192,12 @@ export class ConversationService {
   }
 
   scheduleFeedback(turn) {
-    if(this.context.reception?.enabled&&!turn.directoryChannel)return; // No speculative progress card before social/business intent is known.
+    if(this.context.reception?.enabled&&!turn.directoryChannel){
+      // Receipt only: do not create a speculative social/business card.
+      if(turn.status==='queued'&&!turn.queueNotice?.messageId&&(this.workers.size>=this.concurrency||this.context.memoryAdmission?.check().allowed===false)&&!this.feedback.has(turn.id)){
+        const entry={};entry.timer=setTimeout(()=>{entry.running=(this.queueReceipts??Promise.resolve()).catch(()=>{}).then(()=>this.sendQueueReceipt(turn.id));this.queueReceipts=entry.running.catch(()=>{});entry.running.catch(()=>{});},Math.max(0,this.feedbackMs-(Date.now()-Date.parse(turn.createdAt))));entry.timer.unref();this.feedback.set(turn.id,entry);
+      }return;
+    }
     if (this.feedback.has(turn.id) || (!this.context.cards?.enabled && turn.feedbackState) || !(['queued','thinking'].includes(turn.status)||turn.status==='decided'&&turn.decision?.action==='lookup_contact')) return;
     const entry = {};
     const publish=()=>{
@@ -207,6 +213,26 @@ export class ConversationService {
     }, Math.max(0, this.feedbackMs - (Date.now() - Date.parse(turn.createdAt))));
     entry.timer.unref();
     this.feedback.set(turn.id, entry);
+  }
+
+  sendQueueReceipt(id){
+    this.queueReceiptWork??=new Map();
+    if(this.queueReceiptWork.has(id))return this.queueReceiptWork.get(id);
+    const work=this.deliverQueueReceipt(id).finally(()=>this.queueReceiptWork.delete(id));
+    this.queueReceiptWork.set(id,work);return work;
+  }
+
+  async deliverQueueReceipt(id){
+    if(this.stopped)return;
+    const turn=await stateView(this.context.store,s=>s.conversations.find(t=>t.id===id));
+    if(!turn||turn.status!=='queued'||turn.queueNotice?.messageId)return;
+    const key='queue-'+id;
+    await this.update(id,{queueNotice:{idempotencyKey:key,status:'sending'}});
+    try{
+      const r=await this.context.feishu.reply(turn.messageId,'已收到，正在等待可用处理位置；轮到后会自动继续，无需重复提问。',{profile:turn.profile,replyInThread:turn.replyInThread,idempotencyKey:key,timeoutMs:8000});
+      const messageId=responseMessageId(r);if(!messageId)throw Error('Missing queue receipt');
+      await this.update(id,{queueNotice:{idempotencyKey:key,status:'sent',messageId}});
+    }finally{this.feedback.delete(id);}
   }
 
   async sendFeedback(id) {
@@ -240,6 +266,7 @@ export class ConversationService {
       const turn = await stateView(this.context.store,state=>(state.conversations ?? []).find((item) => this.key(item) === key && ['queued', 'decided', 'ready'].includes(item.status)));
       if (!turn || (turn.retryAt && Date.parse(turn.retryAt) > Date.now())) return;
       if (turn.status === 'queued') {
+        if(this.context.memoryAdmission?.check().allowed===false)return;
         if(!turn.coordinationCoalesced&&turn.chatType==='group'&&turn.visibility!=='requester'&&this.context.agents?.agents?.[turn.profile]?.systemAssistant){
           const remaining=Math.max(0,this.jointInquiryCoalesceMs-(Date.now()-Date.parse(turn.createdAt)));
           if(remaining)await new Promise(resolve=>setTimeout(resolve,remaining));

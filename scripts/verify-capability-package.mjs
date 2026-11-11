@@ -13,6 +13,7 @@ required.unshift('config/website-login-preferences.example.json');
 required.unshift('test/instance-vault-start.test.js');
 required.unshift('src/shared/maintenance-backups.js','src/control-plane/maintenance-backups.js','scripts/maintenance-backups.mjs','config/maintenance-cleanup.example.json','test/maintenance-backups.test.js','docs/maintenance-backups.md');
 required.unshift('src/shared/state-draft.js','src/shared/state-encoding.js','src/shared/state-view.js','test/state-draft.test.js','test/empty-memory-exit.test.js','docs/state-memory.md');
+required.unshift('src/shared/memory-admission.js','scripts/instance-memory.mjs','test/memory-admission.test.js','docs/memory-admission.md','config/instance-memory.example.json');
 for(const name of required){const info=await lstat(path.join(root,name));if(!info.isFile()||info.isSymbolicLink())throw new Error('Missing/unsafe package member: '+name);}
 for(const name of ['config/multi-repository-project.example.json','config/capabilities.example.json','config/task-result.schema.json','package.json','package-lock.json'])JSON.parse(await readFile(path.join(root,name),'utf8'));
 const pkg=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')),lock=JSON.parse(await readFile(path.join(root,'package-lock.json'),'utf8'));

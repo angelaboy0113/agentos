@@ -1,6 +1,6 @@
 # 状态存储、内存与执行检查点
 
-适用于1.98.2。无需新增私有配置、权限或依赖，不增加整项任务时间、轮次或调用次数上限，任务/对话并发保持部署配置。
+适用于1.103.0。原状态存储格式不变；主进程堆和内存准入的可选配置见 memory-admission.md。无需新增权限或依赖，不增加整项任务时间、轮次或调用次数上限，任务/对话并发保持部署配置。
 
 ## 数据路径
 
@@ -35,3 +35,6 @@
 遵循实例空闲守卫；停稳唯一服务完整进程树，备份data/config/secure，校验包和原数据保持后启动，验收所有消费者及health。状态格式未变，整包保留原data、数据集、文件和配置/加密凭据；新增模块随代码包核验。
 
 回退前同样自然空闲并备份最新状态，使用专用分支revert验证发布，不回灌旧agentos.json。已自动排队的检查点应待其结束或由兼容版本接续，不让旧代码复用已撤销授权。macOS为当前维护平台，其它OS及完整跨机路径需在目标平台另验；外部飞书手册按团队实际入口同步，缺入口不能声称已同步。
+
+
+Memory headroom and durable overload waiting: see [memory-admission.md](memory-admission.md). Independent launcher mainHeapMiB defaults to 6144; existing Runner/intake concurrency is unchanged. New work waits under memory pressure; active work is not terminated.

@@ -1,3 +1,4 @@
+import {MemoryAdmission} from '../shared/memory-admission.js';
 import {getHeapStatistics} from 'node:v8';
 import {stateView,questionStateView} from '../shared/state-view.js';
 import {ReceptionService} from './reception.js';
@@ -78,6 +79,9 @@ export async function createControlPlane(overrides = {}) {
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
     websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
+  context.runnerConcurrency=overrides.runnerConcurrency??Number(process.env.AGENTOS_RUNNER_CONCURRENCY??3);
+  if(!Number.isInteger(context.runnerConcurrency)||context.runnerConcurrency<1||context.runnerConcurrency>8)throw Error('Invalid global Runner concurrency');
+  context.memoryAdmission=overrides.memoryAdmission??new MemoryAdmission(process.env.AGENTOS_MEMORY_ADMISSION_MIB?{treeBudgetMiB:Number(process.env.AGENTOS_MEMORY_ADMISSION_MIB)}:{});
   context.controlReceipts=new ControlReceipts(store);
   context.contacts = overrides.contactService ?? new ContactDirectory(context, { file: config.contactsFile });
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
@@ -119,6 +123,7 @@ export async function createControlPlane(overrides = {}) {
   });
 
   server.once('listening', () => {
+    context.memoryAdmission.start?.();
     context.capacityRecoveryStopped=false;
     context.capacityRecoveryTimer=setInterval(()=>pollModelCapacity(context).catch(()=>console.error('[capacity-recovery] recovery deferred')),1000);context.capacityRecoveryTimer.unref();
     context.retention.start();context.backupMaintenance.start();
@@ -130,6 +135,7 @@ export async function createControlPlane(overrides = {}) {
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
   server.once('close', () => {
+    context.memoryAdmission.stop?.();
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
     void Promise.allSettled([context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
@@ -190,7 +196,7 @@ async function route(context) {
     requireAdminSession(context, request, false);
     const runtime = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
     return json(response, 200, { ok: true, overview: await stateView(store,s=>adminOverview(s,
-      { ...runtime, runnerConcurrency: Number(process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3) })) }, { 'cache-control': 'no-store' });
+      { ...runtime, runnerConcurrency: context.runnerConcurrency })) }, { 'cache-control': 'no-store' });
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/records') {
     requireAdminSession(context, request, false);
@@ -241,11 +247,11 @@ async function route(context) {
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {enabled:context.backupMaintenance.enabled??false,lastRun:context.backupMaintenance.lastRun},
-      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'lazy-json-transaction-v2', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal,heapLimitBytes:getHeapStatistics().heap_size_limit,externalBytes:process.memoryUsage().external,arrayBuffersBytes:process.memoryUsage().arrayBuffers}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
+      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'lazy-json-transaction-v2', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,memoryAdmission:context.memoryAdmission.check(),processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal,heapLimitBytes:getHeapStatistics().heap_size_limit,externalBytes:process.memoryUsage().external,arrayBuffersBytes:process.memoryUsage().arrayBuffers}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
-      analysisWorkflow: 'continuous-developer-tools-v2', runnerConcurrency: Number(process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3), sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1', analysisSnapshotPolicy: 'isolated-environment-source-v1',
+      analysisWorkflow: 'continuous-developer-tools-v2', runnerConcurrency: context.runnerConcurrency, sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1', analysisSnapshotPolicy: 'isolated-environment-source-v1',
       resultPresentation: 'analysis-adaptive-tables-v4', identityPolicy: 'profile-linked-human-v1',
       executionPolicy: 'admin-write-members-analysis-v1', harnessPolicy: 'standard-handoff-v1', now: new Date().toISOString() });
   }
@@ -320,8 +326,9 @@ async function route(context) {
   if (request.method === 'POST' && url.pathname === '/api/v1/jobs/lease') {
     requireBearer(request, config.runnerToken, 'runner');
     const body = await readJson(request);
+    if(!context.memoryAdmission.check().allowed)return json(response,200,{ok:true,job:null,waiting:'memory_pressure'});
     if(!await store.leaseWork(body.capabilities??[]))return json(response,200,{ok:true,job:null});
-    const result=await commitControl(context,async()=>({ok:true,job:await store.leaseNext(body.runnerId,body.capabilities??[])}));
+    const result=await commitControl(context,async()=>({ok:true,job:await store.leaseNext(body.runnerId,body.capabilities??[],120,{maxRunning:context.runnerConcurrency})}));
     return json(response,200,result);
   }
 

@@ -7,4 +7,5 @@ for candidate in "$(command -v node || true)" "$HOME"/.nvm/versions/node/v22*/bi
   if [ "$("$candidate" -p 'process.versions.node.split(".")[0]')" = 22 ]; then TASK_NODE_BIN=$candidate; break; fi
 done
 if [ -z "$TASK_NODE_BIN" ]; then echo '请先安装 Node 22'; exit 1; fi
-exec "$TASK_NODE_BIN" "$SCRIPT_DIR/run-system-instance.mjs" "${1:---check}"
+TASK_MAIN_HEAP_MIB=$("$TASK_NODE_BIN" "$SCRIPT_DIR/instance-memory.mjs")
+exec "$TASK_NODE_BIN" --max-old-space-size="$TASK_MAIN_HEAP_MIB" "$SCRIPT_DIR/run-system-instance.mjs" "${1:---check}"
