@@ -36,13 +36,18 @@ export async function createCnbTools(e,q,cred,adapters={}){
   // One response page is bounded; complete history uses nextPage, not a total-call cap.
   const chunks=[];let length=0;const reader=response.body.getReader();try{for(;;){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>8*1024*1024)throw fail('CNB_RESPONSE','CNB单页响应过大，请减小limit后继续；不是整项任务截止');chunks.push(value);}}finally{await reader.cancel();}
   let result;try{result=JSON.parse(Buffer.concat(chunks).toString('utf8'),(_k,v,c)=>typeof v==='number'&&Number.isInteger(v)&&!Number.isSafeInteger(v)?c.source:v);}catch(error){if(error.code)throw error;throw fail('CNB_RESPONSE','CNB流水线响应不是可核验的JSON');}
+  // The deployed API emits decimal strings although its OpenAPI says integer.
+  // Convert only a canonical nonnegative value within the safe integer range.
+  const total=typeof result?.total==='string'&&/^(?:0|[1-9][0-9]*)$/.test(result.total)&&BigInt(result.total)<=BigInt(Number.MAX_SAFE_INTEGER)?Number(result.total):result?.total;
+  const capped=result?.totalCapped===true;
   const offset=(page-1)*limit;
-  if(!Array.isArray(result?.data)||result.data.length>limit||!Number.isSafeInteger(result.total)||result.total<0||result.data.length&&result.total<offset+result.data.length||!result.data.length&&offset<result.total)throw fail('CNB_PAGINATION','CNB分页缺失或总数不一致；不将缺页当作空结果');
+  if(!Array.isArray(result?.data)||result.data.length>limit||!Number.isSafeInteger(total)||total<0||result.totalCapped!==undefined&&typeof result.totalCapped!=='boolean'||!capped&&result.data.length&&total<offset+result.data.length||result.data.length<limit&&offset+result.data.length<total)throw fail('CNB_PAGINATION','CNB分页缺失或总数不一致；不将缺页当作空结果');
   const rows=result.data.map(row=>{
    if(!row||row.slug!==repo||typeof row.sn!=='string'||!/^cnb-[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(row.sn)||args.sn&&row.sn!==args.sn)throw fail('CNB_SCOPE','流水线返回了不一致的仓库或构建号');
    return Object.fromEntries(keys.filter(k=>row[k]!==undefined&&['string','number','boolean'].includes(typeof row[k])).map(k=>[k,safe(row[k])]));
   });
-  return{repository:repo,rows,total:result.total,page,pageSize:limit,nextPage:offset+rows.length<result.total?page+1:null,complete:offset+rows.length>=result.total,fetchedAt:new Date().toISOString(),resultHash:createHash('sha256').update(JSON.stringify(rows)).digest('hex'),snapshot:'逐次读取，非事务快照',evidenceType:'build-history',note:'createTime是构建开始时间，success是流水线结果；不单独证明所有服务当前运行版本或实际上线完成时间。未读取原始日志、变量、脚本或凭据。'};
+  const complete=capped?rows.length<limit:offset+rows.length>=total;
+  return{repository:repo,rows,total,totalIsLowerBound:capped,page,pageSize:limit,nextPage:complete?null:page+1,complete,fetchedAt:new Date().toISOString(),resultHash:createHash('sha256').update(JSON.stringify(rows)).digest('hex'),snapshot:'逐次读取，非事务快照',evidenceType:'build-history',note:'createTime是构建开始时间，success是流水线结果；不单独证明所有服务当前运行版本或实际上线完成时间。未读取原始日志、变量、脚本或凭据。'};
  }
  const spec=[{tool:'connection',args:{repository:'optional exact configured repository; default first configured repository'},description:'Verify the build-history read token by reading one history record. No browser login; no trigger or deployment.'},{tool:'build_repositories',args:{},description:'List configured repository scope only, not live discovery or proof of platform access.'},{tool:'build_history',args:{repository:'exact configured repository',page:'1 or nextPage',limit:'page size',...Object.fromEntries(filters.map(k=>[k,'optional exact official history filter']))},description:'Read current CNB build history and source/target branch, SHA, event, status and start time. Follow nextPage for full coverage. A successful pipeline is not proof of current runtime deployment; commits and build start times are not deployment completion times. No raw logs, secrets or writes.'}];
  return{spec,async run(tool,args={}){
