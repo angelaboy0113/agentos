@@ -36,6 +36,7 @@ const rules = [
  ['TSF_AUTH', /TSF_AUTH|TSF_LOGIN_PROTOCOL/, 'TSF authentication', 'TSF login or session verification incomplete; no deployment executed.', 'Reuse saved encrypted credential; captcha/MFA requires normal verification.'],
  ['TSF_SCOPE', /TSF_SCOPE|TSF_ORIGIN|TSF_CLOSED/, 'TSF scope verification', 'Application/group/namespace outside current authorized scope or changed.', 'Keep original project/environment and verify configured group ownership.'],
  ['TSF_RESPONSE', /TSF_RESPONSE|TSF_PAGINATION/, 'TSF read completeness', 'Cloud response/page incomplete; missing data is not an empty deployment history.', 'Retain evidence and resume missing read pages.'],
+ ['TSF_RATE_LIMIT', /TSF_RATE_LIMIT/, 'TSF metadata throttled', 'Platform throttled this idempotent read; prior evidence remains valid.', 'Resume only missing metadata after cooldown; do not replay successful reads or any deployment.'],
  ['TSF_NETWORK', /TSF_NETWORK|TSF_HTTP/, 'TSF read connection', 'Cloud read connection/HTTP failed; no deployment action executed.', 'Restore connection and resume the same read.'],
  ['TSF_API', /TSF_API/, 'TSF read interface', 'Cloud refused a fixed deployment metadata read.', 'Check recorded interface and safe platform code; do not trigger or retry a deployment.'],
  ['TCT_AUTH', /TCT_AUTH|TCT_LOGIN_PROTOCOL/, '调度平台登录核验', '调度平台登录或会话核验未完成，未触发或修改任务。', '维护者核对本机凭据、验证码、多因素认证及登录协议，保留已有证据后在原问题接续。'],
