@@ -208,7 +208,7 @@ extend_dimension仅派生明确的展示维度，运行时与原始来源重放�
 
 网页调查提供固定参数 browser_inspect，复用当前授权页面和控件引用投影布局/可见字段数；动态展开控件与面板按共享语义识别，不开放任意JS、控制台缓存或隐藏值，见 website-expansion.md。
 
-部署JS取证browser_assets按原页面脚本标签与相对ESM依赖生成任务引用，独立公共GET、脱敏分页和摘要缓存；固定仓库缺功能时定位实际服务，再核对对应授权库。隔离浏览器审核精确staticResources，不将CDN作为跨系统API授权。见website-static-resources.md。
+部署JS取证browser_assets按原页面脚本标签与相对ESM依赖生成任务引用，独立公共GET、脱敏分页和摘要缓存；固定仓库缺功能时定位实际服务，再核对对应授权库。隔离浏览器审核精确staticResources或版本化staticResourceRoots，不将CDN作为跨系统API授权；扫码认证GET另用父页面登录态绑定的loginReads，仍核对原任务租约。已提交导航的资源超时保留原标签与诊断。见website-static-resources.md与login-navigation.md。
 
 网页恢复保留原批准目标与身份，隔离进行中读取/静态阻断/认证状态；部署脚本目录追加本任务实际加载的异步JS，返回HTML不能当源码。详见website-recovery.md。
 

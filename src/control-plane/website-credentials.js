@@ -129,7 +129,7 @@ export class WebsiteCredentialService {
 
   async recoverLogin(job, environment) {
     if(typeof this.context.websiteBrowser.submitCredentials!=='function')return {authenticated:false,credentialState:'unsupported'};
-    try{const status=await this.context.websiteBrowser.loginStatusFor?.(job,environment);if(status?.pageReady===true)return {authenticated:true,credentialState:'not_needed'};if(status?.loginState==='loading')return {authenticated:false,credentialState:'not_checked',loginState:'loading'};if(status?.loginRequired===true&&status.credentialFormVisible===false)return {authenticated:false,credentialState:'not_applicable',loginState:'interactive_login_required'};}catch{return {authenticated:false,credentialState:'access_unavailable'};}
+    try{const status=await this.context.websiteBrowser.loginStatusFor?.(job,environment);if(status?.pageReady===true)return {authenticated:true,credentialState:'not_needed'};if(status?.loginState==='loading')return {authenticated:false,credentialState:'not_checked',loginState:'loading'};if(status?.loginRequired===true&&status.credentialFormVisible===false){if(environment.loginNavigation?.interactive===true)await this.context.websiteBrowser.beginInteractiveLogin?.(job,environment);return {authenticated:false,credentialState:'not_applicable',loginState:'interactive_login_required'};}}catch{return {authenticated:false,credentialState:'access_unavailable'};}
     let saved;
     try{saved=await this.read(environment.credentialRef);}catch{return {authenticated:false,credentialState:'unavailable'};}
     try{const result=await this.context.websiteBrowser.submitCredentials(job,environment,saved);return {authenticated:Boolean(result.authenticated),credentialState:'available',loginState:result.loginState??null};}

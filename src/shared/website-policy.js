@@ -100,10 +100,24 @@ export function validateWebsiteReadEndpoints(value){
 // Exact public static dependencies reviewed from the application entry, not an
 // origin-wide business API grant. Never include query strings, credentials or redirects.
 export function validateWebsiteStaticResources(value,base){
- if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return (u.protocol!=='https:'&&(!base||u.origin!==new URL(base).origin))||u.username||u.password||u.search||u.hash||/[*{}]/.test(decodeURIComponent(u.pathname))||u.href!==url||! /\.(js|css|woff2?|ttf|png|jpe?g|svg|ico)$/i.test(u.pathname);}catch{return true;}}))throw new Error('静态依赖须为审核后的精确资源URL（同源HTTP或HTTPS，跨源仅HTTPS），不能含凭据、查询参数、通配符或业务接口');
+ if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return (u.protocol!=='https:'&&(!base||u.origin!==new URL(base).origin))||u.username||u.password||u.search||u.hash||/[*{}]/.test(decodeURIComponent(u.pathname))||u.href!==url||! /\.(js|css|json|woff2?|ttf|png|jpe?g|webp|gif|svg|ico)$/i.test(u.pathname);}catch{return true;}}))throw new Error('静态依赖须为审核后的精确资源URL（同源HTTP或HTTPS，跨源仅HTTPS），不能含凭据、查询参数、通配符或业务接口');
  return value;
 }
-export function websiteStaticResourceAllowed(base,request,resources=[]){
- if(!Array.isArray(resources)||!resources.includes(request.url)||request.method!=='GET')return false;
- try{const u=new URL(request.url);validateWebsiteStaticResources([request.url],base);const types={script:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|svg|ico)$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
+export function validateWebsiteStaticRoots(value){
+ if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return u.protocol!=='https:'||u.search||u.hash||u.href!==url||!/^\/(?:[A-Za-z0-9_-]+\/){2,}$/.test(u.pathname);}catch{return true;}}))throw Error('公共静态目录须为审核后的HTTPS多段目录，不能含通配符、查询或业务接口');
+ return value;
+}
+export function validateWebsiteLoginReads(value){
+ if(!Array.isArray(value)||value.some(e=>!e||Object.keys(e).some(k=>!['origin','path','types'].includes(k))||(()=>{try{const u=new URL(websiteUrl(e.origin));return u.protocol!=='https:'||u.origin!==e.origin;}catch{return true;}})()||typeof e.path!=='string'||!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\/?$/.test(e.path)||!Array.isArray(e.types)||!e.types.length||e.types.some(t=>!['document','image','script','xhr','fetch'].includes(t))))throw Error('认证读取仅允许审核后的HTTPS来源、明确路径与资源类型，不支持任意来源或写请求');
+ return value;
+}
+export function websiteLoginReadAllowed(request,waiting,reads=[],base){
+ if(!waiting||request.method!=='GET')return false;
+ try{validateWebsiteLoginReads(reads);const u=new URL(request.url);if(u.username||u.password||/%|\\/.test(u.pathname))return false;for(const[key,value]of u.searchParams)if(/^(?:redirect_?uri|redirect_?url|callback_?url|return_?url)$/i.test(key)&&(!base||new URL(value,base).origin!==new URL(base).origin))return false;return reads.some(e=>u.origin===e.origin&&e.types.includes(request.resourceType)&&(u.pathname===e.path||e.path.endsWith('/')&&u.pathname.startsWith(e.path)));}catch{return false;}
+}
+export function websiteStaticResourceAllowed(base,request,resources=[],roots=[]){
+ if(!Array.isArray(resources)||request.method!=='GET')return false;
+ let rooted=false;try{validateWebsiteStaticRoots(roots);const u=new URL(request.url);rooted=!u.search&&!u.hash&&!/%|\\/.test(u.pathname)&&roots.some(root=>u.href.startsWith(root));}catch{return false;}
+ if(!resources.includes(request.url)&&!rooted)return false;
+ try{const u=new URL(request.url);validateWebsiteStaticResources([request.url],base);const types={script:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|webp|gif|svg|ico)$/i,xhr:/\.json$/i,fetch:/\.json$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
 }

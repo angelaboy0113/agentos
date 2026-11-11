@@ -12,7 +12,7 @@ import {BrowserInputError,validateBrowserTool,websitePageLocation} from '../shar
 import { chromium } from 'playwright';
 import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
  constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch}={}){this.authorize=authorize;this.publicFetch=publicFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
@@ -32,7 +32,7 @@ export class WebsiteBrowser {
     const r=route.request();let page;try{page=r.frame().page();}catch{}
     const state=[...this.pages.values()].find(s=>s.page===page),target=state?.environment??e;
     const request={url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},resources=target.queries?.[state?.job?.environmentAccess?.queryId]?.staticResources??[];
-    if(state&&websiteStaticResourceAllowed(target.baseUrl,request,resources)){
+    if(state&&websiteStaticResourceAllowed(target.baseUrl,request,resources,target.queries?.[state?.job?.environmentAccess?.queryId]?.staticResourceRoots??[])){
      // Public GET via an independent client: no browser cookies, tokens, referer,
      // post body, authentication, redirects or response Set-Cookie cross the boundary.
      let permitted=false;try{permitted=await this.authorize(state.job,state.waiting,r);}catch{}
@@ -40,11 +40,18 @@ export class WebsiteBrowser {
      try{const response=await this.publicFetch(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const headers={'content-type':response.headers.get('content-type')??'application/octet-stream','cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
     }
     let allow=false;try{allow=websiteRequestAllowed(target.baseUrl,{url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{}
+    const loginReads=target.queries?.[state?.job?.environmentAccess?.queryId]?.loginReads??[];
+    if(state&&websiteLoginReadAllowed(request,true,loginReads,target.baseUrl)){
+     // The first QR iframe request can precede the next investigator snapshot.
+     // Verify an actual visible login/challenge in this same task's parent DOM.
+     if(!state.waiting)try{state.waiting=(await state.page.evaluate(browserLoginState)).loginRequired===true;}catch{}
+     if(websiteLoginReadAllowed(request,state.waiting,loginReads,target.baseUrl))allow=true;
+    }
     if(state&&websiteLoginPreferenceAllowed(target,request,state.session.credentialPrincipal))allow=true;
     else if(state&&request.method==='POST'&&target.loginPreferences?.paths.includes(new URL(request.url).pathname))state.preferenceNeedsIdentity=true;
     if(allow&&!state)allow=false;
     if(allow&&state) {try{allow=await this.authorize(state.job,state.waiting,r);}catch{allow=false;}}
-    if(!allow){if(state){if(['script','stylesheet','font','image'].includes(r.resourceType()))state.blockedResources.add(websitePageLocation(r.url()));state.blocked.add(`${r.method()} ${new URL(r.url()).pathname}`);if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${new URL(r.url()).pathname}`);}await route.abort().catch(()=>{});return;}
+    if(!allow){if(state){if(['script','stylesheet','font','image'].includes(r.resourceType()))state.blockedResources.add(websitePageLocation(r.url()));const location=websitePageLocation(r.url()),pathname=location.slice(new URL(r.url()).origin.length);state.blocked.add(`${r.method()} ${pathname}`);state.blockedRequestDetails??=[];state.blockedRequestDetails.push({method:r.method(),type:r.resourceType(),location});if(state.blockedRequestDetails.length>32)state.blockedRequestDetails.shift();if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${pathname}`);}await route.abort().catch(()=>{});return;}
     if(state?.environment.loginPreferences&&state?.pendingPrincipal&&r.method()==='POST'&&/\/(?:login|signin|sign-in|authenticate|auth|token)(?:\.[a-z]+)?$/i.test(new URL(r.url()).pathname)){
      // Observe this one authentication response before a redirect can discard
      // its body. Forward it unchanged; never retry authentication or fake it.
@@ -53,6 +60,9 @@ export class WebsiteBrowser {
     await route.continue();
    });
    context.on('close',()=>{this.contexts.delete(key);for(const [id,s]of this.pages)if(s.session===session)this.pages.delete(id);});
+   // Chromium creates an unbound startup blank tab. It is not a task or a
+   // login window and its requests are intentionally denied by the route gate.
+   for(const page of context.pages())if(page.url()==='about:blank')await page.close();
    return session;
   })();this.opening.set(key,p);try{return await p;}finally{this.opening.delete(key);}
  }
@@ -85,7 +95,14 @@ export class WebsiteBrowser {
    if(s.waiting&&response.status()>=400&&['xhr','fetch'].includes(req.resourceType())&&reviewed.some(x=>x.method===req.method()&&reviewedPathMatches(x.path,url.pathname)))s.bootstrapFailure={method:req.method(),path:url.pathname,status:response.status()};
   });
   page.setDefaultTimeout(10000);page.on('download',d=>d.cancel().catch(()=>{}));page.on('popup',p=>p.close().catch(()=>{}));page.on('dialog',d=>d.dismiss().catch(()=>{}));
-  try{await page.goto(initialTarget,{waitUntil:'domcontentloaded',timeout:30000});}catch(error){await this.release(job.id);throw error;}
+  try{await page.goto(initialTarget,{waitUntil:'domcontentloaded',timeout:30000});}catch(error){
+   // A committed application can still be waiting on a slow script or auth
+   // resource. Keep this exact tab and its diagnostics instead of discarding a
+   // usable login page and creating another blank window on the next tool.
+   let committed=false;try{committed=error.name==='TimeoutError'&&new URL(page.url()).origin===new URL(initialTarget).origin;}catch{}
+   if(!committed){await this.release(job.id);throw error;}
+   pageDiagnostic(s,{kind:'navigation-timeout',source:page.url(),name:error.name});
+  }
   return s;
  }
  async acceptAuthentication(s,response){
@@ -119,11 +136,21 @@ export class WebsiteBrowser {
   return {...state,diagnostic:{credentialAttempted:s.credentialAttempted===true,authRequestObserved:s.authPostSeen===true,authResult:s.authResult?.loginState??null,blockedRequests:[...s.blockedLoginReads].slice(-8),bootstrapFailure:s.bootstrapFailure??null}};
  }
  async needsLogin(s){const state=await this.loginStatus(s);return state.loginRequired;}
+ async beginInteractiveLogin(job,e){
+  const navigation=validateLoginNavigation(e.loginNavigation);if(navigation.interactive!==true)throw Error('没有审核的交互登录入口');
+  if(!await this.authorize(job,true,{url:()=>e.baseUrl,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务登录范围已失效');
+  const s=await this.state(job,e);s.waiting=true;
+  const before=await this.loginStatus(s);if(before.verificationRequired)return before;
+  s.waiting=true;
+  await waitForCaptureReady(s);
+  for(const step of navigation.steps){const r=await s.page.evaluate(loginNavigationPage,{...navigation,baseUrl:e.baseUrl,step});if(r.error)throw Error(r.error);if(r.ready)break;}
+  return this.loginStatus(s);
+ }
  async loginStatusFor(job,e){
   const s=await this.state(job,e);
   if(s.page.url()==='about:blank'&&!s.blankRecovery){
    if(!await this.authorize(job,true,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前任务没有有效恢复范围');
-   s.blankRecovery=s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});
+   s.blankRecovery=s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});
    try{await s.blankRecovery;}finally{s.blankRecovery=null;}
   }
   let status=await this.loginStatus(s);
@@ -183,7 +210,7 @@ export class WebsiteBrowser {
    if(!await this.authorize(s.job,s.waiting,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前任务没有有效恢复范围');
    const status=blank?null:await this.loginStatus(s);
    if(!blank&&status?.loginRequired)return {...status,stage:'页面在等待认证，沿用已有登录恢复；本次不重新提交凭据'};
-   if(blank||!status.pageReady&&!s.pendingReads.size&&!s.blockedResources.size&&!s.resourceFailures.size){s.dom=null;s.frameRefs?.clear();s.assets?.clear();s.observedScripts.clear();await s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});s.lastRecovery={at:new Date().toISOString(),kind:blank?'blank-reopened':'quiet-empty-reloaded',target:websitePageLocation(s.initialTarget)};}
+   if(blank||!status.pageReady&&!s.pendingReads.size&&!s.blockedResources.size&&!s.resourceFailures.size){s.dom=null;s.frameRefs?.clear();s.assets?.clear();s.observedScripts.clear();await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});s.lastRecovery={at:new Date().toISOString(),kind:blank?'blank-reopened':'quiet-empty-reloaded',target:websitePageLocation(s.currentReadTarget??s.initialTarget)};}
    else if(!status.pageReady)return {stage:'保留当前加载与故障证据，尚未重复导航',pageStatus:'loading',partial:true,url:websitePageLocation(s.page.url()),diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size},next:s.pendingReads.size?'当前有读取进行中，检查后续快照，不重复点击或打开':'核对实际静态依赖或使用browser_assets继续部署源码取证；不把资源失败当作密码错误'};
   }
   if(tool==='browser_assets')return readWebsiteAsset(s,args,this.authorize,this.publicFetch);
@@ -191,7 +218,7 @@ export class WebsiteBrowser {
   if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
   if(tool==='browser_screenshot')return this.screenshot(s);
   if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
-  if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded'});}
+  if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded'});}
   if(tool==='browser_read')return this.readVisible(s,args);
   if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot'||tool==='browser_recover')return {...await this.snapshot(s),...(s.lastRecovery?{recovery:s.lastRecovery}:{})};
   if(tool==='browser_key'&&args.ref==='page'){await s.page.keyboard.press('Escape');return this.snapshot(s);}
@@ -228,7 +255,15 @@ export class WebsiteBrowser {
    else if(tool==='browser_scroll')await ref.el.evaluate((el,direction)=>{let p=el;const horizontal=['left','right'].includes(direction);while(p&&!(horizontal?p.scrollWidth>p.clientWidth:p.scrollHeight>p.clientHeight))p=p.parentElement;(p??document.scrollingElement).scrollBy(horizontal?(direction==='left'?-600:600):0,horizontal?0:(direction==='up'?-600:600));},args.direction);
    else if(tool==='browser_search')await ref.el.fill(args.text,{timeout:8000});
    else if(tool==='browser_select')await ref.el.selectOption(args.value,{timeout:8000});
-   else await ref.el.click({timeout:8000});
+   else {
+    const link=await ref.el.evaluate(el=>{const a=el.closest('a[href]');return a?.target==='_blank'?a.href:null;});
+    if(link){
+     const target=websiteNavigationTarget(link,s.environment.baseUrl);
+     if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务页面导航范围已失效');
+     s.currentReadTarget=target;
+     await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
+    }else await ref.el.click({timeout:8000});
+   }
   }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   return this.snapshot(s);

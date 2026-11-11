@@ -52,8 +52,33 @@
           ],
           "staticResources": [
             "https://assets.example.invalid/static/framework.js"
+          ],
+          "staticResourceRoots": [
+            "https://assets.example.invalid/releases/build42/static/"
+          ],
+          "loginReads": [
+            {
+              "origin": "https://identity.example.invalid",
+              "path": "/connect/qrconnect",
+              "types": [
+                "document"
+              ]
+            },
+            {
+              "origin": "https://identity.example.invalid",
+              "path": "/qrcode/",
+              "types": [
+                "image"
+              ]
+            }
           ]
         }
+      },
+      "loginNavigation": {
+        "interactive": true,
+        "steps": [
+          "扫码登录"
+        ]
       }
     }
   }

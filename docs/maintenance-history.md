@@ -1778,3 +1778,9 @@ Clarify confirmed connected-system findings and unavailable external-system impl
 Added a fixed-GET build-history provider with per-project/tier exact repository scope, dedicated read token, metadata projection, explicit 401/403/network/pagination diagnostics and persisted phase evidence. Successful pipeline/start-time evidence is distinguished from verified live deployment. Existing website/Git paths remain independent; no build/deploy writes or whole-task limits were added. Operator token enrollment and actual per-environment/API/Feishu acceptance are separate from synthetic regression. See cnb-history.md. Includes the previously reviewed 1.98.2 source-reference projection when upgrading from 1.98.1.
 
 The first native enrollment exposed an actual CNB/OpenAPI mismatch: total is a decimal string, not an integer. Added lossless bounded decimal normalization and totalCapped lower-bound pagination, with real two-page verification. Invalid or unsafe totals still fail. Token material is securely staged during enrollment so a protocol mismatch can be diagnosed without repeatedly requesting the secret. Operator-authorized shared history credentials do not widen per-environment repository tool scope.
+
+## 1.100.0 — 受控网站扫码认证与页面接续
+
+隔离浏览器支持经审核的公共静态目录和认证GET目录，分别处理动态资源、语言包、第三方扫码iframe及原站状态轮询；静态获取不携带浏览器身份，认证读取绑定原任务父页面登录状态、来源、路径、类型和有效范围，回调仍留在原应用。新增interactive精确登录入口，区分公共首页登录按钮、私有资源伪404和非标准扫码弹层，暴露认证图片/iframe/失效布尔状态而不返回二维码或临时认证值。保留同项目/环境/来源的持久会话，扫码/MFA仍由本人完成，不把永久API令牌当网页登录会话。
+
+已提交应用的导航加载超时不再关闭可用原标签，初始无任务blank页关闭；原任务范围内的target=_blank只读链接在当前标签取证，范围外链接不执行，后续空白/登录恢复沿已核对详情目标接续。诊断补方法/类型/脱敏来源，隐藏登录状态和二维码路径临时标识。未放开业务写入、任意跨域或执行脚本，没有新增整任务截止。迁移包、示例、登录/静态资源说明同步；隔离合成回归与部署方真实网站验收分别记录，不据此宣称所有浏览器/其它操作系统或完整跨机通过。

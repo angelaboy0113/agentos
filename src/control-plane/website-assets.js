@@ -6,7 +6,8 @@ import {websiteRequestAllowed,websiteStaticResourceAllowed,cleanWebsiteText} fro
 export async function readWebsiteAsset(s,args,authorize,publicFetch=fetch){
  s.assets??=new Map();
  const resources=s.environment.queries?.[s.job?.environmentAccess?.queryId]?.staticResources??[];
- const allowed=url=>{let u;try{u=new URL(url);}catch{return false;}return !u.search&&!u.hash&&/\.js$/i.test(u.pathname)&&(websiteStaticResourceAllowed(s.environment.baseUrl,{url,method:'GET',resourceType:'script'},resources)||u.origin===new URL(s.environment.baseUrl).origin&&websiteRequestAllowed(s.environment.baseUrl,{url,method:'GET',resourceType:'script'}));};
+ const staticRoots=s.environment.queries?.[s.job?.environmentAccess?.queryId]?.staticResourceRoots??[];
+ const allowed=url=>{let u;try{u=new URL(url);}catch{return false;}return !u.search&&!u.hash&&/\.js$/i.test(u.pathname)&&(websiteStaticResourceAllowed(s.environment.baseUrl,{url,method:'GET',resourceType:'script'},resources,staticRoots)||u.origin===new URL(s.environment.baseUrl).origin&&websiteRequestAllowed(s.environment.baseUrl,{url,method:'GET',resourceType:'script'}));};
  const add=url=>{if(!allowed(url))return null;for(const [ref,a]of s.assets)if(a.url===url)return ref;const ref=randomUUID();s.assets.set(ref,{url});return ref;};
  const roots=await s.page.locator('script[src]').evaluateAll(nodes=>nodes.map(x=>x.src));const rootRefs=[...new Set([...roots,...(s.observedScripts??[])])].map(add).filter(Boolean);
  if(!args.ref)return {assets:rootRefs.map(ref=>({ref,url:websitePageLocation(s.assets.get(ref).url)})),note:'实际页面外部脚本目录；代码是部署产物证据，不代表固定仓库分支或部署时间。仅可用本任务返回的引用。'};

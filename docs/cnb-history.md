@@ -2,6 +2,8 @@
 
 Use the native build-history provider for CNB deployment investigations. It avoids a browser/CDN/session dependency for this supported evidence. It does not remove the existing controlled browser for other websites, and does not silently copy a person's browser cookies. A Git code-read token, a website session, and an OpenAPI build-history token are separate authentication scopes. Do not tell a user they must log in every fourteen days merely because one browser session expired. Check the actual credential's expiry and the failed authentication path.
 
+For controlled CNB website detail reads, separately review its versioned CDN assets, interactive login entry, QR provider and login-state polling paths using `docs/website-static-resources.md` and `docs/login-navigation.md`. An HTTP404 with an explicit sign-in entry can mean an unauthenticated private repository. Verify the real website identity and resource after sign-in; opening a public homepage is insufficient. This website path still depends on the platform's actual session lifetime and human QR/MFA when required. The native history API remains the preferred source for its supported metadata.
+
 ## Configure and verify
 
 A maintainer adapts `config/cnb-history.example.json` into the deployment's private environment configuration. Register each project and test/production tier separately, with exact reviewed repository paths and the original owner/profile policy. Repositories must be real configured sources, not inferred from a similar name. The API origin is the official HTTPS `https://api.cnb.cool`. No model-selected URL, host, proxy or method is accepted. This provider currently does not support a self-hosted CNB API.

@@ -5,13 +5,21 @@ export function browserLoginState(targetDocument){
  const passwords=[...document.querySelectorAll('input[type="password"]')].filter(visible);
  const authPath=/\/(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[/?#]|$)/i.test(location.pathname+location.hash);
  const text=document.body?.innerText?.trim()??'';
- const challenge=[...document.querySelectorAll('input,img,canvas,[role=dialog]')].filter(visible).some(e=>/验证码|短信码|扫码|captcha|verification code|QR code/i.test([e.getAttribute('placeholder'),e.getAttribute('aria-label'),e.getAttribute('alt'),e.getAttribute('title')].filter(Boolean).join(' ')));
+ const challenge=[...document.querySelectorAll('input,img,canvas,[role=dialog],[aria-modal=true],.ant-modal,.el-dialog')].filter(visible).some(e=>/验证码|短信码|扫码|captcha|verification code|QR code/i.test([e.getAttribute('placeholder'),e.getAttribute('aria-label'),e.getAttribute('alt'),e.getAttribute('title'),e.matches('[role=dialog],[aria-modal=true],.ant-modal,.el-dialog')?e.innerText:''].filter(Boolean).join(' ')));
  const passwordChange=passwords.length>1&&/新密码|确认密码|new password|confirm password/i.test(text);
  const error=[...document.querySelectorAll('[role=alert],.el-message--error,.ant-message-error,.el-form-item__error')].filter(visible).some(e=>/错误|失败|不正确|无效|锁定|拒绝|必填|不能为空|error|fail|invalid|incorrect|locked|denied|required/i.test(e.innerText??''));
  const loading=!text||/^(?:加载中[.。…]*|正在加载[.。…]*|loading[.。…]*)$/i.test(text);
- const loginRequired=!!(passwords.length||authPath||passwordChange||challenge);
- const loginState=passwordChange?'password_change_required':challenge?'verification_required':loginRequired?(error?'rejected':'login_required'):loading?'loading':'ready';
- return {loginState,loginRequired,credentialFormVisible:passwords.length>0,verificationRequired:challenge,passwordChangeRequired:passwordChange,credentialRejected:loginState==='rejected',pageReady:loginState==='ready'};
+ // Private sites can conceal an unauthenticated resource as 404. A login link
+ // alone on a public homepage is not evidence of an expired session.
+ const denied=/页面不存在.{0,20}(?:访问权限|无权限)|请先登录|登录后.{0,12}(?:查看|访问)|sign in to (?:view|access)/i.test(text);
+ const loginControl=[...document.querySelectorAll('a,button,[role=button],span')].filter(visible).some(e=>/^(?:微信登录|扫码登录|登\s*录|sign in|log in)$/i.test((e.innerText||e.getAttribute('aria-label')||'').trim()));
+ const interactivePrompt=loginControl&&/欢迎登录|扫码登录|请使用.{0,20}微信.{0,20}扫码验证/.test(text);
+ const verification=challenge||interactivePrompt&&/扫码/.test(text);
+ const loginRequired=!!(passwords.length||authPath||passwordChange||verification||denied&&loginControl||interactivePrompt);
+ const loginState=passwordChange?'password_change_required':verification?'verification_required':loginRequired?(error?'rejected':'login_required'):loading?'loading':'ready';
+ const verificationImageReady=verification&&[...document.querySelectorAll('img')].filter(visible).some(e=>e.complete&&e.naturalWidth>0&&/qrcode|qrconnect|^data:image\//i.test(e.getAttribute('src')??''));
+ const verificationFramePresent=verification&&[...document.querySelectorAll('iframe')].filter(visible).some(e=>/qrconnect|qrcode/i.test(e.getAttribute('src')??''));
+ return {loginState,loginRequired,credentialFormVisible:passwords.length>0,verificationRequired:verification,verificationImageReady,verificationFramePresent,verificationExpired:verification&&/二维码.{0,8}(?:失效|过期)|QR code.{0,15}expired/i.test(text),passwordChangeRequired:passwordChange,credentialRejected:loginState==='rejected',pageReady:loginState==='ready'};
 }
 // Examine allowlisted response fields transiently; raw payloads and text never leave this function.
 export function authResponseState(status,payload){
