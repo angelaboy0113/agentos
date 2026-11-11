@@ -3,6 +3,7 @@ import {reviseReportFile} from '../shared/report-revision.js';
 import {deliveredCsvDataset,appendReportFile} from '../shared/report-append.js';
 import {cleanWebsiteText} from '../shared/website-policy.js';
 import {mongoInputDiagnostic} from './mongo-input-diagnostic.js';
+import {createCnbTools} from './cnb-tools.js';
 import {createTctTools} from './tct-tools.js';
 import {createMongoBackend,mongoToolSpec} from './mongo-tools.js';
 import {sshMysqlConnection} from './ssh-mysql.js';
@@ -215,6 +216,7 @@ export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map(),
 export function phaseReportRegistry(job){const view={...(job??{id:'none'}),reportFiles:[...(job?.reportFiles??[])]};return{view,register(result){const file=result?.exportFile;if(file?.id&&!view.reportFiles.some(item=>item.id===file.id))view.reportFiles.push(file);return result;}};}
 
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
+  if(e.kind==='cnb')return createCnbTools(e,q,cred,adapters);
   if(e.kind==='tct')return createTctTools(e,q,cred,adapters);
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), primaryKeys=new Map(), valueSets = new Map();

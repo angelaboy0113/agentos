@@ -14,7 +14,7 @@
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.98.2** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.99.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 维护备份登记、空闲自动去重及恢复见[维护备份整理](docs/maintenance-backups.md)。
 
@@ -420,3 +420,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 公共静态依赖、空白诊断和部署JS取证见[部署网页资源](docs/website-static-resources.md)。
 
 blank、崩溃/关闭页及加载与登录分型见[原网页恢复](docs/website-recovery.md)。
+
+CNB build-history native read access: [configuration, evidence and acceptance](docs/cnb-history.md). Browser login, source Git access and history-token permissions are distinct.

@@ -95,3 +95,8 @@ Runner 在源码同步后提供 knowledgePaths 的本轮入口及哈希；未配
 对“数据保存在哪里、需注意什么”的只读咨询，区分交付调查结论和真正执行造数/保存的验收。已证实的表/关联/约束应直接交付，未执行写入不代表定位问题未完成；未验证的后台校验或端到端操作单列边界，不额外扩成必须造数成功才回答。物理表仍须实际元数据/后端映射证明，不能只凭前端名称猜表。
 
 运行配置调查：如目录提供 `read_config_values`，使用管理员配置的精确键和类型读取非敏感投影；变量依赖仅同命名空间实际发现的配置引用。缺失、敏感、冲突分别报告，不猜测覆盖顺序。地址配置只证明配置指向；已有已授权入口应继续取证，未授权目标不能自行访问，禁止测试调用业务推送。详见 `docs/config-projection.md`。
+
+
+## CI/CD evidence
+
+When a configured native build-history provider is available, prefer its scoped read tools over opening a website for the same history. Reuse saved history with its original fetchedAt, and query current history for new deployment questions. Source/target branches and successful build events are evidence, not a guarantee of the live application revision; verify runtime release evidence before calling a build start time an actual deployment completion time. Missing history-token permission is distinct from code-read permission and browser login expiry.

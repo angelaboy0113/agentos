@@ -1771,3 +1771,8 @@ Clarify confirmed connected-system findings and unavailable external-system impl
 ## 1.97.1 历史投递重试与整理空闲判定
 
 实际启动验收发现旧失败卡仅重试计数/修订计数变化也会令完整记录摘要失效，导致维护一直延期。稳定摘要只排除四个投递元数据字段，身份/目标/正文/其它状态仍完整核验；活动任务与实际发送worker仍阻挡，不改旧队列或假造成功。增加同一测试中传输元数据变化、正文与跨profile变化的边界断言。
+
+
+## 1.99.0 — native CNB build-history reads
+
+Added a fixed-GET build-history provider with per-project/tier exact repository scope, dedicated read token, metadata projection, explicit 401/403/network/pagination diagnostics and persisted phase evidence. Successful pipeline/start-time evidence is distinguished from verified live deployment. Existing website/Git paths remain independent; no build/deploy writes or whole-task limits were added. Operator token enrollment and actual per-environment/API/Feishu acceptance are separate from synthetic regression. See cnb-history.md. Includes the previously reviewed 1.98.2 source-reference projection when upgrading from 1.98.1.

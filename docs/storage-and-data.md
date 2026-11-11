@@ -184,3 +184,6 @@ browser_inspect 布局投影通过原任务工具结果与调查证据保存，�
 部署脚本图与缓存只在当前浏览器任务页面实例存活；实际工具结果按原任务证据保留，URL/摘要/取证时间与固定源码区别记录。重启不承诺重建旧资源内容，必须对比摘要。私有配置迁移仍保留经审核staticResources及独立Keychain引用。
 
 恢复原页面使旧DOM引用及当前脚本内存缓存失效；新加载资源重新记录摘要/取证时间，旧任务证据仍保留，不混拼部署版本。无需新增持久数据区。
+
+
+CNB build-history metadata uses the existing task-scoped tool-result storage, retaining fetchedAt, pagination completeness and hashes across phases. Its dedicated bearer token belongs only in the local encrypted vault; it is separate from source Git credentials and browser session storage. It adds no new history retention or automatic deletion policy.

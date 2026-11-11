@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "environments": {
+    "sample_prd_builds": {
+      "projectId": "sample",
+      "tier": "prd",
+      "kind": "cnb",
+      "credentialRef": "sample-build-history-readonly",
+      "membersRead": false,
+      "ownerOpenIdsByProfile": {"sample-bot": ["ou_REPLACE_OWNER"]},
+      "cnb": {"apiOrigin": "https://api.cnb.cool"},
+      "queries": {
+        "investigate": {
+          "mode": "investigate",
+          "reviewed": true,
+          "description": "Read reviewed repository build history; never trigger or deploy",
+          "parameters": [{"name": "purpose", "type": "string"}],
+          "maxRows": 30,
+          "timeoutMs": 10000,
+          "repositories": ["your-organization/your-project/your-repository"]
+        }
+      }
+    }
+  }
+}
