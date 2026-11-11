@@ -48,8 +48,9 @@ export function maintenanceBusy(state,context={}){
  if((state.jobs??[]).some(j=>['queued','running','cancelling'].includes(j.status))||(state.conversations??[]).some(c=>['queued','thinking','decided','ready'].includes(c.status)))return true;
  if(context.reception?.running||context.controlReceipts?.pending?.size||(typeof context.adminUsageExports==='number'?context.adminUsageExports:context.adminUsageExports?.size))return true;
  if(['cards','reports','websiteEvidence','successStickers'].some(k=>context[k]?.workers?.size))return true;
- if(Object.values(state.receptionInbox??{}).some(e=>['queued','reminding','diagnosing'].includes(e.status))||Object.values(state.recoveryEvents??{}).some(e=>['queued','diagnosing'].includes(e.status)))return true;
- if(Object.values(state.cardMessages??{}).some(c=>c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered))return true;
+ const inert=(group,key,value)=>context.maintenanceInert?.[group]?.[key]===sha(JSON.stringify(value));
+ if(Object.entries(state.receptionInbox??{}).some(([key,e])=>!inert('receptionInbox',key,e)&&['queued','reminding','diagnosing'].includes(e.status))||Object.entries(state.recoveryEvents??{}).some(([key,e])=>!inert('recoveryEvents',key,e)&&['queued','diagnosing'].includes(e.status)))return true;
+ if(Object.entries(state.cardMessages??{}).some(([key,c])=>!inert('cardMessages',key,c)&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered)))return true;
  for(const k of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries'])if(Object.values(state[k]??{}).some(d=>!d.superseded&&!d.deliveredAt&&(!d.messageId||d.parts?.some(p=>!p.messageId))))return true;
  return false;
 }

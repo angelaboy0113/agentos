@@ -14,7 +14,7 @@ export class BackupMaintenance {
  async gate(item,remove){
   if(this.closed||await this.inboundPending())return false;
   return this.context.store.inspectExclusive(state=>{
-   if(this.closed||maintenanceBusy(state,this.context))return false;
+   if(this.closed||maintenanceBusy(state,{...this.context,maintenanceInert:this.config.inactiveStateRecords}))return false;
    if(item){
     if(this.referenceState!==state){this.referenceState=state;this.referenceChecks=new Map();}
     if(!this.referenceChecks.has(item.checkpoint))this.referenceChecks.set(item.checkpoint,referenced(state,item.checkpoint,this.config.referenceAliases));
