@@ -7,12 +7,15 @@ export function priorToolResults(job,config,plan){
  const refs=new Map();
  if(!job?.id||plan?.projectId!==job.projectId||!plan.tier)return refs;
  for(const entry of job.context??[]){
-  const result=entry?.result,evidence=result?.environmentEvidence,e=config?.environments?.[evidence?.environmentId];
+  const result=entry?.result;
+  for(const item of result?.toolResultCatalog??[]){
+  const evidence=item.provenance??result.environmentEvidence,e=config?.environments?.[evidence?.environmentId];
   if(!e||e.projectId!==job.projectId||e.tier!==plan.tier||!e.queries?.[evidence.queryId]||e.queries[evidence.queryId].mode!=='investigate')continue;
   const scope=fingerprint(e);
-  if(evidence.configHash&&evidence.configHash!==scope)continue;
+  if(evidence.configHash&&evidence.configHash!==scope||item.provenance&&evidence.scope!==scope)continue;
   if(evidence.projectId&&evidence.projectId!==e.projectId||evidence.requestingProjectId&&evidence.requestingProjectId!==job.projectId)continue;
-  for(const item of result.toolResultCatalog??[])if(/^tool-result-[a-f0-9-]{36}$/.test(item.resultRef??''))refs.set(item.resultRef,{scope,environmentId:evidence.environmentId,queryId:evidence.queryId,projectId:e.projectId,tier:e.tier});
+  if(/^tool-result-[a-f0-9-]{36}$/.test(item.resultRef??''))refs.set(item.resultRef,{tool:item.tool,...(item.applicationId?{applicationId:item.applicationId}:{}),...(item.groupId?{groupId:item.groupId}:{}),scope,environmentId:evidence.environmentId,queryId:evidence.queryId,projectId:e.projectId,tier:e.tier});
+  }
  }
  return refs;
 }
