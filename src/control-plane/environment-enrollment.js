@@ -181,8 +181,7 @@ export async function launchEnrollment(context, e) {
   });
 }
 export async function resumeAvailableSetupSources(context, load = loadEnvironments) {
- const state=await context.store.read();
- const waiting=(state.conversations??[]).filter(t=>t.status==='sent'&&t.setupPending&&t.decision?.action==='request_environment_setup'&&t.decision.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&state.questions?.[t.questionId]?.latestTurnId===t.id);
+ const waiting=await stateView(context.store,state=>(state.conversations??[]).filter(t=>t.status==='sent'&&t.setupPending&&t.decision?.action==='request_environment_setup'&&t.decision.environmentSetup?.kind==='mysql'&&!t.decision.environmentSetup.url&&state.questions?.[t.questionId]?.latestTurnId===t.id));
  if(!waiting.length)return;
  const config=await load();
  for(const turn of waiting){
