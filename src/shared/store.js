@@ -44,6 +44,14 @@ export class JsonStore {
     this.transactionContext=new AsyncLocalStorage();this.runnerHeartbeats=new Map();
   }
 
+  // Read-only, writer-serialized maintenance fence: no graph copy or disk write.
+  // Callback must not mutate state and must finish filesystem mutations synchronously.
+  inspectExclusive(operation) {
+    const run = this.queue.then(async () => operation(await this.snapshot()));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
   transact(operation) {
     const nested=this.transactionContext.getStore();if(nested?.active)return Promise.resolve().then(()=>operation(nested.state));
     const queuedAt=Date.now();

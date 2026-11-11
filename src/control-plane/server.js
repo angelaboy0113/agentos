@@ -9,6 +9,7 @@ import {requestedSourceEnvironments} from '../shared/source-comparison.js';
 import {authorizeWebsiteRequest} from './website-authorization.js';
 import {assertSourceRuntimeTier,sourceEnvironmentForTier,sourceRuntimeTier} from '../shared/source-environments.js';
 import {HistoryRetention} from './retention.js';
+import {BackupMaintenance} from './maintenance-backups.js';
 import { resolveProjectId, routeAgent } from '../shared/project-scope.js';
 import {ControlReceipts,CONTROL_PROTOCOL,criticalControl,controlDigest,validRequestId} from '../shared/control-receipts.js';
 import {ContactChannels} from './contact-channels.js';
@@ -104,6 +105,7 @@ export async function createControlPlane(overrides = {}) {
   context.conversations = conversations;
   const receptionPolicy=await loadReceptionPolicy(config.receptionFile);store.receptionPolicy=receptionPolicy;context.reception=new ReceptionService(context,receptionPolicy,overrides.receptionOptions);
   context.retention = new HistoryRetention(context);
+  context.backupMaintenance = new BackupMaintenance(context);
   const server = http.createServer(async (request, response) => {
     try {
       if(!await durableControl(context,request,response))await route({ ...context, request, response });
@@ -117,7 +119,7 @@ export async function createControlPlane(overrides = {}) {
   server.once('listening', () => {
     context.capacityRecoveryStopped=false;
     context.capacityRecoveryTimer=setInterval(()=>pollModelCapacity(context).catch(()=>console.error('[capacity-recovery] recovery deferred')),1000);context.capacityRecoveryTimer.unref();
-    context.retention.start();
+    context.retention.start();context.backupMaintenance.start();
     cards.start();context.longNotices.start();context.reception.start();
     context.websiteEvidence.retry().catch(()=>console.error('[website-evidence] recovery unavailable'));
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
@@ -127,7 +129,7 @@ export async function createControlPlane(overrides = {}) {
   });
   server.once('close', () => {
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.reception.close(),context.longNotices.close(),context.retention.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
 }
@@ -239,7 +241,7 @@ async function route(context) {
     return json(response, 200, { ok: true, adminUsageExports:context.adminUsageExports??0, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
-      investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun },
+      investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {configured:Boolean(context.backupMaintenance.file),lastRun:context.backupMaintenance.lastRun},
       controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,

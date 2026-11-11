@@ -1744,3 +1744,8 @@ Mongo reviewed 查询可配置 requiredFilters，管理员条件在本机和SSH�
 ## 1.96.2 External evidence boundaries
 
 Clarify confirmed connected-system findings and unavailable external-system implementation or mapping evidence. Reuse existing credentials; accept authoritative interface documentation rather than requiring source code. This is shared role guidance, not new permissions or guaranteed external access.
+
+
+## 1.97.0 自动维护备份整理
+
+新增默认关闭的owner登记式日历调度、验收后触发、任务/投递空闲及最新引用栅栏。保护三完整点和全部恢复锚点，SHA256核验后先gzip落盘再去重；唯一历史文件保留。已结束测试依赖按内容摘要及完成证明清理，支持新隔离目录片段恢复。无业务状态/权限/任务耗时限制变化；实际本机部署及恢复测试见实例记录，不声称所有OS或整机恢复均验证。

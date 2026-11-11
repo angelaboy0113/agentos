@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "enabled": false,
+  "hour": 3,
+  "minute": 30,
+  "timeZone": "Asia/Shanghai",
+  "managedRoot": "/absolute/instance/runtime/migration",
+  "checkpoints": [],
+  "pins": [],
+  "candidates": [],
+  "testTrees": [],
+  "referenceAliases": []
+}
