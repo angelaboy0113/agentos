@@ -422,3 +422,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 blank、崩溃/关闭页及加载与登录分型见[原网页恢复](docs/website-recovery.md)。
 
 CNB build-history native read access: [configuration, evidence and acceptance](docs/cnb-history.md). Browser login, source Git access and history-token permissions are distinct.
+
+同任务 TSF/CNB 调查接续可直接复用原来源的已存投影结果和来源标记；固定平台只读调用支持现有批量计划。范围、迁移和部署时间语义见 [TSF 只读取证](docs/tsf-deployment-reads.md)。

@@ -191,3 +191,5 @@ browser_inspect 布局投影通过原任务工具结果与调查证据保存，�
 
 
 CNB build-history metadata uses the existing task-scoped tool-result storage, retaining fetchedAt, pagination completeness and hashes across phases. Its dedicated bearer token belongs only in the local encrypted vault; it is separate from source Git credentials and browser session storage. It adds no new history retention or automatic deletion policy.
+
+同一任务跨环境来源的工具证据仍存原 job exports/tool-results，不复制到另一环境；历史 context 只保存 opaque resultRef、来源指纹和目录元数据。读取只允许任务已交付引用及当前仍有效的同系统/同运行分级配置，并逐次校验哈希、非符号链接路径和来源。该复用不新增网络授权、不在任务间共享；旧结果不能冒充新读取。

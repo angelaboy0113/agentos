@@ -8,7 +8,7 @@ const bad=message=>{throw Object.assign(new Error(message),{code:'REPORT_INPUT'}
 // Opaque references only. The leased job fixes the directory and current environment
 // fixes the scope. Presentation pagination never changes business completeness.
 export class ToolResultStore{
- constructor({directory,scope,authorize=async()=>{},secrets=[]}){this.directory=directory;this.scope=scope;this.authorize=authorize;this.secrets=secrets.filter(Boolean);this.memory=new Map();}
+ constructor({directory,scope,authorize=async()=>{},authorizePrior=null,secrets=[]}){this.directory=directory;this.scope=scope;this.authorize=authorize;this.authorizePrior=authorizePrior;this.secrets=secrets.filter(Boolean);this.memory=new Map();}
  async root(){
   await mkdir(this.directory,{recursive:true,mode:0o700});
   if(!(await lstat(this.directory)).isDirectory()||(await lstat(this.directory)).isSymbolicLink())bad('工具结果目录无效');
@@ -39,9 +39,9 @@ export class ToolResultStore{
   if(this.directory){
    const root=await this.root();
    for(const name of await readdir(root))if(name.endsWith('.json')&&valid(name.slice(0,-5))){try{const saved=await this.load(name.slice(0,-5));items.push(saved);}catch{/* Foreign, linked or corrupt files cannot enter the catalog. */}}
-  }else items.push(...this.memory.values());
-  const all=items.filter(x=>x.scope===this.scope).map(x=>{const r=JSON.parse(x.text);return{resultRef:x.ref,tool:x.tool,createdAt:x.createdAt,totalCharacters:x.text.length,sha256:x.sha256,...(typeof r?.applicationId==='string'&&r.applicationId.length<=128?{applicationId:r.applicationId}:{}),...(typeof r?.groupId==='string'&&r.groupId.length<=128?{groupId:r.groupId}:{}),...(typeof r?.taskId==='string'&&r.taskId.length<=128?{taskId:r.taskId}:{})};}).sort((a,b)=>(b.createdAt??'').localeCompare(a.createdAt??''));
-  await this.authorize();return {items:all.slice(offset,offset+limit),totalCount:all.length,nextOffset:offset+limit<all.length?offset+limit:null,note:'当前任务、当前环境的完整工具结果引用；历史结果不是新取数。'};
+  }else for(const ref of this.memory.keys()){try{items.push(await this.load(ref));}catch{}}
+  const all=items.map(x=>{const r=JSON.parse(x.text);return{resultRef:x.ref,tool:x.tool,createdAt:x.createdAt,totalCharacters:x.text.length,sha256:x.sha256,...(x.provenance?{provenance:x.provenance}:{}),...(typeof r?.applicationId==='string'&&r.applicationId.length<=128?{applicationId:r.applicationId}:{}),...(typeof r?.groupId==='string'&&r.groupId.length<=128?{groupId:r.groupId}:{}),...(typeof r?.taskId==='string'&&r.taskId.length<=128?{taskId:r.taskId}:{})};}).sort((a,b)=>(b.createdAt??'').localeCompare(a.createdAt??''));
+  await this.authorize();return {items:all.slice(offset,offset+limit),totalCount:all.length,nextOffset:offset+limit<all.length?offset+limit:null,note:'当前任务已授权来源的完整结果引用；provenance标明历史来源，读取不等于刷新。'};
  }
  async load(resultRef){
   let saved=this.memory.get(resultRef);
@@ -50,14 +50,15 @@ export class ToolResultStore{
    if(!st.isFile()||st.isSymbolicLink()||!actual.startsWith(root+path.sep))bad('工具结果文件越界');
    try{saved=JSON.parse(await readFile(file,'utf8'));}catch{bad('工具结果文件无法核验');}
   }
-  if(!saved||saved.scope!==this.scope||saved.ref!==resultRef||hash(saved.text)!==saved.sha256)bad('工具结果范围或内容摘要无效');return saved;
+  if(!saved||saved.ref!==resultRef||hash(saved.text)!==saved.sha256)bad('工具结果范围或内容摘要无效');
+  if(saved.scope!==this.scope){const provenance=await this.authorizePrior?.(resultRef,saved.scope);if(!provenance)bad('工具结果来源未在本任务授权');return {...saved,provenance};}return saved;
  }
  async read({resultRef,offset=0,limit=4000}){
   await this.authorize();if(!valid(resultRef)||!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>4000)bad('工具结果引用无效；offset须非负，limit为1至4000字符');
   const saved=await this.load(resultRef);if(offset>saved.text.length)bad('工具结果分页位置无效');
   let end=Math.min(offset+limit,saved.text.length);if(end<saved.text.length&&/[\uD800-\uDBFF]/.test(saved.text[end-1]))end--;
   if(end===offset&&offset<saved.text.length)end=Math.min(offset+2,saved.text.length);
-  await this.authorize();return {resultRef,tool:saved.tool,text:saved.text.slice(offset,end),offset,nextOffset:end<saved.text.length?end:null,totalCharacters:saved.text.length,sha256:saved.sha256,note:'原结果JSON文本分段，未执行新查询；按nextOffset继续，不能把单段当完整结果。'};
+  await this.authorize();if(saved.scope!==this.scope&&!await this.authorizePrior?.(resultRef,saved.scope))bad('工具结果来源授权已变化');return {resultRef,tool:saved.tool,...(saved.provenance?{provenance:saved.provenance}:{}),text:saved.text.slice(offset,end),offset,nextOffset:end<saved.text.length?end:null,totalCharacters:saved.text.length,sha256:saved.sha256,note:'原结果JSON文本分段，未执行新查询；按nextOffset继续，不能把单段当完整结果。'};
  }
 }
 
