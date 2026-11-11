@@ -7,7 +7,7 @@
       "kind": "cnb",
       "credentialRef": "sample-build-history-readonly",
       "membersRead": false,
-      "ownerOpenIdsByProfile": {"sample-bot": ["ou_REPLACE_OWNER"]},
+      "ownerOpenIdsByProfile": {"sample-bot": ["ou_REPLACEOWNER"]},
       "cnb": {"apiOrigin": "https://api.cnb.cool"},
       "queries": {
         "investigate": {
