@@ -5,7 +5,7 @@ const fields={group:['GroupId','GroupName','NamespaceId','NamespaceName','Cluste
 function date(v){if(typeof v!=='string'||!/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(v))throw fail('REPORT_INPUT','Use explicit platform-local YYYY-MM-DD HH:mm:ss range');const d=new Date(v.replace(' ','T')+'Z');if(!Number.isFinite(+d)||d.toISOString().slice(0,19)!==v.replace(' ','T'))throw fail('REPORT_INPUT','Invalid calendar date or time');return v;}
 export async function createTsfTools(e,q,cred,adapters={}){
  validateTsf(e);validateTsfQuery(q);const cloud=createCloudReadSession(e,q,cred,adapters);
- const clean=v=>typeof v==='string'?[cred.username,cred.password].filter(Boolean).reduce((s,x)=>s.split(x).join('[redacted]'),v):v;
+ const clean=v=>typeof v==='string'?[cred.password].filter(Boolean).reduce((s,x)=>s.split(x).join('[redacted]'),v):v;
  const pick=(v,names)=>Object.fromEntries(names.filter(k=>v[k]===null||['string','number','boolean'].includes(typeof v[k])).map(k=>[k,clean(v[k])]));
  const app=id=>{const a=q.applications.find(x=>x.applicationId===id);if(!a)throw fail('TSF_SCOPE','Application outside this project/environment scope');return a;};
  function page(args){const offset=args.offset??0,limit=args.limit??q.maxRows;if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>q.maxRows)throw fail('REPORT_INPUT','Offset must be nonnegative; limit must fit the configured page size. Follow nextOffset for all rows.');return{Offset:offset,Limit:limit};}

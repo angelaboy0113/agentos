@@ -97,7 +97,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
   const cred = e.kind==='website' ? {} : await (adapters.credential ?? credential)(e.credentialRef);
   // A bearer provider's public username label is not an authentication secret.
   // Masking `cnb` would corrupt real build identifiers and canonical links.
-  const toolSecrets=e.kind==='cnb'?[cred.password]:[cred.username,cred.password];
+  const toolSecrets=['cnb','tsf'].includes(e.kind)?[cred.password]:[cred.username,cred.password];
   const datasetScopes=[];
   if(adapters.reportJob?.projectId===e.projectId){for(const [environmentId,entry] of Object.entries(cfg.environments)){
     if(entry.projectId!==e.projectId||entry.tier!==e.tier||!['mysql','mongodb'].includes(entry.kind)||!entry.queries?.[plan.queryId])continue;
