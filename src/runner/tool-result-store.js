@@ -40,7 +40,7 @@ export class ToolResultStore{
    const root=await this.root();
    for(const name of await readdir(root))if(name.endsWith('.json')&&valid(name.slice(0,-5))){try{const saved=await this.load(name.slice(0,-5));items.push(saved);}catch{/* Foreign, linked or corrupt files cannot enter the catalog. */}}
   }else items.push(...this.memory.values());
-  const all=items.filter(x=>x.scope===this.scope).map(x=>{const r=JSON.parse(x.text);return{resultRef:x.ref,tool:x.tool,createdAt:x.createdAt,totalCharacters:x.text.length,sha256:x.sha256,...(typeof r?.groupId==='string'&&r.groupId.length<=128?{groupId:r.groupId}:{}),...(typeof r?.taskId==='string'&&r.taskId.length<=128?{taskId:r.taskId}:{})};}).sort((a,b)=>(b.createdAt??'').localeCompare(a.createdAt??''));
+  const all=items.filter(x=>x.scope===this.scope).map(x=>{const r=JSON.parse(x.text);return{resultRef:x.ref,tool:x.tool,createdAt:x.createdAt,totalCharacters:x.text.length,sha256:x.sha256,...(typeof r?.applicationId==='string'&&r.applicationId.length<=128?{applicationId:r.applicationId}:{}),...(typeof r?.groupId==='string'&&r.groupId.length<=128?{groupId:r.groupId}:{}),...(typeof r?.taskId==='string'&&r.taskId.length<=128?{taskId:r.taskId}:{})};}).sort((a,b)=>(b.createdAt??'').localeCompare(a.createdAt??''));
   await this.authorize();return {items:all.slice(offset,offset+limit),totalCount:all.length,nextOffset:offset+limit<all.length?offset+limit:null,note:'当前任务、当前环境的完整工具结果引用；历史结果不是新取数。'};
  }
  async load(resultRef){

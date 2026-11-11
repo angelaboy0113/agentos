@@ -33,6 +33,11 @@ const rules = [
  ['CNB_SCOPE', /CNB_SCOPE|CNB_CLOSED/, '流水线范围核验', '仓库不在当前系统及环境范围，或返回范围不一致。', '保留原身份和环境，核对已登记仓库，不跨系统借用。'],
  ['CNB_NETWORK', /CNB_NETWORK|CNB_HTTP|CNB_RATE_LIMIT/, '流水线接口连接', 'CNB只读接口本次未成功响应，未触发构建或部署。', '恢复连接或平台容量后接续同一读取，不将旧缓存当最新。'],
  ['CNB_RESPONSE', /CNB_RESPONSE|CNB_PAGINATION/, '流水线分页完整性', 'CNB响应或分页缺失，不能把缺页当作无部署。', '核对响应协议，调整单页大小后继续，保留已读证据。'],
+ ['TSF_AUTH', /TSF_AUTH|TSF_LOGIN_PROTOCOL/, 'TSF authentication', 'TSF login or session verification incomplete; no deployment executed.', 'Reuse saved encrypted credential; captcha/MFA requires normal verification.'],
+ ['TSF_SCOPE', /TSF_SCOPE|TSF_ORIGIN|TSF_CLOSED/, 'TSF scope verification', 'Application/group/namespace outside current authorized scope or changed.', 'Keep original project/environment and verify configured group ownership.'],
+ ['TSF_RESPONSE', /TSF_RESPONSE|TSF_PAGINATION/, 'TSF read completeness', 'Cloud response/page incomplete; missing data is not an empty deployment history.', 'Retain evidence and resume missing read pages.'],
+ ['TSF_NETWORK', /TSF_NETWORK|TSF_HTTP/, 'TSF read connection', 'Cloud read connection/HTTP failed; no deployment action executed.', 'Restore connection and resume the same read.'],
+ ['TSF_API', /TSF_API/, 'TSF read interface', 'Cloud refused a fixed deployment metadata read.', 'Check recorded interface and safe platform code; do not trigger or retry a deployment.'],
  ['TCT_AUTH', /TCT_AUTH|TCT_LOGIN_PROTOCOL/, '调度平台登录核验', '调度平台登录或会话核验未完成，未触发或修改任务。', '维护者核对本机凭据、验证码、多因素认证及登录协议，保留已有证据后在原问题接续。'],
  ['TCT_NETWORK', /TCT_NETWORK|TCT_HTTP/, '调度平台连接', '调度平台本次连接失败、超时或HTTP读取失败，未取得完整响应。', '核对公司云网络及服务，恢复后继续原问题；不把读取失败当成任务没有执行。'],
  ['TCT_SCOPE', /TCT_SCOPE|TCT_ORIGIN|TCT_CLOSED/, '调度读取范围核验', '请求的调度分组或任务不在当前有效范围，或返回范围发生变化。', '核对当前系统、环境、精确分组及任务归属；不跨环境借用权限。'],
@@ -106,7 +111,7 @@ export function failureDetails(error,{stage}={}) {
   return {code,stage:diagnosticStage??null,phase:diagnosticStage?stages[diagnosticStage]:phase,cause,next,
     ...(['TypeError','ReferenceError','RangeError','SyntaxError'].includes(error?.errorName??error?.name)?{errorName:error.errorName??error.name}:{}),
     ...(/^(?:src\/(?:runner|shared|control-plane)\/[a-z0-9-]+\.js:\d+:\d+)$/i.test(error?.sourceLocation??'')?{sourceLocation:error.sourceLocation}:String(error?.stack??'').match(/src\/(?:runner|shared|control-plane)\/[a-z0-9-]+\.js:\d+:\d+/i)?.[0]?{sourceLocation:String(error.stack).match(/src\/(?:runner|shared|control-plane)\/[a-z0-9-]+\.js:\d+:\d+/i)[0]}:{}),
-    ...(typeof error?.platformCode==='string'&&/^(RequestLimitExceeded|AuthFailure|UnauthorizedOperation|ResourceNotFound|InvalidParameter|InternalError|FailedOperation|MissingParameter|UnsupportedOperation)(\.[A-Za-z][A-Za-z0-9]*)?$/.test(error.platformCode)?{platformCode:error.platformCode}:{}),...(['DescribeGroups','DescribeTaskRecords','DescribeTaskDetail','DescribeTaskBatchRecords'].includes(error?.apiAction)?{apiAction:error.apiAction}:{}),...(observedCode?{observedCode}:{}),...(httpStatus?{httpStatus}:{}),...(Number.isInteger(error?.exitCode)&&Math.abs(error.exitCode)<256?{exitCode:error.exitCode}:{}),...(exitSignals.has(error?.exitSignal)?{exitSignal:error.exitSignal}:{})};
+    ...(typeof error?.platformCode==='string'&&/^(RequestLimitExceeded|AuthFailure|UnauthorizedOperation|ResourceNotFound|InvalidParameter|InternalError|FailedOperation|MissingParameter|UnsupportedOperation)(\.[A-Za-z][A-Za-z0-9]*)?$/.test(error.platformCode)?{platformCode:error.platformCode}:{}),...(['DescribeGroups','DescribeTaskRecords','DescribeTaskDetail','DescribeTaskBatchRecords','DescribeContainerGroups','DescribeContainerGroupAttribute','DescribePodInstances','DescribeContainerTasks'].includes(error?.apiAction)?{apiAction:error.apiAction}:{}),...(observedCode?{observedCode}:{}),...(httpStatus?{httpStatus}:{}),...(Number.isInteger(error?.exitCode)&&Math.abs(error.exitCode)<256?{exitCode:error.exitCode}:{}),...(exitSignals.has(error?.exitSignal)?{exitSignal:error.exitSignal}:{})};
 }
 export function failureDiagnostic(error) {
   const d=failureDetails(error);

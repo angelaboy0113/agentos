@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "environments": {
+    "example_prd_tsf": {
+      "projectId": "example",
+      "tier": "prd",
+      "kind": "tsf",
+      "credentialRef": "example-cloud",
+      "membersRead": false,
+      "ownerOpenIdsByProfile": {"example-bot": ["ou_REPLACE"]},
+      "tsf": {
+        "loginOrigin": "https://login.example.invalid",
+        "consoleOrigin": "https://console.example.invalid",
+        "apiOrigin": "https://api.example.invalid",
+        "ownerUin": "123456789",
+        "region": "your-region",
+        "timeZone": "Asia/Shanghai"
+      },
+      "queries": {
+        "investigate": {
+          "mode": "investigate",
+          "reviewed": true,
+          "description": "Reviewed TSF deployment history and current container image versions",
+          "parameters": [{"name": "purpose", "type": "string"}],
+          "maxRows": 20,
+          "timeoutMs": 10000,
+          "applications": [{"applicationId": "application-REPLACE", "applicationName": "your-app", "groups": [{"groupId": "group-REPLACE", "namespaceId": "namespace-REPLACE"}]}]
+        }
+      }
+    }
+  }
+}

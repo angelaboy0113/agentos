@@ -4,6 +4,7 @@ import {deliveredCsvDataset,appendReportFile} from '../shared/report-append.js';
 import {cleanWebsiteText} from '../shared/website-policy.js';
 import {mongoInputDiagnostic} from './mongo-input-diagnostic.js';
 import {createCnbTools} from './cnb-tools.js';
+import {createTsfTools} from './tsf-tools.js';
 import {createTctTools} from './tct-tools.js';
 import {createMongoBackend,mongoToolSpec} from './mongo-tools.js';
 import {sshMysqlConnection} from './ssh-mysql.js';
@@ -218,6 +219,7 @@ export function phaseReportRegistry(job){const view={...(job??{id:'none'}),repor
 export async function createEnvironmentTools(e, q, cred, adapters = {}) {
   if(e.kind==='cnb')return createCnbTools(e,q,cred,adapters);
   if(e.kind==='tct')return createTctTools(e,q,cred,adapters);
+  if(e.kind==='tsf')return createTsfTools(e,q,cred,adapters);
   const secrets = [cred.username, cred.password]; let conn, token, active = true;
   const configs = new Map(), tables = new Map(), columnTypes = new Map(), tableEngines=new Map(), primaryKeys=new Map(), valueSets = new Map();
   const datasets=new ReportDatasets({deploymentScope:{projectId:adapters.reportJob?.projectId,environment:adapters.reportJob?.sourceEnvironment??e.tier},reuseQueries:true,dataBudgetBytes:q.exportDataBudgetBytes??Number.MAX_SAFE_INTEGER,snapshotWindowMs:q.exportSnapshotWindowMs??null,originalQuestion:adapters.originalQuestion,datasetScopes:adapters.datasetScopes,scope:createHash('sha256').update(JSON.stringify(e)).digest('hex'),secrets,maxRows:q.exportMaxRows,previewRows:q.maxRows,directory:adapters.exportDirectory,authorize:adapters.authorize,active:()=>active,onProgress:adapters.onProgress});

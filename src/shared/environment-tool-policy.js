@@ -1,6 +1,7 @@
 import {validateConfigKeys} from './config-projection.js';
 import {validateWebsiteNavigationSelectors} from './website-controls.js';
 import {validateCnbQuery} from './cnb-policy.js';
+import {validateTsfQuery} from './tsf-policy.js';
 import {validateTctQuery} from './tct-policy.js';
 import {validateWebsiteReadEndpoints,validateWebsiteStaticResources,validateWebsiteStaticRoots,validateWebsiteLoginReads} from './website-policy.js';
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
@@ -22,6 +23,8 @@ export function validateToolQuery(e, q) {
   if(q.exportSnapshotWindowMs!==undefined&&(!q.exportMaxRows||!Number.isInteger(q.exportSnapshotWindowMs)||q.exportSnapshotWindowMs<60000))throw new Error('显式报表取数窗口须为至少60000毫秒，仅由管理员按数据变化频率配置');
   if(e.kind==='cnb')validateCnbQuery(q);
   if(e.kind==='tct')validateTctQuery(q);
+  if(e.kind==='tsf')validateTsfQuery(q);
+  else if(q.applications!==undefined)throw Error('Application deployment scopes require a TSF environment');
   if (q.mode !== 'investigate') return false;
   if (q.parameters.length !== 1 || q.parameters[0].name !== 'purpose' || q.parameters[0].type !== 'string') throw new Error('排查必须绑定本次目的');
   // Legacy maxCalls is accepted for compatibility, but no longer controls investigation.
