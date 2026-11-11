@@ -13,7 +13,7 @@ async function g(cwd,args){return (await execute('git',['-C',cwd,'-c',`core.hook
 const visit=(x,fn)=>{if(typeof x==='string')fn(x);else if(x&&typeof x==='object')for(const v of Object.values(x))visit(v,fn);};
 async function regular(file){const s=await lstat(file);if(!s.isFile()||s.isSymbolicLink())throw new Error('unsafe-file');return s;}
 async function directory(file){const s=await lstat(file);if(!s.isDirectory()||s.isSymbolicLink()||await realpath(file)!==file)throw new Error('unsafe-directory');}
-function references(state,project,root,protectIds=[]){
+export function snapshotReferences(state,project,root,protectIds=[]){
  const jobs=state.jobs??[],related=jobs.filter(j=>!project.id||j.projectId===project.id);
  const busy=related.some(j=>['queued','running','cancelling'].includes(j.status)&&!j.analysisSourceSnapshot?.workspace);
  const q=new Set(),ids=new Set(protectIds),pins=new Set();
@@ -23,8 +23,9 @@ function references(state,project,root,protectIds=[]){
  for(const collection of [state.reportDeliveries,state.websiteEvidenceDeliveries])for(const d of Object.values(collection??{}))if(pending(d)){q.add(d.questionId);ids.add(d.jobId);ids.add(d.sourceJobId);}
  for(const [k,c]of Object.entries(state.cardMessages??{}))if(c.revision!==c.deliveredRevision||(c.terminalMention&&!c.mentionDelivered)){if(k.startsWith('question:'))q.add(k.slice(9));else if(k.startsWith('job:'))ids.add(k.split(':')[1]);}
  for(const j of jobs)if(!terminal.has(j.status)||q.has(j.questionId)&&j.questionId||ids.has(j.id))visit(j,v=>{if(path.isAbsolute(v)&&inside(root,path.resolve(v)))pins.add(path.resolve(v));});
- return {busy,pinned:folder=>[...pins].some(p=>inside(folder,p)||inside(p,folder))};
+ return {busy,pins:[...pins]};
 }
+const pinned=(refs,folder)=>refs.pins.some(p=>inside(folder,p)||inside(p,folder));
 async function inspect(folder,manifest){
  const ws=manifest.workspace;await directory(folder);await directory(ws);await regular(path.join(folder,'source-manifest.json'));
  const top=await readdir(folder);if(top.some(n=>!['workspace','source-manifest.json','build-owner.json'].includes(n)))throw new Error('unexpected-container-content');
@@ -62,7 +63,7 @@ function valid(m,folder,source,project){
  const seen=new Set();return m.repositories.every(r=>{if(typeof r.path!=='string'||path.isAbsolute(r.path)||r.path!=='.'&&r.path.split('/').some(x=>!x||x==='.'||x==='..')||seen.has(r.path)||!/^[a-f0-9]{40,64}$/.test(r.commit??'')||typeof r.branch!=='string'||!r.branch)return false;seen.add(r.path);return inside(m.workspace,path.resolve(m.workspace,r.path));});
 }
 async function bytes(folder){return Number((await execute('du',['-sk',folder])).stdout.trim().split(/\s/)[0])*1024;}
-export async function pruneSourceSnapshots(project,{getState,withState,apply=false,onProgress=async()=>{},protectIds=[]}={}){
+export async function pruneSourceSnapshots(project,{getState,readReferences,withState,apply=false,onProgress=async()=>{},protectIds=[]}={}){
  if(project.analysisSourceMode!=='isolated'||!project.analysisSnapshotRoot)return {removed:[],kept:[],unknown:[],skipped:'not-configured'};
  let root=path.resolve(project.analysisSnapshotRoot),source;
  try{if((await lstat(root)).isSymbolicLink())throw new Error('symlink');root=await realpath(root);await directory(root);source=await realpath(project.repoPath);}catch{return {removed:[],kept:[],unknown:[],skipped:'unsafe-or-missing-root'};}
@@ -70,7 +71,8 @@ export async function pruneSourceSnapshots(project,{getState,withState,apply=fal
  if(inside(root,source)||inside(source,root)||inside(root,program)||inside(program,root)||root===process.cwd()||inside(root,process.cwd()))return {removed:[],kept:[],unknown:[],skipped:'unsafe-root'};
  return withSnapshotLock(root,async(checkLock)=>{
   const candidates=[],kept=[],unknown=[],removed=[];
-  const state=await getState();if(references(state,project,root,protectIds).busy)return {removed,kept,unknown,skipped:'project-busy'};
+  const readRefs=async()=>readReferences?readReferences(project,root,protectIds):snapshotReferences(await getState(),project,root,protectIds);
+  if((await readRefs()).busy)return {removed,kept,unknown,skipped:'project-busy'};
   for(const name of await readdir(root)){
    if(name==='.snapshot.lock'||name==='.snapshot-audit'||/^latest-[a-f0-9]{32}\.json$/.test(name))continue;
    const folder=path.join(root,name);
@@ -86,14 +88,14 @@ export async function pruneSourceSnapshots(project,{getState,withState,apply=fal
   let n=0;
   for(const item of candidates){
    await onProgress({checked:++n,total:candidates.length,name:item.name});
-   const refs=references(await getState(),project,root,protectIds);
-   if(refs.busy||refs.pinned(item.folder)||latest.get(item.manifest.environment)===item){kept.push({name:item.name,environment:item.manifest.environment,reason:refs.busy?'project-busy':refs.pinned(item.folder)?'active-or-delivery-reference':'latest-environment'});continue;}
+   const refs=await readRefs();
+   if(refs.busy||pinned(refs,item.folder)||latest.get(item.manifest.environment)===item){kept.push({name:item.name,environment:item.manifest.environment,reason:refs.busy?'project-busy':pinned(refs,item.folder)?'active-or-delivery-reference':'latest-environment'});continue;}
    let repositorySources,size;
    try{repositorySources=await inspect(item.folder,item.manifest);size=await bytes(item.folder);}catch(error){unknown.push({name:item.name,environment:item.manifest.environment,reason:error.message||'unverified-local-state'});continue;}
    const entry={name:item.name,environment:item.manifest.environment,bytes:size,reason:'idle-managed-clean-snapshot'};
    if(!apply){removed.push(entry);continue;}
    const remove=async fresh=>{
-    const refs=references(fresh,project,root,protectIds);if(refs.busy||refs.pinned(item.folder)){kept.push({...entry,reason:'became-active-before-delete'});return;}
+    const refs=snapshotReferences(fresh,project,root,protectIds);if(refs.busy||pinned(refs,item.folder)){kept.push({...entry,reason:'became-active-before-delete'});return;}
     await directory(item.folder);await regular(path.join(item.folder,'source-manifest.json'));
     if(JSON.stringify(JSON.parse(await readFile(path.join(item.folder,'source-manifest.json'),'utf8')))!==JSON.stringify(item.manifest))throw new Error('Manifest changed during collection');
     // Recheck dirt immediately before removal, inside both the cache lock and state writer.

@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {syncSnapshot,verifySnapshot,prepareSnapshotHistory,restoreSnapshot} from '../src/runner/source-snapshot.js';
 import {prepareAnalysisSources} from '../src/runner/source-sync.js';
-import {pruneSourceSnapshots} from '../src/shared/source-snapshot-gc.js';
+import {pruneSourceSnapshots,snapshotReferences} from '../src/shared/source-snapshot-gc.js';
 import {runWithSourceHistory} from '../src/runner/source-history-runner.js';
 import {JsonStore} from '../src/shared/store.js';
 const exec=promisify(execFile),git=async(cwd,...args)=>(await exec('git',['-C',cwd,...args])).stdout.trim();
@@ -53,8 +53,8 @@ test('Git metadata links, alternate stores, commondir and worktree redirection a
 });
 test('old metadata-free provenance remains readable, and reclaimed caches restore the exact old commit',async t=>{
  const f=await fixture(t),a=await syncSnapshot(f.project,f.environment);delete a.projectId;delete a.repositorySources;const {remoteCheckedAt,...manifest}=a;await writeFile(path.join(path.dirname(a.workspace),'source-manifest.json'),JSON.stringify(manifest));await verifySnapshot(f.project,a);
- await f.commit('third');const b=await syncSnapshot(f.project,f.environment);let state={jobs:[]};const gc=()=>pruneSourceSnapshots(f.project,{getState:async()=>state,withState:fn=>fn(state),apply:true});
- const removed=await gc();assert.equal(removed.removed.length,1);await assert.rejects(access(a.workspace));const audit=JSON.parse(await readFile(path.join(f.project.analysisSnapshotRoot,'.snapshot-audit',path.basename(path.dirname(a.workspace))+'.json')));assert.equal(audit.status,'deleted');assert.deepEqual(audit.manifest,manifest);
+ await f.commit('third');const b=await syncSnapshot(f.project,f.environment);let state={jobs:[]};let projected=0;const gc=()=>pruneSourceSnapshots(f.project,{getState:async()=>{throw Error('Full history copy forbidden');},readReferences:async(p,root,ids)=>{projected++;return structuredClone(snapshotReferences(state,p,root,ids));},withState:fn=>fn(state),apply:true});
+ const removed=await gc();assert.ok(projected>=2);assert.equal(removed.removed.length,1);await assert.rejects(access(a.workspace));const audit=JSON.parse(await readFile(path.join(f.project.analysisSnapshotRoot,'.snapshot-audit',path.basename(path.dirname(a.workspace))+'.json')));assert.equal(audit.status,'deleted');assert.deepEqual(audit.manifest,manifest);
  const restored=await restoreSnapshot(f.project,a);assert.equal(restored.workspace,a.workspace);assert.equal(await readFile(path.join(a.workspace,'service/rule.txt'),'utf8'),'second');await verifySnapshot(f.project,a);await access(b.workspace);
 });
 test('GC observes the authoritative latest writer state and protects partial multi-part delivery and unsent mentions',async t=>{

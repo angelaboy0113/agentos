@@ -1,4 +1,5 @@
-import {pruneSourceSnapshots} from '../shared/source-snapshot-gc.js';
+import {stateView} from '../shared/state-view.js';
+import {pruneSourceSnapshots,snapshotReferences} from '../shared/source-snapshot-gc.js';
 import path from 'node:path';
 import {readdir} from 'node:fs/promises';
 import {realDirectory} from '../shared/retention.js';
@@ -14,7 +15,7 @@ export class HistoryRetention {
   this.snapshotApply=apply;
   this.snapshotRunning=(async()=>{const results=[];for(const [id,project]of Object.entries(this.context.projects?.projects??{})){
    const protectIds=[...(this.context.reports?.workers?.keys()??[])].map(k=>k.split(':')[0]);
-   const result=await pruneSourceSnapshots({...project,id},{getState:()=>this.context.store.read(),withState:fn=>this.context.store.transact(fn),apply,protectIds});results.push({projectId:id,...result});
+   const result=await pruneSourceSnapshots({...project,id},{readReferences:(p,root,ids)=>stateView(this.context.store,s=>snapshotReferences(s,p,root,ids)),withState:fn=>this.context.store.transact(fn),apply,protectIds});results.push({projectId:id,...result});
   }this.lastSnapshots={at:new Date().toISOString(),apply,results};return results;})();
   try{return await this.snapshotRunning;}finally{this.snapshotRunning=null;}
  }
