@@ -14,7 +14,7 @@ export function processAbsent(pid){
  try{process.kill(pid,0);return false;}catch(e){return e.code==='ESRCH';}
 }
 // Local launcher only. Never infer a remote Runner's process identity from its display name.
-export async function recoverLocalExecutions(store,directory,{host=hostname(),platform=process.platform,absent=processAbsent}={}){
+export async function recoverLocalExecutions(store,directory,{host=hostname(),platform=process.platform,absent=processAbsent,reviewCheckpoint}={}){
  if(platform==='win32')return {recovered:0,unsupported:true}; // No equivalent negative-PID process-group proof here.
  let files;try{if((await lstat(directory)).isSymbolicLink())throw new Error('Invalid execution registry');files=await readdir(directory);}catch(e){if(e.code==='ENOENT')return {recovered:0};throw e;}
  let recovered=0;
@@ -24,10 +24,18 @@ export async function recoverLocalExecutions(store,directory,{host=hostname(),pl
   if(entry.version!==1||entry.host!==host||entry.platform!==platform||![entry.ownerPid,entry.workerPid].every(p=>Number.isSafeInteger(p)&&p>1)||!absent(entry.ownerPid)||!absent(-entry.workerPid))continue;
   const candidate=await store.select(s=>s.jobs.find(j=>j.id===entry.jobId&&['running','cancelling'].includes(j.status)&&j.lease?.id===entry.leaseId&&j.lease.runnerId===entry.runnerId)?.id);
   if(!candidate){await unlink(full).catch(()=>{});continue;}
+  let review=false;if(reviewCheckpoint)try{review=await reviewCheckpoint(await store.getJob(entry.jobId))===true;}catch{/* Preserve a real validation gap; never replay unverified work. */}
   const changed=await store.transact(state=>{
    const job=state.jobs.find(j=>j.id===entry.jobId);
    if(!job||!['running','cancelling'].includes(job.status)||job.lease?.id!==entry.leaseId||job.lease.runnerId!==entry.runnerId)return false;
    const cancelled=job.events?.some(e=>e.type==='cancel_requested');
+   const q=state.questions?.[job.questionId],latest=state.jobs.filter(j=>j.questionId===job.questionId).at(-1);
+   if(review&&!cancelled&&job.status==='running'&&job.taskIntent==='analysis'&&job.continuousInvestigation&&job.stage==='developer'&&q&&!q.closedAt&&q.senderId===job.senderId&&q.profile===(job.originProfile??job.agentProfile)&&q.projectId===job.projectId&&q.chatId===job.chatId&&latest?.id===job.id&&state.cardMessages?.['question:'+q.id]?.error!=='原消息已撤回，停止更新'&&!(state.conversations??[]).some(t=>t.questionId===q.id&&['queued','thinking','decided','ready'].includes(t.status))){
+    job.executorRecovery={version:1,reviewPending:true,at:new Date().toISOString(),reason:'confirmed_process_exit',fixedSourcePreserved:true,replayBusinessStep:false,...(job.environmentAccess?{interruptedEnvironment:{environmentId:job.environmentAccess.environmentId,scopeHash:job.environmentAccess.scopeHash}}:{})};
+    // Re-enter source review, never re-use a signed read lease or directly replay SQL/web actions.
+    job.lease=null;delete job.environmentAccess;job.status='queued';job.updatedAt=job.executorRecovery.at;
+    job.events.push({type:'executor_checkpoint_review_queued',at:job.updatedAt,processesExited:true,businessReplay:false});return true;
+   }
    job.result=interruptedInvestigation(job,'本机执行器已退出，已确认原任务进程组不存在；已有成果保留，本轮没有完成交付，不自动重跑业务查询','EXECUTOR_EXITED');
    job.status=cancelled?'cancelled':'blocked';job.lease=null;delete job.environmentAccess;
    job.updatedAt=new Date().toISOString();job.events.push({type:cancelled?'cancelled':'failed',at:job.updatedAt,processesExited:true,recoveredAfterExecutorExit:true});return true;

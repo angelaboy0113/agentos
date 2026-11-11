@@ -1,5 +1,7 @@
 # Angel AgentOS
 
+内存与故障检查点恢复说明见[状态存储与内存](docs/state-memory.md)。
+
 一份清单多值字段归并与同题验收规则见[完整清单交付](docs/list-delivery.md)。
 
 已授权主记录、逐图结果和审核快照接入及后台轮询内存说明见[Mongo记录范围](docs/mongo-record-scope.md)。
@@ -12,7 +14,7 @@
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.97.1** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.98.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 维护备份登记、空闲自动去重及恢复见[维护备份整理](docs/maintenance-backups.md)。
 

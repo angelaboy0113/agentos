@@ -1,6 +1,6 @@
 import {prepareReportParts} from '../shared/report-parts.js';
 import {hashFile} from '../shared/file-digest.js';
-import {stateView} from '../shared/state-view.js';
+import {stateView,questionStateView} from '../shared/state-view.js';
 import {privateRecipient} from './private-cards.js';
 import {reportEligible} from '../shared/report-acceptance.js';
 import {createHash} from 'node:crypto';
@@ -11,8 +11,7 @@ export class ReportDelivery {
  constructor(context){this.context=context;this.workers=new Map();this.closed=false;}
  async enqueue(job){
   if(!job||job.nextJobId||job.status!=='completed'||!reportDeliveryReady(job))return;
-  const snapshot=await this.context.store.read();
-  if(!snapshot.jobs.some(j=>(job.questionId?j.questionId===job.questionId:j.id===job.id)&&j.reportFiles?.length))return;
+  if(!await stateView(this.context.store,s=>s.jobs.some(j=>(job.questionId?j.questionId===job.questionId:j.id===job.id)&&j.reportFiles?.length)))return;
   await this.context.store.transact(state=>{
    const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='completed'||!reportDeliveryReady(current))return;
    const q=state.questions?.[job.questionId];
@@ -38,8 +37,8 @@ export class ReportDelivery {
   await this.retry();
  }
  async recover(){
-  const state=await this.context.store.read();const questions=new Set(state.jobs.filter(j=>j.reportFiles?.length).map(j=>j.questionId));
-  for(const id of questions){const latest=state.jobs.filter(j=>j.questionId===id).at(-1);if(latest)await this.enqueue(latest);}
+  const latestIds=await stateView(this.context.store,s=>[...new Set(s.jobs.filter(j=>j.reportFiles?.length).map(j=>j.questionId))].map(id=>s.jobs.filter(j=>j.questionId===id).at(-1)?.id).filter(Boolean));
+  for(const id of latestIds){const latest=await stateView(this.context.store,s=>s.jobs.find(j=>j.id===id));if(latest)await this.enqueue(latest);}
  }
  async retry(snapshot){
   if(this.closed||typeof this.context.feishu.replyFile!=='function')return;
@@ -60,7 +59,7 @@ export class ReportDelivery {
     if(await hashFile(file)!==entry.item.sha256)throw new Error('文件在分卷时发生变化');
     const ids=[];
     for(const [index,part] of prepared.parts.entries()){
-     const current=await this.context.store.read();
+     const current=await questionStateView(this.context.store,{id:entry.sourceJobId,questionId:entry.questionId});
      if(!deliveryEligible(current,entry)||current.reportDeliveries[key]?.superseded||(entry.questionId&&current.questions?.[entry.questionId]?.generation!==entry.questionGeneration))return;
      const recipient=privateRecipient(current,current.jobs.find(j=>j.id===entry.sourceJobId));if(entry.destination.privateRecipient&&entry.destination.privateRecipient!==recipient)throw new Error('Private recipient changed');
      const prior=current.reportDeliveries[key]?.parts?.[index];

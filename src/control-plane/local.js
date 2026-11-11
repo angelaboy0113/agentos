@@ -1,6 +1,9 @@
 import {installDailyLogs} from '../shared/daily-logs.js';
 import path from 'node:path';
+import {stateView} from '../shared/state-view.js';
 import {publishQuestion} from './questions.js';
+import {loadHarness} from '../runner/harness.js';
+import {verifySnapshot} from '../runner/source-snapshot.js';
 import {recoverLocalExecutions} from '../runner/local-executions.js';
 import { loadConversationSettings } from './conversation-settings.js';
 import { randomBytes } from 'node:crypto';
@@ -20,12 +23,18 @@ async function main() {
   });
   const {server,config,projects,agents,store}=app;
   const localExecutionRegistry=path.join(config.dataDir,'local-executions');
-  await recoverLocalExecutions(store,localExecutionRegistry);
+  await recoverLocalExecutions(store,localExecutionRegistry,{reviewCheckpoint:async job=>{
+    const profile=job.originProfile??job.agentProfile,agent=Object.values(agents.agents).find(a=>a.profile===profile),project=projects.projects[job.projectId];
+    if(!agent?.systemAssistant||!project||projects.retiredChatIds?.includes(job.chatId)||agent.allowedChatIds&&!agent.allowedChatIds.includes(job.chatId)||(projects.chatProfileProjectMap?.[job.chatId]?.[profile]??projects.chatProjectMap?.[job.chatId])!==job.projectId)return false;
+    if(job.taskIntent!=='analysis'||!job.continuousInvestigation||job.stage!=='developer'||!job.analysisSourceSnapshot||job.analysisSourceSnapshot.environment!==job.sourceEnvironment)return false;
+    if(!(job.context??[]).some(e=>e.result?.harness?.fingerprint))return false;
+    await loadHarness(job);await verifySnapshot(project,job.analysisSourceSnapshot);return true;
+  }});
   await new Promise((resolve) => server.listen(config.port, config.host, resolve));
   console.log(`[control-plane] listening on http://${config.host}:${config.port}`);
-  const savedState=await store.read();
-  for(const id of new Set(Object.values(savedState.environmentEnrollments??{}).map(e=>e.questionId))) {
-    if(savedState.cardMessages?.[`question:${id}`]) {
+  const enrolledQuestions=await stateView(store,s=>[...new Set(Object.values(s.environmentEnrollments??{}).map(e=>e.questionId))].filter(id=>s.cardMessages?.[`question:${id}`]));
+  for(const id of enrolledQuestions) {
+    {
       try { await publishQuestion(app,id); } catch { console.error("[enrollment-card] 启动刷新未完成，可在卡片重试"); }
     }
   }

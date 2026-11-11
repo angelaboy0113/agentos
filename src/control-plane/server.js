@@ -1,3 +1,5 @@
+import {getHeapStatistics} from 'node:v8';
+import {stateView,questionStateView} from '../shared/state-view.js';
 import {ReceptionService} from './reception.js';
 import {loadReceptionPolicy} from '../shared/reception-policy.js';
 import {cloudSheetTarget,readCloudSheet,CloudSheetError,registerCloudSheetInput,registerCloudDocumentInput,restoreCloudSheetInput} from '../shared/feishu-cloud-sheet.js';
@@ -135,17 +137,17 @@ export async function createControlPlane(overrides = {}) {
 }
 
 export async function repairStaleTerminalQuestionCards(context) {
-  const state = await context.store.read(), repairs = [];
+  const entries=await stateView(context.store,s=>Object.entries(s.cardMessages??{}).map(([key,saved])=>({key,saved,status:questionJob(s,key.replace(/^question:/,''))?.status}))), repairs = [];
   const terminalLabels = { cancelled: '已取消', failed: '执行失败', blocked: '任务受阻', completed: '当前阶段已完成' };
-  for (const [key, saved] of Object.entries(state.cardMessages ?? {})) {
+  for (const {key,saved,status} of entries) {
     if (!key.startsWith('question:') || !saved.messageId) continue;
-    const questionId = key.slice('question:'.length), job = questionJob(state, questionId);
-    if (!job || !['completed', 'blocked', 'failed', 'cancelled'].includes(job.status)) continue;
+    const questionId = key.slice('question:'.length);
+    if (!['completed', 'blocked', 'failed', 'cancelled'].includes(status)) continue;
     const serialized = JSON.stringify(saved.card ?? {});
     const header = saved.card?.header?.subtitle?.content ?? saved.card?.header?.title?.content ?? '';
-    if (!/"action":"(?:cancel|refresh)"/.test(serialized) && header.includes(terminalLabels[job.status])) continue;
+    if (!/"action":"(?:cancel|refresh)"/.test(serialized) && header.includes(terminalLabels[status])) continue;
     if (saved.terminalMention && !saved.terminalMention.kind) {
-      const view = questionView(state, questionId, context.projects);
+      const view = await stateView(context.store,s=>questionView(s, questionId, context.projects));
       repairs.push(context.cards.upsert(key, view.card, view.destination, { terminal: true, immediate: true,
         resultText: view.resultText, terminalMention: saved.terminalMention, generation: saved.generation ?? 1 }));
     } else repairs.push(publishQuestion(context, questionId));
@@ -170,8 +172,8 @@ async function route(context) {
     requireAdminSession(context, request, false);
     context.adminUsageExports=(context.adminUsageExports??0)+1;
     try {
-      const state=await store.read(),names=await context.adminUsageDirectory.names(state);
-      let usage;try { usage=adminUsage(state,Object.fromEntries(url.searchParams),{projects:context.projects,names,allRecords:true}); }
+      const names=await context.adminUsageDirectory.names(await stateView(store,s=>({conversations:s.conversations})));
+      let usage;try { usage=await stateView(store,s=>adminUsage(s,Object.fromEntries(url.searchParams),{projects:context.projects,names,allRecords:true})); }
       catch { return json(response,400,{ok:false,error:'统计日期或时区无效'}); }
       const workbook=usageWorkbook(usage,{person:url.searchParams.get('person')});
       response.writeHead(200,{'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','content-disposition':'attachment; filename="AgentOS-usage.xlsx"','cache-control':'no-store','x-content-type-options':'nosniff'});
@@ -180,30 +182,27 @@ async function route(context) {
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/usage') {
     requireAdminSession(context, request, false);
-    const state = await store.read();
-    const names = await context.adminUsageDirectory.names(state);
-    try { return json(response, 200, {ok:true, usage:adminUsage(state,Object.fromEntries(url.searchParams),{projects:context.projects,names})}); }
+    const names = await context.adminUsageDirectory.names(await stateView(store,s=>({conversations:s.conversations})));
+    try { return json(response, 200, {ok:true, usage:await stateView(store,s=>adminUsage(s,Object.fromEntries(url.searchParams),{projects:context.projects,names}))}); }
     catch { return json(response,400,{ok:false,error:'统计日期或时区无效'}); }
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/overview') {
     requireAdminSession(context, request, false);
-    const state = await store.read();
     const runtime = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
-    return json(response, 200, { ok: true, overview: adminOverview(state,
-      { ...runtime, runnerConcurrency: Number(process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3) }) }, { 'cache-control': 'no-store' });
+    return json(response, 200, { ok: true, overview: await stateView(store,s=>adminOverview(s,
+      { ...runtime, runnerConcurrency: Number(process.env.AGENTOS_RUNNER_CONCURRENCY ?? 3) })) }, { 'cache-control': 'no-store' });
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/records') {
     requireAdminSession(context, request, false);
-    const state = await store.read();
-    return json(response, 200, { ok: true, records: adminRecords(state, {
+    return json(response, 200, { ok: true, records: await stateView(store,s=>adminRecords(s, {
       kind: url.searchParams.get('kind'), status: url.searchParams.get('status'),
       search: url.searchParams.get('q'), limit: url.searchParams.get('limit'),
-    }) }, { 'cache-control': 'no-store' });
+    })) }, { 'cache-control': 'no-store' });
   }
   const adminRecordMatch = url.pathname.match(/^\/api\/v1\/admin\/records\/([^/]+)$/);
   if (request.method === 'GET' && adminRecordMatch) {
     requireAdminSession(context, request, false);
-    const record = adminRecordDetail(await store.read(), decodeURIComponent(adminRecordMatch[1]));
+    const record = await stateView(store,s=>adminRecordDetail(s, decodeURIComponent(adminRecordMatch[1])));
     return record ? json(response, 200, { ok: true, record }, { 'cache-control': 'no-store' })
       : json(response, 404, { ok: false, error: 'Record not found' });
   }
@@ -242,7 +241,7 @@ async function route(context) {
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {enabled:context.backupMaintenance.enabled??false,lastRun:context.backupMaintenance.lastRun},
-      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'stat-cache-detached-v1', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
+      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'lazy-json-transaction-v2', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal,heapLimitBytes:getHeapStatistics().heap_size_limit,externalBytes:process.memoryUsage().external,arrayBuffersBytes:process.memoryUsage().arrayBuffers}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
@@ -361,7 +360,7 @@ async function route(context) {
         return json(response,200,await commitControl(context,async()=>({ok:true,planned:false,sourcePreparedNext:true,job:await store.switchContinuousSourceEnvironment(id,identity,sourceResult,{environmentId:other,reason:'先核对目标环境独立源码，再重新规划原问题所需只读证据'},project)})));
       }
       assertSourceRuntimeTier(context.projects.projects[job.projectId],job.sourceEnvironment,plan.tier);
-      const convergence = environmentContinuation(await store.read(), job, query, sourceResult);
+      const convergence = await stateView(store,s=>environmentContinuation(s, job, query, sourceResult));
       if (!convergence.continue) throw Object.assign(new Error(convergence.reason), { queryDiagnostic: { code: convergence.terminal?'CONVERGENCE_STALLED':'REPEATED_TARGET', reason: convergence.reason } });
       if(convergence.metadata)Object.assign(plan,convergence.metadata);
       const result=await commitControl(context,async()=>({ok:true,planned:true,plan,job:await store.beginContinuousEnvironment(id,identity,plan,sourceResult)}));
@@ -458,7 +457,7 @@ async function route(context) {
           const error=new Error('当前结果尚不能进入后续受控读取');error.queryDiagnostic={code:body.result.handoffGate?.passed===false?'HANDOFF_NOT_READY':'RESULT_NOT_CONTINUABLE',reason:body.result.handoffGate?.passed===false?'当前交接工件或验收证据未通过；这不是任务阶段或数据库权限不足。':'后续读取申请需要needs_clarification结果，不能将ready/blocked结果直接作为新查询授权。',correction:'保留具体handoffGate问题，区分已交付输入与本轮新输出，修正结构化交接后按原范围继续；不重新取数或扩大权限。',retry:true};throw error;
         }
         if(job.convergenceFinal)throw new Error('最终汇总阶段不能再申请环境查询');
-        const snapshot = await store.read();
+        const snapshot = await questionStateView(store,job);
         const earlier = snapshot.jobs.filter(j => j.id!==job.id && j.questionId === job.questionId && j.environmentAccess && ['running','queued','awaiting_environment_approval'].includes(j.status));
         const request = body.result.environmentQuery;
         const continuation=environmentContinuation(snapshot,job,request,body.result);
@@ -493,7 +492,7 @@ async function route(context) {
     if (body.type === 'completed' && job.taskIntent === 'analysis' && job.questionId
       && job.environmentAccess && !job.connectionEnrollmentPending && ['partial', 'ready'].includes(body.result?.outcome)
       && context.projects.projects[job.projectId]?.analysisRepositories?.length) {
-      const prior = (await store.read()).jobs.filter(j => j.questionId === job.questionId && j.environmentAccess && j.id !== job.id && j.result?.environmentEvidence);
+      const prior = await stateView(store,s=>s.jobs.filter(j => j.questionId === job.questionId && j.environmentAccess && j.id !== job.id && j.result?.environmentEvidence));
       const hash = body.result.environmentEvidence?.resultHash;
       const stalled = hash && prior.length >= 2 && prior.slice(-2).every(j => j.result.environmentEvidence.resultHash === hash);
       if (!stalled) routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), resumeInvestigation: true, sourceEnvironment:sourceEnvironmentForTier(context.projects.projects[job.projectId],job.environmentAccess.tier,job.sourceEnvironment) };
@@ -537,7 +536,7 @@ async function route(context) {
     const attachment = job?.attachments.find((item) => item.id === decodeURIComponent(attachmentMatch[2]));
     if (!attachment) return json(response, 404, { ok: false, error: 'Attachment not found' });
     const inputPath=attachment.source?.kind==='delivered-report'
-      ? (await (await import('../shared/report-followup.js')).boundReportInput(await store.read(),job,attachment,config.dataDir)).file : attachment.path;
+      ? (await (await import('../shared/report-followup.js')).boundReportInput(await questionStateView(store,job),job,attachment,config.dataDir)).file : attachment.path;
     const info = await stat(inputPath);
     response.writeHead(200, {
       'content-type': attachment.contentType ?? 'application/octet-stream',
@@ -705,7 +704,7 @@ export async function notifyJobEvent(context, { job, event }) {
     const attempt = current.events.filter((e) => e.type === 'started').at(-1)?.id ?? 'first';
     const key = `job:${job.id}:${attempt}`;
     // Once queued, keep the exact recipients across retries/config changes.
-    const frozenMention = (await context.store.read()).cardMessages?.[key]?.terminalMention;
+    const frozenMention = await stateView(context.store,s=>s.cardMessages?.[key]?.terminalMention);
     const rendered=addressCard(jobCard(current),terminal?await context.replyAddressing?.forTurn(current)??'':'');
     const id = await context.cards.upsert(key, rendered,
       current.visibility==='requester'?cardDestination(current):{ chatId: current.chatId, replyTo: current.chatId ? null : current.replyToMessageId, profile: current.agentProfile },
@@ -759,7 +758,7 @@ function nextAgentRole(job) {
 }
 
 async function sendAsJobAgent({ feishu, store }, job, text) {
-  if(isPrivate(await store.read(),job))return; // Never fall back to a public message.
+  if(await stateView(store,s=>isPrivate(s,job)))return; // Never fall back to a public message.
   let result;
   if (job.chatId && typeof feishu.send === 'function') {
     result = await feishu.send(job.chatId, text, { profile: job.agentProfile });

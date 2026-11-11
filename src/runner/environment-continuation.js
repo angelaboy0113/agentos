@@ -28,7 +28,7 @@ export const publicContinuationCatalog=entries=>compactCatalog(entries);
 // An accepted result is persisted before this is considered. Restart uses that
 // same record; unresolved failures return to source review; verified files survive direct handoff.
 export function continuationSourceResult(job){
-  if(job.environmentAccess||!job.continuousInvestigation||job.taskIntent!=='analysis'||job.stage!=='developer')return null;
+  if(job.executorRecovery?.reviewPending||job.environmentAccess||!job.continuousInvestigation||job.taskIntent!=='analysis'||job.stage!=='developer')return null;
   const last=job.context?.at(-1);
   if(last?.kind!=='environment_result')return null;
   const result=last.result;

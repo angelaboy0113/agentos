@@ -1,3 +1,5 @@
+import {encodeState,writeEncoding,sameEncoding} from './state-encoding.js';
+import {stateDraft} from './state-draft.js';
 import {captureRecoveryEvent} from './reception-policy.js';
 import{availableEnvironmentEvidence,canReviewAlternativeSources}from './available-evidence.js';
 import{loadIntegrationProjects,assertTaskReadScope}from './integration-peers.js';
@@ -40,7 +42,7 @@ function questionEvidence(prior, supplied = []) {
 export class JsonStore {
   constructor(file) {
     this.file = path.resolve(file);
-    this.queue = Promise.resolve();this.readMetrics={full:0,selected:0,loads:0,jsonCopies:0};
+    this.queue = Promise.resolve();this.readMetrics={full:0,selected:0,loads:0,jsonCopies:0,draftTransactions:0,unchangedTransactions:0,materializedBranches:0};
     this.transactionContext=new AsyncLocalStorage();this.runnerHeartbeats=new Map();
   }
 
@@ -56,11 +58,17 @@ export class JsonStore {
     const nested=this.transactionContext.getStore();if(nested?.active)return Promise.resolve().then(()=>operation(nested.state));
     const queuedAt=Date.now();
     const run = this.queue.then(async () => {
-      const started=Date.now();const state = await this.read();
-      const result = await operation(state);
-      await this.write(state);
-      this.lastTransaction={queueMs:started-queuedAt,transactionMs:Date.now()-started};
-      return result;
+      const started=Date.now(),base=await this.snapshot(),transaction=stateDraft(base);
+      try {
+        const result=await operation(transaction.draft);
+        // Returned jobs/cards cannot retain a writable reference into the cache.
+        const detached=structuredClone(result),next=transaction.finish();
+        this.readMetrics.draftTransactions++;
+        this.readMetrics.materializedBranches+=transaction.metrics().materializedBranches;
+        if(next!==base)await this.write(next,{owned:true});else this.readMetrics.unchangedTransactions++;
+        this.lastTransaction={queueMs:started-queuedAt,transactionMs:Date.now()-started};
+        return detached;
+      } finally { transaction.close(); }
     });
     this.queue = run.catch(() => undefined);
     return run;
@@ -86,7 +94,7 @@ export class JsonStore {
     const signature=s=>[s.dev,s.ino,s.size,s.mtimeMs,s.ctimeMs].join(':');
     for(;;){try{const before=signature(await stat(this.file));if(this.cache?.signature===before)return this.cache.state;
       const raw=await readFile(this.file,'utf8'),after=signature(await stat(this.file));if(before!==after)continue;
-      const state=JSON.parse(raw);this.cache={signature:after,state,raw};return state;
+      const state=JSON.parse(raw);this.setCache(after,state,encodeState(state));return state;
     }catch(error){if(error.code==='ENOENT'){this.cache=null;return emptyState();}throw error;}}
   }
   async select(select){this.readMetrics.selected++;return structuredClone(select(await this.snapshot()));}
@@ -100,14 +108,17 @@ export class JsonStore {
     if(typeof raw==='string'){this.readMetrics.jsonCopies++;return JSON.parse(raw);}
     return structuredClone(state);
   }
-  async write(state) {
-    const raw=JSON.stringify(state)+'\n';
-    // Only skip an unchanged transaction if the authoritative file still matches the cached revision.
-    if(this.cache?.raw===raw){await this.snapshot();if(this.cache?.raw===raw)return;}
+  setCache(signature,state,encoding){
+    this.cache={signature,state,encoding,get raw(){return encoding.segments.join('');}};
+  }
+  async write(state,{owned=false}={}) {
+    const next=owned?state:JSON.parse(JSON.stringify(state)),encoding=encodeState(next,this.cache?.encoding);
+    if(sameEncoding(this.cache?.encoding,encoding)){await this.snapshot();if(sameEncoding(this.cache?.encoding,encoding))return;}
     await mkdir(path.dirname(this.file), { recursive: true });
     const temporary = `${this.file}.${process.pid}.tmp`;
-    await writeFile(temporary,raw,{encoding:'utf8',mode:0o600});await rename(temporary,this.file);
-    const info=await stat(this.file);this.cache={signature:[info.dev,info.ino,info.size,info.mtimeMs,info.ctimeMs].join(':'),state:JSON.parse(raw),raw};
+    await writeEncoding(temporary,encoding);await rename(temporary,this.file);
+    const info=await stat(this.file);this.setCache([info.dev,info.ino,info.size,info.mtimeMs,info.ctimeMs].join(':'),next,encoding);
+    this.readMetrics.encodedRecords=(this.readMetrics.encodedRecords??0)+encoding.encodedRecords;
   }
 
   async recordAdminAudit(entry) {

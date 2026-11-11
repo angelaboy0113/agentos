@@ -7,7 +7,7 @@ import {addressCard,addressText} from './reply-addressing.js';
 import {readBusinessDefinitions,recordBusinessDefinitions} from '../shared/business-definitions.js';
 import {sourceEnvironmentForTier} from '../shared/source-environments.js';
 import { resolveProjectId, routeAgent, assistantInstructions } from '../shared/project-scope.js';
-import {stateView} from '../shared/state-view.js';
+import {stateView,questionStateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
 import { refreshExpiredApprovalCards } from './approval-expiry.js';
 import { selectSourceEnvironment, sourceEnvironmentCatalog } from '../shared/source-environments.js';
@@ -318,7 +318,7 @@ export class ConversationService {
           try{file=await this.context.contacts.validateImage(turn,turn.outcome.contactImage);}
           catch{await this.update(turn.id,{outcome:{...turn.outcome,contactImage:null},response:'联系人资料、授权或图片检查未通过，本次没有发送图片，请重新查询。',sentParts:0,contactImageError:'资料、授权或图片检查未通过，未发送；请重新查询。'});continue;}
           if(typeof this.context.feishu.replyImage!=='function')throw new Error('Image transport unavailable');
-          const result=await this.context.feishu.replyImage(turn.messageId,file,{profile:turn.profile,replyInThread:turn.replyInThread,privateRecipient:privateRecipient(await this.context.store.read(),turn),idempotencyKey:'aos-contact-'+turn.id+'-'+turn.outcome.contactImage.sha256.slice(0,32)});
+          const result=await this.context.feishu.replyImage(turn.messageId,file,{profile:turn.profile,replyInThread:turn.replyInThread,privateRecipient:await stateView(this.context.store,s=>privateRecipient(s,turn)),idempotencyKey:'aos-contact-'+turn.id+'-'+turn.outcome.contactImage.sha256.slice(0,32)});
           const imageId=responseMessageId(result);if(!imageId)throw new Error('Image delivery has no message ID');
           responseIds.push(imageId);await this.update(turn.id,{contactImageMessageId:imageId,responseIds});
         }
@@ -343,7 +343,7 @@ export class ConversationService {
 
   async buildInput(turn) {
     const { projects, store } = this.context;
-    const state = await store.read();
+    const state = await questionStateView(store,{...turn,projectId:resolveProjectId(projects, turn.chatId, turn.profile)});
     const persistedTurn=state.conversations?.find(item=>item.id===turn.id);
     if(persistedTurn?.inquiryCoordination)turn={...turn,inquiryCoordination:persistedTurn.inquiryCoordination};
     if(turn.ownerStatusChannel)return {requestId:turn.id,nativeSession:false,role:turn.role,currentTime:new Date().toISOString(),timeZone:this.context.reception.policy.timeZone,channel:{kind:'owner_status'},message:turn.content,history:[],jobs:[],attachments:[],currentAttachmentIds:[],project:null,publicOwnerStatus:this.context.reception.statusInput(state)};
@@ -445,7 +445,7 @@ export class ConversationService {
     if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');
     // Recheck generated-file capabilities at application time, including replay after restart.
     for(const attachment of attachments)if(attachment.source?.kind==='delivered-report')
-      await boundReportInput(await store.read(),{...turn,originProfile:turn.profile,projectId},attachment,this.context.config.dataDir);
+      await boundReportInput(await questionStateView(store,{...turn,projectId}),{...turn,originProfile:turn.profile,projectId},attachment,this.context.config.dataDir);
     if (decision.action === 'request_environment_setup') {
       if(decision.environmentSetup?.url)decision.environmentSetup=enrollmentTarget(decision.environmentSetup);
       // A bare endpoint cannot authorize local credential extraction: discover its source first.
@@ -453,17 +453,17 @@ export class ConversationService {
         const setup=decision.environmentSetup,u=new URL(setup.url),cfg=await loadEnvironments();
         const known=Object.values(cfg.environments).some(e=>e.projectId===projectId&&e.tier===setup.tier&&e.kind==='mysql'
           &&e.host===u.hostname&&e.port===Number(u.port||3306)&&e.database===u.pathname.slice(1)&&e.queries?.investigate?.mode==='investigate');
-        const proven=connectionCandidates(await store.read(),turn,projectId).some(c=>c.url===setup.url&&c.tier===setup.tier&&c.connectionSource);
+        const proven=(await stateView(store,s=>connectionCandidates(s,turn,projectId))).some(c=>c.url===setup.url&&c.tier===setup.tier&&c.connectionSource);
         if(!known&&!proven){turn.setupTargetUrl=setup.url;await this.update(turn.id,{setupTargetUrl:setup.url});setup.url='';}
       }
 
       if (decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url) {
-        const candidates = connectionCandidates(await store.read(), turn, projectId).filter(e=>e.tier===decision.environmentSetup.tier && e.connectionSource && (!turn.setupTargetUrl||e.url===turn.setupTargetUrl));
+        const candidates = (await stateView(store,s=>connectionCandidates(s,turn,projectId))).filter(e=>e.tier===decision.environmentSetup.tier && e.connectionSource && (!turn.setupTargetUrl||e.url===turn.setupTargetUrl));
         if (candidates.length === 1) decision.environmentSetup.url = candidates[0].url;
         else if (candidates.length > 1) return { notice: '发现多个数据库入口，请选择目标库名：' + candidates.map(e=>`${e.host}:${e.port}/${e.database}`).join('；') + '。无需提供密码。' };
         else {
           const sources = catalog(await loadEnvironments(), projectId).filter(e=>e.kind==='nacos' && e.tier===decision.environmentSetup.tier && e.queries.some(q=>q.queryId==='investigate'));
-          const predecessor=(await store.read()).jobs?.find(j=>j.id===turn.setupSourceJobId && j.questionId===turn.questionId && j.projectId===projectId && j.chatId===turn.chatId && j.originProfile===turn.profile);
+          const predecessor=await stateView(store,s=>s.jobs?.find(j=>j.id===turn.setupSourceJobId && j.questionId===turn.questionId && j.projectId===projectId && j.chatId===turn.chatId && j.originProfile===turn.profile));
           const tier=decision.environmentSetup.tier;
           let sourceId;
           try{sourceId=sourceEnvironmentForTier(projects.projects[projectId],tier,decision.sourceEnvironment);}catch(error){return {notice:error.message};}
@@ -513,7 +513,7 @@ export class ConversationService {
         throw new Error('只有真人管理员可以创建会执行修改、规划、测试或审计的任务；普通成员可以继续提问，或发起只读源码排查。');
       }
       if (turn.questionId) {
-        const current = questionJob(await store.read(), turn.questionId);
+        const current = await stateView(store,s=>questionJob(s, turn.questionId));
         if (current && activeQuestionJob(current)) throw new Error('这个问题已有未结束任务；请补充当前任务，或重新 @ 发起一个独立问题。');
       }
       let environmentAccess;
@@ -528,7 +528,7 @@ export class ConversationService {
         // tier through this project's explicit/standard mapping, never as a branch ID.
         try { sourceEnvironment = environmentAccess
           ? sourceEnvironmentForTier(projects.projects[projectId],environmentAccess.tier,decision.sourceEnvironment)
-          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment || questionSourceContext(await store.read(),{...turn,projectId},projects.projects[projectId])?.id);  }
+          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment || (await stateView(store,s=>questionSourceContext(s,{...turn,projectId},projects.projects[projectId])))?.id);  }
         catch (error) { return { notice: error.message }; }
       }
       // Every newly created analysis uses the same persistent developer job,
@@ -553,8 +553,8 @@ export class ConversationService {
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction,
         tabularDelivery:decision.requiresTabularDelivery===true,inquiryCoordination:turn.inquiryCoordination??null,
-        currentQuestion:turn.questionId?questionObjective(await store.read(),turn.questionId):turn.content,
-        originalQuestion: turn.questionId ? questionRequest(await store.read(), turn.questionId) : turn.content,
+        currentQuestion:turn.questionId?await stateView(store,s=>questionObjective(s,turn.questionId)):turn.content,
+        originalQuestion: turn.questionId ? await stateView(store,s=>questionRequest(s, turn.questionId)) : turn.content,
         attachments: [...(turn.resumeAttachments??[]),...attachments],
         delegation: route.stage !== turn.role ? { fromStage: turn.role, toStage: route.stage,
           reason: route.workflow === 'continuous_analysis' ? '交给开发在同一会话内完成只读调查和最终回答' : '按角色边界转交负责人协调' } : null,
@@ -564,7 +564,7 @@ export class ConversationService {
     }
     const job = await store.getJob(decision.jobId);
     if (!job || job.chatId !== turn.chatId || job.projectId !== projectId) throw new Error('本群没有这个任务，不能跨群操作。');
-    if(isPrivate(await store.read(),job)&&(turn.visibility!=='requester'||job.senderId!==turn.senderId))throw new Error('请在原私有问题中操作，不能公开其他私有结果');
+    if((await stateView(store,s=>isPrivate(s,job)))&&(turn.visibility!=='requester'||job.senderId!==turn.senderId))throw new Error('请在原私有问题中操作，不能公开其他私有结果');
     if (turn.questionId && job.questionId !== turn.questionId) throw new Error('请回复对应问题的主卡片操作任务，不能在一个问题里推进另一个问题。');
     if (decision.action === 'approve_environment') {
       const e = verifyPlan(await loadEnvironments(), job.environmentAccess ?? {});
