@@ -198,3 +198,5 @@ CNB build-history metadata uses the existing task-scoped tool-result storage, re
 
 
 Memory headroom and durable overload waiting: see [memory-admission.md](memory-admission.md). Independent launcher mainHeapMiB defaults to 6144; existing Runner/intake concurrency is unchanged. New work waits under memory pressure; active work is not terminated.
+
+任务exports中source-evidence-<sha256>.json只是已存datasets/tool-results的验证索引；原始内容仍保留一份。完整迁移保留索引及对应原数据，不单独删除有任务引用的来源文件。普通数据集交接按流验证摘要，分块清单逐片验证，避免汇总阶段整体反序列化行数组。

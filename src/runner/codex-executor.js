@@ -1,3 +1,4 @@
+import {prepareSavedSourceEvidence,savedSourceEvidenceNotice} from './source-saved-evidence.js';
 import {createDocuments,documentInputText,enforceDocumentOutput} from '../shared/document-artifacts.js';
 import{inquiryExecutionContract,normalizeSelfContinuation}from '../shared/inquiry-execution.js';
 import{loadIntegrationProjects,taskReadCatalog}from '../shared/integration-peers.js';
@@ -63,7 +64,8 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if(job.taskIntent==='analysis'&&!resumingAnalysis){
     try{const hints=await loadSourceMethod(job,sourceSync,{dataDir:config.dataDir??path.dirname(config.worktreeRoot)})??await loadComparisonSourceHints(job,sourceSync);if(hints){job={...job,sourceMethodHints:hints};await emit({type:'progress',phase:'source_method_reused',message:hints.policy==='active-environment-counterpart-hints-v1'?'正在复核另一环境的对应代码路径；只复用本环境摘要匹配的源码片段':'当前源码与口径版本匹配，复用已校验定位证据；数据仍重新查询',files:hints.matchedFiles});}}catch{/* Cache failure falls back to the ordinary source investigation. */}
   }
-  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+taskInputNotice(attachmentPaths)+documentOutputInstructions()+`
+  const savedSourceEvidence=job.taskIntent==='analysis'?await prepareSavedSourceEvidence({...job,sourceEnvironment:sourceSync?.environment??job.sourceEnvironment},config,{load:adapters.loadEnvironments??loadEnvironments}).catch(error=>({unavailable:true,reason:error.message})):null;
+  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+taskInputNotice(attachmentPaths)+(savedSourceEvidence?.path?savedSourceEvidenceNotice(savedSourceEvidence):savedSourceEvidence?.unavailable?'\n已有任务数据的本机交接校验失败：'+savedSourceEvidence.reason+'；保留源码证据，不以此认定业务数据为空。':'')+documentOutputInstructions()+`
 固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标}，Runner按需补取并恢复同一会话。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
