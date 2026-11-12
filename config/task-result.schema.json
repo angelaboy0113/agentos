@@ -13,7 +13,8 @@
     "reportAssessment",
     "sourceHistoryQuery",
     "definitionUpdates",
-    "sourceEnvironmentQuery"
+    "sourceEnvironmentQuery",
+    "documentRequests"
   ],
   "properties": {
     "outcome": {
@@ -680,6 +681,51 @@
           }
         }
       ]
+    },
+    "documentRequests": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "description": "User-requested local output files, rendered and verified by AgentOS; null when no new document is required. Never claim uploaded before outbox delivery.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "format",
+          "title",
+          "purpose",
+          "content"
+        ],
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "html",
+              "pptx",
+              "docx",
+              "pdf",
+              "png",
+              "xlsx",
+              "json",
+              "txt",
+              "md",
+              "csv",
+              "svg",
+              "zip"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

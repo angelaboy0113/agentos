@@ -23,7 +23,7 @@ export async function deliveredReportInputs(state,actor,projectId,dataDir,{attac
   try{
    const {file}=await reportFile(dataDir,entry.sourceJobId,item,{includeContent:false});
    if(inputs.some(a=>a.id===id))continue;
-   inputs.push({id,type:'file',contentType:'text/csv',path:file,filename:item.filename,
+   inputs.push({id,type:'file',contentType:item.contentType??'text/csv',path:file,filename:item.filename,
     source:{kind:'delivered-report',sha256:item.sha256,sourceJobId:entry.sourceJobId,report:structuredClone(item),
      projectId,originProfile:actor.profile??actor.originProfile,chatId:actor.chatId,questionId:job.questionId,
      sourceEnvironment:job.sourceEnvironment??null,deliveredAt:entry.deliveredAt??null}});

@@ -631,7 +631,7 @@ export class JsonStore {
           || event.result.sourceSyncBlocked || event.result.handoffGate?.passed !== true
           || !event.result.verifiedArtifacts?.length || !event.result.handoff?.risks?.length
           || !event.result.sourceSync?.repositories?.length)) throw new Error('Invalid partial analysis evidence');
-        if(job.environmentAccess&&event.result?.exportFiles?.length)recordReportFiles(job,event.result.exportFiles,state.questions?.[job.questionId]?.generation);
+        if(event.result?.exportFiles?.length)recordReportFiles(job,event.result.exportFiles,state.questions?.[job.questionId]?.generation);
         if(!job.environmentAccess&&job.unseenVisualInputIds?.length){job.consumedVisualInputs??=[];job.consumedVisualInputs.push({at:new Date().toISOString(),ids:[...job.unseenVisualInputIds],threadId:event.result?.threadId??null});delete job.unseenVisualInputIds;}
         recordReportReview(job,event.result);
         if(!event.result?.modelCapacityWaiting){delete job.modelCheckpoint;delete job.modelRecovery;}

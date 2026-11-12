@@ -22,8 +22,9 @@ export class ReportDelivery {
    const candidates=jobs.flatMap(source=>(source.reportFiles??[]).filter(item=>reportEligible(current.reportReviews?current:source,item)).map(item=>({source:state.jobs.find(j=>j.id===item.sourceJobId)??source,item})));
    const eligible=candidates.filter(({item})=>!q||item.questionGeneration===q.generation);
    const manifest=(current.result?.outcome==='partial'?current.reportPartialDeliverySet:current.reportDeliverySet)?.files;
-   const selected=manifest?.length ? manifest.map(m=>eligible.find(({item})=>item.id===m.fileId&&item.verificationHash===m.verificationHash)).filter(Boolean) : eligible.slice(-1);
-   if(manifest?.length && selected.length!==manifest.length)return;
+   const selectedReports=manifest?.length ? manifest.map(m=>eligible.find(({item})=>item.id===m.fileId&&item.verificationHash===m.verificationHash)).filter(Boolean) : eligible.slice(-1);
+   if(manifest?.length && selectedReports.length!==manifest.length)return;
+   const selected=[...new Map([...selectedReports,...eligible.filter(x=>x.item.kind==='document')].map(x=>[x.item.id,x])).values()];
    const selectedKeys=new Set(selected.map(({source,item})=>source.id+':'+item.id));
    for(const {source,item} of selected){
     if(q&&item.questionGeneration!==q.generation)continue;

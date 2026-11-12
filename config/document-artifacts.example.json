@@ -1,0 +1,7 @@
+{
+  "documentRequests": [
+    {"format":"html","title":"服务架构","purpose":"按已核验源码和实例说明服务关系","content":"<h1>服务架构</h1><details><summary>证据与边界</summary><p>填写真实证据、时间和未核实项。</p></details>"},
+    {"format":"pptx","title":"服务说明","purpose":"可编辑演示文稿","content":"{\"slides\":[{\"title\":\"服务说明\",\"paragraphs\":[\"真实范围与证据\"],\"table\":[[\"项目\",\"说明\"],[\"服务\",\"已核验内容\"]]}]}"},
+    {"format":"docx","title":"调查说明","purpose":"可编辑文档","content":"{\"sections\":[{\"title\":\"调查说明\",\"paragraphs\":[\"已确认与未核实分别说明\"]}]}"}
+  ]
+}

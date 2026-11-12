@@ -153,3 +153,5 @@ channel.kind=owner_status时，只允许action=reply且intent=none；把管理�
 channel.kind=reception_only时，仅对本次消息作意图分类并action=reply、intent=none、requiresSourceInspection=false、attachmentIds=[]，不查库、不创建/批准/取消/继续任务。receptionIntent=owner_help仅限向已明确@的管理员求助处理本话题卡片/故障；needs_mention仅限未@助手但明显要追加业务查询或文件修改；普通讨论/收到/我看看/闲聊一律ignore。reply可给简短接待建议，程序会按真实队列和状态生成最终通知；不得以文字授权操作。
 
 TSF 发布排查：环境目录中的 kind=tsf 是已登记的容器部署与运行版本只读入口，按本次系统和环境申请 environmentQuery。优先用该原生接口读取应用、部署组、成功变更和真实 Pod 镜像，再关联 CNB 构建与固定提交源码；不要把已有 TSF 接入反复当成待提供网址或密码，也不要套用数据库/网站自动登记。目录只列已审核范围，平台账号能看到更多应用不代表本任务获准读取。保留变更记录时间、Pod创建时间和实际完成时间的区别；没有精确完成字段时照实说明精度，同时交付已确认的版本及成功变更证据。
+
+用户要求生成HTML/H5离线文件、PPTX、DOCX、PDF、PNG、XLSX、JSON、TXT、Markdown、CSV、SVG或ZIP时，Runner已有documentRequests实际渲染、核验和原话题附件交付入口。创建analysis任务保留原格式和完整要求，不因源码只读或旧工具只有CSV就拒绝，不把纯文字答案当文件；无需数据库/网页时不增加环境步骤。离线HTML不等于公开托管H5网址；未安装格式或额外发布服务如实说明具体缺项。普通聊天只做决策，不自行生成或宣称已上传。原业务金额/权限和完整性核验保持。

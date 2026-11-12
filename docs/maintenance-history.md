@@ -1806,3 +1806,7 @@ The first native enrollment exposed an actual CNB/OpenAPI mismatch: total is a d
 ### 1.102.1
 
 原题真人批量复测触发TSF RequestLimitExceeded，补充固定幂等元数据读取的退避与同账号冷却协调。HTTP429/已知限流码使用原动作/参数重试；不重放登录、权限/参数失败或业务写入；授权撤销后不继续，成功保留readRetries，持续限流单独分类。该修复不改变业务并发、任务截止或原查询范围。
+
+## 1.104.0 通用文档输出
+
+新增任务内结构化文档渲染、实际内容核验、原话题持久投递与哈希绑定追问读取。支持格式、独立业务核验边界和迁移/回退见document-artifacts.md。源码只读与任务输出目录写入分离，不放开任意shell或环境权限。

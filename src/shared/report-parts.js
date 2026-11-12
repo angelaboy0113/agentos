@@ -32,6 +32,7 @@ export async function prepareReportParts(file,{maxBytes=FEISHU_FILE_PART_BYTES}=
  try{
   let header,mode='csv';
   try{
+   if(!file.endsWith('.csv'))throw new WideRecord();
    for await(const record of records(file,maxBytes)){
     if(!header){header=record;if(header.length>=maxBytes)throw new WideRecord();continue;}
     if(header.length+record.length>maxBytes)throw new WideRecord();
@@ -52,7 +53,7 @@ export async function prepareReportParts(file,{maxBytes=FEISHU_FILE_PART_BYTES}=
   }
   const originalSha256=await hashFile(file),name=path.basename(file,'.csv')+'.README.txt',instructions=mode==='csv'
    ? '这些CSV分卷均可用Excel独立打开，每卷重复表头。按part编号依次查看；合并时仅保留第一卷表头。单元格内换行保留，未截断或丢弃记录。'
-   : '单条CSV记录超过飞书单文件容量，故发送原文件的二进制分卷；.bin不能单独用Excel打开。在同一目录按文件名顺序拼接后恢复CSV。\nmacOS/Linux: cat '+path.basename(file,'.csv')+'.part*.bin > '+path.basename(file)+'\nWindows PowerShell: $o=[IO.File]::Create("'+path.basename(file)+'"); try { Get-ChildItem "'+path.basename(file,'.csv')+'.part*.bin" | Sort-Object Name | ForEach-Object { $s=[IO.File]::OpenRead($_.FullName); try {$s.CopyTo($o)} finally {$s.Dispose()} } } finally {$o.Dispose()}';
+   : '文件或单条CSV记录超过飞书单文件容量，故发送原文件的二进制分卷；.bin不能单独打开。在同一目录按文件名顺序拼接后恢复原文件。\nmacOS/Linux: cat '+path.basename(file,'.csv')+'.part*.bin > '+path.basename(file)+'\nWindows PowerShell: $o=[IO.File]::Create("'+path.basename(file)+'"); try { Get-ChildItem "'+path.basename(file,'.csv')+'.part*.bin" | Sort-Object Name | ForEach-Object { $s=[IO.File]::OpenRead($_.FullName); try {$s.CopyTo($o)} finally {$s.Dispose()} } } finally {$o.Dispose()}';
   const content='AgentOS完整文件分卷交付\n原文件：'+path.basename(file)+'\n原文件字节数：'+info.size+'\n原文件SHA-256：'+originalSha256+'\n'+instructions+'\n'+parts.map(p=>p.name+' | bytes='+p.bytes+(mode==='csv'?' | 数据行='+p.rows:'')+' | sha256='+p.sha256).join('\n')+'\n';
   // Manifests are also transport files, so even an unusually large manifest is chunked.
   const body=Buffer.from(content);for(let offset=0,index=1;offset<body.length;offset+=maxBytes,index++){const partName=body.length<=maxBytes?name:name+'.part'+String(index).padStart(4,'0')+'.txt',target=path.join(root,partName),chunk=body.subarray(offset,offset+maxBytes);await writeFile(target,chunk,{mode:0o600,flag:'wx'});parts.push({file:target,name:partName,bytes:chunk.length,sha256:await hashFile(target)});}

@@ -1,9 +1,10 @@
+import {documentFormats,inspectDocumentBytes} from './document-artifacts.js';
 import {hashFile} from './file-digest.js';
 import {lstat,realpath,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 export async function reportFile(dataDir,jobId,item,{includeContent=true}={}){
- if(!/^[A-Za-z0-9_-]{1,100}$/.test(jobId)||!/^report-[a-f0-9-]{36}$/.test(item?.id??'')||item.filename!==item.id+'.csv'||item.complete!==true||!Number.isSafeInteger(item.rowCount)||item.rowCount<0||!Number.isSafeInteger(item.bytes)||item.bytes<1||!/^[a-f0-9]{64}$/.test(item.sha256??''))throw new Error('报表文件登记信息无效');
+ if(!/^[A-Za-z0-9_-]{1,100}$/.test(jobId)||!/^report-[a-f0-9-]{36}$/.test(item?.id??'')||item.filename!==item.id+'.'+(item.kind==='document'&&documentFormats.includes(item.format)?item.format:'csv')||item.complete!==true||!Number.isSafeInteger(item.rowCount)||item.rowCount<0||!Number.isSafeInteger(item.bytes)||item.bytes<1||!/^[a-f0-9]{64}$/.test(item.sha256??''))throw new Error('报表文件登记信息无效');
  const root=await realpath(path.join(dataDir,'exports')),file=path.join(dataDir,'exports',jobId,item.filename);
  const jobRoot=path.join(dataDir,'exports',jobId),jobInfo=await lstat(jobRoot),jobActual=await realpath(jobRoot);
  if(jobInfo.isSymbolicLink()||!jobActual.startsWith(root+path.sep))throw new Error('报表任务目录无效');
@@ -15,12 +16,13 @@ export async function reportFile(dataDir,jobId,item,{includeContent=true}={}){
  if(!receiptInfo.isFile()||receiptInfo.isSymbolicLink())throw new Error('报表核验记录无效');
  const body=await readFile(receiptPath);if(createHash('sha256').update(body).digest('hex')!==item.verificationHash)throw new Error('报表核验记录摘要不符');
  const receipt=JSON.parse(body.toString());
- if(receipt.version!==1||receipt.status!=='verified'||receipt.file?.sha256!==item.sha256||receipt.file?.id!==item.id||receipt.coverage?.rowCount!==item.rowCount)throw new Error('报表核验记录与文件不符');
+ if((receipt.version!==1&&!(receipt.version===2&&item.kind==='document'&&receipt.kind==='document'&&receipt.binding?.jobId===jobId&&receipt.file?.format===item.format))||receipt.status!=='verified'||receipt.file?.sha256!==item.sha256||receipt.file?.id!==item.id||receipt.coverage?.rowCount!==item.rowCount)throw new Error('报表核验记录与文件不符');
+ if(item.kind==='document')await inspectDocumentBytes(item.format,await readFile(actual));
  return {file:actual,...(includeContent?{content:await readFile(actual)}:{})};
 }
 export async function validateReportFiles(dataDir,jobId,files){
  if(files===undefined)return [];
  if(!Array.isArray(files))throw new Error('报表文件登记必须为数组');
  for(const item of files)await reportFile(dataDir,jobId,item,{includeContent:false});
- return files.map(({id,filename,bytes,sha256,rowCount,complete,verificationHash})=>({id,filename,bytes,sha256,rowCount,complete,verificationHash}));
+ return files.map(({id,filename,bytes,sha256,rowCount,complete,verificationHash,kind,format,title,contentType})=>({id,filename,bytes,sha256,rowCount,complete,verificationHash,...(kind==='document'?{kind,format,title,contentType}:{})}));
 }

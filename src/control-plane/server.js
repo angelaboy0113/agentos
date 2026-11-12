@@ -511,7 +511,8 @@ async function route(context) {
       routing = { ...agentRouting(context, 'developer', job.originProfile ?? job.agentProfile), reviewInvestigation: true };
     }
     if(body.type==='completed'&&body.result?.exportFiles!==undefined){
-      verifyCompletedPlan(await loadEnvironments(),job.environmentAccess??{},body.result.environmentEvidence);
+      if(job.environmentAccess)verifyCompletedPlan(await loadEnvironments(),job.environmentAccess,body.result.environmentEvidence);
+      else if(body.result.exportFiles.some(f=>f.kind!=='document')||body.result.handoffGate?.passed!==true||job.taskIntent!=='analysis')throw new Error('源码文档缺少真实任务交接核验');
       body.result.exportFiles=await validateReportFiles(config.dataDir,job.id,body.result.exportFiles);
     }
     let committedEvent;

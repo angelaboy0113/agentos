@@ -16,6 +16,7 @@ export function recordReportFiles(job,files,generation){
 export function assessReportDelivery(job,result){
  if(job.tabularDelivery&&result?.outcome==='ready'&&!job.reportFiles?.some(f=>proof(f)))return {...result,outcome:'partial',reportReviewRequired:true,investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'本请求需要可复用统计表文件，尚未生成核验文件'}],nextStep:'复用已保存数据整理完整表格，compose_report/finalize_report核验后交付；不因用户没写Excel而省略文件'}};
 
+ if(job.reportFiles?.length&&job.reportFiles.every(f=>f.kind==='document'))return result;
  result=normalizeReportFormatReview(job,result);
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.reportReviews||!job.reportFiles?.length||result?.sourceSyncBlocked)return result;
  const reviewed=assessment(job,result);
@@ -39,6 +40,7 @@ export function assessReportDelivery(job,result){
 }
 export function recordReportReview(job,result){
  if(!job.reportReviews||result?.handoffGate?.passed!==true||result.sourceSyncBlocked)return;
+ for(const file of result.exportFiles??[])if(file.kind==='document'&&proof(file)&&result.outcome==='ready'&&result.investigation?.status==='complete'&&result.investigation.goals?.some(g=>g.id==='original-question'&&g.required&&g.status==='verified'))job.reportReviews[file.id]={status:'accepted',verificationHash:file.verificationHash,issues:[],at:new Date().toISOString(),document:true};
  const reviewed=assessment(job,result);if(!reviewed)return;
  const {a,file,blocking}=reviewed,previous=job.reportReviews[file.id];
  if(a.decision==='deliver_partial'){

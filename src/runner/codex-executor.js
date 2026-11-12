@@ -1,3 +1,4 @@
+import {createDocuments,documentInputText,enforceDocumentOutput} from '../shared/document-artifacts.js';
 import{inquiryExecutionContract,normalizeSelfContinuation}from '../shared/inquiry-execution.js';
 import{loadIntegrationProjects,taskReadCatalog}from '../shared/integration-peers.js';
 import {isModelCapacityError as capacityError,modelCapacityWait}from '../shared/model-capacity-wait.js';
@@ -62,7 +63,7 @@ export async function executeJob(job, config, emit) {
   if(job.taskIntent==='analysis'&&!resumingAnalysis){
     try{const hints=await loadSourceMethod(job,sourceSync,{dataDir:config.dataDir??path.dirname(config.worktreeRoot)})??await loadComparisonSourceHints(job,sourceSync);if(hints){job={...job,sourceMethodHints:hints};await emit({type:'progress',phase:'source_method_reused',message:hints.policy==='active-environment-counterpart-hints-v1'?'正在复核另一环境的对应代码路径；只复用本环境摘要匹配的源码片段':'当前源码与口径版本匹配，复用已校验定位证据；数据仍重新查询',files:hints.matchedFiles});}}catch{/* Cache failure falls back to the ordinary source investigation. */}
   }
-  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+taskInputNotice(attachmentPaths)+`
+  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+taskInputNotice(attachmentPaths)+documentOutputInstructions()+`
 固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标}，Runner按需补取并恢复同一会话。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
@@ -85,6 +86,13 @@ export async function executeJob(job, config, emit) {
   let definitionReceipts=[];
   if(generated.definitionUpdates?.length)try{definitionReceipts=await recordTaskDefinitions(job,generated.definitionUpdates,{dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile});}
   catch{codexResult={...codexResult,finalMessage:codexResult.finalMessage+'\n共享口径版本尚未保存，不能声称已长期记住；已有调查成果保留。'};}
+  if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed&&codexResult.documentRequests?.length){
+    try{const files=await createDocuments(config.dataDir??path.dirname(config.worktreeRoot),job,codexResult.documentRequests);
+      codexResult={...codexResult,exportFiles:[...(codexResult.exportFiles??[]),...files]};
+    }catch(error){codexResult={...codexResult,outcome:'partial',documentFailure:{code:error.code??'DOCUMENT_RENDER',message:String(error.message)},finalMessage:codexResult.finalMessage+'\n文件生成或实际核验未完成：'+error.message+'。已有调查证据保留，不能声称文件已交付。'};}
+  }
+  delete codexResult.documentRequests;
+  codexResult=enforceDocumentOutput(job,codexResult);
   const aiCompleted = Date.now();
   const verifyCommands = verificationCommands(job, project, codexResult.outcome);
   if (verifyCommands.length) {
@@ -299,7 +307,11 @@ export async function downloadAttachments(job, config, workspace, {fetchInput=fe
    const temp=file+'.'+randomUUID()+'.tmp';await writeFile(temp,body,{mode:0o600,flag:'wx'});await rename(temp,file);
    const tempReceipt=manifest+'.'+randomUUID()+'.tmp';await writeFile(tempReceipt,JSON.stringify({version:1,binding,sha256,bytes}),{mode:0o600,flag:'wx'});await rename(tempReceipt,manifest);
   }
-  downloaded.push({...attachment,path:file,sha256,bytes,cached});
+  if(attachment.source?.report?.kind==='document'){
+   const model=await documentInputText(config.dataDir,attachment.source.sourceJobId,attachment.source.report);
+   const view=file+'.content.json';await writeFile(view,model,{mode:0o600});
+   downloaded.push({...attachment,path:view,originalFile:file,sha256,bytes,cached,contentType:'application/json'});
+  }else downloaded.push({...attachment,path:file,sha256,bytes,cached});
  }
  return downloaded;
 }
@@ -325,6 +337,7 @@ export function analysisTimeoutResult(job,error){
 }
 
 function reportReviewContext(job){
+ if(job.reportFiles?.length&&job.reportFiles.every(f=>f.kind==='document'))return '已生成文档及实际结构审阅：'+JSON.stringify({files:job.reportFiles,evidence:job.reportEvidence})+'。按原问题核对文件格式和内容；结构核验不是金额业务核验，不套用CSV公式审阅。没有修改要求就不重复生成；新修改用documentRequests派生新文件。\n';
  if(job.tabularDelivery===false&&!job.reportFiles?.length&&/(?:无需|不需要|不要|不用).{0,8}(?:csv|excel|文件|文档|表格)|(?:仅|只|用).{0,4}文字|(?:no|without)\s+(?:csv|excel|files?)/i.test(currentUserQuestion(job)))return '本次按用户要求仅文字交付，不为文件生成、表头、上传或下载链接增加步骤。数据仍须完整、精确和独立核验，保留取数时间、实际范围及缺口；已有文件若影响原目标仍须审阅。reportAssessment=null。\n';
  return `表格交付要求：${job.tabularDelivery?'本请求已识别为统计表交付，即使用户未写Excel也必须生成并核验完整文件后才完成。':'多对象、多指标统计和清单通常需要可复用表格；根据原请求判断并主动准备文件，不以没写Excel为由省略。'}
 中文业务导出默认使用中文（英文字段）表头，中文名称须来自源码注解、数据库字段说明或已核实业务定义；compose_report可传label原字段与displayName中文名称，finalize的expectedColumns及columnRules.label必须用实际生成标题。除用户明确要求原始或英文表头，不交付纯英文字段名。已有完整数据集只改表头，不重查数据库；枚举值未经字典核实保持原值，不按英文猜中文。报表输出兼容规则：${JSON.stringify(reportOutputPolicy(currentUserQuestion(job)))}。用户日常说“整理成Excel/发个Excel/导出表格”，默认允许CSV，说明“CSV，Excel可直接打开”后正常交付；不因为后缀不同记required_output或current_format，不为转换重新查询数据库。仅用户明确要求.xlsx、多个工作表、保留公式等CSV不能承载的功能时，格式才属于current_format硬缺口。表格必须如实称CSV，不能改后缀冒充XLSX；内容/范围/默认值缺口照常修正。
@@ -395,3 +408,7 @@ export async function loadStageInstruction(stage) {
     throw error; // Missing role rules must not silently weaken the Harness.
   }
 }
+
+export function documentOutputInstructions(){return `
+通用文件输出（当前执行器真实支持）：用户要求HTML/H5、PPT、Word、PDF、PNG、XLSX、JSON、TXT、Markdown、CSV、SVG或ZIP时，用documentRequests数组请求生成实际文件，无需shell写入或新增数据库权限。每项{format,title,purpose,content}，无新文件填null。purpose说明它满足用户哪个交付要求及证据边界。content为字符串：html/pdf/png为自包含HTML正文（支持CSS和details等原生交互，不执行任意脚本，外链网络/表单/框架禁止；离线文件不是公开托管链接）；pptx为JSON字符串{slides:[{title,paragraphs:[文字],table:[[字符串]]}]}；docx为JSON字符串{sections:[{title,paragraphs:[文字],tables:[[[字符串]]]}]}；业务XLSX优先content=JSON字符串{sourceReportId:已核验CSV的report-id,sheetName:表名}逐格转换，原金额/范围核验不跳过；普通非业务表xlsx为JSON字符串{sheets:[{name,rows:[[字符串或null]]}]}；zip为JSON字符串{entries:[{name:安全文件名,content:文字}]}；其它格式为该格式正文，不能只改后缀。PPT表格自动续页，长内容请主动分章节分页。用户明确要求原生格式时不擅自换CSV；未安装格式渲染器时说明具体缺项，不宣称所有格式都已支持。文件标题、范围、时间和不确定项需写清。业务金额/完整性仍须原独立证据核验，不能用排版成功证明数字正确；已有核验CSV优先复用已有数据及口径，不重新查询。生成成功后程序登记摘要与核验并投递原话题；最终答案说明文件内容，不编造下载网址/已送达。用户后续修改，已交付文件的实际哈希绑定生成内容会作为任务附件提供，读取后派生新文件，不让用户重传、不覆盖原件。请求可正常ready时仍需满足原问题全部业务证据、handoff/checks和权限，未核实不得强绿。
+`;}
