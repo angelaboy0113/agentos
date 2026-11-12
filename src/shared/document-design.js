@@ -24,7 +24,7 @@ export function documentDesignKinds(job){
  if(/修改|调整|美化|优化|重做|重新|改|补充|增加|继续|edit|restyle|redesign/i.test(question)){
   for(const input of [...(job.attachments??[]),...(job.reportFiles??[])]){
    const format=input.format??input.source?.report?.format;
-   if(format==='pptx'||/presentationml/.test(input.contentType??''))selected.add('pptx');
+   if(format==='pptx'||/presentationml/.test(input.contentType??'')||input.source?.kind==='authorized-native-cloud-file'&&['pptx','potx','pptm','potm'].includes(input.source.extension))selected.add('pptx');
    if(format==='html'||input.contentType==='text/html')selected.add('html');
   }
  }

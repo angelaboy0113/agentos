@@ -6,3 +6,12 @@ test('late supplement downloads only the new input and keeps the current system/
 test('corrupted cached file is fetched again and a changed bound input cannot reuse an old receipt',async t=>{const f=await fixture(t),first=await downloadAttachments(base,config,f.dir,f);await writeFile(first[0].path,'corrupt');await downloadAttachments(base,config,f.dir,f);assert.equal(f.count(),2);await downloadAttachments({...base,attachments:[{...base.attachments[0],originalResourceKey:'changed'}]},config,f.dir,f);assert.equal(f.count(),3);});
 test('source digest mismatch, foreign filename traversal and linked input directories cannot be accepted',async t=>{const f=await fixture(t);await assert.rejects(downloadAttachments({...base,attachments:[{...base.attachments[0],source:{sha256:'0'.repeat(64)}}]},config,f.dir,f),/digest/);const good=await downloadAttachments({...base,attachments:[{id:'../../outside',type:'file',contentType:'text/plain'}]},config,f.dir,f);assert.ok(good[0].path.startsWith(await realpath(f.dir)+path.sep));const linked=f.dir+'/linked';await mkdir(linked);await symlink(f.dir,linked+'/.agentos');await assert.rejects(downloadAttachments(base,config,linked,f),/symlink/);});
 test('empty input list adds no prompt and performs no fetch',async t=>{const f=await fixture(t);assert.deepEqual(await downloadAttachments({...base,attachments:[]},config,f.dir,f),[]);assert.equal(f.count(),0);assert.equal(taskInputNotice([]),'');});
+
+test('native original files keep sanitized extensions through source-stage sync and cached followups',async t=>{
+ const f=await fixture(t);
+ for(const ext of ['pptx','potx','pptm','docx','xlsx','pdf','zip','custom']){
+  const a={id:'native-'+ext,type:'file',contentType:'application/octet-stream',source:{kind:'authorized-native-cloud-file',extension:ext}},j={...base,attachments:[a]},first=await downloadAttachments(j,config,f.dir,f),again=await downloadAttachments(j,config,f.dir,f);
+  assert.ok(first[0].path.endsWith('.'+ext));assert.equal(again[0].cached,true);assert.deepEqual(await readFile(first[0].path),await readFile(again[0].path));
+ }
+ const unsafe=await downloadAttachments({...base,attachments:[{id:'unsafe',type:'file',contentType:'application/octet-stream',source:{kind:'authorized-native-cloud-file',extension:'../../escape'}}]},config,f.dir,f);assert.ok(unsafe[0].path.endsWith('.bin'));
+});

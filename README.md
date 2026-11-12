@@ -432,3 +432,5 @@ CNB build-history native read access: [configuration, evidence and acceptance](d
 PPTX 与 HTML/H5 任务默认加载随发行包安装的设计技能，文件追问修改也沿用对应流程；设计技能不扩大业务或网络权限。见 [默认文件设计技能](docs/document-design.md)。
 
 大范围接口文档支持TSF当前版本批量取证、结构化目录集中生成及大HTML标准ZIP传输；见 [接口文档效率](docs/interface-document-efficiency.md)。
+
+云文件接收支持保留各种获准上传文件原始字节；Word、Excel、PPT 等提供结构化预览，未解析格式保留附件并准确标明缺口，不以下载成功冒称内容已核实。见 [云文档与上传文件](docs/native-cloud-document-inputs.md)。
