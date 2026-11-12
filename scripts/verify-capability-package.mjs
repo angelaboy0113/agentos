@@ -1,5 +1,5 @@
 // Read-only verification of a checkout or an extracted code-only release.
-import {readFile,lstat} from 'node:fs/promises';
+import {readFile,lstat,readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
@@ -14,6 +14,9 @@ required.unshift('test/instance-vault-start.test.js');
 required.unshift('src/shared/maintenance-backups.js','src/control-plane/maintenance-backups.js','scripts/maintenance-backups.mjs','config/maintenance-cleanup.example.json','test/maintenance-backups.test.js','docs/maintenance-backups.md');
 required.unshift('src/shared/state-draft.js','src/shared/state-encoding.js','src/shared/state-view.js','test/state-draft.test.js','test/empty-memory-exit.test.js','docs/state-memory.md');
 required.unshift('src/shared/memory-admission.js','scripts/instance-memory.mjs','test/memory-admission.test.js','docs/memory-admission.md','config/instance-memory.example.json');
+required.unshift('src/shared/document-design.js','src/shared/presentation-renderer.js','test/document-design.test.js','docs/document-design.md','config/design-skills/upstream.json');
+async function skillFiles(dir){for(const e of await readdir(path.join(root,dir),{withFileTypes:true})){const member=dir+'/'+e.name;if(e.isDirectory())await skillFiles(member);else required.push(member);}}
+await skillFiles('config/design-skills/pptx');await skillFiles('config/design-skills/frontend-design');
 for(const name of required){const info=await lstat(path.join(root,name));if(!info.isFile()||info.isSymbolicLink())throw new Error('Missing/unsafe package member: '+name);}
 for(const name of ['config/multi-repository-project.example.json','config/capabilities.example.json','config/task-result.schema.json','package.json','package-lock.json'])JSON.parse(await readFile(path.join(root,name),'utf8'));
 const pkg=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')),lock=JSON.parse(await readFile(path.join(root,'package-lock.json'),'utf8'));

@@ -428,3 +428,5 @@ CNB build-history native read access: [configuration, evidence and acceptance](d
 同任务 TSF/CNB 调查接续可直接复用原来源的已存投影结果和来源标记；固定平台只读调用支持现有批量计划。范围、迁移和部署时间语义见 [TSF 只读取证](docs/tsf-deployment-reads.md)。
 
 同任务环境取证返回源码汇总时，可通过哈希绑定的实际文件读取完整数据；见 [已保存证据交接](docs/source-saved-evidence.md)。
+
+PPTX 与 HTML/H5 任务默认加载随发行包安装的设计技能，文件追问修改也沿用对应流程；设计技能不扩大业务或网络权限。见 [默认文件设计技能](docs/document-design.md)。
