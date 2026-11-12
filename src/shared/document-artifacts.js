@@ -37,7 +37,7 @@ async function encode(format,content){
 }
 export async function inspectDocumentBytes(format,bytes){
  if(!bytes.length)fail('文件为空');
- if(['pptx','docx','xlsx','zip'].includes(format)){const {default:JSZip}=await import('jszip');const z=await JSZip.loadAsync(bytes,{checkCRC32:true}),names=Object.keys(z.files);const required={pptx:'ppt/presentation.xml',docx:'word/document.xml',xlsx:'xl/workbook.xml'}[format];if(required&&!names.includes(required))fail('实际Office文件结构不符');return {format,bytes:bytes.length,entries:names.length,structure:'passed'};}
+ if(['pptx','docx','xlsx','zip'].includes(format)){const {default:JSZip}=await import('jszip');const z=await JSZip.loadAsync(bytes,{checkCRC32:true}),names=Object.keys(z.files);if(names.some(n=>n.startsWith('/')||n.split('/').includes('..')||/vbaProject\.bin$/i.test(n)))fail('归档包含危险路径或宏');for(const n of names.filter(n=>n.endsWith('.rels'))){if(/TargetMode=\"External\"/i.test(await z.file(n).async('string')))fail('Office文件不得依赖外部关系');}const required={pptx:'ppt/presentation.xml',docx:'word/document.xml',xlsx:'xl/workbook.xml'}[format];if(required&&!names.includes(required))fail('实际Office文件结构不符');return {format,bytes:bytes.length,entries:names.length,structure:'passed'};}
  if(format==='pdf'&&!bytes.subarray(0,5).equals(Buffer.from('%PDF-')))fail('实际文件不是PDF');
  if(format==='png'&&bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')fail('实际文件不是PNG');
  if(format==='json')parse(bytes.toString());
@@ -51,6 +51,7 @@ export async function documentDirectory(dataDir,jobId){
 }
 async function resolveDocumentRequest(dataDir,job,request){
  if(!['xlsx','csv'].includes(request.format))return request;
+ if(typeof request.content!=='string'){if(job.tabularDelivery)fail('业务原生表格仍需独立核验CSV来源，不能绕过金额和范围核验');return request;}
  const spec=request.format==='xlsx'?parse(request.content):null;
  const sourceId=spec?.sourceReportId;
  if(!sourceId){if(job.tabularDelivery)fail('业务报表转换需已有核验CSV的sourceReportId，不能跳过独立金额与范围核验');return request;}
@@ -62,11 +63,21 @@ async function resolveDocumentRequest(dataDir,job,request){
  const original=await reportFile(dataDir,source.sourceJobId??job.id,source),table=reportCsv(original.content);
  return {...request,content:JSON.stringify({sheets:[{name:spec.sheetName??'核验数据',rows:[table.headers,...table.rows]}]}),sourceReport:{id:source.id,sourceJobId:source.sourceJobId??job.id,sha256:source.sha256,verificationHash:source.verificationHash}};
 }
+async function encodeNative(dataDir,job,request){
+ const {readArtifactFile}=await import('./artifact-workspace.js');
+ const content=request.content;if(!content||typeof content.artifactFile!=='string'||!Object.hasOwn(content,'sourceFile')||Object.keys(content).some(k=>!['artifactFile','sourceFile'].includes(k)))fail('原生产物引用无效');
+ const artifact=await readArtifactFile(dataDir,job.id,content.artifactFile);
+ const source=content.sourceFile===null?null:await readArtifactFile(dataDir,job.id,content.sourceFile);
+ const format=request.format;
+ // Apply the same safe text encoders, including CSV formula escaping and HTML offline rendering.
+ const bytes=['html','csv','json','txt','md','svg'].includes(format)?await encode(format,artifact.bytes.toString('utf8')):artifact.bytes;
+ return {bytes,request:{...request,nativeSource:{sha256:artifact.sha256,...(source?{buildScript:source.bytes.toString('utf8'),buildScriptSha256:source.sha256}:{})}}};
+}
 export async function createDocuments(dataDir,job,requests){
  if(requests==null)return [];
  if(!Array.isArray(requests)||!requests.length)fail('documentRequests需要非空数组或null');
  const directory=await documentDirectory(dataDir,job.id),files=[];
- try{for(const originalRequest of requests){const request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const bytes=await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;
+ try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const native=typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;const bytes=native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;
  const item={id,filename,format:request.format,kind:'document',title:request.title,contentType:documentMime[request.format],bytes:bytes.length,sha256:hash(bytes),rowCount:0,complete:true};
  const receipt={version:2,kind:'document',status:'verified',file:item,coverage:{rowCount:0},binding:{jobId:job.id,projectId:job.projectId,profile:job.originProfile??job.agentProfile,questionId:job.questionId,sourceEnvironment:job.sourceEnvironment??null},purpose:request.purpose,contentAudit:audit,businessVerification:'结构和实际文件核验不等于业务金额核验；业务结论沿用任务独立证据与handoff门控',request};
  const body=Buffer.from(JSON.stringify(receipt));await writeFile(path.join(directory,filename),bytes,{mode:0o600,flag:'wx'});await writeFile(path.join(directory,id+'.verification.json'),body,{mode:0o600,flag:'wx'});item.verificationHash=hash(body);files.push(item);
@@ -74,7 +85,7 @@ export async function createDocuments(dataDir,job,requests){
 }
 export async function documentInputText(dataDir,jobId,item){
  const {reportFile}=await import('./report-files.js');const {file}=await reportFile(dataDir,jobId,item,{includeContent:false});const receipt=JSON.parse(await readFile(path.join(path.dirname(file),item.id+'.verification.json'),'utf8'));
- return JSON.stringify({format:item.format,title:item.title,purpose:receipt.purpose,content:receipt.request.content,sourceSha256:item.sha256,note:'这是已交付实际文件的哈希绑定生成配方；修改应派生新文件，不能改原件。'});
+ return JSON.stringify({format:item.format,title:item.title,purpose:receipt.purpose,...(receipt.request.nativeSource?{actualFile:file,buildScript:receipt.request.nativeSource.buildScript??null,nativeSource:receipt.request.nativeSource}:{content:receipt.request.content}),sourceSha256:item.sha256,note:'这是已交付实际文件的哈希绑定生成配方；修改应派生新文件，不能改原件。'});
 }
 export function requestedDocumentFormats(question=''){
  const rules={html:/\bhtml?\b|\bh5\b|网页文件/i,pptx:/\bpptx?\b|幻灯片|演示文稿/i,docx:/\bdocx\b|\bword\b/i,pdf:/\bpdf\b/i,png:/\bpng\b/i,xlsx:/\bxlsx\b/i,json:/\bjson文件\b|(?:生成|输出|导出).{0,8}json/i,md:/markdown|\.md\b/i,svg:/\bsvg\b/i,zip:/\bzip\b/i};

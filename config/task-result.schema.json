@@ -722,7 +722,30 @@
             "type": "string"
           },
           "content": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "artifactFile",
+                  "sourceFile"
+                ],
+                "properties": {
+                  "artifactFile": {
+                    "type": "string"
+                  },
+                  "sourceFile": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            ]
           }
         }
       }

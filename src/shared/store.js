@@ -465,7 +465,7 @@ export class JsonStore {
       job.sourceEnvironmentEvidence??={};job.sourceEnvironmentEvidence[current]=structuredClone({environment:current,workspace:result.workspace,sourceSync:result.sourceSync,summary:result.summary,finalMessage:result.finalMessage,verifiedArtifacts:result.verifiedArtifacts,handoffGate:result.handoffGate});
       job.context=compactContext([...job.context,{stage:job.stage,kind:'analysis_turn',result:structuredClone({...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:null})}]);
       if(job.unseenVisualInputIds?.length){job.consumedVisualInputs??=[];job.consumedVisualInputs.push({at:new Date().toISOString(),ids:[...job.unseenVisualInputIds],threadId:result.threadId??null});delete job.unseenVisualInputIds;}
-      job.sourceEnvironmentThreads??={};if(result.threadId)job.sourceEnvironmentThreads[current]={questionId:job.questionId,workspace:result.workspace,threadId:result.threadId};
+      job.sourceEnvironmentThreads??={};if(result.threadId)job.sourceEnvironmentThreads[current]={...(result.artifactPolicy?{artifactPolicy:result.artifactPolicy}:{}),questionId:job.questionId,workspace:result.workspace,threadId:result.threadId};
       job.analysisContinuations??={};if(job.analysisContinuation)job.analysisContinuations[current]=job.analysisContinuation;
       if(job.analysisContinuations[target])job.analysisContinuation=job.analysisContinuations[target];else delete job.analysisContinuation;
       job.sourceEnvironment=target;

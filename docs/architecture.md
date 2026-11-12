@@ -231,3 +231,5 @@ CNB build history has a separate scoped `cnb` environment provider. The runner v
 Memory headroom and durable overload waiting: see [memory-admission.md](memory-admission.md). Independent launcher mainHeapMiB defaults to 6144; existing Runner/intake concurrency is unchanged. New work waits under memory pressure; active work is not terminated.
 
 环境取证写入任务本地datasets/tool-results；Runner按原身份、运行分级和当前配置权限验证路径与摘要，生成轻量只读索引交给源码模型，随后进入文档渲染、独立核验和原话题outbox。索引不复制原始行、不触发重新查询。见source-saved-evidence.md。
+
+产物构建：调查源码保持固定只读，独立任务working目录允许程序批量生成文件，经文档导入器校验后复制为不可变交付文件；详见[通用文件输出](document-artifacts.md)。环境数据交接使用同任务原授权与摘要绑定索引，不重新查询或混用其它任务数据。

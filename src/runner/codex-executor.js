@@ -1,3 +1,4 @@
+import {prepareArtifactWorkspace,artifactPermissionArgs,artifactWorkspaceNotice,artifactPolicy} from '../shared/artifact-workspace.js';
 import {prepareSavedSourceEvidence,savedSourceEvidenceNotice} from './source-saved-evidence.js';
 import {createDocuments,documentInputText,enforceDocumentOutput} from '../shared/document-artifacts.js';
 import{inquiryExecutionContract,normalizeSelfContinuation}from '../shared/inquiry-execution.js';
@@ -55,6 +56,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
     catch (error) { return sourceBlocked(error); }
   }
   const workspace = sourceSync?.workspace ?? await prepareWorkspace(job, project, config.worktreeRoot);
+  if(job.taskIntent==='analysis')job={...job,artifactWorkspace:await prepareArtifactWorkspace(config.dataDir??path.dirname(config.worktreeRoot),job.id)};
   const resumingAnalysis=Boolean(analysisThreadId(job,workspace));
   const attachmentPaths = await downloadAttachments(job, config,
     job.taskIntent === 'analysis' ? path.join(config.worktreeRoot, 'analysis-resources') : workspace);
@@ -65,7 +67,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
     try{const hints=await loadSourceMethod(job,sourceSync,{dataDir:config.dataDir??path.dirname(config.worktreeRoot)})??await loadComparisonSourceHints(job,sourceSync);if(hints){job={...job,sourceMethodHints:hints};await emit({type:'progress',phase:'source_method_reused',message:hints.policy==='active-environment-counterpart-hints-v1'?'正在复核另一环境的对应代码路径；只复用本环境摘要匹配的源码片段':'当前源码与口径版本匹配，复用已校验定位证据；数据仍重新查询',files:hints.matchedFiles});}}catch{/* Cache failure falls back to the ordinary source investigation. */}
   }
   const savedSourceEvidence=job.taskIntent==='analysis'?await prepareSavedSourceEvidence({...job,sourceEnvironment:sourceSync?.environment??job.sourceEnvironment},config,{load:adapters.loadEnvironments??loadEnvironments}).catch(error=>({unavailable:true,reason:error.message})):null;
-  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+taskInputNotice(attachmentPaths)+(savedSourceEvidence?.path?savedSourceEvidenceNotice(savedSourceEvidence):savedSourceEvidence?.unavailable?'\n已有任务数据的本机交接校验失败：'+savedSourceEvidence.reason+'；保留源码证据，不以此认定业务数据为空。':'')+documentOutputInstructions()+`
+  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+taskInputNotice(attachmentPaths)+(savedSourceEvidence?.path?savedSourceEvidenceNotice(savedSourceEvidence):savedSourceEvidence?.unavailable?'\n已有任务数据的本机交接校验失败：'+savedSourceEvidence.reason+'；保留源码证据，不以此认定业务数据为空。':'')+documentOutputInstructions()+(job.artifactWorkspace?artifactWorkspaceNotice(job.artifactWorkspace):'')+`
 固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标}，Runner按需补取并恢复同一会话。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
@@ -106,7 +108,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed)try{await rememberSourceMethod(job,sourceSync,{...codexResult,workspace},{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});}catch{/* Optional evidence index cannot block a valid task. */}
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
-  return { ...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { ...(job.artifactWorkspace?{artifactPolicy}:{}),...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({status:e.status,binding:e.binding,calculationAudit:e.calculationAudit,populationAudit:e.populationAudit})),
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     sourceEnvironmentQuery:codexResult.sourceEnvironmentQuery??null,environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate, protocolRepair:codexResult.protocolRepair??null,
@@ -139,7 +141,7 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
   return new Promise((resolve, reject) => {
     const readOnly = job.taskIntent === 'analysis' || ['owner_intake', 'owner_audit', 'owner_report'].includes(job.stage);
     const resumeThreadId = resumeThreadIdOverride ?? analysisThreadId(job, workspace);
-    const args = buildCodexArgs(workspace, attachmentPaths, { readOnly, runtime, resumeThreadId });
+    const args = buildCodexArgs(workspace, attachmentPaths, { readOnly, runtime, resumeThreadId,artifactWorkspace:job.artifactWorkspace });
 
     const child = spawn(codexBin, args, { cwd: workspace, env, windowsHide: true, shell: false });
     let pending = '';
@@ -210,7 +212,7 @@ async function runCodex({ job, config, workspace, attachmentPaths, prompt, emit,
       try {
         const result = JSON.parse(finalMessage);
         if (!['ready', 'needs_clarification', 'blocked', ...(job.taskIntent === 'analysis' ? ['partial'] : [])].includes(result.outcome) || !result.finalMessage?.trim()) throw new Error('Missing valid outcome');
-        resolve({ threadId, model: runtime.model, reasoningEffort: runtime.reasoningEffort, ...result });
+        resolve({ threadId, model: runtime.model, reasoningEffort: runtime.reasoningEffort, ...result,...(job.artifactWorkspace?{artifactPolicy}:{}) });
       } catch (error) { reject(Object.assign(new Error(`Codex result invalid: ${error.message}`),{code:'CODEX_RESULT_INVALID',diagnosticStage:'codex_execution'})); }
     });
   });
@@ -248,7 +250,7 @@ export async function runCodexWithCapacityRetry(options, adapters = {}) {
   }
 }
 
-export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false, runtime = {}, resumeThreadId = null } = {}) {
+export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = false, runtime = {}, resumeThreadId = null,artifactWorkspace=null } = {}) {
   const args = resumeThreadId ? [
     'exec', 'resume',
     ...codexRuntimeArgs(runtime),
@@ -260,10 +262,11 @@ export function buildCodexArgs(workspace, attachmentPaths = [], { readOnly = fal
     'exec', '-C', workspace,
     ...codexRuntimeArgs(runtime),
     '-c', 'features.unbounded_connection_retries=false',
-    ...(readOnly ? ['--skip-git-repo-check', '--sandbox', 'read-only', '-c', 'approval_policy="never"'] : ['--approve-for-me']),
+    ...(readOnly ? ['--skip-git-repo-check', ...(artifactWorkspace?artifactPermissionArgs(artifactWorkspace):['--sandbox', 'read-only']), '-c', 'approval_policy="never"'] : ['--approve-for-me']),
     '--output-schema', RESULT_SCHEMA,
     '--json',
   ];
+  if(resumeThreadId&&readOnly&&artifactWorkspace)args.push(...artifactPermissionArgs(artifactWorkspace));
   if(!resumeThreadId)for (const image of attachmentPaths.filter((item) => item.type === 'image')) args.push('--image', image.path);
   if (resumeThreadId) args.push(resumeThreadId);
   args.push('-');
@@ -276,6 +279,7 @@ export function analysisThreadId(job, workspace) {
  // fresh source turn with the full preserved context and immutable visual
  // attachments, then ordinary continuation may resume that new thread.
  if(job.unseenVisualInputIds?.length)return null;
+ if(job.artifactWorkspace){job={...job,analysisContinuation:job.analysisContinuation?.artifactPolicy===artifactPolicy?job.analysisContinuation:null,context:(job.context??[]).filter(e=>e.result?.artifactPolicy===artifactPolicy),sourceEnvironmentThreads:Object.fromEntries(Object.entries(job.sourceEnvironmentThreads??{}).filter(([,v])=>v.artifactPolicy===artifactPolicy))};}
   if(job.modelCheckpoint?.stage==='source'&&job.analysisContinuation?.questionId===job.questionId&&job.analysisContinuation.workspace===workspace)return job.analysisContinuation.threadId;
   if(job.stage!=='developer')return null;
   if(job.analysisContinuation&&job.analysisContinuation.questionId===job.questionId&&job.analysisContinuation.workspace===workspace)return job.analysisContinuation.threadId;
@@ -412,5 +416,5 @@ export async function loadStageInstruction(stage) {
 }
 
 export function documentOutputInstructions(){return `
-通用文件输出（当前执行器真实支持）：用户要求HTML/H5、PPT、Word、PDF、PNG、XLSX、JSON、TXT、Markdown、CSV、SVG或ZIP时，用documentRequests数组请求生成实际文件，无需shell写入或新增数据库权限。每项{format,title,purpose,content}，无新文件填null。purpose说明它满足用户哪个交付要求及证据边界。content为字符串：html/pdf/png为自包含HTML正文（支持CSS和details等原生交互，不执行任意脚本，外链网络/表单/框架禁止；离线文件不是公开托管链接）；pptx为JSON字符串{slides:[{title,paragraphs:[文字],table:[[字符串]]}]}；docx为JSON字符串{sections:[{title,paragraphs:[文字],tables:[[[字符串]]]}]}；业务XLSX优先content=JSON字符串{sourceReportId:已核验CSV的report-id,sheetName:表名}逐格转换，原金额/范围核验不跳过；普通非业务表xlsx为JSON字符串{sheets:[{name,rows:[[字符串或null]]}]}；zip为JSON字符串{entries:[{name:安全文件名,content:文字}]}；其它格式为该格式正文，不能只改后缀。PPT表格自动续页，长内容请主动分章节分页。用户明确要求原生格式时不擅自换CSV；未安装格式渲染器时说明具体缺项，不宣称所有格式都已支持。文件标题、范围、时间和不确定项需写清。业务金额/完整性仍须原独立证据核验，不能用排版成功证明数字正确；已有核验CSV优先复用已有数据及口径，不重新查询。生成成功后程序登记摘要与核验并投递原话题；最终答案说明文件内容，不编造下载网址/已送达。用户后续修改，已交付文件的实际哈希绑定生成内容会作为任务附件提供，读取后派生新文件，不让用户重传、不覆盖原件。请求可正常ready时仍需满足原问题全部业务证据、handoff/checks和权限，未核实不得强绿。
+通用文件输出（当前执行器真实支持）：用户要求HTML/H5、PPT、Word、PDF、PNG、XLSX、JSON、TXT、Markdown、CSV、SVG或ZIP时，用documentRequests数组请求生成实际文件，可由内置渲染器生成，或在下方本任务工作区用程序批量构建；无需新增数据库权限。每项{format,title,purpose,content}，无新文件填null。purpose说明它满足用户哪个交付要求及证据边界。content为字符串：html/pdf/png为自包含HTML正文（支持CSS和details等原生交互，不执行任意脚本，外链网络/表单/框架禁止；离线文件不是公开托管链接）；pptx为JSON字符串{slides:[{title,paragraphs:[文字],table:[[字符串]]}]}；docx为JSON字符串{sections:[{title,paragraphs:[文字],tables:[[[字符串]]]}]}；业务XLSX优先content=JSON字符串{sourceReportId:已核验CSV的report-id,sheetName:表名}逐格转换，原金额/范围核验不跳过；普通非业务表xlsx为JSON字符串{sheets:[{name,rows:[[字符串或null]]}]}；zip为JSON字符串{entries:[{name:安全文件名,content:文字}]}；其它格式为该格式正文，不能只改后缀。PPT表格自动续页，长内容请主动分章节分页。用户明确要求原生格式时不擅自换CSV；未安装格式渲染器时说明具体缺项，不宣称所有格式都已支持。文件标题、范围、时间和不确定项需写清。业务金额/完整性仍须原独立证据核验，不能用排版成功证明数字正确；已有核验CSV优先复用已有数据及口径，不重新查询。生成成功后程序登记摘要与核验并投递原话题；最终答案说明文件内容，不编造下载网址/已送达。用户后续修改，已交付文件的实际哈希绑定生成内容会作为任务附件提供，读取后派生新文件，不让用户重传、不覆盖原件。请求可正常ready时仍需满足原问题全部业务证据、handoff/checks和权限，未核实不得强绿。
 `;}
