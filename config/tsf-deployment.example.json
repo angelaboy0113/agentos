@@ -7,7 +7,11 @@
       "kind": "tsf",
       "credentialRef": "example-cloud",
       "membersRead": false,
-      "ownerOpenIdsByProfile": {"example-bot": ["ou_REPLACE"]},
+      "ownerOpenIdsByProfile": {
+        "example-bot": [
+          "ou_REPLACE"
+        ]
+      },
       "tsf": {
         "loginOrigin": "https://login.example.invalid",
         "consoleOrigin": "https://console.example.invalid",
@@ -21,10 +25,29 @@
           "mode": "investigate",
           "reviewed": true,
           "description": "Reviewed TSF deployment history and current container image versions",
-          "parameters": [{"name": "purpose", "type": "string"}],
+          "parameters": [
+            {
+              "name": "purpose",
+              "type": "string"
+            }
+          ],
           "maxRows": 20,
           "timeoutMs": 10000,
-          "applications": [{"applicationId": "application-REPLACE", "applicationName": "your-app", "groups": [{"groupId": "group-REPLACE", "namespaceId": "namespace-REPLACE"}]}]
+          "applications": [
+            {
+              "applicationId": "application-REPLACE",
+              "applicationName": "your-app",
+              "groups": [
+                {
+                  "groupId": "group-REPLACE",
+                  "namespaceId": "namespace-REPLACE"
+                }
+              ]
+            }
+          ],
+          "configurationApplications": [
+            "application-REPLACE"
+          ]
         }
       }
     }

@@ -100,3 +100,5 @@ Runner 在源码同步后提供 knowledgePaths 的本轮入口及哈希；未配
 ## CI/CD evidence
 
 When a configured native build-history provider is available, prefer its scoped read tools over opening a website for the same history. Reuse saved history with its original fetchedAt, and query current history for new deployment questions. Source/target branches and successful build events are evidence, not a guarantee of the live application revision; verify runtime release evidence before calling a build start time an actual deployment completion time. Missing history-token permission is distinct from code-read permission and browser login expiry.
+
+数据源未登记时，先检查当前已授权工具目录是否包含TSF data_sources等配置发现入口，按本系统/原环境和实际应用/部署组读取非敏感目标，再申请受控接入准备；不要以发布版本工具不返回数据库地址断言平台没有配置。发现入口不自动授予新数据库读取权，也不能将其它系统机器人当作绕过审批的代理。

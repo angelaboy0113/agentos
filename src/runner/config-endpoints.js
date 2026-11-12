@@ -21,8 +21,8 @@ export function configurationValues(source, { rejectConflicts = false } = {}) {
   }
   return values;
 }
-export function databaseEndpoints(source) {
-  const values = configurationValues(source);
+export function databaseEndpoints(source, options = {}) {
+  const values = configurationValues(source, options);
   const resolve = (v, seen = []) => {
     if (seen.length > 16 || v.length > 16000) throw new Error('配置引用无法解析');
     return v.replace(/\$\{([^{}]+)\}/g, (_, key) => {
