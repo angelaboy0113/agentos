@@ -243,6 +243,12 @@ async function route(context) {
     return json(response,200,{ok:true,results},{'cache-control':'no-store'});
   }
 
+  if(request.method==='POST'&&url.pathname==='/api/v1/admin/maintenance-backups/run'){
+    requireAdminSession(context,request,true);const body=await readJson(request);
+    const result=await context.backupMaintenance.tick({force:true,apply:body.apply===true});
+    return json(response,200,{ok:true,result},{'cache-control':'no-store'});
+  }
+
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, adminUsageExports:context.adminUsageExports??0, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),

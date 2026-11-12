@@ -68,6 +68,13 @@ async function compact(c,{runtime,audit,gate,openCheck=noOpenFiles,apply=false})
  c={...c,pins:[...new Set([...c.pins,...pins])]};
  const {protectedPaths,data}=await checkedRegistry(c,runtime);
 await safePath(audit,c.managedRoot);
+ let contentResult;
+ if(c.contentStore?.enabled===true){
+  const {archiveHistoricalBulk}=await import('./backup-content-store.js');
+  contentResult=await archiveHistoricalBulk(c,{runtime,audit,gate,openCheck,apply,protectedPaths,data});
+  if(contentResult.deferred)return contentResult;
+  c={...c,candidates:[]}; // Content archival replaces only the legacy bulk pass.
+ }
  const result={version:1,apply,removed:0,duplicateFiles:0,logicalBytes:0,uniquePreserved:0,protectedCheckpoints:[...protectedPaths],deferred:false};
  const anchors=[];
  for(const p of protectedPaths)for(const kind of ['exports','control-receipts']){const base=path.join(data.get(p),kind);try{await safePath(base,c.managedRoot);anchors.push({base,kind,checkpoint:p});}catch(e){if(e.code!=='ENOENT')throw e;}}
@@ -127,7 +134,8 @@ await safePath(audit,c.managedRoot);
   if(await dependencyDigest(retired)!==tree.sha256)throw Error('MAINTENANCE_TEST_QUARANTINED');
   await fs.rm(retired,{recursive:true});result.testTreesRemoved++;
  }
- const after=await fs.statfs(runtime);result.observedFreeBytesChange=Number(after.bavail)*Number(after.bsize)-Number(before.bavail)*Number(before.bsize);result.logicalIsNotPhysical=true;return result;
+ const after=await fs.statfs(runtime);result.observedFreeBytesChange=Number(after.bavail)*Number(after.bsize)-Number(before.bavail)*Number(before.bsize);result.logicalIsNotPhysical=true;
+ return contentResult?{...contentResult,testTreesRemoved:result.testTreesRemoved,deferred:result.deferred,observedFreeBytesChange:contentResult.observedFreeBytesChange+result.observedFreeBytesChange}:result;
 }
 export async function dependencyDigest(root){
  const h=createHash('sha256');

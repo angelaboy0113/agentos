@@ -7,7 +7,12 @@ if(action==='restore-fragments'){
  const release=await acquire(root);if(!release)throw Error('Maintenance locked');try{console.log(JSON.stringify(await restorePlan(path.resolve(arg),{destination:path.resolve(extra),managedRoot:root})));}finally{await release();}
 }else if(['register-checkpoint','register-test'].includes(action)){
  const release=await acquire(root);if(!release)throw Error('Maintenance locked');
- try{const c=validateRegistry(JSON.parse(await fs.readFile(file)),runtime),proofPath=path.resolve(action==='register-test'?extra:arg);await safePath(proofPath,root);const raw=await fs.readFile(proofPath),proof={path:proofPath,sha256:sha(raw)};
+ try{const c=validateRegistry(JSON.parse(await fs.readFile(file)),runtime),proofPath=path.resolve(action==='register-test'?extra:arg);await safePath(proofPath,root);const raw=await fs.readFile(proofPath);
+ // Deployment acceptance and test logs can acquire later annotations. Freeze the
+ // exact reviewed bytes, rather than trusting a mutable operator report forever.
+ const proofs=path.join(root,'.maintenance-proofs');await fs.mkdir(proofs,{recursive:true,mode:0o700});await safePath(proofs,root);
+ const immutable=path.join(proofs,sha(raw)+'.json');try{const fd=await fs.open(immutable,'wx',0o600);try{await fd.writeFile(raw);await fd.sync();}finally{await fd.close();}}catch(e){if(e.code!=='EEXIST')throw e;await safePath(immutable,root);if(sha(await fs.readFile(immutable))!==sha(raw))throw Error('MAINTENANCE_PROOF_CHANGED');}
+ const proof={path:immutable,sha256:sha(raw)};
  if(action==='register-checkpoint'){
   const acceptance=JSON.parse(raw);if(!acceptance.health||acceptance.ready<1||!acceptance.backup||!acceptance.commit||!acceptance.version||!Number.isFinite(Date.parse(acceptance.at)))throw Error('Accepted deployment proof required');
   await safePath(acceptance.backup,root);if(!c.checkpoints.some(b=>b.path===acceptance.backup))c.checkpoints.push({path:acceptance.backup,acceptedAt:acceptance.at,proof});

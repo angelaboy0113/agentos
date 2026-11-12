@@ -187,6 +187,17 @@ test('remote rollback selects an existing cache without mutating it; GC follows 
  const r=await pruneSourceSnapshots(project,{getState:async()=>({jobs:[]}),withState:fn=>fn({jobs:[]}),apply:true});assert.equal(r.removed.length,1);assert.ok(r.unknown.some(x=>x.name==='analysis-external'));await access(a.workspace);await assert.rejects(access(b.workspace));await access(f.writer);
 });
 
+test('retired pin is rechecked at the writer fence and registry revocation preserves real old source',async t=>{
+ const {pruneSourceSnapshots}=await import('../src/shared/source-snapshot-gc.js'),{inactiveRecordFingerprint}=await import('../src/shared/maintenance-backups.js');const f=await fixture(t);
+ const project={...f.project,id:'demo',analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),analysisEnvironments:{uat:{repositories:[{path:'business',branch:f.branch}]}}};
+ const q=()=>prepareAnalysisSources({stage:'developer',sourceEnvironment:'uat'},project),old=await q();await commit(f.writer,'new version');await git(f.writer,'push');const latest=await q();
+ const card={revision:2,deliveredRevision:1,card:{body:'withdrawn'},destination:{profile:'one'}},state={jobs:[{projectId:'demo',questionId:'q',status:'completed',analysisSourceSnapshot:old}],cardMessages:{'question:q':card}};
+ let retired={'question:q':inactiveRecordFingerprint('cardMessages',card)};
+ const result=await pruneSourceSnapshots(project,{getState:async()=>state,readInactiveCards:async()=>retired,withState:fn=>{retired={};return fn(state);},apply:true});assert.equal(result.removed.length,0);assert.ok(result.kept.some(x=>x.reason==='became-active-before-delete'));await access(old.workspace);await access(latest.workspace);
+ retired={'question:q':inactiveRecordFingerprint('cardMessages',card)};
+ const accepted=await pruneSourceSnapshots(project,{getState:async()=>state,readInactiveCards:async()=>retired,withState:fn=>fn(state),apply:true});assert.equal(accepted.removed.length,1);await assert.rejects(access(old.workspace));await access(latest.workspace);
+});
+
 
 test('snapshot locks serialize independent callers and release after an operation error',async t=>{
  const {withSnapshotLock}=await import('../src/shared/snapshot-lock.js');const f=await fixture(t);const seen=[];

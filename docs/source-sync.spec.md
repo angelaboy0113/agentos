@@ -125,3 +125,16 @@ node scripts/prune-source-snapshots.mjs --apply --server http://127.0.0.1:YOUR_P
 - 验证覆盖真实本地远端分支前进/回滚、凭据脱敏、临时错误恢复和耗尽、不重放非远端读取、两环境并发/旧快照复用及路径/共享对象保护。真实CNB可读性与群任务成功单独记录在部署实例中；测试注入故障不等于真实断网。
 
 失败排查：先看原卡阶段与code；认证按本机安全凭据流程恢复；磁盘/权限/对象异常由维护者检查具体缓存与来源，不删除业务工作区。恢复后按原问题和原提交接续，不新建问题掩盖失败。迁移代码包须含source-git-diagnostic.js，完整迁移仍保留当前状态、清单、datasets与tool-results。POSIX锁仍依赖Python3，Windows和完整跨机未因此获得实测保证。
+# Retired delivery references
+
+The instance maintenance registry may contain operator-reviewed stable fingerprints
+for withdrawn/retired cards. Snapshot collection reuses those exact fingerprints to
+exclude only obsolete transport pins. Payload, target or identity changes invalidate
+the exemption. Running/waiting jobs, conversations, report workers and missing file
+deliveries remain independent protection. Default operation with no valid registry
+retains every original pin. No question/job/card state or delivery receipt is changed.
+The deletion path still uses the snapshot lock, authoritative state writer, fresh
+reference and dirty-tree inspection, environment-latest protection and lightweight
+source manifest audit. Untracked changes, incomplete builds and unknown paths are
+retained for operator inspection, not silently deleted.
+

@@ -2,6 +2,7 @@ import {stateView} from '../shared/state-view.js';
 import {pruneSourceSnapshots,snapshotReferences} from '../shared/source-snapshot-gc.js';
 import path from 'node:path';
 import {readdir} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {realDirectory} from '../shared/retention.js';
 import {pruneHistory,retentionPolicy,sweepArtifacts} from '../shared/retention.js';
 const DAY=86400000;
@@ -15,7 +16,8 @@ export class HistoryRetention {
   this.snapshotApply=apply;
   this.snapshotRunning=(async()=>{const results=[];for(const [id,project]of Object.entries(this.context.projects?.projects??{})){
    const protectIds=[...(this.context.reports?.workers?.keys()??[])].map(k=>k.split(':')[0]);
-   const result=await pruneSourceSnapshots({...project,id},{readReferences:(p,root,ids)=>stateView(this.context.store,s=>snapshotReferences(s,p,root,ids)),withState:fn=>this.context.store.transact(fn),apply,protectIds});results.push({projectId:id,...result});
+   const readInactiveCards=async()=>{try{const c=JSON.parse(await readFile(path.join(this.context.config.runtimeDir,'maintenance-cleanup.local.json'),'utf8'));return c.inactiveStateRecords?.cardMessages??{};}catch{return {};}};
+   const result=await pruneSourceSnapshots({...project,id},{readReferences:async(p,root,ids)=>{const inactive=await readInactiveCards();return stateView(this.context.store,s=>snapshotReferences(s,p,root,ids,inactive));},withState:fn=>this.context.store.transact(fn),apply,protectIds,readInactiveCards});results.push({projectId:id,...result});
   }this.lastSnapshots={at:new Date().toISOString(),apply,results};return results;})();
   try{return await this.snapshotRunning;}finally{this.snapshotRunning=null;}
  }

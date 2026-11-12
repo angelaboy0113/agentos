@@ -6,7 +6,7 @@
 
 在实例的 `runtime/maintenance-cleanup.local.json` 保存配置（0600，父目录0700），示例见 `config/maintenance-cleanup.example.json`。修改时间、启停开关下个一分钟检查周期生效，不需重启。`hour/minute/timeZone` 是本地日历时间；每天到点后尝试一次，忙则延期，错过某天不补跑多次。电脑休眠时不运行，醒来后检查。已完成当天不会因普通重启重复执行。`acceptedRelease` 与实际程序版本一致且尚未处理时，也可在发布验收后触发；只有验收通过的部署才登记该触发器。
 
-`managedRoot` 必须精确为当前实例 runtime/migration；不遍历个人目录、业务仓、凭据或未登记的迁移文件。每个checkpoint登记路径、验收时间、验收证据路径/SHA256。保留最近三个完整点，以及 `pins` 和自动生成的全部恢复锚点。恢复锚点只增不减，轮换须人工迁移索引后验证；本版不自动删除独有历史内容、不转换旧去重索引、不实施内容寻址库。
+`managedRoot` 必须精确为当前实例 runtime/migration；不遍历个人目录、业务仓、凭据或未登记的迁移文件。每个checkpoint登记路径、验收时间、验收证据路径/SHA256。保留最近三个完整点，以及 `pins` 和自动生成的全部恢复锚点。恢复锚点只增不减，轮换须人工迁移索引后验证；默认去重模式不自动删除独有历史内容，也不转换旧去重索引。可选压缩内容库见下方专节，独有字节同样保留在可核验对象中。
 
 发布验收并记录真实 `health/ready/backup/commit/version/at` 后，由维护发布流程运行：
 
@@ -51,3 +51,64 @@ node scripts/maintenance-backups.mjs restore-fragments RUNTIME PLAN_GZ NEW_EMPTY
 ## 验证边界
 
 回归覆盖三完整点/锚点保护、独有文件、真实gzip恢复、哈希变化、路径/链接/外部打开、跨进程互斥、忙时延期、新任务栅栏、日历幂等和测试依赖变化。macOS本机配置和服务实际验收另记实例记录；lsof、目录fsync及真实恢复在其它OS未验，不宣称跨平台无人值守已通过。未登记目录和完整迁移路径无自动保证。外部飞书实施手册需有维护入口才能同步。
+# Compressed content storage for historical bulk
+
+An operator may enable `contentStore.enabled` in the instance cleanup registry.
+The default remains disabled. The existing schedule, idle checks, cross-process
+lock, reference aliases and writer fence continue to apply. The local authenticated
+`POST /api/v1/admin/maintenance-backups/run` accepts only `apply: true/false` and
+uses the registered scope; request bodies cannot nominate filesystem paths.
+
+The latest three accepted complete checkpoints and every configured or historical
+restore anchor remain unchanged. For other registered `exports` and
+`control-receipts` roots, each regular single-link file is hashed and streamed into
+an instance-local compressed object keyed by SHA-256. Identical bytes share an
+object across checkpoints. No hard links to current data or symlinks are created.
+Unique historical bytes are archived too, never discarded as obsolete.
+
+Before deleting an original file, the compressed object is decoded and verified,
+its file and parent directory are synced, and the version's manifest is atomically
+saved and synced. Immediately before unlink, the authoritative writer checks for
+new tasks/references and the file/object signatures are rechecked. An interrupted
+batch leaves either duplicate originals or indexed recoverable objects. A corrupt
+object, modified source, shared inode, open directory or changed scope fails closed.
+Objects and manifests are not automatically garbage-collected in this release.
+
+Each archived bulk root has a sibling `*.content-store.json` recovery pointer.
+Use the bundled tool, supplying an existing NEW EMPTY directory under the managed
+maintenance root:
+
+```sh
+node scripts/restore-backup-content.mjs MANIFEST NEW_EMPTY_DIRECTORY MANAGED_ROOT
+```
+
+Recovery verifies every decompressed file's length/hash and preserves its mode and
+mtime. It rejects traversal, symlink objects and an existing checkpoint overlay.
+The restored directory contains the files listed in that manifest. To reconstruct
+a full older checkpoint, combine these verified files with its retained native
+files and, where applicable, the pre-existing fragment recovery ledgers. Existing
+legacy ledgers and their pinned anchors must be kept; this feature does not silently
+rewrite them or claim a complete migration of every legacy backup format.
+
+Private migration must include `runtime/migration/.backup-content-store` (objects
+and manifests), `.maintenance-proofs`, `runtime/maintenance-cleanup.local.json`,
+`runtime/maintenance-backups`, and any retained checkpoints/legacy ledgers required
+for the chosen recovery scope. A code-only release intentionally excludes these
+private contents. Do not migrate just a manifest without its objects. New-host
+absolute path rebasing and a complete private migration are separate operator
+validation steps; they have not been implied by local archive tests.
+
+Acceptance requires an actual restoration of an archived historical root and hash
+comparison, not just unit tests or smaller directory totals. Report logical bytes
+and observed free-space changes separately: APFS clone accounting can differ.
+Registration now captures immutable copies of the reviewed acceptance/test proof,
+so later annotations in an operator report do not invalidate cleanup provenance.
+
+Rollback: first set `contentStore.enabled: false`. Preserve the content store,
+manifests, recovery tool and all legacy anchors. Older software cannot reconstruct
+compressed bulk on its own; materialize the selected checkpoint into a separate
+directory and verify it before attempting a recovery. Never restore old business
+state over the running instance. No secret, business source, login session, current
+exports or arbitrary operator directory is in the archival scope. Other operating
+systems and complete cross-machine restoration require separate validation.
+

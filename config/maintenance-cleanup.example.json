@@ -9,5 +9,6 @@
   "pins": [],
   "candidates": [],
   "testTrees": [],
-  "referenceAliases": []
+  "referenceAliases": [],
+  "contentStore": {"enabled": false}
 }

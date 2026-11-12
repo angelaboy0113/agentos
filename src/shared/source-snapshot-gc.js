@@ -6,6 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 import {withSnapshotLock} from './snapshot-lock.js';
+import {inactiveRecordFingerprint} from './maintenance-backups.js';
 const execute=promisify(execFile),terminal=new Set(['completed','failed','cancelled','blocked']);
 const inside=(root,p)=>p===root||p.startsWith(root+path.sep);
 // Use explicit argv, never commands from manifests or source text.
@@ -13,7 +14,7 @@ async function g(cwd,args){return (await execute('git',['-C',cwd,'-c',`core.hook
 const visit=(x,fn)=>{if(typeof x==='string')fn(x);else if(x&&typeof x==='object')for(const v of Object.values(x))visit(v,fn);};
 async function regular(file){const s=await lstat(file);if(!s.isFile()||s.isSymbolicLink())throw new Error('unsafe-file');return s;}
 async function directory(file){const s=await lstat(file);if(!s.isDirectory()||s.isSymbolicLink()||await realpath(file)!==file)throw new Error('unsafe-directory');}
-export function snapshotReferences(state,project,root,protectIds=[]){
+export function snapshotReferences(state,project,root,protectIds=[],inactiveCards={}){
  const jobs=state.jobs??[],related=jobs.filter(j=>!project.id||j.projectId===project.id);
  const busy=related.some(j=>['queued','running','cancelling'].includes(j.status)&&!j.analysisSourceSnapshot?.workspace);
  const q=new Set(),ids=new Set(protectIds),pins=new Set();
@@ -21,7 +22,12 @@ export function snapshotReferences(state,project,root,protectIds=[]){
  for(const t of state.conversations??[])if(['queued','thinking','decided','ready'].includes(t.status)||t.setupPending&&t.status!=='sent'){if(!t.projectId||!project.id||t.projectId===project.id)q.add(t.questionId);}
  const pending=d=>!d.superseded&&!['sent','delivered','completed','cancelled'].includes(d.status)&&!d.deliveredAt&&(!d.messageId||d.parts?.some(p=>!p.messageId));
  for(const collection of [state.reportDeliveries,state.websiteEvidenceDeliveries])for(const d of Object.values(collection??{}))if(pending(d)){q.add(d.questionId);ids.add(d.jobId);ids.add(d.sourceJobId);}
- for(const [k,c]of Object.entries(state.cardMessages??{}))if(c.revision!==c.deliveredRevision||(c.terminalMention&&!c.mentionDelivered)){if(k.startsWith('question:'))q.add(k.slice(9));else if(k.startsWith('job:'))ids.add(k.split(':')[1]);}
+ for(const [k,c]of Object.entries(state.cardMessages??{}))if(c.revision!==c.deliveredRevision||(c.terminalMention&&!c.mentionDelivered)){
+  // Only operator-reviewed stable content can retire a transport-only pin.
+  // Live jobs, conversations and actual attachment deliveries remain independent pins.
+  if(inactiveCards[k]===inactiveRecordFingerprint('cardMessages',c))continue;
+  if(k.startsWith('question:'))q.add(k.slice(9));else if(k.startsWith('job:'))ids.add(k.split(':')[1]);
+ }
  for(const j of jobs)if(!terminal.has(j.status)||q.has(j.questionId)&&j.questionId||ids.has(j.id))visit(j,v=>{if(path.isAbsolute(v)&&inside(root,path.resolve(v)))pins.add(path.resolve(v));});
  return {busy,pins:[...pins]};
 }
@@ -63,7 +69,7 @@ function valid(m,folder,source,project){
  const seen=new Set();return m.repositories.every(r=>{if(typeof r.path!=='string'||path.isAbsolute(r.path)||r.path!=='.'&&r.path.split('/').some(x=>!x||x==='.'||x==='..')||seen.has(r.path)||!/^[a-f0-9]{40,64}$/.test(r.commit??'')||typeof r.branch!=='string'||!r.branch)return false;seen.add(r.path);return inside(m.workspace,path.resolve(m.workspace,r.path));});
 }
 async function bytes(folder){return Number((await execute('du',['-sk',folder])).stdout.trim().split(/\s/)[0])*1024;}
-export async function pruneSourceSnapshots(project,{getState,readReferences,withState,apply=false,onProgress=async()=>{},protectIds=[]}={}){
+export async function pruneSourceSnapshots(project,{getState,readReferences,withState,apply=false,onProgress=async()=>{},protectIds=[],inactiveCards={},readInactiveCards=async()=>inactiveCards}={}){
  if(project.analysisSourceMode!=='isolated'||!project.analysisSnapshotRoot)return {removed:[],kept:[],unknown:[],skipped:'not-configured'};
  let root=path.resolve(project.analysisSnapshotRoot),source;
  try{if((await lstat(root)).isSymbolicLink())throw new Error('symlink');root=await realpath(root);await directory(root);source=await realpath(project.repoPath);}catch{return {removed:[],kept:[],unknown:[],skipped:'unsafe-or-missing-root'};}
@@ -71,7 +77,7 @@ export async function pruneSourceSnapshots(project,{getState,readReferences,with
  if(inside(root,source)||inside(source,root)||inside(root,program)||inside(program,root)||root===process.cwd()||inside(root,process.cwd()))return {removed:[],kept:[],unknown:[],skipped:'unsafe-root'};
  return withSnapshotLock(root,async(checkLock)=>{
   const candidates=[],kept=[],unknown=[],removed=[];
-  const readRefs=async()=>readReferences?readReferences(project,root,protectIds):snapshotReferences(await getState(),project,root,protectIds);
+  const readRefs=async()=>readReferences?readReferences(project,root,protectIds):snapshotReferences(await getState(),project,root,protectIds,await readInactiveCards());
   if((await readRefs()).busy)return {removed,kept,unknown,skipped:'project-busy'};
   for(const name of await readdir(root)){
    if(name==='.snapshot.lock'||name==='.snapshot-audit'||/^latest-[a-f0-9]{32}\.json$/.test(name))continue;
@@ -95,7 +101,7 @@ export async function pruneSourceSnapshots(project,{getState,readReferences,with
    const entry={name:item.name,environment:item.manifest.environment,bytes:size,reason:'idle-managed-clean-snapshot'};
    if(!apply){removed.push(entry);continue;}
    const remove=async fresh=>{
-    const refs=snapshotReferences(fresh,project,root,protectIds);if(refs.busy||pinned(refs,item.folder)){kept.push({...entry,reason:'became-active-before-delete'});return;}
+    const refs=snapshotReferences(fresh,project,root,protectIds,await readInactiveCards());if(refs.busy||pinned(refs,item.folder)){kept.push({...entry,reason:'became-active-before-delete'});return;}
     await directory(item.folder);await regular(path.join(item.folder,'source-manifest.json'));
     if(JSON.stringify(JSON.parse(await readFile(path.join(item.folder,'source-manifest.json'),'utf8')))!==JSON.stringify(item.manifest))throw new Error('Manifest changed during collection');
     // Recheck dirt immediately before removal, inside both the cache lock and state writer.
