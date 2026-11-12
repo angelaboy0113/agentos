@@ -1814,3 +1814,5 @@ The first native enrollment exposed an actual CNB/OpenAPI mismatch: total is a d
 ### 1.104.1 文件成果回传
 
 真人双助手PPT自测发现文件已生成但源码执行器最终结果投影遗漏exportFiles。补齐文件/失败字段，并在控制面独立核对所需格式，防止文字承诺被当作交付完成；新增真实executeJob与控制面回归。
+
+源码中途接续到环境、继续源码自查及切换源码环境时，同样登记并验证文件引用；下一轮复用同一成果及实际核验资料，避免已生成文件丢失后重复制作。

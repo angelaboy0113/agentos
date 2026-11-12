@@ -141,6 +141,7 @@ export class AgentRunner {
       const direct=continuationSourceResult(current);
       if(direct)await emit({type:'progress',phase:'environment_handoff',message:'复用已核验规则与已有数据，直接申请下一数据库步骤，最终仍审阅完整问题'});
       const result = direct??await this.execute(current, this.config, emit, signal);
+      if(result.exportFiles?.length)recordReportFiles(current,result.exportFiles,current.reportFiles?.at(-1)?.questionGeneration);
       recordReportReview(current,result);
       save({...current,context:[...(current.context??[]),{kind:'analysis_turn',result}]});
       if(result?.outcome==='needs_clarification'&&result.sourceEnvironmentQuery){

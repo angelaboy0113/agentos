@@ -331,6 +331,7 @@ export class JsonStore {
       job.continuousQueryKeys ??= [];
       if(!job.continuousQueryKeys.includes(queryKey))job.continuousQueryKeys.push(queryKey);
       if(plan.continuationKey){job.continuousContinuationKeys??=[];job.continuousContinuationKeys.push(plan.continuationKey);}
+      if(sourceResult.exportFiles?.length)recordReportFiles(job,sourceResult.exportFiles,state.questions?.[job.questionId]?.generation);
       recordReportReview(job,sourceResult);
       if(sourceResult.environmentContinuation){
         const previous=job.context.at(-1)?.result;
@@ -441,6 +442,7 @@ export class JsonStore {
       if (!job.continuousInvestigation || job.taskIntent !== 'analysis' || job.stage !== 'developer' || job.environmentAccess) {
         throw new Error('当前任务不能续接源码自查');
       }
+      if(result.exportFiles?.length)recordReportFiles(job,result.exportFiles,state.questions?.[job.questionId]?.generation);
       const decision = continuousReviewDecision(job, result);
       if (!decision.continue) return { job: structuredClone(job), continued: false, terminalResult: structuredClone(result), reason: decision.reason ?? null };
       recordReportReview(job,result);
@@ -456,6 +458,7 @@ export class JsonStore {
     return this.transact(state=>{
       const job=requireJob(state,id);requireActiveLease(job,identity);
       if(!job.continuousInvestigation||job.taskIntent!=='analysis'||job.stage!=='developer'||job.environmentAccess||result.handoffGate?.passed!==true)throw new Error('当前任务不能接续另一源码环境');
+      if(result.exportFiles?.length)recordReportFiles(job,result.exportFiles,state.questions?.[job.questionId]?.generation);
       const target=comparisonTarget(job,project,request),current=job.sourceEnvironment,snapshot=job.analysisSourceSnapshot;
       if(!snapshot||result.sourceSync?.cacheKey!==snapshot.cacheKey||result.workspace!==snapshot.workspace||result.sourceQuestionId!==job.questionId)throw new Error('环境交接缺少本问题固定源码证据');
       job.analysisSourceSnapshots??={};job.analysisSourceSnapshots[current]=structuredClone(snapshot);

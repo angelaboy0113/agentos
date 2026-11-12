@@ -336,6 +336,7 @@ async function route(context) {
   if(request.method==='POST'&&continuousSourceMatch){
     requireBearer(request,config.runnerToken,'runner');const body=await readJson(request),id=decodeURIComponent(continuousSourceMatch[1]),job=await store.getJob(id),result=body.result??{};
     if(!job||result.outcome!=='needs_clarification'||result.environmentQuery||result.websiteQuery||result.environmentSetup)throw Error('无有效的独立源码接续请求');
+    if(result.exportFiles!==undefined)result.exportFiles=await validateSourceDocumentFiles(config.dataDir,job,result);
     return json(response,200,await commitControl(context,async()=>({ok:true,job:await store.switchContinuousSourceEnvironment(id,{runnerId:body.runnerId,leaseId:body.leaseId},result,result.sourceEnvironmentQuery,context.projects.projects[job.projectId])})));
   }
 
@@ -352,6 +353,7 @@ async function route(context) {
     }
     const identity = { leaseId: body.leaseId, runnerId: body.runnerId };
     const sourceResult = body.result ?? {};
+    if(sourceResult.exportFiles!==undefined)sourceResult.exportFiles=await validateSourceDocumentFiles(config.dataDir,job,sourceResult);
     try {
       let query = sourceResult.environmentQuery;
       if(sourceResult.websiteQuery){
@@ -419,6 +421,7 @@ async function route(context) {
     requireBearer(request, config.runnerToken, 'runner');
     const id = decodeURIComponent(continuousAnalysisMatch[1]);
     const body = await readJson(request);
+    if(body.result?.exportFiles!==undefined)body.result.exportFiles=await validateSourceDocumentFiles(config.dataDir,await store.getJob(id),body.result);
     const result=await commitControl(context,async()=>({ok:true,...await store.continueContinuousAnalysis(id,
       { leaseId: body.leaseId, runnerId: body.runnerId }, body.result)}));
     return json(response,200,result);
@@ -893,4 +896,18 @@ async function durableControl(context,request,response){
   pending={...meta,promise};receipts.pending.set(id,pending);promise.finally(()=>{if(receipts.pending.get(id)===pending)receipts.pending.delete(id);}).catch(()=>{});
  }
  const result=await pending.promise;if(result.status===200)await receiptAllowed(context,meta,result.body);json(response,result.status,result.body);return true;
+}
+
+async function validateSourceDocumentFiles(dataDir,job,result){
+ if(job?.taskIntent!=='analysis'||result.handoffGate?.passed!==true||!Array.isArray(result.exportFiles))throw new Error('Source document artifacts require the current analysis handoff');
+ const files=[];
+ for(const file of result.exportFiles){
+  if(file.kind==='document')files.push(...await validateReportFiles(dataDir,job.id,[file]));
+  else{
+   const prior=job.reportFiles?.find(f=>f.id===file.id&&f.sha256===file.sha256&&f.verificationHash===file.verificationHash);
+   if(!prior)throw new Error('Source results cannot introduce an unregistered database report');
+   files.push(...await validateReportFiles(dataDir,prior.sourceJobId??job.id,[prior]));
+  }
+ }
+ return files;
 }

@@ -91,7 +91,8 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  return result;
 }
 export async function reportReviewEvidence(dataDir,job){
- const item=job.reportFiles?.filter(f=>f.verificationHash).at(-1);if(!item)return null;
+ const verified=job.reportFiles?.filter(f=>f.verificationHash)??[];
+ const item=verified.filter(f=>f.kind!=='document').at(-1)??verified.at(-1);if(!item)return null;
  try{
   const primary=await inspectReport(dataDir,job,{fileId:item.id});
   primary.relatedReports=[];let reviewBytes=Buffer.byteLength(JSON.stringify(primary));
