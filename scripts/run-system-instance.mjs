@@ -13,6 +13,13 @@ if (!['--check', '--start'].includes(mode)) throw new Error('Use --check or --st
 if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('请用 Node 22 启动独立实例');
 const instance = JSON.parse(await readFile(path.join(runtime, 'instance.local.json'), 'utf8'));
 mainHeapMiB(instance);
+const officeEnvironment={};
+for(const [field,key] of [['officeRendererPath','AGENTOS_OFFICE_RENDERER'],['pdfRasterizerPath','AGENTOS_PDF_RASTERIZER']]){
+ if(instance[field]===undefined)continue;
+ if(typeof instance[field]!=='string'||!path.isAbsolute(instance[field])||/[\r\n\0]/.test(instance[field]))throw Error('Office preview executable must be a trusted absolute instance path');
+ await access(instance[field]);officeEnvironment[key]=await realpath(instance[field]);
+}
+if(Object.keys(officeEnvironment).length===1)throw Error('Configure both Office preview executables together');
 const branch = execFileSync('git', ['-C', program, 'branch', '--show-current'], { encoding: 'utf8' }).trim();
 if (branch !== instance.branch) throw new Error('当前分支不属于本实例，拒绝启动');
 if (!Number.isInteger(instance.port) || instance.port < 1024 || instance.port > 65535 || (instance.protectedPorts ?? []).includes(instance.port)) throw new Error('实例端口无效或与受保护实例冲突');
@@ -44,6 +51,7 @@ if (mode === '--check') process.exit(pending.length ? 2 : 0);
 if (pending.length) throw new Error('接入尚未完成，拒绝连接事件或启动服务');
 for (const key of Object.keys(process.env)) if (/^(AGENTOS_|FEISHU_|LARKSUITE_CLI_CONFIG_DIR$)/.test(key)) delete process.env[key];
 Object.assign(process.env, {
+  ...officeEnvironment,
   AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),
   AGENTOS_DATA_DIR: path.join(runtime, 'data'), AGENTOS_RUNNER_WORKTREE_ROOT: path.join(runtime, 'data', 'worktrees'),

@@ -30,3 +30,21 @@ export async function officePreview(bytes,format,directory,options={}){
   return {status:'rendered',sourceSha256,pageCount:pages.length,pdf:{path:pdf,sha256:hash(pdfBytes),bytes:pdfBytes.length},pages,note:'实际同一文件逐页渲染，仍需查看所有图片判断遮挡/溢出/字体。预览使用本机字体替代，不等于Office客户端动画验收；原文件未改。'};
  }catch{if(dir)await rm(dir,{recursive:true,force:true});return {status:'failed',sourceSha256,phase,code:'OFFICE_PREVIEW_FAILED',note:'Office预览失败，原文档保留；不能把结构成功等同视觉核验。请维护者核对本机渲染器。'};}
 }
+
+// A failed/missing preview may recover after configuration or renderer repair.
+// Keep the document verification receipt immutable; cache the derived preview
+// separately, bound to the unchanged actual file digest and owning directory.
+export async function officePreviewEvidence(bytes,format,directory,fileId,recorded,options={}){
+ if(!['pptx','docx'].includes(format))return recorded??null;
+ if(!/^report-[a-f0-9-]{36}$/.test(fileId))throw Error('Invalid Office preview file binding');
+ const {realpath,rename}=await import('node:fs/promises'),{randomUUID}=await import('node:crypto'),root=await realpath(directory),sourceSha256=hash(bytes),file=path.join(root,fileId+'.preview.json');
+ async function valid(p){
+  if(p?.status!=='rendered'||p.sourceSha256!==sourceSha256||!p.pages?.length||p.pageCount!==p.pages.length)return false;
+  try{for(const v of [p.pdf,...p.pages]){const resolved=await realpath(v.path),s=await lstat(v.path);if(!resolved.startsWith(root+path.sep)||s.isSymbolicLink()||!s.isFile()||s.nlink!==1||hash(await readFile(v.path))!==v.sha256)return false;}return true;}catch{return false;}
+ }
+ if(await valid(recorded))return recorded;
+ try{const s=await lstat(file);if(s.isSymbolicLink()||!s.isFile())throw Error('Linked preview receipt');const cached=JSON.parse(await readFile(file,'utf8'));if(cached.fileId===fileId&&await valid(cached.preview))return cached.preview;}catch(e){if(e.message==='Linked preview receipt')throw e;}
+ const preview=await officePreview(bytes,format,root,options);
+ if(preview.status==='rendered'){const temp=file+'.'+randomUUID()+'.tmp';await writeFile(temp,JSON.stringify({fileId,sourceSha256,preview}),{mode:0o600,flag:'wx'});await rename(temp,file);}
+ return preview;
+}

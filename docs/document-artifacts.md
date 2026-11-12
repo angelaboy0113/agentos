@@ -64,3 +64,7 @@ Mac本机验证包括真实Codex调用能写本任务产物、不能写源码/�
 可信 Runner 可选配置绝对可执行路径环境变量 `AGENTOS_OFFICE_RENDERER`（LibreOffice/soffice）和 `AGENTOS_PDF_RASTERIZER`（pdftoppm），示例见 config/document-artifacts.example.json。设置在实例服务环境，不能由模型/文件指定。重启须空闲发布。PPTX/DOCX经原有宏/外部关系/路径检查后，在任务exports独立预览目录转换PDF和逐页PNG；各调用单独网络/进程故障等待窗口180秒，不设整任务截止，不截断页数。预览目录与任务文件一起保留和迁移，按原任务保留机制清理。macOS预览用系统黑体替代缺少的微软雅黑，原文件不改变；其他系统字体替代需实测。
 
 `contentAudit.preview`记录 rendered/unavailable/failed、原文件SHA、全部页路径与SHA、实际页数。模型须查看所有图片，再做布局结论；渲染完成不自动意味着视觉通过、业务正确或动画兼容。未配置或失败保留已生成文件并给出明确渲染缺口，不声称已预览，也不要求重查业务。无额外数据库/飞书权限，不运行宏、外部关系或用户指定命令。Office客户端动态动画、其他操作系统和任意专有格式仍须分别验收。
+
+实例启动器会清除继承的部署环境，独立实例应在自己的 runtime/instance.local.json 成对设置 officeRendererPath 与 pdfRasterizerPath（可信绝对可执行路径），启动器验证后映射上述环境变量；不能只在外部shell或LaunchAgent设置环境变量期待其保留。未配置的旧实例保持兼容，不能继承其它实例的渲染器路径。1.111.1已增加真实启动脚本回归。
+
+已登记文件的旧预览曾因未配置或临时错误失败时，inspect_report/控制面审阅会按同一原文件摘要重新预览，并将派生预览单独缓存；不改原文件或不可变verification回执。缓存逐页校验路径、文件摘要和源文件绑定；被修改的预览不能继续复用。恢复配置后不要求重新制作文件或重新查库。

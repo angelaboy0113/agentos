@@ -31,5 +31,9 @@
   "runtimeEnvironmentExample": {
     "AGENTOS_OFFICE_RENDERER": "/path/to/soffice",
     "AGENTOS_PDF_RASTERIZER": "/path/to/pdftoppm"
+  },
+  "instanceExample": {
+    "officeRendererPath": "/path/to/soffice",
+    "pdfRasterizerPath": "/path/to/pdftoppm"
   }
 }
