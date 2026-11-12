@@ -24,9 +24,10 @@ async function visual(html,format){
 async function encode(format,content){
  if(format==='html'){const html=offlineHtml(content);await visual(html,'check');return Buffer.from(html);}
  if(['pdf','png'].includes(format))return visual(offlineHtml(content),format);
- if(['txt','md','csv'].includes(format))return Buffer.from(text(content));
+ if(['txt','md'].includes(format))return Buffer.from(text(content));
+ if(format==='csv'){const {reportCsv}=await import('./report-revision.js');const table=reportCsv(Buffer.from(text(content))),cell=v=>'"'+(/^[\s\uFEFF]*[=+@-]/.test(v)&&!/^-[0-9]+(?:\.[0-9]+)?$/.test(v)?"'"+v:v).replaceAll('"','""')+'"';return Buffer.from('\uFEFF'+[table.headers,...table.rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n');}
  if(format==='json'){parse(content);return Buffer.from(content);}
- if(format==='svg'){if(!/^\s*<svg[\s>]/.test(content)||/<(?:script|foreignObject)|\bon\w+\s*=|(?:href|src)\s*=\s*["'](?!#|data:)/i.test(content))fail('SVG需要自包含且无活动外链');return Buffer.from(content);}
+ if(format==='svg'){if(/(?:https?|file|javascript):|@import|url\(\s*[^#]/i.test(content.replace(/xmlns(?::\w+)?=["'][^"']+["']/g,'')))fail('SVG不得含外部地址或脚本');if(!/^\s*<svg[\s>]/.test(content)||/<(?:script|foreignObject)|\bon\w+\s*=|(?:href|src)\s*=\s*["'](?!#|data:)/i.test(content))fail('SVG需要自包含且无活动外链');return Buffer.from(content);}
  const spec=parse(content);
  if(format==='zip'){if(!Array.isArray(spec.entries)||!spec.entries.length)fail('ZIP需要entries');const {default:JSZip}=await import('jszip');const zip=new JSZip(),seen=new Set();for(const e of spec.entries){if(!/^[\w\u3400-\u9fff .-]+\.(?:txt|md|csv|json|html|svg)$/.test(e.name)||seen.has(e.name))fail('ZIP条目名称无效或重复');seen.add(e.name);zip.file(e.name,await encode(e.name.split('.').at(-1),text(e.content)));}return zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});}
  if(format==='xlsx'){if(!Array.isArray(spec.sheets)||!spec.sheets.length)fail('XLSX需要sheets');const {default:ExcelJS}=await import('exceljs');const wb=new ExcelJS.Workbook();for(const sheet of spec.sheets){const ws=wb.addWorksheet(text(sheet.name));if(!Array.isArray(sheet.rows))fail('工作表缺少rows');for(const row of sheet.rows){if(!Array.isArray(row)||row.some(v=>v!==null&&typeof v!=='string'))fail('工作簿原始单元格必须为字符串或null，避免金额和长编号损失');ws.addRow(row);}ws.views=[{state:'frozen',ySplit:1}];}return Buffer.from(await wb.xlsx.writeBuffer());}
