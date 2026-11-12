@@ -40,7 +40,9 @@ export function assessReportDelivery(job,result){
 }
 export function recordReportReview(job,result){
  if(!job.reportReviews||result?.handoffGate?.passed!==true||result.sourceSyncBlocked)return;
- for(const file of result.exportFiles??[])if(file.kind==='document'&&proof(file)&&result.outcome==='ready'&&result.investigation?.status==='complete'&&result.investigation.goals?.some(g=>g.id==='original-question'&&g.required&&g.status==='verified'))job.reportReviews[file.id]={status:'accepted',verificationHash:file.verificationHash,issues:[],at:new Date().toISOString(),document:true};
+ const inspectedDocuments=(job.reportFiles??[]).filter(file=>file.kind==='document'&&(result.reportInspections??[]).some(e=>e.status==='verified'&&e.binding?.fileId===file.id&&e.binding.sha256===file.sha256&&e.binding.verificationHash===file.verificationHash));
+ const documents=[...new Map([...inspectedDocuments,...(result.exportFiles??[]).filter(f=>f.kind==='document')].map(f=>[f.format,f])).values()];
+ for(const file of documents)if(file.kind==='document'&&proof(file)&&result.outcome==='ready'&&result.investigation?.status==='complete'&&result.investigation.goals?.some(g=>g.id==='original-question'&&g.required&&g.status==='verified'))job.reportReviews[file.id]={status:'accepted',verificationHash:file.verificationHash,issues:[],at:new Date().toISOString(),document:true};
  const reviewed=assessment(job,result);if(!reviewed)return;
  const {a,file,blocking}=reviewed,previous=job.reportReviews[file.id];
  if(a.decision==='deliver_partial'){

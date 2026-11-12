@@ -60,3 +60,5 @@ test('source self-continuation persists verified files for next-turn review inst
 });
 
 test('layout document cannot replace independent business dataset verification',async()=>{const {assessReportDelivery}=await import('../src/shared/report-acceptance.js');const j={...job,tabularDelivery:true,reportFiles:[{id:'layout-only',kind:'document',verificationHash:'a'.repeat(64)}]};assert.equal(assessReportDelivery(j,{outcome:'ready',investigation:{status:'complete'}}).outcome,'partial');});
+
+test('final source review accepts prior-turn actual document without generating it again',async t=>{const dir=await mkdtemp(path.join(os.tmpdir(),'aos-doc-final-review-'));t.after(()=>rm(dir,{recursive:true,force:true}));const [file]=await createDocuments(dir,job,[request('html')]),j={...job,reportFiles:[],reportReviews:{}};recordReportFiles(j,[file],1);const view=await inspectReport(dir,j,{fileId:file.id});recordReportReview(j,{outcome:'ready',handoffGate:{passed:true},reportInspections:[view],investigation:{status:'complete',goals:[{id:'original-question',required:true,status:'verified'}]}});assert.equal(reportEligible(j,file),true);});
