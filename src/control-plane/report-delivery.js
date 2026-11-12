@@ -1,10 +1,12 @@
+import {inspectReport} from '../shared/report-inspection.js';
 import {prepareReportParts} from '../shared/report-parts.js';
 import {hashFile} from '../shared/file-digest.js';
 import {stateView,questionStateView} from '../shared/state-view.js';
 import {privateRecipient} from './private-cards.js';
-import {reportEligible} from '../shared/report-acceptance.js';
+import {reportEligible,recordReportReview} from '../shared/report-acceptance.js';
 import {createHash} from 'node:crypto';
 import {reportFile} from '../shared/report-files.js';
+import {resolveProjectId} from '../shared/project-scope.js';
 import {messageIdOf} from './live-cards.js';
 // Reports are per-question business artifacts, never shared knowledge or a public download URL.
 export class ReportDelivery {
@@ -37,7 +39,27 @@ export class ReportDelivery {
   });
   await this.retry();
  }
+ async recoverDocumentReviews(){
+  const candidates=await stateView(this.context.store,s=>s.jobs.filter(j=>recoverableDocumentReview(j,s)&&reviewRouteCurrent(this.context,j,s)).map(j=>({id:j.id,projectId:j.projectId,questionId:j.questionId,reportFiles:j.reportFiles.filter(f=>j.result.reportAssessment.deliverables.some(d=>d.fileId===f.id)),fingerprint:reviewFingerprint(j),generation:s.questions?.[j.questionId]?.generation})));
+  for(const candidate of candidates){
+   if(this.closed)return;
+   try{
+    const inspections=await Promise.all(candidate.reportFiles.map(f=>inspectReport(this.context.config.dataDir,candidate,{fileId:f.id})));
+    await this.context.store.transact(state=>{
+     const current=state.jobs.find(j=>j.id===candidate.id);
+     if(!recoverableDocumentReview(current,state)||!reviewRouteCurrent(this.context,current,state)||reviewFingerprint(current)!==candidate.fingerprint||state.questions?.[current.questionId]?.generation!==candidate.generation)return;
+     const reviewed={...current,reportEvidence:undefined,reportReviews:structuredClone(current.reportReviews)};
+     recordReportReview(reviewed,{...current.result,reportInspections:inspections});
+     const files=reviewed.reportPartialDeliverySet?.files;
+     if(!files?.length||!files.every(f=>reviewed.reportReviews[f.fileId]?.status==='accepted_partial'))return;
+     current.reportReviews=reviewed.reportReviews;current.reportPartialDeliverySet=reviewed.reportPartialDeliverySet;
+     current.documentReviewRecovery={policy:'verified-persisted-document-review-v1',at:new Date().toISOString(),resultHash:candidate.fingerprint,files:files.map(f=>({fileId:f.fileId,verificationHash:f.verificationHash})),businessResultUnchanged:true};
+    });
+   }catch{/* Missing/tampered files remain unaccepted; never requery business or invent a receipt. */}
+  }
+ }
  async recover(){
+  await this.recoverDocumentReviews();
   const latestIds=await stateView(this.context.store,s=>[...new Set(s.jobs.filter(j=>j.reportFiles?.length).map(j=>j.questionId))].map(id=>s.jobs.filter(j=>j.questionId===id).at(-1)?.id).filter(Boolean));
   for(const id of latestIds){const latest=await stateView(this.context.store,s=>s.jobs.find(j=>j.id===id));if(latest)await this.enqueue(latest);}
  }
@@ -84,3 +106,13 @@ export class ReportDelivery {
 function deliveryEligible(state,entry){const source=state.jobs.find(j=>j.id===entry.sourceJobId);const reviewer=state.jobs.filter(j=>(entry.questionId?j.questionId===entry.questionId:j.id===entry.sourceJobId)&&j.reportReviews?.[entry.item.id]).at(-1);return reportEligible(reviewer??source??{},entry.item);}
 
 function reportDeliveryReady(job){return job?.result?.outcome==='ready'||job?.result?.outcome==='partial'&&job.reportPartialDeliverySet?.files?.length>0;}
+
+function reviewFingerprint(job){return createHash('sha256').update(JSON.stringify([job.id,job.status,job.nextJobId,job.result,job.reportFiles,job.reportReviews])).digest('hex');}
+function recoverableDocumentReview(job,state){
+ const r=job?.result,a=r?.reportAssessment,q=state.questions?.[job?.questionId];
+ if(!job||job.status!=='completed'||job.nextJobId||job.taskIntent!=='analysis'||job.tabularDelivery||r?.outcome!=='partial'||r.handoffGate?.passed!==true||r.sourceSyncBlocked||a?.decision!=='deliver_partial'||a.coverage!=='incomplete'||!Array.isArray(a.issues)||a.issues.some(i=>i.kind!=='required_output')||!Array.isArray(a.deliverables)||!a.deliverables.length)return false;
+ if(q&&state.jobs.filter(j=>j.questionId===job.questionId).at(-1)?.id!==job.id||state.cardMessages?.['question:'+job.questionId]?.error==='原消息已撤回，停止更新')return false;
+ return a.deliverables.every(d=>{const f=job.reportFiles?.find(f=>f.id===d.fileId),old=r.reportInspections?.find(e=>e.status==='verified'&&e.binding?.fileId===f?.id&&e.binding.sha256===f.sha256&&e.binding.verificationHash===f.verificationHash);return f?.kind==='document'&&f.complete&&(!q||f.questionGeneration===q.generation)&&job.reportReviews?.[f.id]?.status==='awaiting_review'&&old;});
+}
+
+function reviewRouteCurrent(context,job,state){const q=state.questions?.[job.questionId],projects=context.projects;if(!projects)return false;const profile=q?.profile??job.originProfile??job.agentProfile,chat=q?.chatId??job.chatId;if(!q||!profile||!chat||profile!==(job.originProfile??job.agentProfile)||q.senderId&&q.senderId!==job.senderId)return false;return resolveProjectId(projects,chat,profile)===job.projectId;}
