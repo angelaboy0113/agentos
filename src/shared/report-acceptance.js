@@ -16,7 +16,7 @@ export function recordReportFiles(job,files,generation){
 export function assessReportDelivery(job,result){
  if(job.tabularDelivery&&result?.outcome==='ready'&&!job.reportFiles?.some(f=>f.kind!=='document'&&proof(f)))return {...result,outcome:'partial',reportReviewRequired:true,investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'本请求需要可复用统计表文件，尚未生成核验文件'}],nextStep:'复用已保存数据整理完整表格，compose_report/finalize_report核验后交付；不因用户没写Excel而省略文件'}};
 
- if(job.reportFiles?.length&&job.reportFiles.every(f=>f.kind==='document'))return result;
+ if(job.reportFiles?.length&&job.reportFiles.every(f=>f.kind==='document'))return pendingDocumentReview(job,result);
  result=normalizeReportFormatReview(job,result);
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!job.reportReviews||!job.reportFiles?.length||result?.sourceSyncBlocked)return result;
  const reviewed=assessment(job,result);
@@ -53,9 +53,10 @@ export function recordReportReview(job,result){
     ||blocking.some(i=>i.kind!=='required_output')||!validDeliverables(job,components,file.id,result.reportInspections))return;
   const inspections=result.reportInspections??[];
   const files=components.map(x=>job.reportFiles.find(f=>f.id===x.fileId));
-  if(files.some(f=>!f.complete||!inspections.some(e=>e.status==='verified'&&componentScopeReviewed(e.populationAudit,a.scopeReview)&&e.binding?.fileId===f.id
+  const documentOnly=!job.tabularDelivery&&files.every(f=>f.kind==='document');
+  if(files.some(f=>!f.complete||!inspections.some(e=>e.status==='verified'&&(documentOnly?e.contentAudit?.structure==='passed':componentScopeReviewed(e.populationAudit,a.scopeReview)&&e.calculationAudit?.status==='passed')&&e.binding?.fileId===f.id
     &&e.binding.verificationHash===f.verificationHash&&e.binding.sha256===f.sha256
-    &&e.binding.rowCount===f.rowCount&&e.calculationAudit?.status==='passed')))return;
+    &&e.binding.rowCount===f.rowCount)))return;
   job.reportPartialDeliverySet={files:files.map(f=>({fileId:f.id,verificationHash:f.verificationHash})),
     scope:components.map(x=>({fileId:x.fileId,evidence:x.evidence})),at:new Date().toISOString()};
   for(const f of files)job.reportReviews[f.id]={status:'accepted_partial',verificationHash:f.verificationHash,
@@ -86,7 +87,7 @@ export function acceptedReportResult(job){
 function validDeliverables(job,requested,primary,transportEvidence=[]){
  if(!Array.isArray(requested)||!requested.length||!requested.some(x=>x.fileId===primary)||new Set(requested.map(x=>x.fileId)).size!==requested.length)return false;
  const evidence=job.reportEvidence?[job.reportEvidence,...(job.reportEvidence.relatedReports??[])]:transportEvidence.filter(e=>e?.status==='verified'&&job.reportFiles?.some(f=>e.binding?.fileId===f.id&&e.binding.sha256===f.sha256&&e.binding.rowCount===f.rowCount&&(!f.sourceJobId||e.binding.sourceJobId===f.sourceJobId)));
- return requested.every(x=>typeof x.evidence==='string'&&x.evidence.trim()&&job.reportFiles?.some(f=>f.id===x.fileId&&proof(f)&&evidence.some(e=>e?.status==='verified'&&e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&e.calculationAudit?.status==='passed')));
+ return requested.every(x=>typeof x.evidence==='string'&&x.evidence.trim()&&job.reportFiles?.some(f=>f.id===x.fileId&&proof(f)&&evidence.some(e=>e?.status==='verified'&&e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&(f.kind==='document'&&!job.tabularDelivery?e.contentAudit?.structure==='passed':e.calculationAudit?.status==='passed'))));
 }
 
 function componentScopeReviewed(scope,review){
@@ -95,4 +96,12 @@ function componentScopeReviewed(scope,review){
  return !differences.length||review?.populationRef===scope.selected.datasetRef&&review.evidence?.trim()
   &&Array.isArray(review.comparisons)&&differences.every(c=>review.comparisons.some(r=>r.datasetRef===c.datasetRef
     &&r.keyColumn===c.keyColumn&&r.decision==='out_of_scope'&&r.evidence?.trim()));
+}
+
+export function pendingDocumentReview(job,result){
+ const files=[...(job.reportFiles??[]),...(result.exportFiles??[])].filter(f=>f.kind==='document'&&proof(f));
+ if(job.taskIntent!=='analysis'||job.tabularDelivery||result?.outcome!=='partial'||result.sourceSyncBlocked||result.handoffGate?.passed===false||!files.length||assessment({...job,reportFiles:files},result))return result;
+ const pending=files.filter(f=>!['accepted','accepted_partial','revision_required'].includes(job.reportReviews?.[f.id]?.status));
+ if(!pending.length)return result;
+ return {...result,reportReviewRequired:true,environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,status:'continue',blocker:null,nextStep:'先审阅已经生成且由内置渲染器核验的文档，不重复查询业务。按实际文件哈希、contentAudit、目的与源码证据填写reportAssessment；完整交付用deliver，整体仍缺其它内容但文档准确覆盖自身已核实范围时显式deliver_partial/coverage=incomplete，deliverables逐份列出fileId和范围证据，只将其它尚缺输出记required_output。保持原问题缺口和黄色状态；当前文件内容错误或来源不实仍需revise。文件：'+pending.map(f=>f.id+' ('+f.title+')').join('、')}};
 }

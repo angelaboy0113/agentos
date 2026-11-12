@@ -92,10 +92,14 @@ export function requestedDocumentFormats(question=''){
  const clauses=String(question).split(/[，。；\n]/).filter(c=>!/(?:不要|无需|不需要|不必).{0,6}(?:html|h5|ppt|word|pdf|png|xlsx|文件)/i.test(c));
  return Object.entries(rules).filter(([,re])=>clauses.some(c=>re.test(c)&&/(?:生成|输出|产出|提供|给我|做成|制作|导出|整理成|交付|改成|转换|转成|存为|保存为|发我)/i.test(c))).map(([f])=>f);
 }
+export function documentFailureResult(result,error){
+ const code=error.code??'DOCUMENT_RENDER',message=String(error.message);
+ return {...result,outcome:'partial',documentFailure:{code,message},handoff:{...result.handoff,returnTo:'none',risks:[...(result.handoff?.risks??[]),'文件生成或实际核验未完成：'+message]},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'文件步骤 '+code+'：'+message}],nextStep:'保留现有业务证据与产物工作区，修正文件构建或布局后重新提交documentRequests；内置渲染器完成实际核验，不重新业务查询。'},finalMessage:result.finalMessage+'\n文件生成或实际核验未完成：'+message+'。已有调查证据保留，不能声称文件已交付。'};
+}
 export function enforceDocumentOutput(job,result){
  if(result.outcome!=='ready')return result;
  const required=requestedDocumentFormats(currentUserQuestion(job)),files=[...(job.reportFiles??[]),...(result.exportFiles??[])];
  const missing=required.filter(format=>!files.some(f=>f.format===format&&f.verificationHash));
  if(!missing.length)return result;
- return {...result,outcome:'partial',reportReviewRequired:true,handoff:{...result.handoff,returnTo:'developer',risks:[...(result.handoff?.risks??[]),'用户要求的实际文件尚未生成并核验']},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'用户要求的实际文件尚缺：'+missing.join(',')}],nextStep:'用documentRequests生成缺少的实际文件，复用已有证据，不重查业务。'},finalMessage:result.finalMessage+'\n用户要求的 '+missing.join('/')+' 文件尚未生成并核验，不能声称已完整交付。'};
+ return {...result,outcome:'partial',reportReviewRequired:true,handoff:{...result.handoff,returnTo:'none',risks:[...(result.handoff?.risks??[]),'用户要求的实际文件尚未生成并核验']},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'用户要求的实际文件尚缺：'+missing.join(',')}],nextStep:'用documentRequests生成缺少的实际文件，复用已有证据，不重查业务。'},finalMessage:result.finalMessage+'\n用户要求的 '+missing.join('/')+' 文件尚未生成并核验，不能声称已完整交付。'};
 }

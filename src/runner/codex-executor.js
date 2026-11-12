@@ -1,6 +1,7 @@
+import {pendingDocumentReview} from '../shared/report-acceptance.js';
 import {prepareArtifactWorkspace,artifactPermissionArgs,artifactWorkspaceNotice,artifactPolicy} from '../shared/artifact-workspace.js';
 import {prepareSavedSourceEvidence,savedSourceEvidenceNotice} from './source-saved-evidence.js';
-import {createDocuments,documentInputText,enforceDocumentOutput} from '../shared/document-artifacts.js';
+import {createDocuments,documentFailureResult,documentInputText,enforceDocumentOutput} from '../shared/document-artifacts.js';
 import{inquiryExecutionContract,normalizeSelfContinuation}from '../shared/inquiry-execution.js';
 import{loadIntegrationProjects,taskReadCatalog}from '../shared/integration-peers.js';
 import {isModelCapacityError as capacityError,modelCapacityWait}from '../shared/model-capacity-wait.js';
@@ -93,10 +94,10 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed&&codexResult.documentRequests?.length){
     try{const files=await createDocuments(config.dataDir??path.dirname(config.worktreeRoot),job,codexResult.documentRequests);
       codexResult={...codexResult,exportFiles:[...(codexResult.exportFiles??[]),...files]};
-    }catch(error){codexResult={...codexResult,outcome:'partial',documentFailure:{code:error.code??'DOCUMENT_RENDER',message:String(error.message)},finalMessage:codexResult.finalMessage+'\n文件生成或实际核验未完成：'+error.message+'。已有调查证据保留，不能声称文件已交付。'};}
+    }catch(error){codexResult=documentFailureResult(codexResult,error);}
   }
   delete codexResult.documentRequests;
-  codexResult=enforceDocumentOutput(job,codexResult);
+  codexResult=pendingDocumentReview(job,enforceDocumentOutput(job,codexResult));
   const aiCompleted = Date.now();
   const verifyCommands = verificationCommands(job, project, codexResult.outcome);
   if (verifyCommands.length) {
@@ -108,8 +109,8 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed)try{await rememberSourceMethod(job,sourceSync,{...codexResult,workspace},{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});}catch{/* Optional evidence index cannot block a valid task. */}
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
-  return { ...(job.artifactWorkspace?{artifactPolicy}:{}),...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
-    reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({status:e.status,binding:e.binding,calculationAudit:e.calculationAudit,populationAudit:e.populationAudit})),
+  return { ...(job.artifactWorkspace?{artifactPolicy}:{}),...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),...(codexResult.reportReviewRequired?{reportReviewRequired:true}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+    reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({status:e.status,binding:e.binding,calculationAudit:e.calculationAudit,populationAudit:e.populationAudit,...(e.contentAudit?{contentAudit:e.contentAudit}:{})})),
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     sourceEnvironmentQuery:codexResult.sourceEnvironmentQuery??null,environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate, protocolRepair:codexResult.protocolRepair??null,
     timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };
@@ -416,5 +417,5 @@ export async function loadStageInstruction(stage) {
 }
 
 export function documentOutputInstructions(){return `
-通用文件输出（当前执行器真实支持）：用户要求HTML/H5、PPT、Word、PDF、PNG、XLSX、JSON、TXT、Markdown、CSV、SVG或ZIP时，用documentRequests数组请求生成实际文件，可由内置渲染器生成，或在下方本任务工作区用程序批量构建；无需新增数据库权限。每项{format,title,purpose,content}，无新文件填null。purpose说明它满足用户哪个交付要求及证据边界。content为字符串：html/pdf/png为自包含HTML正文（支持CSS和details等原生交互，不执行任意脚本，外链网络/表单/框架禁止；离线文件不是公开托管链接）；pptx为JSON字符串{slides:[{title,paragraphs:[文字],table:[[字符串]]}]}；docx为JSON字符串{sections:[{title,paragraphs:[文字],tables:[[[字符串]]]}]}；业务XLSX优先content=JSON字符串{sourceReportId:已核验CSV的report-id,sheetName:表名}逐格转换，原金额/范围核验不跳过；普通非业务表xlsx为JSON字符串{sheets:[{name,rows:[[字符串或null]]}]}；zip为JSON字符串{entries:[{name:安全文件名,content:文字}]}；其它格式为该格式正文，不能只改后缀。PPT表格自动续页，长内容请主动分章节分页。用户明确要求原生格式时不擅自换CSV；未安装格式渲染器时说明具体缺项，不宣称所有格式都已支持。文件标题、范围、时间和不确定项需写清。业务金额/完整性仍须原独立证据核验，不能用排版成功证明数字正确；已有核验CSV优先复用已有数据及口径，不重新查询。生成成功后程序登记摘要与核验并投递原话题；最终答案说明文件内容，不编造下载网址/已送达。用户后续修改，已交付文件的实际哈希绑定生成内容会作为任务附件提供，读取后派生新文件，不让用户重传、不覆盖原件。请求可正常ready时仍需满足原问题全部业务证据、handoff/checks和权限，未核实不得强绿。
+通用文件输出（当前执行器真实支持）：用户要求HTML/H5、PPT、Word、PDF、PNG、XLSX、JSON、TXT、Markdown、CSV、SVG或ZIP时，用documentRequests数组请求生成实际文件，可由内置渲染器生成，或在下方本任务工作区用程序批量构建；无需新增数据库权限。每项{format,title,purpose,content}，无新文件填null。purpose说明它满足用户哪个交付要求及证据边界。content为字符串：html/pdf/png为自包含HTML正文（支持CSS和details等原生交互，不执行任意脚本，外链网络/表单/框架禁止；离线文件不是公开托管链接）；pptx为JSON字符串{slides:[{title,paragraphs:[文字],table:[[字符串]]}]}；docx为JSON字符串{sections:[{title,paragraphs:[文字],tables:[[[字符串]]]}]}；业务XLSX优先content=JSON字符串{sourceReportId:已核验CSV的report-id,sheetName:表名}逐格转换，原金额/范围核验不跳过；普通非业务表xlsx为JSON字符串{sheets:[{name,rows:[[字符串或null]]}]}；zip为JSON字符串{entries:[{name:安全文件名,content:文字}]}；其它格式为该格式正文，不能只改后缀。PPT表格自动续页，长内容请主动分章节分页。用户明确要求原生格式时不擅自换CSV；未安装格式渲染器时说明具体缺项，不宣称所有格式都已支持。文件标题、范围、时间和不确定项需写清。文档类文件的reportEvidence使用contentAudit，不要求CSV专属calculationAudit或dataset范围审计；原问题整体仍有外部缺口，但已生成文档准确完整覆盖其声明的已核实范围，可在读取哈希绑定审阅资料后显式reportAssessment={fileId,coverage:'incomplete',decision:'deliver_partial',issues:[{kind:'required_output',evidence:整体尚缺的具体输出}],deliverables:[{fileId,evidence:该文档准确完整覆盖的范围}],scopeReview:null}，保留黄色及缺口，不伪称整项完成；当前文件本身有错误或虚假来源不能部分交付。业务金额/完整性仍须原独立证据核验，不能用排版成功证明数字正确；已有核验CSV优先复用已有数据及口径，不重新查询。生成成功后程序登记摘要与核验并投递原话题；最终答案说明文件内容，不编造下载网址/已送达。用户后续修改，已交付文件的实际哈希绑定生成内容会作为任务附件提供，读取后派生新文件，不让用户重传、不覆盖原件。请求可正常ready时仍需满足原问题全部业务证据、handoff/checks和权限，未核实不得强绿。
 `;}

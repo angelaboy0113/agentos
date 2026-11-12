@@ -45,3 +45,9 @@ Runner将模型内容交给受信任渲染器，不授予模型任意shell、联
 大文件优先用程序批量解析源码或已核验的数据集、构建实际文件，最终只返回 `content:{artifactFile:"interfaces.html",sourceFile:"build.mjs"}`，`sourceFile` 可为 null。无需将数千条目录在模型结果JSON里反复转写。相对路径、目录链接、硬链接和实际格式均检查；原生HTML仍执行离线隔离和真实渲染检查，业务CSV/XLSX不绕过独立核验。构建脚本仅作哈希绑定来源保存，导入器不会执行它；修改已交付文件时提供不可变原文件及脚本来源，派生新产物。
 
 Mac本机验证包括真实Codex调用能写本任务产物、不能写源码/其它任务/配置；已有硬链接会在调用前拒绝，沙箱内创建跨边界硬链接和符号链接写入均被拒绝。其它操作系统的命名权限实现未实测，不能将Mac结果外推。
+
+浏览器排版检查由运行器内置的可信渲染器执行；分析沙箱拒绝模型自行启动Chromium不代表交付格式不可用。提交实际文件引用即可让渲染器核验。文件生成或渲染失败保留 `documentFailure` 的分类与具体原因，并将原问题保持为可接续的未完成状态，修正文件后重试，不重查已有业务数据，不通过第二次结果协议错误掩盖原始失败。
+
+## 部分范围文档交付
+
+新文档已经生成且结构/渲染核验通过，但原问题有外部缺口时，程序先接续一次实际文件审阅，避免文件因整项未完成而永远卡在awaiting_review。模型必须显式填写reportAssessment：decision=deliver_partial、coverage=incomplete，deliverables逐份给出fileId与该文件准确完整覆盖的范围；其它尚缺输出记required_output。当前文件本身来源不实、范围错误或公式错误仍禁止发送。审阅资料绑定sourceJobId、fileId、SHA及verificationHash，文档使用contentAudit，不伪造业务CSV的calculationAudit。只有全是文档且非tabularDelivery任务才能使用此文档审阅路径；金额/业务表格保持原独立核验。文件投递仍走原身份/话题/幂等outbox，整项保持partial及黄色，不得借附件成功改成全部ready。
