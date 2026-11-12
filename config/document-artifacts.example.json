@@ -27,5 +27,9 @@
         "sourceFile": "build.mjs"
       }
     }
-  ]
+  ],
+  "runtimeEnvironmentExample": {
+    "AGENTOS_OFFICE_RENDERER": "/path/to/soffice",
+    "AGENTOS_PDF_RASTERIZER": "/path/to/pdftoppm"
+  }
 }

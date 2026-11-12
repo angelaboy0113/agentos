@@ -1,3 +1,4 @@
+import {prepareDocumentHandoff} from './document-handoff.js';
 import {documentDesignInstructions} from '../shared/document-design.js';
 import {pendingDocumentReview} from '../shared/report-acceptance.js';
 import {prepareArtifactWorkspace,artifactPermissionArgs,artifactWorkspaceNotice,artifactPolicy} from '../shared/artifact-workspace.js';
@@ -90,15 +91,12 @@ export async function executeJob(job, config, emit, adapters = {}) {
     try { await verifyAnalysisSources(project, sourceSync); }
     catch (error) { return { ...sourceBlocked(error), sourceSync }; }
   }
-  let codexResult = enforceHandoff(rawResult, await validateHandoff(job, rawResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
+  const documentHandoff=await prepareDocumentHandoff(job,rawResult,workspace,{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});
+  job=documentHandoff.job;
+  let codexResult=documentHandoff.result;
   let definitionReceipts=[];
   if(generated.definitionUpdates?.length)try{definitionReceipts=await recordTaskDefinitions(job,generated.definitionUpdates,{dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile});}
   catch{codexResult={...codexResult,finalMessage:codexResult.finalMessage+'\n共享口径版本尚未保存，不能声称已长期记住；已有调查成果保留。'};}
-  if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed&&codexResult.documentRequests?.length){
-    try{const files=await createDocuments(config.dataDir??path.dirname(config.worktreeRoot),job,codexResult.documentRequests);
-      codexResult={...codexResult,exportFiles:[...(codexResult.exportFiles??[]),...files]};
-    }catch(error){codexResult=documentFailureResult(codexResult,error);}
-  }
   delete codexResult.documentRequests;
   codexResult=pendingDocumentReview(job,enforceDocumentOutput(job,codexResult));
   const aiCompleted = Date.now();
