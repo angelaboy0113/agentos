@@ -53,3 +53,5 @@ Mac本机验证包括真实Codex调用能写本任务产物、不能写源码/�
 新文档已经生成且结构/渲染核验通过，但原问题有外部缺口时，程序先接续一次实际文件审阅，避免文件因整项未完成而永远卡在awaiting_review。模型必须显式填写reportAssessment：decision=deliver_partial、coverage=incomplete，deliverables逐份给出fileId与该文件准确完整覆盖的范围；其它尚缺输出记required_output。当前文件本身来源不实、范围错误或公式错误仍禁止发送。审阅资料绑定sourceJobId、fileId、SHA及verificationHash，文档使用contentAudit，不伪造业务CSV的calculationAudit。只有全是文档且非tabularDelivery任务才能使用此文档审阅路径；金额/业务表格保持原独立核验。文件投递仍走原身份/话题/幂等outbox，整项保持partial及黄色，不得借附件成功改成全部ready。
 
 重启恢复仅重新核验模型已明确选择 `deliver_partial` 的已完成文档：原任务必须仍为当前同代、同机器人/群/项目/发起人，旧检查摘要与实际文件/收据须一致。只补验收元数据和文件投递，不改业务结果、不补造模型判断、不重查数据库；取消、撤回、换代、改来源或金额表格不适用。
+
+接单区分技术文档与业务统计：接口/参数字段目录、服务架构、部署说明即使含表格，也不天然是需要CSV金额核验的业务报表。混合业务金额/对象统计仍保持原核验；旧任务既有业务表格约束不静默删去。
