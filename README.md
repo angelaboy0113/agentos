@@ -16,7 +16,7 @@
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.104.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.104.1** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 维护备份登记、空闲自动去重及恢复见[维护备份整理](docs/maintenance-backups.md)。
 

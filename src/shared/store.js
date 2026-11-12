@@ -1,3 +1,4 @@
+import {enforceDocumentOutput} from './document-artifacts.js';
 import {encodeState,writeEncoding,sameEncoding} from './state-encoding.js';
 import {stateDraft} from './state-draft.js';
 import {captureRecoveryEvent} from './reception-policy.js';
@@ -588,6 +589,7 @@ export class JsonStore {
   async appendEvent(jobId, event, completionRouting = {}) {
     return this.transact((state) => {
       const job = requireJob(state, jobId);
+      if(event.type==='completed'&&job.taskIntent==='analysis'&&!job.environmentAccess&&event.result)event={...event,result:enforceDocumentOutput(job,event.result)};
       if (event.leaseId && (job.lease?.id !== event.leaseId || job.lease?.runnerId !== event.runnerId)) {
         throw new Error('Stale or foreign Runner lease');
       }

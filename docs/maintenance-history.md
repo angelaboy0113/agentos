@@ -1810,3 +1810,7 @@ The first native enrollment exposed an actual CNB/OpenAPI mismatch: total is a d
 ## 1.104.0 通用文档输出
 
 新增任务内结构化文档渲染、实际内容核验、原话题持久投递与哈希绑定追问读取。支持格式、独立业务核验边界和迁移/回退见document-artifacts.md。源码只读与任务输出目录写入分离，不放开任意shell或环境权限。
+
+### 1.104.1 文件成果回传
+
+真人双助手PPT自测发现文件已生成但源码执行器最终结果投影遗漏exportFiles。补齐文件/失败字段，并在控制面独立核对所需格式，防止文字承诺被当作交付完成；新增真实executeJob与控制面回归。

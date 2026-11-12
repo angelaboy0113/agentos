@@ -86,5 +86,5 @@ export function enforceDocumentOutput(job,result){
  const required=requestedDocumentFormats(currentUserQuestion(job)),files=[...(job.reportFiles??[]),...(result.exportFiles??[])];
  const missing=required.filter(format=>!files.some(f=>f.format===format&&f.verificationHash));
  if(!missing.length)return result;
- return {...result,outcome:'partial',reportReviewRequired:true,handoff:{...result.handoff,returnTo:'developer'},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'用户要求的实际文件尚缺：'+missing.join(',')}],nextStep:'用documentRequests生成缺少的实际文件，复用已有证据，不重查业务。'},finalMessage:result.finalMessage+'\n用户要求的 '+missing.join('/')+' 文件尚未生成并核验，不能声称已完整交付。'};
+ return {...result,outcome:'partial',reportReviewRequired:true,handoff:{...result.handoff,returnTo:'developer',risks:[...(result.handoff?.risks??[]),'用户要求的实际文件尚未生成并核验']},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'用户要求的实际文件尚缺：'+missing.join(',')}],nextStep:'用documentRequests生成缺少的实际文件，复用已有证据，不重查业务。'},finalMessage:result.finalMessage+'\n用户要求的 '+missing.join('/')+' 文件尚未生成并核验，不能声称已完整交付。'};
 }

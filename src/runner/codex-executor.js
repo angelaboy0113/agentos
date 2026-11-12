@@ -38,7 +38,7 @@ const DEFAULT_STAGE_INSTRUCTIONS = {
 const ROLE_DIRECTORY = fileURLToPath(new URL('../../config/roles/', import.meta.url));
 const RESULT_SCHEMA = fileURLToPath(new URL('../../config/task-result.schema.json', import.meta.url));
 
-export async function executeJob(job, config, emit) {
+export async function executeJob(job, config, emit, adapters = {}) {
   if (config.executor === 'mock') return executeMock(job, emit);
   if (config.executor !== 'codex') throw new Error(`Unsupported executor: ${config.executor}`);
 
@@ -68,7 +68,7 @@ export async function executeJob(job, config, emit) {
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
   let generated;
-  try { generated = await runWithSourceHistory({ job, project, sourceSync, config, workspace, attachmentPaths, prompt, emit },{run:runCodexWithCapacityRetry}); }
+  try { generated = await runWithSourceHistory({ job, project, sourceSync, config, workspace, attachmentPaths, prompt, emit },{run:adapters.runModel??runCodexWithCapacityRetry}); }
   catch(error) {
     if(job.taskIntent==='analysis'&&capacityError(error))return modelCapacityWait({stage:'source',harnessFingerprint:harness.metadata.fingerprint,agentStage:job.stage,questionId:job.questionId,workspace,threadId:error.threadId??analysisThreadId(job,workspace)},job.modelRecovery);
     if(error.code!=='ANALYSIS_TURN_TIMEOUT'||job.taskIntent!=='analysis')throw error;
@@ -104,7 +104,7 @@ export async function executeJob(job, config, emit) {
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed)try{await rememberSourceMethod(job,sourceSync,{...codexResult,workspace},{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});}catch{/* Optional evidence index cannot block a valid task. */}
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
-  return { definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { ...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({status:e.status,binding:e.binding,calculationAudit:e.calculationAudit,populationAudit:e.populationAudit})),
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     sourceEnvironmentQuery:codexResult.sourceEnvironmentQuery??null,environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate, protocolRepair:codexResult.protocolRepair??null,
