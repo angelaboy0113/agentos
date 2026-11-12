@@ -196,7 +196,8 @@ async function route(context) {
     requireAdminSession(context, request, false);
     const runtime = await loadCodexRuntimeSettings({ file: config.codexRuntimeFile });
     return json(response, 200, { ok: true, overview: await stateView(store,s=>adminOverview(s,
-      { ...runtime, runnerConcurrency: context.runnerConcurrency })) }, { 'cache-control': 'no-store' });
+      { ...runtime, runnerConcurrency: context.runnerConcurrency }, Date.now(),
+      {includeMaintenance:url.searchParams.get('includeMaintenance') === 'true'})) }, { 'cache-control': 'no-store' });
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/records') {
     requireAdminSession(context, request, false);

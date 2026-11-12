@@ -75,6 +75,19 @@ test('local admin console serves task records and safely updates runtime setting
   const summary = await overview.json();
   assert.equal(summary.overview.counts.completed24h, 1);
   assert.equal(summary.overview.recent[0].model, 'gpt-5.6-sol');
+  await app.store.transact(s=>{
+    const original=s.jobs[0];
+    s.jobs.push({...original,id:'marked-maintenance',originalQuestion:'【维护自测】演示',result:{outcome:'ready'}},
+      {...original,id:'partial-result',result:{outcome:'partial'}});
+  });
+  const corrected=await(await fetch(`${base}/api/v1/admin/overview`,{headers:{cookie}})).json();
+  assert.equal(corrected.overview.counts.completed24h,1);
+  assert.equal(corrected.overview.counts.partial24h,1);
+  assert.equal(corrected.overview.counts.maintenance24h,1);
+  assert.equal(corrected.overview.performance.successRate,50);
+  const include=await(await fetch(`${base}/api/v1/admin/overview?includeMaintenance=true`,{headers:{cookie}})).json();
+  assert.equal(include.overview.counts.completed24h,2);
+  assert.equal(include.overview.metricPolicy.includeMaintenance,true);
 
   const browser = await fetch(`${base}/api/v1/admin/browser-health`, { headers: { cookie } });
   assert.deepEqual(await browser.json(), { ok: true, mode: 'shared-chrome', running: true, windows: 2 });

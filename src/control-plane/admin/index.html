@@ -49,10 +49,16 @@
         </div>
 
         <div class="metrics" aria-label="运行指标">
-          <article><span>执行中</span><strong id="metric-active">—</strong><small>排队与运行任务</small></article>
-          <article><span>今日完成</span><strong id="metric-completed">—</strong><small>最近 24 小时</small></article>
-          <article><span>成功率</span><strong id="metric-success">—</strong><small>最近 24 小时</small></article>
-          <article><span>中位回复</span><strong id="metric-median">—</strong><small>完成记录</small></article>
+          <article><span>执行中</span><strong id="metric-active">—</strong><small>排队与运行的问题卡（含自测）</small></article>
+          <article><span>完整完成</span><strong id="metric-completed">—</strong><small>最近24小时结束 · 仅完整结果</small></article>
+          <article><span>完整完成率</span><strong id="metric-success">—</strong><small>完整完成 ÷ 已结束问题</small></article>
+          <article><span>任务耗时中位数</span><strong id="metric-median">—</strong><small>原问题开始至终态 · 含等待</small></article>
+        </div>
+        <div class="metric-explanation">
+          <label><input type="checkbox" id="overview-include-tests"> 包含明确标记的维护自测</label>
+          <p id="metric-breakdown">正在读取分类统计…</p>
+          <p id="metric-window"></p>
+          <p>每位助手每张问题卡按最新任务结果计一次，不重复计接单回复。部分完成、受阻、失败、结果未标明参与完成率分母；取消与等待补充/审批单列。普通回复不参与任务耗时；统计仅覆盖留存记录，完整结果标记不等于人工验收。</p>
         </div>
 
         <div class="overview-grid">
@@ -66,7 +72,7 @@
               <div><dt>控制服务</dt><dd><span class="mini-dot good"></span>正常</dd></div>
               <div><dt>Runner</dt><dd id="runner-state">读取中</dd></div>
               <div><dt>当前模型</dt><dd id="health-model">—</dd></div>
-              <div><dt>失败记录</dt><dd id="health-failed">—</dd></div>
+              <div><dt>受阻 / 失败（24小时）</dt><dd id="health-failed">—</dd></div>
             </dl>
             <div class="audit-block"><h4>最近设置变更</h4><div id="audit-list" class="audit-list"><p>暂无变更</p></div></div>
           </section>
@@ -77,7 +83,7 @@
         <div class="toolbar panel">
           <label class="search"><span>搜索</span><input id="record-search" type="search" placeholder="任务编号、问题或项目"></label>
           <label><span>类型</span><select id="record-kind"><option value="all">全部</option><option value="job">执行任务</option><option value="conversation">普通回复</option></select></label>
-          <label><span>状态</span><select id="record-status"><option value="all">全部状态</option><option value="running">执行中</option><option value="queued">排队中</option><option value="completed">已完成</option><option value="sent">已回复</option><option value="failed">失败</option><option value="blocked">受阻</option></select></label>
+          <label><span>状态</span><select id="record-status"><option value="all">全部状态</option><option value="running">执行中</option><option value="queued">排队中</option><option value="completed">完整完成</option><option value="partial">部分完成</option><option value="unverified">结果未标明</option><option value="awaiting_clarification">待补充</option><option value="awaiting_approval">待审批</option><option value="cancelled">已取消</option><option value="sent">已回复</option><option value="failed">失败</option><option value="blocked">受阻</option></select></label>
         </div>
         <section class="panel table-panel">
           <div class="table-wrap">

@@ -1,8 +1,9 @@
 const state = { overview: null, settings: null, records: [] };
+let overviewSeq=0;
 const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识', usage: '使用统计' };
 const statusMap = {
   queued: ['排队中', 'warn'], running: ['执行中', 'live'], cancelling: ['停止中', 'warn'],
-  completed: ['已完成', 'good'], sent: ['已回复', 'good'], failed: ['失败', 'bad'],
+  completed: ['完整完成', 'good'], partial: ['部分完成', 'warn'], unverified: ['结果未标明', 'warn'], sent: ['已回复', 'good'], failed: ['失败', 'bad'],
   blocked: ['受阻', 'bad'], cancelled: ['已取消', 'bad'], awaiting_approval: ['待确认', 'warn'],
   awaiting_clarification: ['待补充', 'warn'], decided: ['待发送', 'live'], pending: ['处理中', 'live'],
 };
@@ -13,6 +14,7 @@ const modelLabels = { 'gpt-6-astra': 'GPT-6 Astra', 'gpt-5.6-sol': 'GPT-5.6 Sol'
 document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
 document.querySelectorAll('[data-goto]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.goto)));
 document.querySelector('#refresh').addEventListener('click', refreshCurrent);
+document.querySelector('#overview-include-tests').addEventListener('change', loadOverview);
 document.querySelector('#runtime-form').addEventListener('submit', saveRuntime);
 document.querySelector('#close-drawer').addEventListener('click', closeDrawer);
 document.querySelector('#drawer-backdrop').addEventListener('click', closeDrawer);
@@ -32,8 +34,9 @@ async function api(path, options = {}) {
 }
 
 async function loadOverview() {
+  const seq=++overviewSeq;
   try {
-    const { overview } = await api('/api/v1/admin/overview'); state.overview = overview;
+    const { overview } = await api('/api/v1/admin/overview?includeMaintenance='+document.querySelector('#overview-include-tests').checked); if(seq!==overviewSeq)return; state.overview = overview;
     document.querySelector('#service-dot').classList.add('online');
     document.querySelector('#service-label').textContent = 'AgentOS 正常';
     const runtime = overview.runtime;
@@ -44,12 +47,16 @@ async function loadOverview() {
     setText('metric-success', overview.performance.successRate === null ? '—' : `${overview.performance.successRate}%`);
     setText('metric-median', duration(overview.performance.medianMs));
     setText('runner-state', overview.runnerPool?.total ? `${overview.runnerPool.online}/${overview.runnerPool.total} 在线 · ${overview.runnerPool.busy} 忙碌` : '尚未注册');
-    setText('health-model', modelName(runtime.model)); setText('health-failed', overview.counts.failed24h);
+    setText('health-model', modelName(runtime.model)); setText('health-failed', `${overview.counts.blocked24h} / ${overview.counts.failed24h}`);
+    const c=overview.counts;
+    setText('metric-breakdown', `已结束 ${c.finished24h} · 完整 ${c.completed24h} · 部分 ${c.partial24h} · 受阻 ${c.blocked24h} · 失败 ${c.failed24h} · 结果未标明 ${c.unverified24h} · 取消 ${c.cancelled24h}；当前等待补充/审批 ${c.waiting}。维护自测 ${c.maintenance24h}（默认排除）；普通回复 ${c.replies24h}、接单回复 ${c.intake24h}（均不计成功）。`);
+    const date=value=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
+    setText('metric-window', `滚动24小时：${date(overview.metricPolicy.from)} — ${date(overview.metricPolicy.to)}（北京时间，按结束时点统计）；耗时样本 ${overview.performance.sampleCount}。`);
     document.querySelector('#recent-list').innerHTML = overview.recent.length ? overview.recent.map(recordRow).join('') : '<div class="loading-row">暂无处理记录</div>';
     bindRecordButtons(document.querySelector('#recent-list'));
     document.querySelector('#audit-list').innerHTML = overview.audit.length ? overview.audit.map((item) => `<p>${escapeHtml(dateTime(item.at))} · 模型设置已更新</p>`).join('') : '<p>暂无变更</p>';
     markUpdated();
-  } catch (error) { offline(error); }
+  } catch (error) { if(seq===overviewSeq)offline(error); }
 }
 
 async function loadRecords() {
@@ -101,10 +108,10 @@ function showView(name) { document.querySelectorAll('.view').forEach((item) => i
 function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if (current === 'usage') loadUsage(); else if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
 function bindRecordButtons(root) { root.querySelectorAll('[data-record]').forEach((item) => item.addEventListener('click', () => openRecord(item.dataset.record))); }
 
-function recordRow(item) { const status = statusInfo(item.status); return `<button class="record-row" data-record="${escapeHtml(item.id)}"><span class="record-icon">${item.kind === 'job' ? '任' : '答'}</span><span class="record-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.projectName)} · ${escapeHtml(stageMap[item.stage] ?? item.stage ?? '普通回复')}</small></span><span class="record-meta"><span class="pill ${status[1]}">${status[0]}</span><small>${dateTime(item.createdAt)}</small></span></button>`; }
-function recordTableRow(item) { const status = statusInfo(item.status); return `<tr data-record="${escapeHtml(item.id)}"><td class="task-cell"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.id)} · ${escapeHtml(item.projectName)}</small></td><td><span class="pill ${status[1]}">${status[0]}</span></td><td>${escapeHtml(modelName(item.model))}</td><td>${duration(item.durationMs)}</td><td>${dateTime(item.createdAt)}</td></tr>`; }
+function recordRow(item) { const status = statusInfo(item.displayStatus ?? item.status); return `<button class="record-row" data-record="${escapeHtml(item.id)}"><span class="record-icon">${item.kind === 'job' ? '任' : '答'}</span><span class="record-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.projectName)} · ${escapeHtml(stageMap[item.stage] ?? item.stage ?? '普通回复')}</small></span><span class="record-meta"><span class="pill ${status[1]}">${status[0]}</span><small>${dateTime(item.createdAt)}</small></span></button>`; }
+function recordTableRow(item) { const status = statusInfo(item.displayStatus ?? item.status); return `<tr data-record="${escapeHtml(item.id)}"><td class="task-cell"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.id)} · ${escapeHtml(item.projectName)}</small></td><td><span class="pill ${status[1]}">${status[0]}</span></td><td>${escapeHtml(modelName(item.model))}</td><td>${duration(item.durationMs)}</td><td>${dateTime(item.createdAt)}</td></tr>`; }
 function detailMarkup(item) {
-  const status = statusInfo(item.status);
+  const status = statusInfo(item.displayStatus ?? item.status);
   const events = item.events?.length ? `<div class="timeline">${item.events.map((event) => `<div class="timeline-item"><strong>${escapeHtml(eventLabel(event))}</strong><small>${dateTime(event.at)}${event.message ? ` · ${escapeHtml(event.message)}` : ''}</small></div>`).join('')}</div>` : '<p>这条记录没有分阶段事件。</p>';
   return `<div class="detail-grid"><div class="detail-stat"><small>状态</small><strong><span class="pill ${status[1]}">${status[0]}</span></strong></div><div class="detail-stat"><small>模型</small><strong>${escapeHtml(modelName(item.model))}</strong></div><div class="detail-stat"><small>总耗时</small><strong>${duration(item.durationMs)}</strong></div><div class="detail-stat"><small>推理强度</small><strong>${escapeHtml(effortMap[item.reasoningEffort] ?? item.reasoningEffort ?? '未记录')}</strong></div><div class="detail-stat"><small>工具调用</small><strong>${item.toolCount ?? 0} 次</strong></div><div class="detail-stat"><small>处理角色</small><strong>${escapeHtml(stageMap[item.stage] ?? item.stage ?? '普通回复')}</strong></div></div>${section('用户问题', item.originalQuestion ?? item.content ?? item.title)}${section('AgentOS 回复', item.result?.finalMessage ?? item.response ?? '暂无回复')}${item.result?.summary && item.result.summary !== item.result.finalMessage ? section('结论摘要', item.result.summary) : ''}<section class="detail-section"><h3>处理时间线</h3>${events}</section>`;
 }

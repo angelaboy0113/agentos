@@ -1,3 +1,10 @@
+## 2026-11-12 · AgentOS 1.109.1 · Overview statistics semantics
+
+- Aggregate complete retained question-card results before pagination, by actual terminal time in the rolling 24-hour window; count only the latest job per bot/chat/question.
+- Separate ready, partial, blocked, failed, cancelled, unknown and waiting states. Ordinary/intake replies do not count as task success; explicit maintenance tests are excluded by default and can be included.
+- Median and record wall time cover original question to terminal event, including queue/waits/recovery. Preserve execution timing and all original records; no task, retention, points, delivery or permission changes.
+- Admin API publishes the exact window, sample count and policy. List/detail status and filters distinguish partial results from complete results. No new private config/dependency; bundled metrics regression included.
+
 # 1.103.0 — configurable main heap and pressure-aware durable admission
 
 6 GiB independent main-process startup default; child worker heap flags remain isolated. Shared heap/tree-RSS hysteresis delays new turns/leases, preserves active work and result delivery, with factual scoped queue receipts. See memory-admission.md for configuration, tests, observability and platform boundaries.
