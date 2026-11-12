@@ -59,6 +59,24 @@ lock, reference aliases and writer fence continue to apply. The local authentica
 `POST /api/v1/admin/maintenance-backups/run` accepts only `apply: true/false` and
 uses the registered scope; request bodies cannot nominate filesystem paths.
 
+Choose `contentStore.mode` explicitly. `clone` consolidates byte-identical files
+using native copy-on-write clones from the latest three complete checkpoints.
+Every old backup and legacy anchor keeps its original paths, contents, permissions
+and modification times, with separate writable inodes. The newest three are never
+replaced. This needs no restore-index rewrite or additional object payload and is
+preferable where historical copies occupy independent physical blocks. An audit
+journal is synced before each atomic replacement; source, target and clone hashes,
+path boundaries, open-file and fresh task/reference guards are checked. Receipts
+avoid repeating verified replacements. No hard links or full-copy fallback are
+used; unsupported filesystem cloning fails safely. Actual macOS clonefile is used
+because some Node builds do not implement FICLONE_FORCE on macOS.
+
+`gzip` (also the legacy default when mode is omitted) selects the compressed object
+format below. Pilot actual free-space changes before enabling it broadly: adding
+compressed objects can consume MORE disk when original APFS clones already share
+blocks. A successful recovery test alone does not demonstrate space savings. Do
+not conflate byte-identical CoW consolidation with removing unique historical data.
+
 The latest three accepted complete checkpoints and every configured or historical
 restore anchor remain unchanged. For other registered `exports` and
 `control-receipts` roots, each regular single-link file is hashed and streamed into

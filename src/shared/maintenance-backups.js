@@ -26,6 +26,7 @@ export function dueKey(config,now=new Date()){
 }
 export function validateRegistry(c,runtime){
  if(c.version!==1||typeof c.enabled!=='boolean'||!Number.isInteger(c.hour)||c.hour<0||c.hour>23||!Number.isInteger(c.minute)||c.minute<0||c.minute>59)throw Error('MAINTENANCE_CONFIG');
+ if(c.contentStore&&(typeof c.contentStore.enabled!=='boolean'||![undefined,'gzip','clone'].includes(c.contentStore.mode)))throw Error('MAINTENANCE_CONFIG');
  new Intl.DateTimeFormat('en',{timeZone:c.timeZone}).format();
  if(c.managedRoot!==path.join(runtime,'migration')||!Array.isArray(c.checkpoints)||!Array.isArray(c.pins)||!Array.isArray(c.candidates))throw Error('MAINTENANCE_REGISTRY');
  for(const b of c.checkpoints)if(!b.path||!Number.isFinite(Date.parse(b.acceptedAt))||!b.proof?.path||!/^[a-f0-9]{64}$/.test(b.proof.sha256))throw Error('MAINTENANCE_PROOF');
@@ -51,10 +52,11 @@ export function inactiveRecordFingerprint(group,value){
  return sha(JSON.stringify(stable));
 }
 export function maintenanceBusy(state,context={}){
+ const inert=(group,key,value)=>{const expected=context.maintenanceInert?.[group]?.[key];return typeof expected==='string'&&expected===inactiveRecordFingerprint(group,value);};
  if((state.jobs??[]).some(j=>['queued','running','cancelling'].includes(j.status))||(state.conversations??[]).some(c=>['queued','thinking','decided','ready'].includes(c.status)))return true;
  if(context.reception?.running||context.controlReceipts?.pending?.size||(typeof context.adminUsageExports==='number'?context.adminUsageExports:context.adminUsageExports?.size))return true;
- if(['cards','reports','websiteEvidence','successStickers'].some(k=>context[k]?.workers?.size))return true;
- const inert=(group,key,value)=>{const expected=context.maintenanceInert?.[group]?.[key];return typeof expected==='string'&&expected===inactiveRecordFingerprint(group,value);};
+ if(['reports','websiteEvidence','successStickers'].some(k=>context[k]?.workers?.size))return true;
+ if(context.cards?.workers?.size&&[...context.cards.workers.keys()].some(k=>!state.cardMessages?.[k]||!inert('cardMessages',k,state.cardMessages[k])))return true;
  if(Object.entries(state.receptionInbox??{}).some(([key,e])=>!inert('receptionInbox',key,e)&&['queued','reminding','diagnosing'].includes(e.status))||Object.entries(state.recoveryEvents??{}).some(([key,e])=>!inert('recoveryEvents',key,e)&&['queued','diagnosing'].includes(e.status)))return true;
  if(Object.entries(state.cardMessages??{}).some(([key,c])=>!inert('cardMessages',key,c)&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered)))return true;
  for(const k of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries'])if(Object.values(state[k]??{}).some(d=>!d.superseded&&!d.deliveredAt&&(!d.messageId||d.parts?.some(p=>!p.messageId))))return true;
@@ -69,7 +71,12 @@ async function compact(c,{runtime,audit,gate,openCheck=noOpenFiles,apply=false})
  const {protectedPaths,data}=await checkedRegistry(c,runtime);
 await safePath(audit,c.managedRoot);
  let contentResult;
- if(c.contentStore?.enabled===true){
+ if(c.contentStore?.enabled===true&&c.contentStore.mode==='clone'){
+  const {deduplicateBackupClones}=await import('./backup-clone-dedup.js');
+  contentResult=await deduplicateBackupClones(c,{runtime,audit,gate,openCheck,apply,protectedPaths,data});
+  if(contentResult.deferred)return contentResult;
+  c={...c,candidates:[]};
+ }else if(c.contentStore?.enabled===true){
   const {archiveHistoricalBulk}=await import('./backup-content-store.js');
   contentResult=await archiveHistoricalBulk(c,{runtime,audit,gate,openCheck,apply,protectedPaths,data});
   if(contentResult.deferred)return contentResult;

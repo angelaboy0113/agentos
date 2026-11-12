@@ -436,8 +436,9 @@ PPTX 与 HTML/H5 任务默认加载随发行包安装的设计技能，文件追
 云文件接收支持保留各种获准上传文件原始字节；Word、Excel、PPT 等提供结构化预览，未解析格式保留附件并准确标明缺口，不以下载成功冒称内容已核实。见 [云文档与上传文件](docs/native-cloud-document-inputs.md)。
 # Backup storage and source-cache maintenance
 
-Instances can opt into compressed content-addressed historical bulk storage while
-keeping their newest three complete checkpoints and pinned recovery anchors intact.
+Instances can opt into native copy-on-write duplicate consolidation or compressed
+content-addressed historical bulk storage, retaining the newest three complete
+checkpoints and all historical recovery data. Pilot real physical space changes.
 See [backup maintenance](docs/maintenance-backups.md) for the operator registry,
 recovery CLI, verification and rollback boundaries. Current data and business
 repositories are outside its scope; directory totals are not physical disk savings.

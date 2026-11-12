@@ -1867,6 +1867,14 @@ TSF current_inventory批量核对当前授权部署与完整实例分页，完�
 ## 1.111.1 — 独立实例Office路径显式传递
 
 修复独立启动器清除继承AGENTOS变量导致正式预览未配置；从实例专属officeRendererPath/pdfRasterizerPath验证后传入，外部同名环境不继承，旧实例可不配置。真实独立启动脚本回归核对加密凭据隔离和可信路径覆盖。
+# 1.112.1
+
+Add optional native copy-on-write duplicate consolidation, preserving historical
+backup paths and bytes and the newest three untouched complete checkpoints. This
+avoids compressed-object overhead on already cloned APFS backups. Atomic verified
+replacement, independent inodes, durable audit/receipts, actual clonefile support
+on macOS and unsupported-filesystem refusal are covered by regression tests.
+
 # 1.112.0
 
 Optional compressed content-addressed storage for registered idle historical backup
