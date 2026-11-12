@@ -111,4 +111,3 @@ directory and verify it before attempting a recovery. Never restore old business
 state over the running instance. No secret, business source, login session, current
 exports or arbitrary operator directory is in the archival scope. Other operating
 systems and complete cross-machine restoration require separate validation.
-

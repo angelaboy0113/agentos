@@ -441,4 +441,3 @@ keeping their newest three complete checkpoints and pinned recovery anchors inta
 See [backup maintenance](docs/maintenance-backups.md) for the operator registry,
 recovery CLI, verification and rollback boundaries. Current data and business
 repositories are outside its scope; directory totals are not physical disk savings.
-

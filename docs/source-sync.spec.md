@@ -137,4 +137,3 @@ The deletion path still uses the snapshot lock, authoritative state writer, fres
 reference and dirty-tree inspection, environment-latest protection and lightweight
 source manifest audit. Untracked changes, incomplete builds and unknown paths are
 retained for operator inspection, not silently deleted.
-

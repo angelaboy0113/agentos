@@ -1877,4 +1877,3 @@ bytes. Snapshot collection understands exact operator-reviewed retired card pins
 without releasing live jobs, waits or pending file deliveries. Configuration example,
 local authenticated maintenance endpoint and package verification are synchronized.
 Real disk recovery and deployment evidence are maintained by each instance operator.
-
