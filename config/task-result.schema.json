@@ -596,7 +596,8 @@
           "additionalProperties": false,
           "required": [
             "repositories",
-            "reason"
+            "reason",
+            "targets"
           ],
           "properties": {
             "repositories": {
@@ -608,6 +609,33 @@
             },
             "reason": {
               "type": "string"
+            },
+            "targets": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "repository",
+                      "commit"
+                    ],
+                    "properties": {
+                      "repository": {
+                        "type": "string"
+                      },
+                      "commit": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{40,64}$"
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         }

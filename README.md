@@ -430,3 +430,5 @@ CNB build-history native read access: [configuration, evidence and acceptance](d
 同任务环境取证返回源码汇总时，可通过哈希绑定的实际文件读取完整数据；见 [已保存证据交接](docs/source-saved-evidence.md)。
 
 PPTX 与 HTML/H5 任务默认加载随发行包安装的设计技能，文件追问修改也沿用对应流程；设计技能不扩大业务或网络权限。见 [默认文件设计技能](docs/document-design.md)。
+
+大范围接口文档支持TSF当前版本批量取证、结构化目录集中生成及大HTML标准ZIP传输；见 [接口文档效率](docs/interface-document-efficiency.md)。

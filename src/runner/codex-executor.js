@@ -72,7 +72,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   const design=await documentDesignInstructions(job);
   if(design.receipts.length)await emit({type:'progress',phase:'document_design_loaded',message:'已加载对应文件设计技能',designSkills:design.receipts});
   const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+taskInputNotice(attachmentPaths)+(savedSourceEvidence?.path?savedSourceEvidenceNotice(savedSourceEvidence):savedSourceEvidence?.unavailable?'\n已有任务数据的本机交接校验失败：'+savedSourceEvidence.reason+'；保留源码证据，不以此认定业务数据为空。':'')+documentOutputInstructions()+(job.artifactWorkspace?artifactWorkspaceNotice(job.artifactWorkspace):'')+design.notice+`
-固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标}，Runner按需补取并恢复同一会话。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
+固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标,targets:[{repository:仓库相对路径,commit:本次要补齐祖先的固定提交SHA}]（无明确目标时targets=null），Runner按需补取并恢复同一会话。该工具仅补齐当前固定提交的祖先，不能用它获取另一个生产构建提交或独立生产分支；此时先读取现有缓存对象，仍缺失就明确目标版本的源码范围缺口，不能把另一提交写在reason里发起无效全量下载。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
   let generated;

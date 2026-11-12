@@ -1,4 +1,5 @@
-import {createReadStream} from 'node:fs';
+import {pipeline} from 'node:stream/promises';
+import {createReadStream,createWriteStream} from 'node:fs';
 import {mkdtemp,open,stat,rm,writeFile,readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {hashFile} from './file-digest.js';
@@ -30,6 +31,16 @@ export async function prepareReportParts(file,{maxBytes=FEISHU_FILE_PART_BYTES}=
  const finish=async()=>{if(!current)return;await current.handle.close();const {file,name,bytes,rows}=current;parts.push({file,name,bytes,rows,sha256:await hashFile(file)});current=null;};
  const start=async(header,suffix='.csv')=>{const name=path.basename(file,'.csv')+'.part'+String(parts.length+1).padStart(4,'0')+suffix;const target=path.join(root,name);current={file:target,name,handle:await open(target,'wx',0o600),bytes:header.length,rows:0};await current.handle.writeFile(header);};
  try{
+  // HTML remains the verified original inside an ordinary ZIP. Stream it to
+  // avoid holding large catalogues in the control-plane heap. Other formats
+  // retain existing byte/CSV transport behaviour.
+  if(file.endsWith('.html')){
+   const {default:JSZip}=await import('jszip'),zip=new JSZip(),name=path.basename(file)+'.zip',target=path.join(root,name),originalSha256=await hashFile(file);
+   zip.file(path.basename(file),createReadStream(file));zip.file('README.txt','解压后打开HTML文件；内容与已核验原文件一致。原文件SHA256：'+originalSha256);
+   await pipeline(zip.generateNodeStream({type:'nodebuffer',streamFiles:true,compression:'DEFLATE'}),createWriteStream(target,{flags:'wx',mode:0o600}));
+   const size=(await stat(target)).size;if(size<=maxBytes)return{parts:[{file:target,name,bytes:size,sha256:await hashFile(target)}],mode:'zip',originalSha256,close};
+   await rm(target);
+  }
   let header,mode='csv';
   try{
    if(!file.endsWith('.csv'))throw new WideRecord();

@@ -1,0 +1,17 @@
+// A static, offline catalogue: render structured observations once instead of
+// regenerating bespoke templates and repeating every schema under each route.
+const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const text=v=>{if(typeof v!=='string')throw Error('Interface document text must be a string');return escape(v);};
+export function renderInterfaceDocument(spec){
+ if(!spec||typeof spec.title!=='string'||!Array.isArray(spec.endpoints))throw Error('Interface catalogue requires title and endpoints');
+ const seen=new Set(),models=new Set();
+ for(const m of spec.models??[]){if(typeof m.id!=='string'||models.has(m.id))throw Error('Duplicate or missing model ID');models.add(m.id);}
+ const cell=v=>v==null?'未核实':typeof v==='string'?text(v):text(JSON.stringify(v));
+ const sections=(spec.sections??[]).map(s=>'<section><h2>'+text(s.title)+'</h2><p>'+text(s.text)+'</p></section>').join('');
+ const entries=spec.endpoints.map((e,i)=>{
+  if(typeof e.id!=='string'||!e.id||seen.has(e.id))throw Error('Duplicate or missing endpoint ID');seen.add(e.id);
+  for(const id of e.modelIds??[])if(!models.has(id))throw Error('Missing referenced model '+id);
+  return {anchor:'endpoint-'+i,row:'<tr><td><a href="#endpoint-'+i+'">'+cell(e.method)+'</a></td><td>'+cell(e.path)+'</td><td>'+cell(e.service)+'</td><td>'+cell(e.category)+'</td><td>'+cell(e.description)+'</td></tr>',detail:'<details id="endpoint-'+i+'"><summary>'+cell(e.method)+' '+cell(e.path)+' · '+cell(e.service)+'</summary><dl><dt>专业说明</dt><dd>'+cell(e.description)+'</dd><dt>大白话</dt><dd>'+cell(e.plain)+'</dd><dt>分类与证据状态</dt><dd>'+cell(e.category)+' / '+cell(e.status)+'</dd><dt>请求</dt><dd>'+cell(e.request)+'</dd><dt>返回</dt><dd>'+cell(e.response)+'</dd><dt>源码依据</dt><dd>'+cell(e.source)+'</dd></dl>'+(e.modelIds?.length?'<p>关联模型：'+e.modelIds.map(id=>'<a href="#model-'+[...models].indexOf(id)+'">'+text(id)+'</a>').join('、')+'</p>':'')+'</details>'};
+ });
+ return `<style>*{box-sizing:border-box}body{color:#203647;background:#f7f9fb;font-family:Arial,"PingFang SC",sans-serif}main{max-width:1180px;margin:auto}header{background:#16364b;color:white;padding:36px;border-radius:12px}h1{font-size:32px;line-height:1.3}h2{margin-top:32px}p,dd{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#087d80}header a{color:#b8e6e5}.scroll{overflow-x:auto;background:white}table{width:100%;font-size:14px}th{background:#e4eef2;text-align:left}details{background:white;margin:10px 0;padding:14px;border:1px solid #dce5ea;border-radius:6px}summary{cursor:pointer;font-weight:bold;overflow-wrap:anywhere}dt{font-weight:bold;margin-top:12px}dd{margin:4px 0}footer{margin-top:32px;color:#596b78}@media(max-width:600px){header{padding:20px}h1{font-size:26px}th,td{min-width:85px}}</style><main><header><h1>${text(spec.title)}</h1><p>${cell(spec.scope)}</p><p>接口目录 ${entries.length} 条 · 每个模型集中列示一次。源码声明、部署版本与实际调用证据分别核对。</p></header>${sections}<h2>接口索引</h2><div class="scroll"><table><thead><tr><th>方法</th><th>路径</th><th>服务</th><th>分类</th><th>说明</th></tr></thead><tbody>${entries.map(e=>e.row).join('')}</tbody></table></div><h2>接口详情</h2>${entries.map(e=>e.detail).join('')}<h2>集中模型定义</h2>${(spec.models??[]).map((m,i)=>'<details id="model-'+i+'"><summary>'+text(m.id)+'</summary><p>'+cell(m.definition)+'</p><p>依据：'+cell(m.source)+'</p></details>').join('')}<footer>未核实项保留为未核实；该文件本身不证明所有源码接口均在生产调用。数据与证据范围见正文。</footer></main>`;
+}
