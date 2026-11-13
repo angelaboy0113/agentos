@@ -1925,3 +1925,8 @@ Real disk recovery and deployment evidence are maintained by each instance opera
 
 ## 1.116.0
 MongoDB经审核固定副本集主节点发现、缺集合参数可修正诊断；网页开关只读状态；保存证据明确正文/封装摘要。导航继续按既有维护审核选择器开放，不开放业务写入或新增整任务截止。详见 readonly-investigation-recovery.md。
+
+
+## 1.116.4 — Persist factual knowledge conflict boundaries across restart
+
+The startup reconciliation path no longer reactivates a recorded factual contradiction merely because a later semantic comparison calls it equivalent. The reuse gate also rejects legacy reactivated contradictions when their dependency/deployment evidence is unchanged. Existing uncertain paraphrase recovery and genuinely reverified changed-source supersession remain available. No task limits, data scopes, or business permissions changed.

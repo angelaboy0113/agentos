@@ -79,8 +79,25 @@ export class TeamKnowledgeService {
     const info=await stat(file);if(!info.isFile()||info.size>2000000)throw new Error('Invalid dependency');
     return hash(await readFile(file));
   }
+  unresolvedContradiction(entry){
+    const seen=new Set();let current=entry;
+    while(current?.comparison?.previousId){
+      if(seen.has(current.id))return true;
+      seen.add(current.id);
+      const previous=this.store.get(current.comparison.previousId);
+      if(!previous)return current.comparison.relation==='contradiction';
+      // Semantic refresh and equivalent descendants cannot erase a factual
+      // dispute. New verified dependency/deployment evidence may supersede it.
+      const changed=previous.revision!==current.revision||previous.dependencies.some(old=>current.dependencies.some(next=>next.repository===old.repository&&next.path===old.path&&next.hash!==old.hash));
+      if(changed)return false;
+      if(current.comparison.relation==='contradiction')return true;
+      current=previous;
+    }
+    return false;
+  }
   async valid(entry,team){
     if(entry.status!=='active')return {reusable:false,reason:entry.status};
+    if(this.unresolvedContradiction(entry))return {reusable:false,reason:'unresolved_contradiction'};
     if(entry.policyHash!==hash(team))return {reusable:false,reason:'scope_changed'};
     if(this.now()-entry.verifiedAt>(entry.kind==='method'?(team.methodFreshnessMs??86400000):(team.freshnessMs??86400000)))return {reusable:false,reason:'expired'};
     try{
@@ -248,7 +265,9 @@ export class TeamKnowledgeService {
       }
       for(const group of groups.values()){
         if(!group.some(x=>x.status==='conflict')||group.length<2)continue;
-        const latest=group[0];let compatible=true;
+        const latest=group[0];
+        if(group.some(entry=>this.unresolvedContradiction(entry)))continue;
+        let compatible=true;
         for(const older of group.slice(1)){
           const comparison=await this.compare(older,latest);
           if(!['equivalent','extension'].includes(comparison.relation)){compatible=false;break;}

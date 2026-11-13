@@ -25,3 +25,8 @@ On resume the loader keeps the original context and old evidence untouched, reco
 A user saying “the system tag/category” does not itself identify a physical dictionary column. When exactly one live UI control matches the concept and its request/source mapping is verified, state that interpretation in the answer and file rather than blocking a reversible read. Explicit technical field choices, a rejected interpretation or multiple real business definitions still require clarification. This guidance does not authorize guesses based on similar names or matching counts.
 
 Invalid knowledge answers are withheld from intake candidates and recheck instructions. Conflicted, corrected, stale-source or otherwise invalid answers remain auditable in the knowledge store but are not reinjected as investigation rules. A topic and invalidation reason can guide fresh discovery. Only currently verified knowledge selected for a live-data recheck retains its method text; this does not reuse old amounts, grant scope or skip fresh evidence.
+
+
+### Knowledge conflicts after restart
+
+A fact contradiction remains a discovery-only topic while the relevant dependency hashes and deployment marker are unchanged, even if an older runtime marked it active during reconciliation. Startup semantic comparison may repair uncertain paraphrases but cannot supply new factual evidence. A freshly verified changed dependency or deployment may supersede the old rule through the normal evidence capture path. Inspect `unresolved_contradiction` separately from authorization or database errors; no end-user credentials are required to rediscover the mapping within existing scope.

@@ -155,7 +155,7 @@ test('a newly verified rule can supersede old contradiction after relevant depen
  x.options.model.extract=async()=>({...proposal,existingId:x.id,answer:'新版入口改为活动管理中的方案创建。'});
  await writeFile(path.join(x.dir,'guide.js'),'export const entry="new-route";');
  await x.service.ingest({...x.job,id:'new-rule',updatedAt:new Date(Date.parse(x.job.updatedAt)+1).toISOString()});
- const latest=x.service.store.latest('team','prd',x.service.store.get(x.id).topic);assert.equal(latest.status,'active');assert.equal(x.service.store.get(x.id).status,'superseded');
+ const latest=x.service.store.latest('team','prd',x.service.store.get(x.id).topic);assert.equal(latest.status,'active');assert.equal(x.service.store.get(x.id).status,'superseded');assert.equal((await x.service.valid(latest,x.team)).reusable,true);
 });
 test('legacy false conflicts upgrade environment proof without renewing verification time or reviving suspensions',async t=>{
  const x=await seeded(t);const workspace=path.join(x.dir,'snapshots','run','workspace');await mkdir(workspace,{recursive:true});await writeFile(path.join(workspace,'guide.js'),'export const entry="create";');
@@ -219,4 +219,17 @@ test('source or policy invalidation and explicit correction do not smuggle stale
 });
 test('verified current knowledge still supplies reusable method for a live query without bypassing reads',async t=>{
  const x=await seeded(t),d=decision(x.id);d.knowledgeMatch.currentData=true;const next=await x.service.reuse(actor,'p',d,x.input);assert.equal(next.action,'create_task');assert.equal(next.intent,'analysis');assert.ok(next.instruction.includes(proposal.answer));assert.equal(next.knowledgeHint.reason,'intent_or_live_data');assert.equal(x.service.store.get(x.id).status,'active');
+});
+
+
+test('restart semantic reconciliation cannot erase a recorded fact contradiction or expose its old hint',async t=>{
+ const x=await seeded(t),workspace=path.join(x.dir,'snapshots','run','workspace');await mkdir(workspace,{recursive:true});await writeFile(path.join(workspace,'guide.js'),'export const entry="create";');x.context.projects.projects.p.analysisSnapshotRoot=path.join(x.dir,'snapshots');
+ x.options.model.compare=async()=>({relation:'contradiction',reason:'Two mutually exclusive field mappings'});x.options.model.extract=async()=>({...proposal,existingId:x.id,answer:'Use a different physical mapping instead of the original one.'});
+ const later={...x.job,id:'contradiction',updatedAt:new Date(Date.parse(x.job.updatedAt)+1).toISOString()};await x.service.ingest(later);const second=x.service.store.latest('team','prd',x.service.store.get(x.id).topic);assert.equal(second.status,'conflict');
+ x.context.store={read:async()=>({jobs:[x.job,later].map(j=>({...j,result:{...j.result,sourceSync:{...j.result.sourceSync,workspace}}}))})};x.service.source={bindings:async()=>[{repository:'.',branch:'main',commit:'a'.repeat(40),originHash:'test'}],current:async()=>({same:true})};
+ x.options.model.compare=async()=>({relation:'equivalent',reason:'A later model thinks these are equivalent'});await x.service.reconcile();assert.equal(x.service.store.get(second.id).status,'conflict');
+ // A legacy runtime may already have resolved it. The validity gate must still
+ // reject that unchanged-evidence contradiction without mutating the old record.
+ x.service.store.resolve(second.id);const candidate=await x.service.candidates(actor,'p');const v=candidate.candidates.find(c=>c.id===second.id);assert.equal(v.directReusable,false);assert.equal(v.answer,'');assert.equal(v.reason,'unresolved_contradiction');
+ x.options.model.extract=async()=>({...proposal,existingId:second.id,answer:second.answer});await x.service.ingest({...x.job,id:'equivalent-descendant',updatedAt:new Date(Date.parse(x.job.updatedAt)+2).toISOString()});const descendant=x.service.store.latest('team','prd',second.topic);assert.equal(descendant.status,'active');assert.equal((await x.service.valid(descendant,x.team)).reason,'unresolved_contradiction');
 });
