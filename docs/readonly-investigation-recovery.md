@@ -14,3 +14,5 @@ MongoDB 连接检查成功不代表业务查询能够读取。固定直连的目
 
 ### Quantity changes and premature clarification
 For before/after counts, follow the actual metric implementation and schema through population, status, relationship existence/effective bindings and snapshot semantics. A narrow field projection or one denied page is not proof that the authorized evidence is unavailable. Reuse saved complete datasets and fetch only the actual missing dependencies. Do not brute-force arbitrary filters to reproduce a number. Request user clarification only for a genuine unresolved choice or missing indispensable input. Independent key-set differences, actual change audit and matching implementation can support a qualified causal answer without replaying historical clicks. This is investigation guidance, not a new permission grant or a guarantee that historical evidence exists.
+
+User terms such as tag/category/status need not name a storage dictionary. Match the real UI label to its actual filter/boolean/enum before declaring the concept unavailable. A verified stable mapping is a lead; it neither grants cross-task data access nor makes historical counts current.
