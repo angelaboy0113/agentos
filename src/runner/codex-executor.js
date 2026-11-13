@@ -1,3 +1,4 @@
+import {countAnswerOnly} from '../shared/count-answer.js';
 import {prepareDocumentHandoff} from './document-handoff.js';
 import {documentDesignInstructions} from '../shared/document-design.js';
 import {pendingDocumentReview} from '../shared/report-acceptance.js';
@@ -44,6 +45,7 @@ const ROLE_DIRECTORY = fileURLToPath(new URL('../../config/roles/', import.meta.
 const RESULT_SCHEMA = fileURLToPath(new URL('../../config/task-result.schema.json', import.meta.url));
 
 export async function executeJob(job, config, emit, adapters = {}) {
+  if(countAnswerOnly(job))job={...job,tabularDelivery:false};
   if (config.executor === 'mock') return executeMock(job, emit);
   if (config.executor !== 'codex') throw new Error(`Unsupported executor: ${config.executor}`);
 
@@ -347,6 +349,7 @@ export function analysisTimeoutResult(job,error){
 
 function reportReviewContext(job){
  if(job.reportFiles?.length&&job.reportFiles.every(f=>f.kind==='document'))return '已生成文档及实际结构审阅：'+JSON.stringify({files:job.reportFiles,evidence:job.reportEvidence})+'。按原问题核对文件格式和内容；结构核验不是金额业务核验，不套用CSV公式审阅。没有修改要求就不重复生成；新修改用documentRequests派生新文件。\n';
+ if(countAnswerOnly(job))return '本问题只要求数量/去重数量：直接在原卡给出已独立核验的数字，可用简短原生表格，说明组织可见范围、期间、实际取数时间及真实缺口。不额外强制CSV或完整门店明细作为完成前提；已有阶段自行提出的导出计划不是用户新增要求。完整来源、逐键去重、关联与计算核验仍必须完成，不能用页面总数或样本猜第二项。若用户后来要求文件，按该轮新要求生成和核验。reportAssessment=null。\n';
  if(job.tabularDelivery===false&&!job.reportFiles?.length&&/(?:无需|不需要|不要|不用).{0,8}(?:csv|excel|文件|文档|表格)|(?:仅|只|用).{0,4}文字|(?:no|without)\s+(?:csv|excel|files?)/i.test(currentUserQuestion(job)))return '本次按用户要求仅文字交付，不为文件生成、表头、上传或下载链接增加步骤。数据仍须完整、精确和独立核验，保留取数时间、实际范围及缺口；已有文件若影响原目标仍须审阅。reportAssessment=null。\n';
  return `表格交付要求：${job.tabularDelivery?'本请求已识别为统计表交付，即使用户未写Excel也必须生成并核验完整文件后才完成。':'多对象、多指标统计和清单通常需要可复用表格；根据原请求判断并主动准备文件，不以没写Excel为由省略。'}
 中文业务导出默认使用中文（英文字段）表头，中文名称须来自源码注解、数据库字段说明或已核实业务定义；compose_report可传label原字段与displayName中文名称，finalize的expectedColumns及columnRules.label必须用实际生成标题。除用户明确要求原始或英文表头，不交付纯英文字段名。已有完整数据集只改表头，不重查数据库；枚举值未经字典核实保持原值，不按英文猜中文。报表输出兼容规则：${JSON.stringify(reportOutputPolicy(currentUserQuestion(job)))}。用户日常说“整理成Excel/发个Excel/导出表格”，默认允许CSV，说明“CSV，Excel可直接打开”后正常交付；不因为后缀不同记required_output或current_format，不为转换重新查询数据库。仅用户明确要求.xlsx、多个工作表、保留公式等CSV不能承载的功能时，格式才属于current_format硬缺口。表格必须如实称CSV，不能改后缀冒充XLSX；内容/范围/默认值缺口照常修正。
@@ -355,6 +358,7 @@ function reportReviewContext(job){
 `;}
 
 export async function buildPrompt(job, project, harness = null, sourceSync = null, ledger = [], workspace = null,integrationProjects = null) {
+  if(countAnswerOnly(job))job={...job,tabularDelivery:false};
   harness ??= await loadHarness(job);
   const assistantRules = await assistantInstructions(project);
   const environmentCatalog = job.taskIntent === 'analysis' && ['developer', 'owner_report'].includes(job.stage) && job.questionId

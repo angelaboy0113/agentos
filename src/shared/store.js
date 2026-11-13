@@ -1,3 +1,4 @@
+import {requiresTabularFile} from './count-answer.js';
 import {enforceDocumentOutput} from './document-artifacts.js';
 import {encodeState,writeEncoding,sameEncoding} from './state-encoding.js';
 import {stateDraft} from './state-draft.js';
@@ -159,7 +160,7 @@ export class JsonStore {
         ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
         ...(input.continuousInvestigation ? { continuousInvestigation: true, ...(input.taskIntent==='analysis'?{availableSourceReviewPolicy:'preserve-and-review-v1'}:{}) } : {}),
         missionId: input.missionId ?? createId('MISSION'),
-        tabularDelivery:input.tabularDelivery===true,...(input.inquiryCoordination?{inquiryCoordination:structuredClone(input.inquiryCoordination)}:{}),
+        tabularDelivery:requiresTabularFile(input),...(input.inquiryCoordination?{inquiryCoordination:structuredClone(input.inquiryCoordination)}:{}),
         projectId: input.projectId,
         projectName: input.projectName ?? input.projectId,
         chatId: input.chatId ?? null,

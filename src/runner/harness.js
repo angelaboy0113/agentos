@@ -1,3 +1,4 @@
+import{requiresTabularFile}from '../shared/count-answer.js';
 import { hashFile } from '../shared/file-digest.js';
 import { reportFile } from '../shared/report-files.js';
 import { investigationComplete, QUESTION_GOAL_ID } from '../shared/investigation-review.js';
@@ -88,7 +89,7 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
       verifiedArtifacts.push({ kind: item.kind, path: path.relative(root, resolved).replaceAll('\\', '/'), sha256: await hashFile(resolved), bytes: info.size });
     } catch (error) { issues.push(item?.kind === 'report' && /^report-/.test(item.path ?? '') ? '登记报表的任务归属、文件或核验摘要未通过；请核对任务导出记录，不重新查询数据库' : '源码或文档工件不存在、超出工作区或属于禁止路径；请核对工件清单'); }
   }
-  if(result.outcome==='ready'&&job.tabularDelivery&&verifiedArtifacts.some(a=>a.kind==='report-input')&&!verifiedArtifacts.some(a=>a.kind==='report'))issues.push('原报表仅是输入，本轮要求的新文件尚未生成和核验');
+  if(result.outcome==='ready'&&requiresTabularFile(job)&&verifiedArtifacts.some(a=>a.kind==='report-input')&&!verifiedArtifacts.some(a=>a.kind==='report'))issues.push('原报表仅是输入，本轮要求的新文件尚未生成和核验');
   const seen = new Set();
   for (const check of h.checks) {
     if (!check || typeof check !== 'object') { issues.push('验收项格式无效'); continue; }

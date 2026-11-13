@@ -1,3 +1,4 @@
+import {requiresTabularFile} from './count-answer.js';
 import {normalizeReportFormatReview} from './report-output-policy.js';
 // Program verification and review against the user's request are separate states.
 // This module never creates receipts, queries data or sends files.
@@ -14,7 +15,7 @@ export function recordReportFiles(job,files,generation){
  for(const f of files){if(!job.reportFiles.some(x=>x.id===f.id))job.reportFiles.push({...structuredClone(f),sourceJobId:job.id,questionGeneration:generation??null});job.reportReviews[f.id]??={status:proof(f)?'awaiting_review':'draft',verificationHash:f.verificationHash};}
 }
 export function assessReportDelivery(job,result){
- if(job.tabularDelivery&&result?.outcome==='ready'&&!job.reportFiles?.some(f=>f.kind!=='document'&&proof(f)))return {...result,outcome:'partial',reportReviewRequired:true,investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'本请求需要可复用统计表文件，尚未生成核验文件'}],nextStep:'复用已保存数据整理完整表格，compose_report/finalize_report核验后交付；不因用户没写Excel而省略文件'}};
+ if(requiresTabularFile(job)&&result?.outcome==='ready'&&!job.reportFiles?.some(f=>f.kind!=='document'&&proof(f)))return {...result,outcome:'partial',reportReviewRequired:true,investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'本请求需要可复用统计表文件，尚未生成核验文件'}],nextStep:'复用已保存数据整理完整表格，compose_report/finalize_report核验后交付；不因用户没写Excel而省略文件'}};
 
  if(job.reportFiles?.length&&job.reportFiles.every(f=>f.kind==='document'))return pendingDocumentReview(job,result);
  result=normalizeReportFormatReview(job,result);
