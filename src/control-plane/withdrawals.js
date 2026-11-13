@@ -1,3 +1,4 @@
+import{withdrawalCardHash}from'../shared/withdrawn-delivery.js';
 import {stateView} from '../shared/state-view.js';
 const turnActive=t=>['queued','thinking','decided','ready'].includes(t.status);
 const jobActive=j=>['queued','running','cancelling','awaiting_instruction','awaiting_clarification','awaiting_approval','awaiting_environment_approval'].includes(j.status);
@@ -29,7 +30,7 @@ export function applyWithdrawal(s,target,at=new Date().toISOString()){
  for(const j of s.jobs??[])if(ids.has(j.questionId)&&jobActive(j)&&j.status!=='cancelling'){
   j.status=j.status==='running'?'cancelling':'cancelled';j.updatedAt=at;j.cancelReason='原提问或话题已撤回';j.events.push({type:j.status==='cancelling'?'cancel_requested':'cancelled',by:'source_message_withdrawn',at,messageId:target.messageId});jobs.push(j.id);
  }
- for(const q of qs){const c=s.cardMessages?.['question:'+q.id];if(c)Object.assign(c,{error:'原消息已撤回，停止更新',withdrawnAt:at,retryAt:0});}
+ for(const q of qs){const c=s.cardMessages?.['question:'+q.id];if(c)Object.assign(c,{error:'原消息已撤回，停止更新',withdrawnAt:at,retryAt:0,sourceWithdrawal:{questionId:q.id,messageId:target.messageId,profile:q.profile,chatId:q.chatId,at,cardHash:withdrawalCardHash(c)}});}
  for(const name of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries','longInvestigationNotices'])for(const e of Object.values(s[name]??{}))if(ids.has(e.questionId)&&!e.messageId)Object.assign(e,{superseded:true,reason:'source_message_withdrawn'});
  for(const name of ['receptionInbox','recoveryEvents','environmentEnrollments'])for(const e of Object.values(s[name]??{}))if(ids.has(e.questionId)&&!['sent','complete','completed','cancelled','superseded'].includes(e.status))Object.assign(e,{status:'cancelled',cancelReason:'source_message_withdrawn'});
  return {questionIds:[...ids],turnIds,jobIds:jobs};
