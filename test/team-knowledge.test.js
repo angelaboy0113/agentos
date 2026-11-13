@@ -207,3 +207,16 @@ test('attachment review is typed and rejects invalid impacts and duplicate revie
  }
  const d=decision('id');d.knowledgeMatch.attachmentReview={reviewedIds:['x'],impact:'context_only',reason:'用于定位同一页面'};assert.doesNotThrow(()=>validateDecision(d));
 });
+
+test('conflicting knowledge withholds old answer from both intake candidates and recheck instruction',async t=>{
+ const x=await seeded(t);x.options.model.extract=async()=>({...proposal,existingId:x.id,answer:'不同且互斥的旧存储字典解释。'});await x.service.ingest({...x.job,id:'conflicting-job',updatedAt:new Date(Date.parse(x.job.updatedAt)+1).toISOString()});
+ const input=await x.service.candidates(actor,'p');assert.ok(input.candidates.length);assert.ok(input.candidates.every(c=>c.reason==='conflict'&&c.answer===''));
+ const next=await x.service.reuse(actor,'p',decision(x.id),{...x.input,teamKnowledge:input});assert.equal(next.action,'create_task');assert.ok(!next.instruction.includes(proposal.answer));assert.ok(!next.instruction.includes('不同且互斥的旧存储字典解释'));assert.equal(next.knowledgeHint.reason,'recheck_conflict');assert.equal(x.service.store.get(x.id).status,'conflict');
+});
+test('source or policy invalidation and explicit correction do not smuggle stale answers into investigation',async t=>{
+ const x=await seeded(t);await writeFile(path.join(x.dir,'guide.js'),'different semantics');const next=await x.service.reuse(actor,'p',decision(x.id),x.input);assert.equal(next.action,'create_task');assert.ok(!next.instruction.includes(proposal.answer));
+ const d=decision(x.id);d.knowledgeMatch.correction=true;const corrected=await x.service.reuse(actor,'p',d,x.input);assert.ok(!corrected.instruction.includes(proposal.answer));assert.equal(x.service.store.get(x.id).status,'suspended');
+});
+test('verified current knowledge still supplies reusable method for a live query without bypassing reads',async t=>{
+ const x=await seeded(t),d=decision(x.id);d.knowledgeMatch.currentData=true;const next=await x.service.reuse(actor,'p',d,x.input);assert.equal(next.action,'create_task');assert.equal(next.intent,'analysis');assert.ok(next.instruction.includes(proposal.answer));assert.equal(next.knowledgeHint.reason,'intent_or_live_data');assert.equal(x.service.store.get(x.id).status,'active');
+});
