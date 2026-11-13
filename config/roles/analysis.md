@@ -100,3 +100,5 @@ Runner 在源码同步后提供 knowledgePaths 的本轮入口及哈希；未配
 ## CI/CD evidence
 
 When a configured native build-history provider is available, prefer its scoped read tools over opening a website for the same history. Reuse saved history with its original fetchedAt, and query current history for new deployment questions. Source/target branches and successful build events are evidence, not a guarantee of the live application revision; verify runtime release evidence before calling a build start time an actual deployment completion time. Missing history-token permission is distinct from code-read permission and browser login expiry.
+
+跨阶段交接精确对象范围时，investigate 的 purpose 已支持完整目标与范围，不受旧目录200字上限限制。必要的真实编码/主键集合可用单行JSON或已授权datasetRef/resultRef交接，不能只写“见nextStep/本地工作文件”，也不因说明旧限制让下一阶段重复恢复全部网页。网页短结果同样保存带摘要引用，末页应直接复用，不把补取失败当空集。
