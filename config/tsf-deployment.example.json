@@ -47,7 +47,11 @@
           ],
           "configurationApplications": [
             "application-REPLACE"
-          ]
+          ],
+          "logApplications": [
+            "application-REPLACE"
+          ],
+          "containerLogApplications": []
         }
       }
     }

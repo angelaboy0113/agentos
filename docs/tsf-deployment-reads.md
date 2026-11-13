@@ -25,9 +25,9 @@
 
 ## 权限与数据边界
 
-执行器只实现四个 TSF 原生读取动作：`DescribeContainerGroups`、`DescribeContainerGroupAttribute`、`DescribePodInstances`、`DescribeContainerTasks`。虽然云 API 的传输方法是 POST，这些动作均为查询；模型不能选择 URL、HTTP 方法或动作。登录 POST 单独用于正常子账号认证。
+原部署查询实现四个 TSF 原生读取动作：`DescribeContainerGroups`、`DescribeContainerGroupAttribute`、`DescribePodInstances`、`DescribeContainerTasks`。虽然云 API 的传输方法是 POST，这些动作均为查询；模型不能选择 URL、HTTP 方法或动作。登录 POST 单独用于正常子账号认证。
 
-只返回明确字段投影；丢弃环境变量、YAML、访问凭证、日志、镜像认证和任意嵌套配置。账号本身可能有管理权限，`accountReadOnlyVerified:false` 如实保留，程序通过固定接口和范围执行只读。每次动作重新验证批准计划，获取实例前重新核对组与命名空间；跨应用、跨环境、已移动或不可见部署组拒绝复用。
+部署工具只返回明确字段投影；丢弃环境变量、YAML、访问凭证、镜像认证和任意嵌套配置。日志工具单独显式登记并脱敏，见下文。账号本身可能有管理权限，`accountReadOnlyVerified:false` 如实保留，程序通过固定接口和范围执行只读。每次动作重新验证批准计划，获取实例前重新核对组与命名空间；跨应用、跨环境、已移动或不可见部署组拒绝复用。
 
 原始工具结果投影后存入当前任务的 `tool-results`，跨阶段和重启用 `list_tool_results` / `read_tool_result` 复用，保留取证时间，不能把历史证据称为新鲜运行状态。迁移随任务数据和加密凭据库一起保留，不把真实配置或任务数据放入代码包。
 
@@ -58,3 +58,21 @@ Retry-After 超过现有单次读取窗口或仍持续限流时，返回独立 T
 维护者可在已审核TSF查询模板中增加`configurationApplications`，内容必须是该模板applications的子集。不配置则不开放。模型可调用`data_sources(applicationId, groupId)`，程序先核实实时部署组及命名空间，再完整分页读取该组当前已发布配置，只读取这些配置ID并前后复核发布绑定。结果只包含配置ID/版本/发布时间/摘要及MySQL主机、端口、库名；原始配置、用户名、密码、令牌不会进入模型、任务或日志。支持properties、YAML及平台base64编码；重复冲突、缺失引用和并发发布不能被当作有效单一目标。
 
 发现地址不等于账号只读、连接成功或新增数据授权。缺少数据库入口时先使用已登记同系统/环境的配置发现能力；将真实目标交给受控接入准备，由维护者确认范围、将凭据存本机加密库并验证原传输通道，再登记数据库。不得让模型自行连接新地址或扩大TPM/其它系统权限。共享配置/环境注入未覆盖时明示缺口，不把空发现说成没有数据库。配置读取不包含修改、发布、回滚、运行环境变量或日志。
+
+## 应用异常日志只读调查
+
+`queries.investigate.logApplications` 显式列出允许读日志的 applicationId，必须是同模板 applications 的子集；未登记则不暴露日志工具，旧配置兼容。授权仍以原 profile、项目、环境、应用/部署组/命名空间为界，不能因同一云账号能看到多系统而省略登记。
+
+- `log_configurations(applicationId,groupId)` 读取部署组实际关联的业务日志采集配置。共享 ConfigId 不授权其他组；不修改配置。
+- `search_logs` 提供应用、组、source、明确本地起止时间、字面关键词数组和offset/limit。stdout调用SearchStdoutLog；business还须提供当前组关联的configId，调用SearchBusinessLog。固定NORMAL检索、固定组筛选，逐页返回nextOffset。空关键词数组明确检索所给窗口。不接受模型传URL、动作、任意查询语言或关闭鉴权。
+- 私有容器直接日志需另登记 `containerLogApplications`（logApplications子集），开放 `container_log_tail(applicationId,groupId,tailLines)`。维护者须先核实目标控制台SearchContainerStdoutLog的读取协议。工具只读取各容器当前保留的末尾日志，不创建持续订阅；返回complete=false、historicalCoverageVerified=false，标注未知时间、多副本和实际条数，不能冒充指定期间完整归档。公共云或其它私有云未实测该接口时不得直接启用。
+
+原生历史接口参考：[标准输出日志](https://cloud.tencent.com/document/api/649/57370)、[业务日志](https://cloud.tencent.com/document/api/649/57371)、[分组日志配置](https://cloud.tencent.com/document/api/649/75773)。私有容器接口以目标控制台实际协议为准。增加的固定读取动作为DescribeGroupBusinessLogConfigs、SearchStdoutLog、SearchBusinessLog、SearchContainerStdoutLog；不会触发业务请求、生成/上传、部署、重推或写数据库。
+
+每次读取前后复核组与命名空间；业务日志配置从当前组关联列表校验。异常查询状态、缺页、非法时间戳、跨组或历史结果越出指定本地时间范围均明确报错，不补成空结果。标准输出行未提供组字段时，范围依据固定GroupId请求与实时组验证，不能声称每行独立证明了GroupId。历史索引可变，各页保留fetchedAt，不冒充事务快照。
+
+只投影实例、平台时间、日志ID和脱敏正文/调用栈。清除认证头、cookie、连接串凭据、常见密钥字段、当前凭据及私钥块；保留正常异常类、关联ID、源码行。原始响应、认证会话和任意嵌套字段不进入任务或日志；正文不静默截断，复用tool-results保存/分页/恢复。未知日志格式的敏感字段仍需验证，不能宣称能识别所有秘密。
+
+历史检索为空只说明该来源/条件没有索引命中，不证明请求不存在、采集健康或问题恢复。应核对配置及其他已授权来源，必要时读取容器日志，保留采集/保留期缺口。有日志工具时不再以“TSF只有部署查询”为由结束；日志不足以关联当次失败时仍如实部分完成，不强绿。
+
+验证：`node scripts/test.js test/tsf-logs.test.js test/tsf-tools.test.js`。覆盖项目/环境并发、共享配置隔离、撤权、分页、跨年时区、敏感内容、多副本尾部和空结果语义。真实平台、原卡结果、真人新题及跨机验收分别记录。迁移含新增模块/配置示例、任务tool-results及凭据库；回退旧版本前撤去新logApplications/containerLogApplications，保留后续业务状态，不倒灌agentos.json。

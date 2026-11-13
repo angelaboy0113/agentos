@@ -1,3 +1,4 @@
+import{createTsfLogTools}from'./tsf-log-tools.js';
 import {parallelRead} from '../shared/parallel-read.js';
 import{createHash}from'node:crypto';
 import{databaseEndpoints}from'./config-endpoints.js';
@@ -27,6 +28,7 @@ export async function createTsfTools(e,q,cred,adapters={}){
   const after=await releases(a,g),signature=xs=>JSON.stringify(xs.map(r=>[r.ConfigId,r.ConfigVersion,r.ConfigReleaseId]).sort());if(signature(before)!==signature(after))throw fail('TSF_CONFIG_CHANGED','Released configuration changed during discovery; retry the read, do not mix versions');
   return{applicationId:a.applicationId,groupId:g.GroupId,namespaceId:g.NamespaceId,rows,complete:rows.length>0&&rows.every(r=>!r.unresolved&&r.databaseTargets.length>0),databaseConnectionVerified:false,note:'Only current released configuration targets; credentials/raw content withheld. No database connection or new data grant. Empty targets do not prove this service has no database; shared/injected configuration may be missing.',...evidence()};
  }
+ const logs=createTsfLogTools({q,cred,cloud,app,group,page,paged,date,evidence});spec.push(...logs.spec);
  return{spec,async run(tool,args={}){await cloud.check();const contract=spec.find(x=>x.tool===tool);if(!contract||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(contract.args,k)))throw fail('REPORT_INPUT','Unknown TSF read tool or arguments');
   if(tool==='connection'){await cloud.connect();return{connected:true,kind:'tsf',...evidence()};}
   if(tool==='applications')return{rows:q.applications.map(a=>({...a,groups:a.groups.map(g=>({...g}))})),metadataVerified:false,source:'reviewed-configuration',complete:true};
@@ -41,6 +43,7 @@ export async function createTsfTools(e,q,cred,adapters={}){
     return{applicationId:a.applicationId,applicationName:a.applicationName,groups:observations,missingConfiguredGroupIds:missing,complete:missing.length===0};
    });return{rows,complete:rows.every(r=>r.complete),timeSemantics:'Current configured images and observed pods; no exact deployment completion time inferred',...evidence()};
   }
+  if(logs.spec.some(s=>s.tool===tool))return logs.run(tool,args);
   const a=app(args.applicationId);
   if(tool==='data_sources'){if(!q.configurationApplications?.includes(a.applicationId))throw fail('TSF_SCOPE','Configuration discovery not granted for this application');return dataSources(a,await group(a,args.groupId));}
   if(tool==='groups'){const rows=await groups(a),missing=a.groups.filter(g=>!rows.some(r=>r.GroupId===g.groupId)).map(g=>g.groupId);return{applicationId:a.applicationId,applicationName:a.applicationName,rows:rows.map(x=>pick(x,fields.group)),missingConfiguredGroupIds:missing,partial:missing.length>0,complete:true,...evidence()};}

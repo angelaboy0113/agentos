@@ -442,3 +442,5 @@ checkpoints and all historical recovery data. Pilot real physical space changes.
 See [backup maintenance](docs/maintenance-backups.md) for the operator registry,
 recovery CLI, verification and rollback boundaries. Current data and business
 repositories are outside its scope; directory totals are not physical disk savings.
+
+TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使用分组采集配置和标准输出/业务日志检索；私有容器直接日志还需核实接口并登记 `containerLogApplications`。固定只读、明确时间和脱敏证据保留，不把当前容器尾部或空索引当作完整历史。配置、验证和回退见 [TSF 只读接入](docs/tsf-deployment-reads.md#应用异常日志只读调查)。
