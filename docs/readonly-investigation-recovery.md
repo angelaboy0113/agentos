@@ -30,3 +30,5 @@ Invalid knowledge answers are withheld from intake candidates and recheck instru
 ### Knowledge conflicts after restart
 
 A fact contradiction remains a discovery-only topic while the relevant dependency hashes and deployment marker are unchanged, even if an older runtime marked it active during reconciliation. Startup semantic comparison may repair uncertain paraphrases but cannot supply new factual evidence. A freshly verified changed dependency or deployment may supersede the old rule through the normal evidence capture path. Inspect `unresolved_contradiction` separately from authorization or database errors; no end-user credentials are required to rediscover the mapping within existing scope.
+
+Transport-suppressed withdrawn cards without positive withdrawal proof remain candidates for the normal read-only watcher. Only exact same-profile/chat/message API deleted=true retires their payload; errors remain retryable and no successful delivery receipt is invented.

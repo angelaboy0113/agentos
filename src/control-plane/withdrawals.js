@@ -7,7 +7,7 @@ const identity=x=>JSON.stringify([x.profile,x.chatId,x.messageId]);
 export function withdrawalCandidates(s){
  const pending=new Set();
  for(const name of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries','longInvestigationNotices'])for(const e of Object.values(s[name]??{}))if(!e.messageId&&!e.superseded)pending.add(e.questionId);
- for(const [key,c]of Object.entries(s.cardMessages??{}))if(key.startsWith('question:')&&c.error!=='原消息已撤回，停止更新'&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered))pending.add(key.slice(9));
+ for(const [key,c]of Object.entries(s.cardMessages??{}))if(key.startsWith('question:')&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered))pending.add(key.slice(9));
  for(const j of s.jobs??[])if(jobActive(j))pending.add(j.questionId);
  for(const t of s.conversations??[])if(turnActive(t))pending.add(t.questionId);
  const candidates=new Map(),add=x=>{if(x.profile&&x.chatId&&x.messageId)candidates.set(identity(x),x);};

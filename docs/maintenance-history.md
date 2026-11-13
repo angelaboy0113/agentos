@@ -1930,3 +1930,5 @@ MongoDB经审核固定副本集主节点发现、缺集合参数可修正诊断�
 ## 1.116.4 — Persist factual knowledge conflict boundaries across restart
 
 The startup reconciliation path no longer reactivates a recorded factual contradiction merely because a later semantic comparison calls it equivalent. The reuse gate also rejects legacy reactivated contradictions when their dependency/deployment evidence is unchanged. Existing uncertain paraphrase recovery and genuinely reverified changed-source supersession remain available. No task limits, data scopes, or business permissions changed.
+
+Transport-suppressed withdrawn cards without positive withdrawal proof remain candidates for the normal read-only watcher. Only exact same-profile/chat/message API deleted=true retires their payload; errors remain retryable and no successful delivery receipt is invented.
