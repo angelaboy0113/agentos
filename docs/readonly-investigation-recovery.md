@@ -11,3 +11,6 @@ MongoDB 连接检查成功不代表业务查询能够读取。固定直连的目
 验收应覆盖副本目标/主节点选择、跨系统与集合范围、缺参修正、只读导航及写控件拒绝、勾选状态、旧证据恢复。真实历史日志不存在仍须如实说明，不因程序修复将未核实业务问题标绿。配置、凭据与运行证据只随原私有迁移流程转移；本次 macOS 实测不代表其它操作系统或完整跨机迁移已通过。
 
 撤回与正在返回的旧投递失败存在竞态：以API已确认的撤回身份、范围和精确原payload摘要判定退役，不以可被旧失败覆盖的展示文案判定。迟到失败不复活投递，不伪造成功回执；新payload/目的地或活动worker仍保护。
+
+### Quantity changes and premature clarification
+For before/after counts, follow the actual metric implementation and schema through population, status, relationship existence/effective bindings and snapshot semantics. A narrow field projection or one denied page is not proof that the authorized evidence is unavailable. Reuse saved complete datasets and fetch only the actual missing dependencies. Do not brute-force arbitrary filters to reproduce a number. Request user clarification only for a genuine unresolved choice or missing indispensable input. Independent key-set differences, actual change audit and matching implementation can support a qualified causal answer without replaying historical clicks. This is investigation guidance, not a new permission grant or a guarantee that historical evidence exists.

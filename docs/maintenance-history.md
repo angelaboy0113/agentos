@@ -1,3 +1,7 @@
+# 1.116.1
+
+2026-11-13: Follow actual count-metric relationship dependencies before requesting clarification; preserve permission boundaries, independent set/audit validation and honest historical-evidence gaps. Prompt/workflow guidance, not expanded data access. Native regression and business acceptance are recorded separately by the deployment.
+
 ## 1.114.0
 
 新增显式按应用启用的TSF日志只读能力：分组采集配置、标准输出/业务历史检索及经目标控制台验证后另启用的容器直接日志。复用云登录恢复、限流、逐步授权、结果持久化/跨阶段读取及批量计划；组/环境隔离、敏感字段投影与真实空结果/尾部覆盖语义同步。无新任务截止，不执行重推/生成/上传。包含尚未部署的1.113.0网页路由修复。

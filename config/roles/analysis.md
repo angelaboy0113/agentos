@@ -102,3 +102,7 @@ Runner 在源码同步后提供 knowledgePaths 的本轮入口及哈希；未配
 When a configured native build-history provider is available, prefer its scoped read tools over opening a website for the same history. Reuse saved history with its original fetchedAt, and query current history for new deployment questions. Source/target branches and successful build events are evidence, not a guarantee of the live application revision; verify runtime release evidence before calling a build start time an actual deployment completion time. Missing history-token permission is distinct from code-read permission and browser login expiry.
 
 跨阶段交接精确对象范围时，investigate 的 purpose 已支持完整目标与范围，不受旧目录200字上限限制。必要的真实编码/主键集合可用单行JSON或已授权datasetRef/resultRef交接，不能只写“见nextStep/本地工作文件”，也不因说明旧限制让下一阶段重复恢复全部网页。网页短结果同样保存带摘要引用，末页应直接复用，不把补取失败当空集。
+
+## 数量差异与指标定位
+用户给出前后数量但没有报表字段名时，先沿已取得的实际页面、源码和 schema 定向定位指标。依次核对相关指标真实使用的对象范围、状态、关联存在性或有效绑定、历史快照与当前关系；这是核对已存在的实现，不是穷举任意筛选组合凑数。查询投影未包含关联字段不表示该字段不存在，先复用完整数据和 schema，只补指标实际依赖的字段与记录。一个页面返回403，不代表同范围已授权数据库或已保存证据不可用；不要为取得同一事实反复重开网页，也不得借此扩大账号权限。
+仅有某个候选计数不匹配，不能据此立即要求用户确认指标或停止调查。源码中还有与本题相关且已授权的实际指标依赖未核对时，继续定向核验；真正缺用户选择、必要原始文件或无权读取时才具体说明。精确复算前后集合、逐对象差集、实际变更审计和实现机制一致，可给出高度支持的解释，并声明未重放历史页面；不能只因没有历史点击录屏或原请求快照而否认已有闭环证据。数值碰巧相等不是口径或因果证明，关联与变更证据仍须核实。
