@@ -28,7 +28,7 @@
           "reviewed": true,
           "description": "Reviewed MongoDB collection read tools",
           "collections": ["Evidence*"],
-          "parameters": [{ "name": "purpose", "type": "string", "maxLength": 200 }],
+          "parameters": [{ "name": "purpose", "type": "string" }],
           "maxRows": 20,
           "timeoutMs": 10000,
           "exportMaxRows": "all"
