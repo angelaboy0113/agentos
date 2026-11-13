@@ -20,11 +20,21 @@ export async function loadHarness(job, directory = CONFIG) {
     if (!texts[name].trim()) throw new Error(`Empty Harness role: ${name}`);
   }
   const fingerprint = digest(JSON.stringify({ raw, texts }));
+  // Trusted, reviewed transitions pin the complete target rather than accepting
+  // arbitrary future edits. Historical task evidence remains immutable.
+  const { reviewedGuidanceTransitions = [], ...contentManifest } = manifest;
+  const contentFingerprint = digest(JSON.stringify({ manifest: contentManifest, texts }));
+  const sha = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+  if (!Array.isArray(reviewedGuidanceTransitions) || reviewedGuidanceTransitions.some(entry =>
+    !entry || !sha(entry.fromFingerprint) || !sha(entry.toContentHash) || entry.scope !== 'guidance-only'
+    || typeof entry.review !== 'string' || !entry.review.trim())) throw new Error('Invalid reviewed Harness transition');
   const previous = (job.context ?? []).map((entry) => entry.result?.harness).filter(Boolean);
-  if (previous.some((entry) => entry.fingerprint !== fingerprint)) throw new Error('Harness版本在任务链中发生变化；请先由管理员复核，不自动沿用旧批准。');
+  const mismatched = [...new Set(previous.map(entry => entry.fingerprint).filter(value => value !== fingerprint))];
+  if (mismatched.some(value => !reviewedGuidanceTransitions.some(entry => entry.fromFingerprint === value
+    && entry.toContentHash === contentFingerprint))) throw new Error('Harness版本在任务链中发生变化；请先由管理员复核，不自动沿用旧批准。');
   const role = job.taskIntent === 'analysis' ? (job.stage === 'owner_report' ? 'analysis_report' : 'analysis') : job.stage;
   if (!texts[role]) throw new Error(`Unknown Harness role: ${role}`);
-  return { metadata: { ...manifest, fingerprint, role }, instruction: `${texts.common}\n\n${texts[role]}` };
+  return { metadata: { ...manifest, fingerprint, contentFingerprint, reviewedPreviousFingerprints: mismatched, role }, instruction: `${texts.common}\n\n${texts[role]}` };
 }
 
 // Keep raw evidence references available without copying each author's entire persuasive report.

@@ -5,5 +5,25 @@
     "url": "https://weilongmeiwei.feishu.cn/wiki/MDHbwEZSKi1kifk8zKvcm18Dnpg",
     "version": "1.1.0",
     "revision": 334
-  }
+  },
+  "reviewedGuidanceTransitions": [
+    {
+      "fromFingerprint": "269c90e9687c80627a61901e7625c9506682ce6a58c0ed018039cde191e1da9b",
+      "toContentHash": "f1d6b7eac76eaa4f6304a5e29f2b8735f8581c579308564d56a3f6cce8744323",
+      "scope": "guidance-only",
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned."
+    },
+    {
+      "fromFingerprint": "4ae6ef04cf64572c25dc602a7fddfe8665578fd007179e28d444fbad7f232cd7",
+      "toContentHash": "f1d6b7eac76eaa4f6304a5e29f2b8735f8581c579308564d56a3f6cce8744323",
+      "scope": "guidance-only",
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned."
+    },
+    {
+      "fromFingerprint": "70e1f17a30cd650ed289d68d3b933b535eb91492b914aa3e7eaca51d4a8036b4",
+      "toContentHash": "f1d6b7eac76eaa4f6304a5e29f2b8735f8581c579308564d56a3f6cce8744323",
+      "scope": "guidance-only",
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned."
+    }
+  ]
 }

@@ -1,3 +1,7 @@
+# 1.116.2
+
+旧任务规范接续增加维护者显式审阅的指导文本兼容记录：旧摘要与完整目标内容摘要双向固定，未知差异仍拒绝，历史证据不改写。权限与数据范围独立校验，未增加任务截止。新增三项回归覆盖原证据保留、目标角色/规范变化和无效声明；配置与使用边界见 docs/readonly-investigation-recovery.md。
+
 # 1.116.1
 
 2026-11-13: Follow actual count-metric relationship dependencies before requesting clarification; preserve permission boundaries, independent set/audit validation and honest historical-evidence gaps. Prompt/workflow guidance, not expanded data access. Native regression and business acceptance are recorded separately by the deployment.
