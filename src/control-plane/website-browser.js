@@ -12,7 +12,7 @@ import {BrowserInputError,validateBrowserTool,websitePageLocation,websitePageRou
 import { chromium } from 'playwright';
 import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
  constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch}={}){this.authorize=authorize;this.publicFetch=publicFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
@@ -39,7 +39,7 @@ export class WebsiteBrowser {
      if(!permitted){await route.abort().catch(()=>{});return;}
      try{const response=await this.publicFetch(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const headers={'content-type':response.headers.get('content-type')??'application/octet-stream','cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
     }
-    let allow=false;try{allow=websiteRequestAllowed(target.baseUrl,{url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{}
+    let allow=false,boundary;try{boundary=websiteRequestBoundary(target.baseUrl,request,state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);allow=boundary.allowed;}catch{}
     const loginReads=target.queries?.[state?.job?.environmentAccess?.queryId]?.loginReads??[];
     if(state&&websiteLoginReadAllowed(request,true,loginReads,target.baseUrl)){
      // The first QR iframe request can precede the next investigator snapshot.
@@ -51,7 +51,7 @@ export class WebsiteBrowser {
     else if(state&&request.method==='POST'&&target.loginPreferences?.paths.includes(new URL(request.url).pathname))state.preferenceNeedsIdentity=true;
     if(allow&&!state)allow=false;
     if(allow&&state) {try{allow=await this.authorize(state.job,state.waiting,r);}catch{allow=false;}}
-    if(!allow){if(state){if(['script','stylesheet','font','image'].includes(r.resourceType()))state.blockedResources.add(websitePageLocation(r.url()));const location=websitePageLocation(r.url()),pathname=location.slice(new URL(r.url()).origin.length);state.blocked.add(`${r.method()} ${pathname}`);state.blockedRequestDetails??=[];state.blockedRequestDetails.push({method:r.method(),type:r.resourceType(),location});if(state.blockedRequestDetails.length>32)state.blockedRequestDetails.shift();if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${pathname}`);}await route.abort().catch(()=>{});return;}
+    if(!allow){if(state){if(['script','stylesheet','font','image'].includes(r.resourceType()))state.blockedResources.add(websitePageLocation(r.url()));const location=websitePageLocation(r.url()),pathname=location.slice(new URL(r.url()).origin.length);state.blocked.add(`${r.method()} ${pathname}`);state.blockedRequestDetails??=[];state.blockedRequestDetails.push({method:r.method(),type:r.resourceType(),location,...(boundary?.allowed?{code:'TASK_AUTHORIZATION_REQUIRED',requiresEndpointReview:false}:boundary??{})});if(state.blockedRequestDetails.length>32)state.blockedRequestDetails.shift();if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${pathname}`);}await route.abort().catch(()=>{});return;}
     if(state?.environment.loginPreferences&&state?.pendingPrincipal&&r.method()==='POST'&&/\/(?:login|signin|sign-in|authenticate|auth|token)(?:\.[a-z]+)?$/i.test(new URL(r.url()).pathname)){
      // Observe this one authentication response before a redirect can discard
      // its body. Forward it unchanged; never retry authentication or fake it.

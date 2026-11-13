@@ -1893,3 +1893,8 @@ bytes. Snapshot collection understands exact operator-reviewed retired card pins
 without releasing live jobs, waits or pending file deliveries. Configuration example,
 local authenticated maintenance endpoint and package verification are synchronized.
 Real disk recovery and deployment evidence are maintained by each instance operator.
+
+
+### 1.114.1 — 网页精确只读边界诊断
+
+本机未审核请求、方法不匹配、来源范围和任务授权失败分别诊断，不再将本机拦截当作网站认证失败。名词式和版本后缀查询仍须维护者按源码登记精确只读端点，不扩大通用写权限。同步真实浏览器初始化依赖、并行系统/环境和写入拒绝回归。

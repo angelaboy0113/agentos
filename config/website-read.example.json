@@ -45,6 +45,16 @@
               "method": "POST",
               "path": "/api/session/context",
               "reviewed": true
+            },
+            {
+              "method": "POST",
+              "path": "/api/referenceOptions",
+              "reviewed": true
+            },
+            {
+              "method": "POST",
+              "path": "/api/resources/list/v2",
+              "reviewed": true
             }
           ],
           "readNavigationSelectors": [
@@ -77,7 +87,7 @@
       "loginNavigation": {
         "interactive": true,
         "steps": [
-          "扫码登录"
+          "\u626b\u7801\u767b\u5f55"
         ]
       }
     }

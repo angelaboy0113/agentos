@@ -65,6 +65,18 @@ export function websiteRequestAllowed(base, request, manualLogin=false, readEndp
  if(request.method==='OPTIONS')return true;
  return request.resourceType==='document'||/\.(?:js|css|png|jpg|jpeg|svg|ico|woff2?|ttf|map)$/i.test(tail)||reads.test(tail)||u.pathname==='/' || readEndpoints.some(e=>e.reviewed===true&&e.method===request.method&&reviewedPathMatches(e.path,u.pathname)) || /\/(?:api\/)?(?:menus?|permissions?|profiles?|users?\/me)$/i.test(u.pathname);
 }
+// Explain a local policy rejection without treating it as a server response or
+// account failure. No request body, query values or credential material leaves.
+export function websiteRequestBoundary(base,request,manualLogin=false,readEndpoints=[]){
+ let u;try{u=new URL(request.url);}catch{return {allowed:false,code:'INVALID_REQUEST_URL',requiresEndpointReview:false};}
+ const allowed=websiteRequestAllowed(base,request,manualLogin,readEndpoints);
+ if(allowed)return {allowed:true,code:null,requiresEndpointReview:false};
+ if(u.origin!==new URL(base).origin)return {allowed:false,code:'REQUEST_ORIGIN_SCOPE',requiresEndpointReview:false};
+ const reviewed=readEndpoints.filter(e=>e.reviewed===true&&reviewedPathMatches(e.path,u.pathname));
+ if(reviewed.length&&!reviewed.some(e=>e.method===request.method)&&!['HEAD','OPTIONS'].includes(request.method))return {allowed:false,code:'REVIEWED_METHOD_MISMATCH',requiresEndpointReview:false};
+ const candidate=request.method==='POST'&&!reviewed.length&&websiteRequestAllowed(base,request,manualLogin,[...readEndpoints,{method:'POST',path:u.pathname,reviewed:true}]);
+ return {allowed:false,code:candidate?'READ_ENDPOINT_REVIEW_REQUIRED':'REQUEST_POLICY_DENIED',requiresEndpointReview:candidate,note:candidate?'请求尚未被本机只读规则认可，不代表账号失效或服务端拒绝。按真实源码核对用途后由维护者登记精确方法和路径；不能只凭命名认定只读，也不能通过改方法或重放写操作绕过。':'本机请求边界拒绝；不是服务端业务响应。'};
+}
 // Explicit operator-approved login UI preferences, distinct from read endpoints.
 // Only an account authenticated by this browser session may use the exception.
 export function websiteLoginPreferenceAllowed(e,request,principal){
