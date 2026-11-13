@@ -24,7 +24,7 @@ test('continuation jobs reuse the same question-scoped tab while unrelated quest
 });
 test('a blank continuation tab is recovered in place and a user-closed tab gets one replacement',async()=>{
  const calls=[];let closed=false;const b=new SharedChromeBrowser(async()=>true,async q=>{calls.push(q);if(q.operation==='find')return{tabId:'tab-'+calls.filter(x=>x.operation==='find').length,windowId:'1'};if(closed){closed=false;throw Error('原Chrome标签页已关闭');}if(q.script==='JSON.stringify({blank:location.href==="about:blank"})')return{blank:true};if(q.script.startsWith('location.assign'))return{recovering:true};return{pageText:'ready',controls:[]};},async()=>{}),base={questionId:'q',originProfile:'owner',projectId:'p'};
- await b.run({...base,id:'one'},e,'connection');await b.release('one');await b.run({...base,id:'two'},e,'connection');assert.equal(calls.filter(x=>x.operation==='find').length,1);assert.ok(calls.some(x=>x.script?.startsWith('location.assign')));
+ await b.run({...base,id:'one'},e,'connection');await b.release('one');await b.run({...base,id:'two'},e,'connection');assert.equal(calls.filter(x=>x.operation==='find').length,1);assert.ok(calls.some(x=>x.script?.includes('location.assign')));
  await b.release('two');closed=true;await b.run({...base,id:'three'},e,'connection');assert.equal(calls.filter(x=>x.operation==='find').length,2);
 });
 test('daily Chrome exposes a safe automation health probe',async()=>{

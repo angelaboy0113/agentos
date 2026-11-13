@@ -1,6 +1,6 @@
 import {chromeFrameDocument} from './website-frames.js';
 import {BrowserInputError} from '../shared/browser-tool-input.js';
-import {validateBrowserTool} from '../shared/browser-tool-input.js';
+import {websitePageLocation,websitePageRoute,validateBrowserTool} from '../shared/browser-tool-input.js';
 import {readWebsiteAsset} from './website-assets.js';
 import {controlMetadata} from '../shared/website-controls.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
@@ -20,16 +20,24 @@ export class SharedChromeBrowser{
  }
  async state(job,e){
   const now=Date.now();for(const [key,value] of this.sessions)if(value.releasedAt&&now-value.releasedAt>6*60*60*1000)this.sessions.delete(key);
-  let s=this.pages.get(job.id);if(s){if(s.baseUrl!==websiteUrl(e.baseUrl))throw new Error('任务入口已变化，需要重新申请');return s;}
+  const requested=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);
   const lineage=[job.questionId??job.id,job.originProfile,job.projectId,e.tier,websiteUrl(e.baseUrl)].map(v=>String(v??'')).join('\u0000');
-  s=this.sessions.get(lineage);if(s){try{const status=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:'JSON.stringify({blank:location.href==="about:blank"})'});if(status.blank){const target=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`location.assign(${JSON.stringify(target)});JSON.stringify({recovering:true})`});await this.wait(400);}delete s.releasedAt;this.pages.set(job.id,s);return s;}catch(error){if(!/原Chrome标签页已关闭/.test(error.message))throw error;this.sessions.delete(lineage);}}
+  let s=this.pages.get(job.id);if(s){if(s.baseUrl!==websiteUrl(e.baseUrl)||s.lineage!==lineage)throw new Error('任务入口已变化，需要重新申请');if(s.boundTarget!==requested){await this.navigate(job,e,s,requested);s.boundTarget=requested;}return s;}
+  s=this.sessions.get(lineage);if(s){try{const status=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:'JSON.stringify({blank:location.href==="about:blank"})'});if(status.blank||s.boundTarget!==requested){await this.navigate(job,e,s,s.boundTarget===requested?(s.currentReadTarget??requested):requested);s.boundTarget=requested;}delete s.releasedAt;this.pages.set(job.id,s);return s;}catch(error){if(!/原Chrome标签页已关闭/.test(error.message))throw error;this.sessions.delete(lineage);}}
   const tab=await this.transport({operation:'find',baseUrl:websiteUrl(e.baseUrl),exclude:[...this.sessions.values()].map(s=>s.tabId)});
-  s={...tab,token:randomUUID().replaceAll('-',''),baseUrl:websiteUrl(e.baseUrl),waiting:false,lineage};this.pages.set(job.id,s);this.sessions.set(lineage,s);return s;
+  s={...tab,token:randomUUID().replaceAll('-',''),baseUrl:websiteUrl(e.baseUrl),waiting:false,lineage,boundTarget:job.environmentAccess?.websiteTarget?null:requested};this.pages.set(job.id,s);this.sessions.set(lineage,s);if(job.environmentAccess?.websiteTarget){await this.navigate(job,e,s,requested);s.boundTarget=requested;}return s;
+ }
+ async navigate(job,e,s,input){
+  const target=websiteNavigationTarget(input,e.baseUrl);
+  if(!await this.authorize(job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前问题没有有效网页访问授权');
+  // Fixed navigation program; never reuse model JavaScript or another app's tab.
+  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`(()=>{if(location.href!=="about:blank"){const current=new URL(location.href),base=new URL(${JSON.stringify(s.baseUrl)});if(current.origin!==base.origin)throw Error("原Chrome标签页已离开授权应用");}location.assign(${JSON.stringify(target)});return JSON.stringify({recovering:true})})()`});
+  s.currentReadTarget=target;s.token=randomUUID().replaceAll('-','');await this.wait(400);return raw;
  }
  async snapshot(job,e,s,tool,args){
   await this.allowed(job,e,s.waiting);
   const request={baseUrl:s.baseUrl,token:s.token,tool,args};
-  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`(()=>{const selected=(${chromeFrameDocument.toString()})(${JSON.stringify(request)});if(selected.result)return JSON.stringify(selected.result);return JSON.stringify({...(${chromePage.toString()})(${JSON.stringify(request)},{document:selected.document,metadata:${controlMetadata.toString()},inspect:${inspectWebsiteControl.toString()}}),...(${browserLoginState.toString()})(selected.document)})})()`});
+  const raw=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`(()=>{const selected=(${chromeFrameDocument.toString()})(${JSON.stringify(request)});if(selected.result)return JSON.stringify(selected.result);return JSON.stringify({...(${chromePage.toString()})(${JSON.stringify(request)},{document:selected.document,metadata:${controlMetadata.toString()},inspect:${inspectWebsiteControl.toString()},location:${websitePageLocation.toString()},route:${websitePageRoute.toString()}}),...(${browserLoginState.toString()})(selected.document)})})()`});
   if(raw.error){if(raw.code)throw new BrowserInputError(raw.code,raw.error);throw new Error(raw.error);}
   s.waiting=raw.loginRequired===true||raw.loginState==='loading';if(!s.waiting)s.credentialAttempted=false;
   if(raw.pageText)raw.pageText=cleanWebsiteText(raw.pageText);
@@ -37,12 +45,13 @@ export class SharedChromeBrowser{
   return raw;
  }
  run(job,e,tool,args={}){return this.serial(async()=>{
-  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_frames','browser_frame','browser_recover','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_frames','browser_frame','browser_recover','browser_navigate','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
   if(['browser_frames','browser_frame'].includes(tool))validateBrowserTool(tool,args);
   await this.allowed(job,e);const s=await this.state(job,e);
+  if(tool==='browser_navigate'){validateBrowserTool(tool,args);try{websiteNavigationTarget(args.url,e.baseUrl);}catch{throw new BrowserInputError('BROWSER_ARGUMENTS','目标地址未通过同应用只读校验；核对实际菜单或源码地址，不执行越界或修改操作。');}await this.navigate(job,e,s,args.url);return this.snapshot(job,e,s,'browser_snapshot',{});}
   if(tool==='browser_recover'){
    validateBrowserTool(tool,args);let status;try{status=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:'JSON.stringify({blank:location.href==="about:blank",url:location.origin+location.pathname})'});}catch(error){if(!/原Chrome标签页已关闭/.test(error.message))throw error;this.pages.delete(job.id);const reopened=await this.state(job,e);return this.snapshot(job,e,reopened,'browser_snapshot',{});}
-   if(status.blank){const target=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`location.assign(${JSON.stringify(target)});JSON.stringify({recovering:true})`});await this.wait(400);}
+   if(status.blank){const target=websiteNavigationTarget(s.currentReadTarget??job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:`location.assign(${JSON.stringify(target)});JSON.stringify({recovering:true})`});await this.wait(400);}
    return this.snapshot(job,e,s,'browser_snapshot',{});
   }
   if(tool==='browser_assets')validateBrowserTool(tool,args);

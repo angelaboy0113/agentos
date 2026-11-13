@@ -71,5 +71,5 @@ export function chromePage(request, adapters={}) {
  }
  const empty=!lines.length&&!controls.length,frameCount=document.querySelectorAll('iframe,frame').length;
  const pageStatus=empty?(document.readyState!=='complete'?'loading':frameCount?'frames':'empty'):'ready';
- return {stage:empty?'尚未读取到业务内容':'已读取日常Chrome业务页面',partial:empty,pageStatus,readyState:document.readyState,frameCount,url:current.origin+current.pathname+current.hash,pageText:lines.join('\n'),controls,blockedRequests:[],rows:[],...(empty?{message:frameCount?'当前只读到页面外壳，存在内嵌页面，尚未取得报表内容；不能认定没有数据或没有权限。':'页面尚无可读正文和菜单；可能尚未加载完成，不能认定没有数据或没有权限。'}:{}),note:'复用日常Chrome登录态；仅当前批准应用的可见内容。浏览器正常加载网络请求，不拦截登录或权限初始化。'};
+ return {stage:empty?'尚未读取到业务内容':'已读取日常Chrome业务页面',partial:empty,pageStatus,readyState:document.readyState,frameCount,url:adapters.location?adapters.location(current.href):current.origin+current.pathname+(current.hash.startsWith('#/')?current.hash.split('?')[0]:''),...(adapters.route?{route:adapters.route(current.href)}:{}),pageText:lines.join('\n'),controls,blockedRequests:[],rows:[],...(empty?{message:frameCount?'当前只读到页面外壳，存在内嵌页面，尚未取得报表内容；不能认定没有数据或没有权限。':'页面尚无可读正文和菜单；可能尚未加载完成，不能认定没有数据或没有权限。'}:{}),note:'复用日常Chrome登录态；仅当前批准应用的可见内容。浏览器正常加载网络请求，不拦截登录或权限初始化。'};
 }

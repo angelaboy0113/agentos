@@ -8,7 +8,7 @@ export {controlMetadata} from '../shared/website-controls.js';
 import {waitForCaptureReady,screenshotSecretSelector} from '../shared/website-capture.js';
 import {browserLoginState,authResponseState} from '../shared/browser-login-state.js';
 import { randomUUID,createHash } from 'node:crypto';
-import {BrowserInputError,validateBrowserTool,websitePageLocation} from '../shared/browser-tool-input.js';
+import {BrowserInputError,validateBrowserTool,websitePageLocation,websitePageRoute} from '../shared/browser-tool-input.js';
 import { chromium } from 'playwright';
 import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -198,26 +198,34 @@ export class WebsiteBrowser {
   const s=await this.state(job,e);
   // A ref belongs to one immutable element handle in one page generation, never nth(i).
   const previous=s.operation??Promise.resolve();
-  const operation=previous.catch(()=>{}).then(async()=>{if(tool!=='browser_frames'&&tool!=='browser_frame'&&tool!=='browser_recover'&&tool!=='browser_diagnostics')await assertWebsiteFrame(s);const result=await (['connection','browser_open','browser_snapshot','browser_read','browser_assets','browser_inspect','browser_frames'].includes(tool)?this.readAcrossNavigation(s,()=>this.perform(s,tool,args)):this.perform(s,tool,args));if(tool!=='browser_frames'&&tool!=='browser_recover'&&tool!=='browser_diagnostics')await assertWebsiteFrame(s);return result;});s.operation=operation;
+  const operation=previous.catch(()=>{}).then(async()=>{if(tool!=='browser_frames'&&tool!=='browser_frame'&&tool!=='browser_recover'&&tool!=='browser_diagnostics'&&tool!=='browser_navigate')await assertWebsiteFrame(s);const result=await (['connection','browser_open','browser_snapshot','browser_read','browser_assets','browser_inspect','browser_frames'].includes(tool)?this.readAcrossNavigation(s,()=>this.perform(s,tool,args)):this.perform(s,tool,args));if(tool!=='browser_frames'&&tool!=='browser_recover'&&tool!=='browser_diagnostics'&&tool!=='browser_navigate')await assertWebsiteFrame(s);return result;});s.operation=operation;
   try{return await operation;}finally{if(s.operation===operation)s.operation=null;}
  }
  async perform(s,tool,args){
   if(tool==='browser_diagnostics')return websiteDiagnostics(s);
   if(tool==='browser_frames')return websiteFrames(s);
   if(tool==='browser_frame'){await websiteFrames(s,args.ref);return this.snapshot(s);}
+  if(tool==='browser_navigate'){
+   let target;try{target=websiteNavigationTarget(args.url,s.environment.baseUrl);}catch{throw new BrowserInputError('BROWSER_ARGUMENTS','目标地址未通过同应用只读校验；使用已观察到的菜单或源码地址，不能传凭据、修改动作或其它应用地址。');}
+   if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务页面导航范围已失效');
+   s.currentReadTarget=target;s.restoreTarget=true;s.dom=null;s.frameRefs=new Map();
+   // Navigation only: never replay the query, login submission or business action.
+   await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
+   return {...await this.snapshot(s),...await this.loginStatus(s),navigation:{requested:websitePageLocation(target),requestedRoute:websitePageRoute(target),actual:websitePageLocation(s.page.url()),actualRoute:websitePageRoute(s.page.url()),targetMatched:s.page.url()===target,readOnly:true}};
+  }
   const blank=s.page.url()==='about:blank';
   if(blank||tool==='browser_recover'){
    if(!await this.authorize(s.job,s.waiting,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前任务没有有效恢复范围');
    const status=blank?null:await this.loginStatus(s);
    if(!blank&&status?.loginRequired)return {...status,stage:'页面在等待认证，沿用已有登录恢复；本次不重新提交凭据'};
    if(blank||!status.pageReady&&!s.pendingReads.size&&!s.blockedResources.size&&!s.resourceFailures.size){s.dom=null;s.frameRefs?.clear();s.assets?.clear();s.observedScripts.clear();await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});s.lastRecovery={at:new Date().toISOString(),kind:blank?'blank-reopened':'quiet-empty-reloaded',target:websitePageLocation(s.currentReadTarget??s.initialTarget)};}
-   else if(!status.pageReady)return {stage:'保留当前加载与故障证据，尚未重复导航',pageStatus:'loading',partial:true,url:websitePageLocation(s.page.url()),diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size},next:s.pendingReads.size?'当前有读取进行中，检查后续快照，不重复点击或打开':'核对实际静态依赖或使用browser_assets继续部署源码取证；不把资源失败当作密码错误'};
+   else if(!status.pageReady)return {stage:'保留当前加载与故障证据，尚未重复导航',pageStatus:'loading',partial:true,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size},next:s.pendingReads.size?'当前有读取进行中，检查后续快照，不重复点击或打开':'核对实际静态依赖或使用browser_assets继续部署源码取证；不把资源失败当作密码错误'};
   }
   if(tool==='browser_assets')return readWebsiteAsset(s,args,this.authorize,this.publicFetch);
   const login=await this.loginStatus(s);
   if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
   if(tool==='browser_screenshot')return this.screenshot(s);
-  if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
+  if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded'});}
   if(tool==='browser_read')return this.readVisible(s,args);
   if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot'||tool==='browser_recover')return {...await this.snapshot(s),...(s.lastRecovery?{recovery:s.lastRecovery}:{})};
@@ -228,7 +236,7 @@ export class WebsiteBrowser {
   if(!current||!current.visible)throw new BrowserInputError('BROWSER_REF_STALE','原控件已移除或隐藏；先browser_snapshot，不重复旧操作。');
   if(current.label!==ref.rawLabel||current.type!==ref.type)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
   if(current.blocked)throw new Error('该操作可能改变业务状态，本次未执行');
-  if(tool==='browser_inspect')return {url:websitePageLocation(s.page.url()),label:cleanWebsiteText(current.label),...await ref.el.evaluate(inspectWebsiteControl)};
+  if(tool==='browser_inspect')return {url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),label:cleanWebsiteText(current.label),...await ref.el.evaluate(inspectWebsiteControl)};
   if(tool==='browser_context_menu'){
    if(current.kind!=='row')throw new BrowserInputError('BROWSER_CONTROL_TYPE','仅可打开当前快照数据行的上下文菜单，不执行任何菜单项。');
    await ref.el.click({button:'right',timeout:8000});return this.snapshot(s);
@@ -278,7 +286,7 @@ export class WebsiteBrowser {
   if(contentHash&&contentHash!==hash)throw new BrowserInputError('BROWSER_CONTENT_CHANGED','当前可见内容已变化；保留旧页证据，从offset=0重新读取，不能拼成同一份响应');
   const matchOffset=find?text.indexOf(find,offset):null,begin=find?matchOffset<0?text.length:Math.max(0,matchOffset-Math.min(400,Math.floor(limit/4))):offset;
   const part=text.slice(begin,begin+Math.min(limit,10000)),nextOffset=begin+part.length<text.length?begin+part.length:null,nextMatchOffset=find&&matchOffset>=0?text.indexOf(find,matchOffset+find.length):null;
-  return {section,url:websitePageLocation(s.page.url()),contentHash:hash,offset:begin,text:part,...(find?{matchOffset,nextMatchOffset:nextMatchOffset<0?null:nextMatchOffset,literalMatchOnly:true}:{}),totalCharacters:text.length,nextOffset,endOfContent:nextOffset===null,complete:begin===0&&nextOffset===null,note:'仅当前已授权页面的可见脱敏内容，分页不是历史快照；沿contentHash和nextOffset续读，变化时重新开始。无新的业务请求或写入。'};
+  return {section,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),contentHash:hash,offset:begin,text:part,...(find?{matchOffset,nextMatchOffset:nextMatchOffset<0?null:nextMatchOffset,literalMatchOnly:true}:{}),totalCharacters:text.length,nextOffset,endOfContent:nextOffset===null,complete:begin===0&&nextOffset===null,note:'仅当前已授权页面的可见脱敏内容，分页不是历史快照；沿contentHash和nextOffset续读，变化时重新开始。无新的业务请求或写入。'};
  }
  async snapshot(s){
   if(s.hoverTooltip&&!await s.hoverTooltip.element.evaluate(el=>el.isConnected).catch(()=>false)){for(const h of [s.hoverTooltip.element,s.hoverTooltip.tooltip])await h.dispose().catch(()=>{});s.hoverTooltip=null;}
@@ -295,7 +303,7 @@ export class WebsiteBrowser {
   }
   const fields=await websiteDOM(s).evaluate(websiteFields,{secretSelector:screenshotSecretSelector});
   const loading=!text.trim()||s.pendingReads.size>0||await websiteDOM(s).locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));
-  return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,controlsLimited:controls.length>=300,url:websitePageLocation(s.page.url()),pageText:cleanWebsiteText(text),fields:fields.slice(0,100),fieldsLimited:fields.length>100,controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
+  return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,controlsLimited:controls.length>=300,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),pageText:cleanWebsiteText(text),fields:fields.slice(0,100),fieldsLimited:fields.length>100,controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
  }
  async screenshot(s){
   if(!/^[A-Za-z0-9_-]+$/.test(s.job.id))throw new Error('Invalid evidence job');
@@ -304,7 +312,7 @@ export class WebsiteBrowser {
   const dir=path.join(this.evidenceRoot,s.job.id);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.evidenceRoot,0o700);await chmod(dir,0o700);
   const name=randomUUID()+'.png',file=path.join(dir,name);
   const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:s.page.frames().map(frame=>frame.locator(screenshotSecretSelector)),maskColor:'#6b7280',...(readiness.status==='ready'?{}:{style:'body::after{content:"页面加载尚未完成 · 现场截图";position:fixed;top:8px;right:12px;z-index:2147483647;background:#fff3cd;color:#704d00;padding:6px 10px;border:1px solid #e6ce81;border-radius:4px;font:13px sans-serif;pointer-events:none}'})});await chmod(file,0o600);
-  return {...await this.snapshot(s),...(readiness.status==='ready'?{}:{pageStatus:'loading',partial:true}),stage:readiness.status==='ready'?'已保存稳定网页截图':'已保存加载未完成的现场截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url()),readiness},rows:[],note:'已等待接口、加载指示和页面稳定；正常业务字段保留，凭据及显式敏感区用灰色遮挡。readiness.status为ready仅代表渲染稳定，不代表业务正常；其它状态是加载未完成的现场证据。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};
+  return {...await this.snapshot(s),...(readiness.status==='ready'?{}:{pageStatus:'loading',partial:true}),stage:readiness.status==='ready'?'已保存稳定网页截图':'已保存加载未完成的现场截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),readiness},rows:[],note:'已等待接口、加载指示和页面稳定；正常业务字段保留，凭据及显式敏感区用灰色遮挡。readiness.status为ready仅代表渲染稳定，不代表业务正常；其它状态是加载未完成的现场证据。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};
  }
  async release(id){const s=this.pages.get(id);this.pages.delete(id);await s?.page.close().catch(()=>{});}
  async close(){await Promise.allSettled([...this.contexts.values()].map(s=>s.context.close()));this.contexts.clear();this.pages.clear();}

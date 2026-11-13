@@ -1,3 +1,7 @@
+## 1.113.0
+
+补齐同应用只读 browser_navigate，修复错误 history/hash 地址需反复整轮交接的问题；安全暴露路由模式及非敏感参数名称，避免将 URL 脱敏误判为参数丢失。日常 Chrome 绑定首次/续查的显式深层目标，保留正常页面进展与授权隔离。原业务写入与身份/环境边界保持，无新配置或任务截止。验证和边界见 website-recovery.md。
+
 ## 2026-11-12 · AgentOS 1.109.1 · Overview statistics semantics
 
 - Aggregate complete retained question-card results before pagination, by actual terminal time in the rolling 24-hour window; count only the latest job per bot/chat/question.

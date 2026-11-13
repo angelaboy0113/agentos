@@ -91,6 +91,7 @@ export function websiteTools(job,config,environment={}){
  {tool:'browser_open',args:{},description:'查看当前业务网页'}, {tool:'browser_snapshot',args:{},description:'刷新页面文本和引用'},
  {tool:'browser_frames',args:{},description:'列出当前任务原应用范围内可见内嵌页和主页面；外层空白或只有导航时先核对，不读取跨域/隐藏帧。'},
  {tool:'browser_frame',args:{ref:'browser_frames返回的当前内嵌页引用'},description:'选择同源可见内嵌页并刷新文本/控件；旧控件引用失效。登录和页面读取仍须原身份与授权，不传URL/JS。'},
+ {tool:'browser_navigate',args:{url:'same-application readonly URL discovered in current page/menu or verified source'},description:'在原任务同一已授权应用内打开已有证据的只读地址，保留普通路径或#/路由及筛选/调试参数；不接受跨应用、凭据或写操作。先看snapshot.route判断history/hash及queryKeys/hashQueryKeys；脱敏url不含参数不代表参数不存在。只修正导航，不重放查询或业务动作，不为改URL另起整轮源码调查。'},
  {tool:'browser_recover',args:{},description:'按原任务批准的页面恢复about:blank、已关闭/崩溃页或安静空白外壳；保留原身份/环境/筛选目标，不接受URL、JS或凭据。存在进行中读取、被拦依赖或登录条件时先诊断，不反复导航或提交登录。'},
  {tool:'browser_assets',args:{ref:'可选：本任务目录/依赖返回的脚本引用；空对象先取目录',offset:0,limit:4000,find:'可选字面定位',contentHash:'续读脚本摘要'},description:'读取当前部署页面公开外部JS及其ESM依赖，脱敏分页；用于固定仓库缺实现时定向确认实际接口/服务，不传URL/JS/文件路径，不执行源码，不凭前端猜物理表；继续核对接口所属服务的已授权数据库。'},
  {tool:'browser_inspect',args:{ref:'当前控件引用'},description:'读取当前控件与祖先的计算布局、展开属性和所在表单字段可见数量；用于点击前后对比和排查展开无效。不读取隐藏值、不执行JS或请求，不能传选择器。'},

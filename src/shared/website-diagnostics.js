@@ -1,7 +1,7 @@
 // Observe the authorized page; never return console payloads, headers, bodies,
 // query strings, storage or credentials. These are recent diagnostic metadata,
 // not a replacement for a complete business/application log.
-import{websitePageLocation}from'./browser-tool-input.js';
+import{websitePageLocation,websitePageRoute}from'./browser-tool-input.js';
 export function pageDiagnostic(s,{kind='runtime',name,message='',source,line,column,status,method,code}={}){
  const entry={kind,at:new Date().toISOString()};
  if(name&&/^[A-Za-z]+Error$/.test(name))entry.name=name;
@@ -13,4 +13,4 @@ export function pageDiagnostic(s,{kind='runtime',name,message='',source,line,col
  if((typeof code==='number'&&Number.isFinite(code))||(typeof code==='string'&&/^[A-Za-z0-9_-]{1,32}$/.test(code)))entry.code=code;
  s.readDiagnostics??=[];s.readDiagnostics.push(entry);if(s.readDiagnostics.length>64)s.readDiagnostics.shift();
 }
-export function websiteDiagnostics(s){return {url:websitePageLocation(s.page.url()),readOnly:true,scope:'current-authorized-task-page',recent:s.readDiagnostics??[],blockedRequests:s.blockedRequestDetails??[],blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,note:'仅当前页面最近的脱敏错误、资源和只读请求状态；无控制台原文、响应正文、认证头、存储或新请求。不是完整应用日志。'};}
+export function websiteDiagnostics(s){return {url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),readOnly:true,scope:'current-authorized-task-page',recent:s.readDiagnostics??[],blockedRequests:s.blockedRequestDetails??[],blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,note:'仅当前页面最近的脱敏错误、资源和只读请求状态；无控制台原文、响应正文、认证头、存储或新请求。不是完整应用日志。'};}
