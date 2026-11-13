@@ -9,21 +9,21 @@
   "reviewedGuidanceTransitions": [
     {
       "fromFingerprint": "269c90e9687c80627a61901e7625c9506682ce6a58c0ed018039cde191e1da9b",
-      "toContentHash": "f1d6b7eac76eaa4f6304a5e29f2b8735f8581c579308564d56a3f6cce8744323",
+      "toContentHash": "97e1be99119c01e0fe586a4ab4b5bc2d61ba945a11089856b2b85088b745c76e",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change."
     },
     {
       "fromFingerprint": "4ae6ef04cf64572c25dc602a7fddfe8665578fd007179e28d444fbad7f232cd7",
-      "toContentHash": "f1d6b7eac76eaa4f6304a5e29f2b8735f8581c579308564d56a3f6cce8744323",
+      "toContentHash": "97e1be99119c01e0fe586a4ab4b5bc2d61ba945a11089856b2b85088b745c76e",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change."
     },
     {
       "fromFingerprint": "70e1f17a30cd650ed289d68d3b933b535eb91492b914aa3e7eaca51d4a8036b4",
-      "toContentHash": "f1d6b7eac76eaa4f6304a5e29f2b8735f8581c579308564d56a3f6cce8744323",
+      "toContentHash": "97e1be99119c01e0fe586a4ab4b5bc2d61ba945a11089856b2b85088b745c76e",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change."
     }
   ]
 }
