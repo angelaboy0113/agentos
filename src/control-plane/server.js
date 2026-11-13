@@ -1,3 +1,5 @@
+import{DeliveryMaintenance}from'./delivery-maintenance.js';
+import{deliveryAttention,resumeDelivery}from'../shared/delivery-retry.js';
 import {WithdrawalWatcher} from './withdrawals.js';
 import {MemoryAdmission} from '../shared/memory-admission.js';
 import {getHeapStatistics} from 'node:v8';
@@ -93,7 +95,7 @@ export async function createControlPlane(overrides = {}) {
   context.cards = cards;
   context.replyAddressing = new ReplyAddressing(context);
   context.adminUsageDirectory = new AdminUsageDirectory(context);
-  context.longNotices=new LongInvestigationNotices(context);context.successStickers=new SuccessStickers(context);context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();await context.successStickers.retry();};
+  context.deliveryMaintenance=new DeliveryMaintenance(context);context.longNotices=new LongInvestigationNotices(context);context.successStickers=new SuccessStickers(context);context.reports=new ReportDelivery(context);context.websiteEvidence=new WebsiteEvidenceDelivery(context);cards.afterRetry=async state=>{await context.reports.retry(state);await context.websiteEvidence.retry();await context.successStickers.retry();};
   context.notifyJobEvent = (result) => notifyJobEvent(context, result);
   // Upgrade previously sent owned job cards in place; never create or execute a task during migration.
   if (cards.enabled) await store.transact((state) => {
@@ -126,7 +128,7 @@ export async function createControlPlane(overrides = {}) {
 
   server.once('listening', () => {
     context.memoryAdmission.start?.();
-    context.withdrawals.start();
+    context.withdrawals.start();context.deliveryMaintenance.start();
     context.capacityRecoveryStopped=false;
     context.capacityRecoveryTimer=setInterval(()=>pollModelCapacity(context).catch(()=>console.error('[capacity-recovery] recovery deferred')),1000);context.capacityRecoveryTimer.unref();
     context.retention.start();context.backupMaintenance.start();
@@ -140,7 +142,7 @@ export async function createControlPlane(overrides = {}) {
   server.once('close', () => {
     context.memoryAdmission.stop?.();
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.withdrawals.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
 }
@@ -215,6 +217,14 @@ async function route(context) {
     const record = await stateView(store,s=>adminRecordDetail(s, decodeURIComponent(adminRecordMatch[1])));
     return record ? json(response, 200, { ok: true, record }, { 'cache-control': 'no-store' })
       : json(response, 404, { ok: false, error: 'Record not found' });
+  }
+  if(request.method==='GET'&&url.pathname==='/api/v1/admin/deliveries'){
+    requireAdminSession(context,request,false);return json(response,200,{ok:true,deliveries:await stateView(store,deliveryAttention)},{'cache-control':'no-store'});
+  }
+  if(request.method==='POST'&&url.pathname==='/api/v1/admin/deliveries/resume'){
+    requireAdminSession(context,request,true);const body=await readJson(request,16384);
+    try{return json(response,200,{ok:true,result:await store.transact(s=>resumeDelivery(s,body))});}
+    catch{return json(response,409,{ok:false,error:'投递状态已变化，请刷新后核对；原结果未改动'});}
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/settings/runtime') {
     requireAdminSession(context, request, false);

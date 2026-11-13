@@ -16,7 +16,7 @@
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.116.4** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.117.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 维护备份登记、空闲自动去重及恢复见[维护备份整理](docs/maintenance-backups.md)。
 
@@ -446,3 +446,5 @@ repositories are outside its scope; directory totals are not physical disk savin
 TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使用分组采集配置和标准输出/业务日志检索；私有容器直接日志还需核实接口并登记 `containerLogApplications`。固定只读、明确时间和脱敏证据保留，不把当前容器尾部或空索引当作完整历史。配置、验证和回退见 [TSF 只读接入](docs/tsf-deployment-reads.md#应用异常日志只读调查)。
 
 撤回原提问/话题会停止对应后台任务，具体检测延迟与边界见[撤回关联取消](docs/withdrawal-cancellation.md)。
+
+投递长期失败的停止、管理员提醒及原文件重投见 [投递待维护](docs/delivery-maintenance.md)。

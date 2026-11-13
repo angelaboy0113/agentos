@@ -1,3 +1,4 @@
+import{deliveryAttention}from'../shared/delivery-retry.js';
 import {adminTaskMetrics, taskDisplayStatus, taskWallMs} from './admin-metrics.js';
 const TERMINAL = new Set(['completed', 'failed', 'blocked', 'cancelled']);
 
@@ -18,6 +19,7 @@ export function adminOverview(state, runtime, now = Date.now(), options = {}) {
     ? Number(runtime.runnerConcurrency) : currentRunners.length;
   return {
     runtime,
+    deliveryAttentionCount:deliveryAttention(state).length,
     ...metrics,
     runner: runner ? { ...runner, online: runnerHasActiveLease || now - Date.parse(runner.lastSeenAt) < 30_000 } : null,
     runners: currentRunners,

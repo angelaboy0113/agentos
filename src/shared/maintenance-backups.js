@@ -1,3 +1,4 @@
+import{deliveryHeld}from'./delivery-retry.js';
 import{withdrawnCardInert}from'./withdrawn-delivery.js';
 // Only owner-registered historical bulk directories; never a general runtime sweep.
 import fs from 'node:fs/promises';
@@ -59,8 +60,8 @@ export function maintenanceBusy(state,context={}){
  if(['reports','websiteEvidence','successStickers'].some(k=>context[k]?.workers?.size))return true;
  if(context.cards?.workers?.size&&[...context.cards.workers.keys()].some(k=>!state.cardMessages?.[k]||!inert('cardMessages',k,state.cardMessages[k])))return true;
  if(Object.entries(state.receptionInbox??{}).some(([key,e])=>!inert('receptionInbox',key,e)&&['queued','reminding','diagnosing'].includes(e.status))||Object.entries(state.recoveryEvents??{}).some(([key,e])=>!inert('recoveryEvents',key,e)&&['queued','diagnosing'].includes(e.status)))return true;
- if(Object.entries(state.cardMessages??{}).some(([key,c])=>!withdrawnCardInert(state,key,c)&&!inert('cardMessages',key,c)&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered)))return true;
- for(const k of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries'])if(Object.values(state[k]??{}).some(d=>!d.superseded&&!d.deliveredAt&&(!d.messageId||d.parts?.some(p=>!p.messageId))))return true;
+ if(Object.entries(state.cardMessages??{}).some(([key,c])=>!deliveryHeld('cardMessages',c)&&!withdrawnCardInert(state,key,c)&&!inert('cardMessages',key,c)&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered)))return true;
+ for(const k of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries'])if(Object.values(state[k]??{}).some(d=>!deliveryHeld(k,d)&&!d.superseded&&!d.deliveredAt&&(!d.messageId||d.parts?.some(p=>!p.messageId))))return true;
  return false;
 }
 // lock is deliberately never auto-stolen after a crash. Operator may inspect/remove it.

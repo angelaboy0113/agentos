@@ -1,3 +1,4 @@
+import{deliveryHeld}from'../shared/delivery-retry.js';
 import{withdrawalCardHash}from'../shared/withdrawn-delivery.js';
 import {stateView} from '../shared/state-view.js';
 const turnActive=t=>['queued','thinking','decided','ready'].includes(t.status);
@@ -6,8 +7,8 @@ const identity=x=>JSON.stringify([x.profile,x.chatId,x.messageId]);
 // A missing message, authentication failure or API timeout is NOT proof of recall.
 export function withdrawalCandidates(s){
  const pending=new Set();
- for(const name of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries','longInvestigationNotices'])for(const e of Object.values(s[name]??{}))if(!e.messageId&&!e.superseded)pending.add(e.questionId);
- for(const [key,c]of Object.entries(s.cardMessages??{}))if(key.startsWith('question:')&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered))pending.add(key.slice(9));
+ for(const name of ['reportDeliveries','websiteEvidenceDeliveries','stickerDeliveries','longInvestigationNotices'])for(const e of Object.values(s[name]??{}))if(!deliveryHeld(name,e)&&!e.messageId&&!e.superseded)pending.add(e.questionId);
+ for(const [key,c]of Object.entries(s.cardMessages??{}))if(!deliveryHeld('cardMessages',c)&&key.startsWith('question:')&&(c.revision!==c.deliveredRevision||c.terminalMention&&!c.mentionDelivered))pending.add(key.slice(9));
  for(const j of s.jobs??[])if(jobActive(j))pending.add(j.questionId);
  for(const t of s.conversations??[])if(turnActive(t))pending.add(t.questionId);
  const candidates=new Map(),add=x=>{if(x.profile&&x.chatId&&x.messageId)candidates.set(identity(x),x);};

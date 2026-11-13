@@ -1,3 +1,4 @@
+import{deliveryHeld,deliveryFailure,deliveryFingerprint}from'../shared/delivery-retry.js';
 import path from 'node:path';
 import {lstat,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
@@ -32,26 +33,28 @@ export class WebsiteEvidenceDelivery {
  }
  async status(job){
   const state=await stateView(this.context.store,s=>({questions:{[job.questionId]:s.questions?.[job.questionId]},websiteEvidenceDeliveries:Object.fromEntries(Object.entries(s.websiteEvidenceDeliveries??{}).filter(([,e])=>e.sourceJobId===job.id))})),q=state.questions?.[job.questionId];
-  return Object.values(state.websiteEvidenceDeliveries??{}).filter(e=>e.sourceJobId===job.id&&(!job.questionId||e.messageId||e.questionGeneration===q?.generation)&&!e.superseded).map(e=>({...e.item,delivery:e.messageId?'sent':'pending',messageId:e.messageId??null}));
+  return Object.values(state.websiteEvidenceDeliveries??{}).filter(e=>e.sourceJobId===job.id&&(!job.questionId||e.messageId||e.questionGeneration===q?.generation)&&!e.superseded).map(e=>({...e.item,delivery:e.messageId?'sent':deliveryHeld('websiteEvidenceDeliveries',e)?'attention':'pending',messageId:e.messageId??null}));
  }
  async retry(){
   if(this.closed||typeof this.context.feishu.replyImage!=='function')return;
-  const state=await stateView(this.context.store,s=>({websiteEvidenceDeliveries:Object.fromEntries(Object.entries(s.websiteEvidenceDeliveries??{}).filter(([,e])=>!e.messageId&&!e.superseded&&Date.now()>=(e.retryAt??0)))}));
-  for(const [key,entry]of Object.entries(state.websiteEvidenceDeliveries??{}))if(!entry.messageId&&!entry.superseded&&Date.now()>=(entry.retryAt??0)&&!this.workers.has(key)){
+  const state=await stateView(this.context.store,s=>({websiteEvidenceDeliveries:Object.fromEntries(Object.entries(s.websiteEvidenceDeliveries??{}).filter(([,e])=>!deliveryHeld('websiteEvidenceDeliveries',e)&&!e.messageId&&!e.superseded&&Date.now()>=(e.retryAt??0)))}));
+  for(const [key,entry]of Object.entries(state.websiteEvidenceDeliveries??{}))if(!deliveryHeld('websiteEvidenceDeliveries',entry)&&!entry.messageId&&!entry.superseded&&Date.now()>=(entry.retryAt??0)&&!this.workers.has(key)){
    const work=this.deliver(key,entry);this.workers.set(key,work);work.finally(()=>this.workers.delete(key)).catch(()=>{});
   }
   await Promise.allSettled([...this.workers.values()]);
  }
  async deliver(key,entry){
+  if(deliveryHeld('websiteEvidenceDeliveries',entry))return;
   try{
-   const state=await stateView(this.context.store,s=>({jobs:s.jobs.filter(j=>j.id===entry.sourceJobId),questions:{[entry.questionId]:s.questions?.[entry.questionId]}})),job=state.jobs.find(j=>j.id===entry.sourceJobId),q=state.questions?.[entry.questionId];
+   const state=await stateView(this.context.store,s=>({jobs:s.jobs.filter(j=>j.id===entry.sourceJobId),questions:{[entry.questionId]:s.questions?.[entry.questionId]},websiteEvidenceDeliveries:{[key]:s.websiteEvidenceDeliveries?.[key]}})),job=state.jobs.find(j=>j.id===entry.sourceJobId),q=state.questions?.[entry.questionId];
+   if(deliveryHeld('websiteEvidenceDeliveries',state.websiteEvidenceDeliveries?.[key]))return;
    if(q?.withdrawnAt||!job||!screenshotRequested(job)||job.status==='cancelled'||entry.questionId&&(!q||q.generation!==entry.questionGeneration)){await this.context.store.transact(s=>{s.websiteEvidenceDeliveries[key].superseded=true;});return;}
    const recipient=privateRecipient(state,job);if(recipient!==entry.destination.privateRecipient)throw new Error('Evidence recipient changed');
    const file=await websiteEvidenceFile(this.context.config.dataDir,entry.sourceJobId,entry.item);
    const result=await this.context.feishu.replyImage(entry.destination.messageId,file,{...entry.destination,idempotencyKey:'aos-web-'+createHash('sha256').update(key).digest('hex').slice(0,32)});
    const messageId=messageIdOf(result);if(!messageId)throw new Error('Image receipt missing');
-   await this.context.store.transact(s=>Object.assign(s.websiteEvidenceDeliveries[key],{messageId,deliveredAt:new Date().toISOString(),failures:0,retryAt:0}));
-  }catch{await this.context.store.transact(s=>{const e=s.websiteEvidenceDeliveries[key];if(!e)return;e.failures=(e.failures??0)+1;e.retryAt=Date.now()+Math.min(300000,5000*2**Math.min(e.failures,6));e.error='截图发送或校验未完成，将重试投递，不重复网页操作';});}
+   await this.context.store.transact(s=>Object.assign(s.websiteEvidenceDeliveries[key],{messageId,deliveryRetry:undefined,deliveredAt:new Date().toISOString(),failures:0,retryAt:0}));
+  }catch(error){await this.context.store.transact(s=>{const e=s.websiteEvidenceDeliveries[key];if(!e||deliveryFingerprint('websiteEvidenceDeliveries',e)!==deliveryFingerprint('websiteEvidenceDeliveries',entry))return;e.failures=(e.failures??0)+1;e.retryAt=Date.now()+Math.min(300000,5000*2**Math.min(e.failures,6));e.error='截图发送或校验未完成，将重试投递，不重复网页操作';deliveryFailure('websiteEvidenceDeliveries',e,entry,error);});}
  }
  async close(){this.closed=true;await Promise.allSettled([...this.workers.values()]);}
 }

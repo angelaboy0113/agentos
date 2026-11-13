@@ -22,6 +22,7 @@ async function skillFiles(dir){for(const e of await readdir(path.join(root,dir),
 await skillFiles('config/design-skills/pptx');await skillFiles('config/design-skills/frontend-design');
 required.unshift('src/shared/interface-document.js','scripts/render-interface-document.mjs','test/interface-document.test.js','docs/interface-document-efficiency.md');
 required.unshift('src/control-plane/admin-metrics.js','test/admin-metrics.test.js');
+required.unshift('src/shared/delivery-retry.js','src/control-plane/delivery-maintenance.js','test/delivery-retry.test.js','docs/delivery-maintenance.md');
 for(const name of required){const info=await lstat(path.join(root,name));if(!info.isFile()||info.isSymbolicLink())throw new Error('Missing/unsafe package member: '+name);}
 for(const name of ['config/multi-repository-project.example.json','config/capabilities.example.json','config/task-result.schema.json','package.json','package-lock.json'])JSON.parse(await readFile(path.join(root,name),'utf8'));
 const pkg=JSON.parse(await readFile(path.join(root,'package.json'),'utf8')),lock=JSON.parse(await readFile(path.join(root,'package-lock.json'),'utf8'));

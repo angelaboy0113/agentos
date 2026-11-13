@@ -1,6 +1,6 @@
 const state = { overview: null, settings: null, records: [] };
 let overviewSeq=0;
-const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识', usage: '使用统计' };
+const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识', usage: '使用统计', deliveries: '投递待维护' };
 const statusMap = {
   queued: ['排队中', 'warn'], running: ['执行中', 'live'], cancelling: ['停止中', 'warn'],
   completed: ['完整完成', 'good'], partial: ['部分完成', 'warn'], unverified: ['结果未标明', 'warn'], sent: ['已回复', 'good'], failed: ['失败', 'bad'],
@@ -39,6 +39,7 @@ async function loadOverview() {
     const { overview } = await api('/api/v1/admin/overview?includeMaintenance='+document.querySelector('#overview-include-tests').checked); if(seq!==overviewSeq)return; state.overview = overview;
     document.querySelector('#service-dot').classList.add('online');
     document.querySelector('#service-label').textContent = 'AgentOS 正常';
+    setText('delivery-badge',overview.deliveryAttentionCount||'');const warning=document.querySelector('#delivery-warning');warning.hidden=!overview.deliveryAttentionCount;warning.textContent=`${overview.deliveryAttentionCount} 条投递待维护：自动重试已停止，点击核对`;
     const runtime = overview.runtime;
     document.querySelector('#hero-model').textContent = modelName(runtime.model);
     document.querySelector('#hero-effort').textContent = runtime.reasoningEffort ? `推理强度：${effortMap[runtime.reasoningEffort] ?? runtime.reasoningEffort}` : '推理强度继承本机 Codex 设置';
@@ -54,7 +55,7 @@ async function loadOverview() {
     setText('metric-window', `滚动24小时：${date(overview.metricPolicy.from)} — ${date(overview.metricPolicy.to)}（北京时间，按结束时点统计）；耗时样本 ${overview.performance.sampleCount}。`);
     document.querySelector('#recent-list').innerHTML = overview.recent.length ? overview.recent.map(recordRow).join('') : '<div class="loading-row">暂无处理记录</div>';
     bindRecordButtons(document.querySelector('#recent-list'));
-    document.querySelector('#audit-list').innerHTML = overview.audit.length ? overview.audit.map((item) => `<p>${escapeHtml(dateTime(item.at))} · 模型设置已更新</p>`).join('') : '<p>暂无变更</p>';
+    document.querySelector('#audit-list').innerHTML = overview.audit.length ? overview.audit.map((item) => `<p>${escapeHtml(dateTime(item.at))} · ${item.type==='delivery_resume'?'已人工恢复原投递':'模型设置已更新'}</p>`).join('') : '<p>暂无变更</p>';
     markUpdated();
   } catch (error) { if(seq===overviewSeq)offline(error); }
 }
@@ -104,8 +105,8 @@ async function openRecord(id) {
 }
 
 function closeDrawer() { document.querySelector('#record-drawer').classList.remove('open'); document.querySelector('#record-drawer').setAttribute('aria-hidden', 'true'); document.querySelector('#drawer-backdrop').hidden = true; }
-function showView(name) { document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'usage') loadUsage(); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); if (name === 'knowledge') loadKnowledge(); }
-function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if (current === 'usage') loadUsage(); else if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
+function showView(name) { if(name==='deliveries')loadDeliveries(); document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'usage') loadUsage(); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); if (name === 'knowledge') loadKnowledge(); }
+function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if(current==='deliveries')loadDeliveries(); else if (current === 'usage') loadUsage(); else if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
 function bindRecordButtons(root) { root.querySelectorAll('[data-record]').forEach((item) => item.addEventListener('click', () => openRecord(item.dataset.record))); }
 
 function recordRow(item) { const status = statusInfo(item.displayStatus ?? item.status); return `<button class="record-row" data-record="${escapeHtml(item.id)}"><span class="record-icon">${item.kind === 'job' ? '任' : '答'}</span><span class="record-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.projectName)} · ${escapeHtml(stageMap[item.stage] ?? item.stage ?? '普通回复')}</small></span><span class="record-meta"><span class="pill ${status[1]}">${status[0]}</span><small>${dateTime(item.createdAt)}</small></span></button>`; }
@@ -183,3 +184,7 @@ document.querySelector('#usage-export').onclick=async()=>{
  try{const params=new URLSearchParams({start:value('usage-start'),end:value('usage-end'),profile:value('usage-profile'),scope:value('usage-scope'),grouping:value('usage-grouping'),excludeAdmin:value('usage-admin'),person:usagePerson});const response=await fetch('/api/v1/admin/usage/export.xlsx?'+params);if(!response.ok){const data=await response.json();throw Error(data.error||'导出失败');}const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='AgentOS-使用统计.xlsx';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('Excel 已导出，包含当前筛选范围的全部明细');}
  catch(e){toast(e.message);}finally{button.disabled=false;button.textContent='导出 Excel';}
 };
+
+async function loadDeliveries(){
+ try{const{deliveries}=await api('/api/v1/admin/deliveries');document.querySelector('#delivery-list').innerHTML=deliveries.length?deliveries.map((e,i)=>`<article class="metric-explanation"><strong>${escapeHtml(e.questionId??'私聊登记')} · ${escapeHtml(e.profile??'')}</strong><p>${escapeHtml(e.group)} · 失败 ${e.attempts} 次 · ${escapeHtml(e.reason)} · ${dateTime(e.heldAt)}</p><button class="text-button" data-retry-delivery="${i}" ${e.reconciliationRequired?'disabled':''}>${e.reconciliationRequired?'先核对平台回执':'已检查，恢复原投递'}</button></article>`).join(''):'<p>暂无待维护投递</p>';document.querySelectorAll('[data-retry-delivery]').forEach(b=>b.addEventListener('click',async()=>{const e=deliveries[Number(b.dataset.retryDelivery)];if(!confirm('确认已核对权限及原消息回执？将恢复原投递，不会重新执行查询。'))return;try{await api('/api/v1/admin/deliveries/resume',{method:'POST',headers:{'x-agentos-admin':'1'},body:JSON.stringify({group:e.group,key:e.key,fingerprint:e.fingerprint})});await loadDeliveries();}catch(error){toast(error.message)}}));markUpdated();}catch(error){toast(error.message)}
+}

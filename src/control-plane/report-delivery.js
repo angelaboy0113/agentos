@@ -1,3 +1,4 @@
+import{deliveryHeld,deliveryFailure,deliveryFingerprint}from'../shared/delivery-retry.js';
 import {inspectReport} from '../shared/report-inspection.js';
 import {prepareReportParts} from '../shared/report-parts.js';
 import {hashFile} from '../shared/file-digest.js';
@@ -66,8 +67,8 @@ export class ReportDelivery {
  }
  async retry(snapshot){
   if(this.closed||typeof this.context.feishu.replyFile!=='function')return;
-  const state=snapshot??await stateView(this.context.store,s=>{const entries=Object.entries(s.reportDeliveries??{}).filter(([,e])=>!e.messageId&&!e.superseded);const ids=new Set(entries.map(([,e])=>e.questionId));return {reportDeliveries:Object.fromEntries(entries),jobs:entries.length?(s.jobs??[]).filter(j=>ids.has(j.questionId)||entries.some(([,e])=>e.sourceJobId===j.id)):[],questions:s.questions};});
-  for(const [key,entry] of Object.entries(state.reportDeliveries??{}))if(!entry.messageId&&!entry.superseded&&Date.now()>=(entry.retryAt??0)&&!this.workers.has(key)){
+  const state=snapshot??await stateView(this.context.store,s=>{const entries=Object.entries(s.reportDeliveries??{}).filter(([,e])=>!deliveryHeld('reportDeliveries',e)&&!e.messageId&&!e.superseded);const ids=new Set(entries.map(([,e])=>e.questionId));return {reportDeliveries:Object.fromEntries(entries),jobs:entries.length?(s.jobs??[]).filter(j=>ids.has(j.questionId)||entries.some(([,e])=>e.sourceJobId===j.id)):[],questions:s.questions};});
+  for(const [key,entry] of Object.entries(state.reportDeliveries??{}))if(!deliveryHeld('reportDeliveries',entry)&&!entry.messageId&&!entry.superseded&&Date.now()>=(entry.retryAt??0)&&!this.workers.has(key)){
    if(!deliveryEligible(state,entry)){await this.context.store.transact(s=>{s.reportDeliveries[key].superseded=true;});continue;}
    if(entry.questionId&&state.questions?.[entry.questionId]?.generation!==entry.questionGeneration){await this.context.store.transact(s=>{s.reportDeliveries[key].superseded=true;});continue;}
    const work=this.deliver(key,entry);this.workers.set(key,work);work.finally(()=>this.workers.delete(key)).catch(()=>{});
@@ -75,6 +76,7 @@ export class ReportDelivery {
   await Promise.allSettled([...this.workers.values()]);
  }
  async deliver(key,entry){
+  if(deliveryHeld('reportDeliveries',entry))return;
   try{
    if(!/^[a-f0-9]{64}$/.test(entry.item.verificationHash??'')){await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{superseded:true,error:'旧文件无最终核验记录，保留本地，不自动发送'}));return;}
    const {file}=await reportFile(this.context.config.dataDir,entry.sourceJobId,entry.item,{includeContent:false});
@@ -84,7 +86,7 @@ export class ReportDelivery {
     const ids=[];
     for(const [index,part] of prepared.parts.entries()){
      const current=await questionStateView(this.context.store,{id:entry.sourceJobId,questionId:entry.questionId});
-     if(!deliveryEligible(current,entry)||current.reportDeliveries[key]?.superseded||(entry.questionId&&current.questions?.[entry.questionId]?.generation!==entry.questionGeneration))return;
+     if(deliveryHeld('reportDeliveries',current.reportDeliveries?.[key])||!deliveryEligible(current,entry)||current.reportDeliveries[key]?.superseded||(entry.questionId&&current.questions?.[entry.questionId]?.generation!==entry.questionGeneration))return;
      const recipient=privateRecipient(current,current.jobs.find(j=>j.id===entry.sourceJobId));if(entry.destination.privateRecipient&&entry.destination.privateRecipient!==recipient)throw new Error('Private recipient changed');
      const prior=current.reportDeliveries[key]?.parts?.[index];
      if(prior&&(prior.sha256!==part.sha256||prior.name!==part.name))throw new Error('投递分卷内容发生变化');
@@ -95,10 +97,10 @@ export class ReportDelivery {
      const id=messageIdOf(result);if(!id)throw new Error('没有文件消息编号');ids.push(id);
      await this.context.store.transact(state=>{const e=state.reportDeliveries[key];e.parts??=[];e.parts[index]={name:part.name,sha256:part.sha256,bytes:part.bytes,messageId:id,deliveredAt:new Date().toISOString()};});
     }
-    await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{messageId:ids[0],messageIds:ids,partCount:ids.length,deliveredAt:new Date().toISOString(),failures:0,retryAt:0}));
+    await this.context.store.transact(state=>Object.assign(state.reportDeliveries[key],{messageId:ids[0],messageIds:ids,deliveryRetry:undefined,partCount:ids.length,deliveredAt:new Date().toISOString(),failures:0,retryAt:0}));
    }finally{await prepared.close();}
-  }catch{
-   await this.context.store.transact(state=>{const e=state.reportDeliveries[key];e.failures=(e.failures??0)+1;e.retryAt=Date.now()+Math.min(300000,5000*2**Math.min(e.failures,6));e.error='文件发送或校验未通过；保留文件并等待重试，不重新查询数据库';});
+  }catch(error){
+   await this.context.store.transact(state=>{const e=state.reportDeliveries[key];if(!e||deliveryFingerprint('reportDeliveries',e)!==deliveryFingerprint('reportDeliveries',entry))return;e.failures=(e.failures??0)+1;e.retryAt=Date.now()+Math.min(300000,5000*2**Math.min(e.failures,6));e.error='文件发送或校验未通过；保留文件并等待重试，不重新查询数据库';deliveryFailure('reportDeliveries',e,entry,error);});
   }
  }
  async close(){this.closed=true;await Promise.allSettled([...this.workers.values()]);}

@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createControlPlane } from '../src/control-plane/server.js';
+import{deliveryFailure,deliveryFingerprint}from'../src/shared/delivery-retry.js';
 import { adminOverview } from '../src/control-plane/admin-view.js';
 
 test('admin overview keeps a runner online while it holds a live job lease', () => {
@@ -54,6 +55,15 @@ test('local admin console serves task records and safely updates runtime setting
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   const cookie = page.headers.get('set-cookie').split(';')[0];
 
+  await app.store.transact(s=>{s.cardMessages??={};const e={revision:2,deliveredRevision:1,card:{text:'private payload'},destination:{profile:'bot',replyTo:'root'}};deliveryFailure('cardMessages',e,e,{status:403},1);s.cardMessages['held-test']=e;});
+  assert.equal((await fetch(base+'/api/v1/admin/deliveries')).status,401);
+  const held=await(await fetch(base+'/api/v1/admin/deliveries',{headers:{cookie}})).json();assert.equal(held.deliveries.length,1);assert.ok(!JSON.stringify(held).includes('private payload'));
+  const resume=base+'/api/v1/admin/deliveries/resume',request={group:'cardMessages',key:'held-test',fingerprint:held.deliveries[0].fingerprint};
+  assert.equal((await fetch(resume,{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(request)})).status,401);
+  const resumeHeaders={cookie,origin:base,'x-agentos-admin':'1','content-type':'application/json'};
+  assert.equal((await fetch(resume,{method:'POST',headers:resumeHeaders,body:JSON.stringify({...request,fingerprint:'wrong'})})).status,409);
+  assert.equal((await fetch(resume,{method:'POST',headers:resumeHeaders,body:JSON.stringify(request)})).status,200);
+  await app.store.transact(s=>{delete s.cardMessages['held-test'];});
   const prune=base+'/api/v1/admin/source-snapshots/prune';
   assert.equal((await fetch(prune,{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'})).status,401);
   for(const body of [{},{apply:true}]){

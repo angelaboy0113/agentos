@@ -1,3 +1,4 @@
+import{deliveryHeld,deliveryFailure,deliveryFingerprint}from'../shared/delivery-retry.js';
 import {withdrawnCardInert} from '../shared/withdrawn-delivery.js';
 import {fitNativeCardTables} from './card-markdown-tables.js';
 import {stateView} from '../shared/state-view.js';
@@ -71,7 +72,7 @@ export class LiveCards {
     if (this.closed) return;
     if(this.retrying)return this.retrying;
     const work=(async()=>{
-      const keys=await stateView(this.store,s=>Object.entries(s.cardMessages??{}).filter(([key,v])=>!withdrawnCardInert(s,key,v)&&v.error!=='原消息已撤回，停止更新'&&(v.retiredMessageIds?.length||v.revision!==v.deliveredRevision||(v.terminalMention&&!v.mentionDelivered))&&Date.now()>=(v.retryAt??0)).map(([key])=>key));
+      const keys=await stateView(this.store,s=>Object.entries(s.cardMessages??{}).filter(([key,v])=>!deliveryHeld('cardMessages',v)&&!withdrawnCardInert(s,key,v)&&v.error!=='原消息已撤回，停止更新'&&(v.retiredMessageIds?.length||v.revision!==v.deliveredRevision||(v.terminalMention&&!v.mentionDelivered))&&Date.now()>=(v.retryAt??0)).map(([key])=>key));
       if(this.afterRetry)this.afterRetry().catch(()=>{});
       for(const key of keys)this.flush(key).catch(()=>{});
     })();this.retrying=work;try{await work;}finally{this.retrying=null;}
@@ -98,6 +99,7 @@ export class LiveCards {
   async deliver(key, force) {
     await this.cleanupPrivate(key);
     let entry = await stateView(this.store,s=>withdrawnCardInert(s,key,s.cardMessages?.[key])?null:s.cardMessages?.[key]);
+    if(deliveryHeld('cardMessages',entry))return entry.messageId;
     if (entry?.error==='原消息已撤回，停止更新') return entry.messageId;
     if (!entry || (entry.revision === entry.deliveredRevision && (!entry.terminalMention || entry.mentionDelivered))) return entry?.messageId;
     // A local maintenance hold prevents external edits while operator approval is pending.
@@ -170,17 +172,20 @@ export class LiveCards {
         });
       }
       // Long reports stay in the same card. Never resume legacy plaintext overflow on restart.
+      await this.store.transact(s=>{const c=s.cardMessages[key];if(c&&deliveryFingerprint('cardMessages',c)===deliveryFingerprint('cardMessages',entry))delete c.deliveryRetry;});
       return messageId;
     } catch (error) {
       const withdrawn = /(?:\b230011\b|message was withdrawn)/i.test(String(error?.message ?? error));
       await this.store.transact((state) => {
         const current = state.cardMessages[key];
+        if(!current||deliveryFingerprint('cardMessages',current)!==deliveryFingerprint('cardMessages',entry))return;
         if(withdrawnCardInert(state,key,current)){current.error='原消息已撤回，停止更新';current.retryAt=0;return;}
         if (withdrawn) Object.assign(current, { deliveredRevision: current.revision, failures: 0, retryAt: 0, error: '原消息已撤回，停止更新' });
         else {
           current.failures = (current.failures ?? 0) + 1;
           current.retryAt = Date.now() + Math.min(60_000, current.failures * 5000);
           current.error = '消息投递失败，等待重试'; // Never persist raw CLI credentials in public status.
+          deliveryFailure('cardMessages',current,entry,error);
           // Deterministic platform layout rejection needs a new representation,
           // not unlimited retries of the identical rejected card.
           if(/(?:\b11310\b|card table number over limit)/i.test(String(error?.message ?? error))

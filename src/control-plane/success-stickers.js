@@ -1,3 +1,4 @@
+import{deliveryHeld,deliveryFailure,deliveryFingerprint}from'../shared/delivery-retry.js';
 import {createHash,randomInt} from 'node:crypto';
 import {isAdministrator} from './authorization.js';
 import {messageIdOf} from './live-cards.js';
@@ -95,15 +96,15 @@ export class SuccessStickers {
   async registrationReceipt(key){
     if(this.workers.has('r:'+key))return this.workers.get('r:'+key);
     const work=(async()=>{
-      const e=await this.context.store.select(s=>s.stickerRegistrations?.[key]);if(!e||e.receiptId||Date.now()<(e.retryAt??0))return;
+      const e=await this.context.store.select(s=>s.stickerRegistrations?.[key]);if(!e||deliveryHeld('stickerRegistrations',e)||e.receiptId||Date.now()<(e.retryAt??0))return;
       if(stickerIdentity(this.agent(e.profile))!==e.identity||!isAdministrator(this.context.projects,{profile:e.profile,senderId:e.senderId}))return;
       if(e.firstAttemptAt&&Date.now()-e.firstAttemptAt>=55*60*1000){await this.markReconcile('stickerRegistrations',key);return;}
       await this.context.store.transact(s=>{s.stickerRegistrations[key].firstAttemptAt??=Date.now();});
       try{
         const sent=await this.context.feishu.reply(e.messageId,`原生表情包已登记，素材库现有 ${e.count} 张`,{profile:e.profile,idempotencyKey:'aos-sticker-reg-'+key.slice(0,32)});
         const receiptId=messageIdOf(sent);if(!receiptId)throw Error('Registration receipt missing');
-        await this.context.store.transact(s=>Object.assign(s.stickerRegistrations[key],{receiptId,deliveredAt:now(),retryAt:0,error:null}));
-      }catch{await this.failed('stickerRegistrations',key);}
+        await this.context.store.transact(s=>Object.assign(s.stickerRegistrations[key],{receiptId,deliveryRetry:undefined,deliveredAt:now(),retryAt:0,error:null}));
+      }catch(error){await this.failed('stickerRegistrations',key,e,error);}
     })();this.workers.set('r:'+key,work);try{await work;}finally{this.workers.delete('r:'+key);}
   }
   async retry(){
@@ -150,12 +151,12 @@ export class SuccessStickers {
           fileKey:chosen.fileKey,destination:{messageId:q.messageId,chatId:q.chatId,replyInThread:q.replyInThread===true,profile:a.profile},createdAt:now(),idempotencyKey:'aos-sticker-'+key.slice(0,36)};
       });
     }
-    const pending=await this.context.store.select(s=>Object.entries(s.stickerDeliveries??{}).filter(([,e])=>!e.messageId&&!e.superseded&&!e.reconciliationRequired&&Date.now()>=(e.retryAt??0)));
+    const pending=await this.context.store.select(s=>Object.entries(s.stickerDeliveries??{}).filter(([,e])=>!deliveryHeld('stickerDeliveries',e)&&!e.messageId&&!e.superseded&&!e.reconciliationRequired&&Date.now()>=(e.retryAt??0)));
     for(const [key,e]of pending)await this.deliver(key,e);
   }
   async deliver(key,e){
-    if(this.closed)return;
-    const fresh=await this.snapshot(),q=fresh.questions?.[e.questionId],card=fresh.cardMessages?.['question:'+e.questionId],a=this.agent(e.profile);
+    if(this.closed||deliveryHeld('stickerDeliveries',e))return;
+    const fresh=await this.snapshot();if(deliveryHeld('stickerDeliveries',fresh.stickerDeliveries?.[key]))return;const q=fresh.questions?.[e.questionId],card=fresh.cardMessages?.['question:'+e.questionId],a=this.agent(e.profile);
     if(stickerIdentity(a)!==e.identity||!firstQuestionRound(q)||q.generation!==e.questionGeneration||q.messageId!==e.destination.messageId||q.chatId!==e.destination.chatId){
       await this.context.store.transact(s=>{s.stickerDeliveries[key].superseded=true;});return;
     }
@@ -174,10 +175,10 @@ export class SuccessStickers {
     try{
       const result=await this.context.feishu.replySticker(e.destination.messageId,e.fileKey,{...e.destination,idempotencyKey:e.idempotencyKey});
       const messageId=messageIdOf(result);if(!messageId)throw Error('Sticker receipt missing');
-      await this.context.store.transact(s=>Object.assign(s.stickerDeliveries[key],{messageId,deliveredAt:now(),failures:0,retryAt:0,error:null}));
-    }catch{await this.failed('stickerDeliveries',key);}
+      await this.context.store.transact(s=>Object.assign(s.stickerDeliveries[key],{messageId,deliveryRetry:undefined,deliveredAt:now(),failures:0,retryAt:0,error:null}));
+    }catch(error){await this.failed('stickerDeliveries',key,e,error);}
   }
-  async failed(collection,key){await this.context.store.transact(s=>{const e=s[collection]?.[key];if(!e)return;e.failures=(e.failures??0)+1;e.retryAt=Date.now()+Math.min(300000,e.failures*5000);e.error='表情包投递尚未确认，将沿用原素材及幂等键重试';});}
+  async failed(collection,key,attempted,error){await this.context.store.transact(s=>{const e=s[collection]?.[key];if(!e||deliveryFingerprint(collection,e)!==deliveryFingerprint(collection,attempted??e))return;e.failures=(e.failures??0)+1;e.retryAt=Date.now()+Math.min(300000,e.failures*5000);e.error='表情包投递尚未确认，将沿用原素材及幂等键重试';deliveryFailure(collection,e,attempted??e,error);});}
   async markReconcile(collection,key){await this.context.store.transact(s=>Object.assign(s[collection][key],{reconciliationRequired:true,error:'超过平台去重窗口前暂停未确认投递，需核对回执；业务结果不受影响'}));}
   async close(){this.closed=true;await this.retrying;await Promise.allSettled(this.workers.values());}
 }

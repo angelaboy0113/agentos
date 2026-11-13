@@ -18,6 +18,7 @@
         <button class="nav-item" data-view="usage"><span>使用统计</span><kbd>5</kbd></button>
         <button class="nav-item" data-view="records"><span>任务记录</span><kbd>2</kbd></button>
         <button class="nav-item" data-view="knowledge"><span>团队知识</span><kbd>4</kbd></button>
+        <button class="nav-item" data-view="deliveries"><span>投递待维护</span><span id="delivery-badge"></span></button>
         <button class="nav-item" data-view="settings"><span>模型设置</span><kbd>3</kbd></button>
       </nav>
       <div class="sidebar-foot">
@@ -38,7 +39,9 @@
         </div>
       </header>
 
+      <section class="view" id="view-deliveries"><section class="panel"><h2>投递待维护</h2><p>停止的是重复投递，业务结果仍保留。请先检查目的地、权限及已有回执，再恢复投递；不会重新查询业务数据。表情超过平台去重窗口仍需核对原回执。</p><div id="delivery-list"></div></section></section>
       <section class="view active" id="view-overview">
+        <button class="text-button" data-goto="deliveries" id="delivery-warning" hidden></button>
         <div class="hero-panel">
           <div>
             <span class="eyebrow">当前运行模型</span>

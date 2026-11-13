@@ -1932,3 +1932,8 @@ MongoDB经审核固定副本集主节点发现、缺集合参数可修正诊断�
 The startup reconciliation path no longer reactivates a recorded factual contradiction merely because a later semantic comparison calls it equivalent. The reuse gate also rejects legacy reactivated contradictions when their dependency/deployment evidence is unchanged. Existing uncertain paraphrase recovery and genuinely reverified changed-source supersession remain available. No task limits, data scopes, or business permissions changed.
 
 Transport-suppressed withdrawn cards without positive withdrawal proof remain candidates for the normal read-only watcher. Only exact same-profile/chat/message API deleted=true retires their payload; errors remain retryable and no successful delivery receipt is invented.
+
+
+## 1.117.0 — Durable delivery attention and operator recovery
+
+Cards/completion mentions, report files, screenshot images, native stickers and registration receipts stop automatically after permanent rejection or sustained repeated failure of the same payload. Transient failures keep retrying; no model/query/job deadline changes. Immutable payload fingerprints fence new content and late failures. Local administrator console exposes redacted attention records and CSRF-protected CAS resume; part receipts and idempotency keys survive. Each matching bot administrator receives at most one private alert attempt per payload. Alert failure remains unconfirmed and never creates a new infinite retry queue. Historical terminal deliveries migrate without forging success.
