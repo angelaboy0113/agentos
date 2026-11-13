@@ -71,6 +71,7 @@ export class ConversationService {
     this.running = null;
     this.timer = null;
     this.abort = new AbortController();
+    this.turnAborts=new Map();
   }
 
   async start() {
@@ -92,6 +93,8 @@ export class ConversationService {
     await Promise.all([...this.feedback.values()].map((entry) => entry.running));
   }
 
+  abortWithdrawn(ids){for(const id of ids){this.turnAborts.get(id)?.abort();const f=this.feedback.get(id);clearTimeout(f?.timer);clearInterval(f?.pulse);this.feedback.delete(id);}this.wake();}
+
   async enqueue(event) {
     if (!event.message_id || !event.chat_id || !event.sender_id) throw new Error('Missing message identity');
     const profile = event.agent_profile ?? null;
@@ -101,6 +104,7 @@ export class ConversationService {
       state.conversations ??= [];
       const existing = state.conversations.find((turn) => turn.messageId === event.message_id && turn.profile === profile);
       if (existing) return { conversation: true, turnId: existing.id, duplicate: true };
+      if(Object.values(state.questions??{}).some(q=>q.withdrawnAt&&q.profile===profile&&q.chatId===event.chat_id&&[event.root_id,event.reply_to].filter(Boolean).some(id=>id===q.messageId||id===q.threadRootId)))return {ignored:true,reason:'source_topic_withdrawn'};
       const privateReply=event.chat_type==='p2p'&&Object.values(state.cardMessages??{}).find(c=>c.destination.visibility==='requester'&&c.privateDeliveryKind==='dm'&&c.privateDeliveryChatId===event.chat_id&&c.destination.openId===event.sender_id&&c.destination.profile===profile&&c.messageId===event.reply_to);
       const routedChatId=privateReply?.destination?.chatId??event.chat_id;
       const turn = {
@@ -258,7 +262,7 @@ export class ConversationService {
   }
 
   async update(id, fields) {
-    await this.context.store.transact((state) => Object.assign(state.conversations.find((turn) => turn.id === id), fields));
+    await this.context.store.transact((state) => {const t=state.conversations.find(turn=>turn.id===id);if(t&&!t.withdrawnAt)Object.assign(t,fields);});
   }
 
   async process(key) {
@@ -276,12 +280,17 @@ export class ConversationService {
         const aiStarted = Date.now();
         await this.update(turn.id, { status: 'thinking', aiStartedAt: new Date(aiStarted).toISOString(),
           queueMs: aiStarted - Date.parse(turn.createdAt) });
+        const turnAbort=new AbortController();this.turnAborts.set(turn.id,turnAbort);
+        const signal=AbortSignal.any([this.abort.signal,turnAbort.signal]);
         try {
-          const input = await this.buildInput(turn);
-          let decision = validateDecision(await this.decide(input, this.abort.signal, { sessionKey: key,
+          signal.throwIfAborted();
+          const input = await this.buildInput(turn);signal.throwIfAborted();
+          if(await stateView(this.context.store,s=>(s.conversations??[]).find(t=>t.id===turn.id)?.withdrawnAt))return;
+          let decision = validateDecision(await this.decide(input, signal, { sessionKey: key,
             onEvent: (event, info) => {
               if (event === 'error') this.update(turn.id, { connectionRetryAt: new Date().toISOString(), connectionWillRetry: info.willRetry }).catch(() => {});
             } }));
+          signal.throwIfAborted();
           if (decision.definitionUpdates?.length) {
             try { decision.definitionReceipts=await recordBusinessDefinitions({dataDir:this.context.config.dataDir,file:this.context.config.knowledgeFile,actor:turn,projectId:input.project?.id,updates:decision.definitionUpdates});
               if(decision.definitionReceipts.length)decision.reply+=`\n已保存团队口径：${decision.definitionReceipts.map(r=>`${r.title}（${r.environment}，第${r.version}版）`).join('、')}。后续同范围提问沿用该版本，实时数据重新查询。`;
@@ -292,12 +301,14 @@ export class ConversationService {
           await this.update(turn.id, { status: 'decided', decision, timing: decision.timing ?? { aiMs: Date.now() - aiStarted },
             attachmentPool: input.attachments, aiCompletedAt: new Date().toISOString() });
         } catch (error) {
+          if(turnAbort.signal.aborted)return;
           if (this.stopped) { await this.update(turn.id, { status: 'queued' }); return; }
           console.error(`[conversation:${turn.id}] AI failed:`, error.message);
           await this.update(turn.id, { status: 'ready', error: error.message.slice(0, 4000),
             response: conversationFailure(error), ...(this.context.reception?.enabled&&!turn.directoryChannel?{displayMode:'direct',questionId:turn.receptionParentQuestionId??null}:{}), ...(error.contextBudget?{contextBudget:error.contextBudget}:{}),
             timing: error.timing ?? { aiMs: Date.now() - aiStarted }, aiFailed: true });
         }
+        finally{this.turnAborts.delete(turn.id);}
         continue;
       }
       if (turn.status === 'decided') {
@@ -316,6 +327,7 @@ export class ConversationService {
         clearInterval(feedback?.pulse);
         await feedback?.running;
         this.feedback.delete(turn.id);
+        if(await stateView(this.context.store,s=>(s.conversations??[]).find(t=>t.id===turn.id)?.withdrawnAt||s.questions?.[turn.questionId]?.withdrawnAt))return;
         const deliveryStarted = Date.now();
         if(turn.directoryChannel){const responseIds=await this.context.contactChannels.deliver(turn);await this.update(turn.id,{status:'sent',completedAt:new Date().toISOString(),responseIds,contactImageMessageId:turn.outcome?.contactImage?responseIds[0]:null});continue;}
         const responseIds = [...(turn.responseIds ?? [])];
@@ -335,6 +347,7 @@ export class ConversationService {
           if (mention && parts.length) parts[parts.length - 1] = `${parts.at(-1)}\n\n${mention.text}`;
         }
         for (let i = turn.sentParts ?? 0; i < parts.length; i++) {
+          if(await stateView(this.context.store,s=>(s.conversations??[]).find(t=>t.id===turn.id)?.withdrawnAt||s.questions?.[turn.questionId]?.withdrawnAt))return;
           const result = await this.context.feishu.reply(turn.messageId, parts[i], { profile: turn.profile, replyInThread: turn.replyInThread,idempotencyKey:'aos-direct-'+turn.id+'-'+i });
           const id = responseMessageId(result);
           if (id) responseIds.push(id);
@@ -364,7 +377,7 @@ export class ConversationService {
 
   async activateQuestion(turn){
    if(!turn.questionPreview&&!turn.ownerStatusChannel)return turn;
-   return this.context.store.transact(s=>{const t=s.conversations.find(x=>x.id===turn.id);if(directSocial(t)){t.displayMode='direct';t.questionId=t.receptionParentQuestionId??null;}else if(t.questionPreview){attachQuestion(s,t,t.deferredQuestionEvent??{},this.context.projects);}
+   return this.context.store.transact(s=>{const t=s.conversations.find(x=>x.id===turn.id);if(t?.withdrawnAt||s.questions?.[t?.questionId]?.withdrawnAt)throw Error('原提问已撤回');if(directSocial(t)){t.displayMode='direct';t.questionId=t.receptionParentQuestionId??null;}else if(t.questionPreview){attachQuestion(s,t,t.deferredQuestionEvent??{},this.context.projects);}
     delete t.questionPreview;delete t.reservedQuestionId;delete t.deferredQuestionEvent;return structuredClone(t);});
   }
 
@@ -454,6 +467,7 @@ export class ConversationService {
   }
 
   async apply(turn) {
+    if(await stateView(this.context.store,s=>(s.conversations??[]).find(t=>t.id===turn.id)?.withdrawnAt||s.questions?.[turn.questionId]?.withdrawnAt))throw Error('原提问已撤回');
     if(turn.ownerStatusChannel){const d=turn.decision;if(d.action!=='reply'||d.intent!=='none'||d.environmentQuery||d.environmentSetup||d.attachmentIds.length||d.requiresSourceInspection)throw Error('管理员状态私聊不执行任何业务或权限动作');return d.ownerStatusUpdate?this.context.reception.setOwnerStatus(turn,d.ownerStatusUpdate):{notice:''};}
     if(turn.decision.ownerStatusUpdate)throw Error('共享状态只能由指定管理员私聊设置');
     if(turn.directoryChannel&&!['lookup_contact','reply'].includes(turn.decision.action))throw new Error('本群仅支持按姓名或工号查人，不执行开发、环境或数据库任务');

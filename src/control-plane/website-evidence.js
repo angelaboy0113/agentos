@@ -45,7 +45,7 @@ export class WebsiteEvidenceDelivery {
  async deliver(key,entry){
   try{
    const state=await stateView(this.context.store,s=>({jobs:s.jobs.filter(j=>j.id===entry.sourceJobId),questions:{[entry.questionId]:s.questions?.[entry.questionId]}})),job=state.jobs.find(j=>j.id===entry.sourceJobId),q=state.questions?.[entry.questionId];
-   if(!job||!screenshotRequested(job)||job.status==='cancelled'||entry.questionId&&(!q||q.generation!==entry.questionGeneration)){await this.context.store.transact(s=>{s.websiteEvidenceDeliveries[key].superseded=true;});return;}
+   if(q?.withdrawnAt||!job||!screenshotRequested(job)||job.status==='cancelled'||entry.questionId&&(!q||q.generation!==entry.questionGeneration)){await this.context.store.transact(s=>{s.websiteEvidenceDeliveries[key].superseded=true;});return;}
    const recipient=privateRecipient(state,job);if(recipient!==entry.destination.privateRecipient)throw new Error('Evidence recipient changed');
    const file=await websiteEvidenceFile(this.context.config.dataDir,entry.sourceJobId,entry.item);
    const result=await this.context.feishu.replyImage(entry.destination.messageId,file,{...entry.destination,idempotencyKey:'aos-web-'+createHash('sha256').update(key).digest('hex').slice(0,32)});

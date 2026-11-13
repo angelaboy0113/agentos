@@ -141,6 +141,7 @@ export class JsonStore {
       }
       // A same-question supplement adds execution context; it cannot replace the root request.
       const question = input.questionId && state.questions?.[input.questionId];
+      if(question?.withdrawnAt)throw Error('原提问已撤回，不再创建任务');
       if (input.taskIntent === 'analysis' && question && question.projectId === input.projectId && question.chatId === input.chatId) {
         const root = (state.conversations ?? []).find(t => t.id === question.rootTurnId);
         const prior = state.jobs.filter(j => j.questionId === question.id && j.projectId === input.projectId && j.chatId === input.chatId && j.taskIntent === 'analysis');
@@ -574,7 +575,7 @@ export class JsonStore {
         }
       }
       if(maxRunning!==undefined&&state.jobs.filter(j=>['running','cancelling'].includes(j.status)).length>=maxRunning)return null;
-      const job = state.jobs.find((candidate) => candidate.status === 'queued' &&
+      const job = state.jobs.find((candidate) => candidate.status === 'queued' && !state.questions?.[candidate.questionId]?.withdrawnAt &&
         !state.jobs.some((other) => other.status === 'cancelling' && other.projectId === candidate.projectId) &&
         (capabilities.length === 0 || capabilities.includes(candidate.stage)));
       if (!job) return null;

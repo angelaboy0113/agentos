@@ -17,6 +17,7 @@ export class ReportDelivery {
   await this.context.store.transact(state=>{
    const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='completed'||!reportDeliveryReady(current))return;
    const q=state.questions?.[job.questionId];
+   if(q?.withdrawnAt)return false;
    if(q&&state.jobs.filter(j=>j.questionId===job.questionId).at(-1)?.id!==job.id)return;
    const jobs=job.questionId?state.jobs.filter(j=>j.questionId===job.questionId):[current];
    state.reportDeliveries??={};
@@ -103,7 +104,7 @@ export class ReportDelivery {
  async close(){this.closed=true;await Promise.allSettled([...this.workers.values()]);}
 }
 
-function deliveryEligible(state,entry){const source=state.jobs.find(j=>j.id===entry.sourceJobId);const reviewer=state.jobs.filter(j=>(entry.questionId?j.questionId===entry.questionId:j.id===entry.sourceJobId)&&j.reportReviews?.[entry.item.id]).at(-1);return reportEligible(reviewer??source??{},entry.item);}
+function deliveryEligible(state,entry){if(state.questions?.[entry.questionId]?.withdrawnAt)return false;const source=state.jobs.find(j=>j.id===entry.sourceJobId);const reviewer=state.jobs.filter(j=>(entry.questionId?j.questionId===entry.questionId:j.id===entry.sourceJobId)&&j.reportReviews?.[entry.item.id]).at(-1);return reportEligible(reviewer??source??{},entry.item);}
 
 function reportDeliveryReady(job){return job?.result?.outcome==='ready'||job?.result?.outcome==='partial'&&job.reportPartialDeliverySet?.files?.length>0;}
 
@@ -111,6 +112,7 @@ function reviewFingerprint(job){return createHash('sha256').update(JSON.stringif
 function recoverableDocumentReview(job,state){
  const r=job?.result,a=r?.reportAssessment,q=state.questions?.[job?.questionId];
  if(!job||job.status!=='completed'||job.nextJobId||job.taskIntent!=='analysis'||job.tabularDelivery||r?.outcome!=='partial'||r.handoffGate?.passed!==true||r.sourceSyncBlocked||a?.decision!=='deliver_partial'||a.coverage!=='incomplete'||!Array.isArray(a.issues)||a.issues.some(i=>i.kind!=='required_output')||!Array.isArray(a.deliverables)||!a.deliverables.length)return false;
+ if(q?.withdrawnAt)return false;
  if(q&&state.jobs.filter(j=>j.questionId===job.questionId).at(-1)?.id!==job.id||state.cardMessages?.['question:'+job.questionId]?.error==='原消息已撤回，停止更新')return false;
  return a.deliverables.every(d=>{const f=job.reportFiles?.find(f=>f.id===d.fileId),old=r.reportInspections?.find(e=>e.status==='verified'&&e.binding?.fileId===f?.id&&e.binding.sha256===f.sha256&&e.binding.verificationHash===f.verificationHash);return f?.kind==='document'&&f.complete&&(!q||f.questionGeneration===q.generation)&&job.reportReviews?.[f.id]?.status==='awaiting_review'&&old;});
 }

@@ -27,6 +27,7 @@ const questionDelivery=(state,q,identity)=>values(state.stickerDeliveries).some(
 
 // Display colour alone is never evidence that a business request succeeded.
 export function stickerSuccess(state,q,card,agent,library) {
+  if(q?.withdrawnAt)return false;
   if(!firstQuestionRound(q) || !library?.items?.length || !(Date.parse(q.createdAt)>=Date.parse(library.activatedAt))
     || q.profile!==agent.profile || q.projectId!==agent.projectId || q.visibility==='requester' || q.directoryChannel
     || agent.allowedChatIds && !agent.allowedChatIds.includes(q.chatId)

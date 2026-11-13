@@ -1,3 +1,4 @@
+import {WithdrawalWatcher} from './withdrawals.js';
 import {MemoryAdmission} from '../shared/memory-admission.js';
 import {getHeapStatistics} from 'node:v8';
 import {stateView,questionStateView} from '../shared/state-view.js';
@@ -109,6 +110,7 @@ export async function createControlPlane(overrides = {}) {
   });
   const conversations = new ConversationService(context, { ...await loadConversationSettings(config.conversationFile), memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
+  context.withdrawals=new WithdrawalWatcher(context);
   const receptionPolicy=await loadReceptionPolicy(config.receptionFile);store.receptionPolicy=receptionPolicy;context.reception=new ReceptionService(context,receptionPolicy,overrides.receptionOptions);
   context.retention = new HistoryRetention(context);
   context.backupMaintenance = new BackupMaintenance(context);
@@ -124,6 +126,7 @@ export async function createControlPlane(overrides = {}) {
 
   server.once('listening', () => {
     context.memoryAdmission.start?.();
+    context.withdrawals.start();
     context.capacityRecoveryStopped=false;
     context.capacityRecoveryTimer=setInterval(()=>pollModelCapacity(context).catch(()=>console.error('[capacity-recovery] recovery deferred')),1000);context.capacityRecoveryTimer.unref();
     context.retention.start();context.backupMaintenance.start();
@@ -137,7 +140,7 @@ export async function createControlPlane(overrides = {}) {
   server.once('close', () => {
     context.memoryAdmission.stop?.();
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.withdrawals.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
 }

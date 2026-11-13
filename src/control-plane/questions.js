@@ -151,6 +151,7 @@ export function publishQuestion(context, id) {
   let queue = locks.get(context.store); if (!queue) { queue = new Map(); locks.set(context.store, queue); }
   const work = (queue.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
     const snapshot = await stateView(context.store,s=>({questions:{[id]:s.questions[id]},recoveryEvents:Object.fromEntries(Object.entries(s.recoveryEvents??{}).filter(([,e])=>e.questionId===id)),jobs:(s.jobs??[]).filter(j=>j.questionId===id),conversations:(s.conversations??[]).filter(t=>t.questionId===id||t.id===s.questions[id]?.rootTurnId||t.id===s.questions[id]?.latestTurnId),environmentEnrollments:Object.fromEntries(Object.entries(s.environmentEnrollments??{}).filter(([,e])=>e.questionId===id)),cardMessages:{['question:'+id]:s.cardMessages?.['question:'+id]}}));
+    if(snapshot.questions[id]?.withdrawnAt)return null;
     const version = sourceVersion(snapshot, id);
     const view = questionView(snapshot, id, context.projects);
     if(view.terminal&&context.replyAddressing){
@@ -170,7 +171,7 @@ export function publishQuestion(context, id) {
     });
     return context.cards.upsert(key, view.card, view.destination, { terminal: view.terminal, immediate: true,
       questionRound:{generation:view.question.generation,turnId:view.question.latestTurnId}, resultText: view.resultText, terminalMention: view.mention, publicCompletionMention: view.mention?.kind==='directory_completion', generation,
-      guard: (state) => { if (sourceVersion(state, id) !== version) throw new Error('Question changed during presentation; retry'); } });
+      guard: (state) => { if(state.questions[id]?.withdrawnAt)throw Error('原提问已撤回');if (sourceVersion(state, id) !== version) throw new Error('Question changed during presentation; retry'); } });
   });
   queue.set(id, work); work.finally(() => { if (queue.get(id) === work) queue.delete(id); }).catch(() => {});
   return work;

@@ -27,7 +27,7 @@ export function investigationElapsed(jobs,startAt,now=Date.now()){
  let total=0,end=lower;for(const [a,b]of intervals.filter(([a,b])=>b>a).sort((x,y)=>x[0]-y[0])){if(b>end){total+=b-Math.max(a,end);end=b;}}return total;
 }
 function current(state,q){
- if(!q||q.visibility==='requester')return null;
+ if(!q||q.withdrawnAt||q.visibility==='requester')return null;
  const turn=(state.conversations??[]).find(t=>t.id===q.latestTurnId),root=(state.conversations??[]).find(t=>t.id===q.rootTurnId);
  if(root?.chatType!=='group'||!turn||turn.visibility==='requester'||root.profile!==q.profile||turn.profile!==q.profile||root.chatId!==q.chatId||turn.chatId!==q.chatId)return null;
  const jobs=(state.jobs??[]).filter(j=>j.questionId===q.id&&j.projectId===q.projectId&&(j.originProfile??j.agentProfile)===q.profile);
