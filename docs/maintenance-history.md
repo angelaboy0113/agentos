@@ -1909,3 +1909,7 @@ Real disk recovery and deployment evidence are maintained by each instance opera
 ## 1.115.0 — 撤回关联取消
 
 原提问/话题经同身份API确认已撤回后，停止排队/等待任务、中止单条对话模型调用，运行任务沿既有租约取消与退出确认。抑制迟到卡片、文件、截图、表情和接待恢复；补充消息撤回不误停整个问题，网络/权限错误不当撤回。见[撤回处理](withdrawal-cancellation.md)。无新任务总耗时或轮次限制、无新凭据/权限。
+
+
+## 1.116.0
+MongoDB经审核固定副本集主节点发现、缺集合参数可修正诊断；网页开关只读状态；保存证据明确正文/封装摘要。导航继续按既有维护审核选择器开放，不开放业务写入或新增整任务截止。详见 readonly-investigation-recovery.md。

@@ -1,0 +1,4 @@
+{
+  "description": "Merge into your existing reviewed MongoDB entry only after verifying replica identity; keep host/database/auth/SSH/collection scope unchanged. No secrets.",
+  "replicaSet": "verified-replica-set-name"
+}

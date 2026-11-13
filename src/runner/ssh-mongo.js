@@ -7,6 +7,6 @@ export async function mongoDriverArchive(){
 }
 export async function sshMongoConnection(e,q,cred,adapters={}){
  if(!e.transport)throw new Error('MongoDB requires approved SSH remote execution; no local connection or fallback');
- const connection=await sshRemoteConnection(e,q,cred,{...adapters,archive:adapters.archive??mongoDriverArchive,connectionPayload:{host:e.host,port:e.port,database:e.database,authSource:e.authSource??e.database,username:cred.username,password:cred.password,tls:e.tls===true,readConcern:e.readConcern??'local',timeoutMs:q.timeoutMs,collections:q.collections,requiredFilters:q.requiredFilters??[],accountPolicy:e.accountPolicy??'strict-readonly'}});
+ const connection=await sshRemoteConnection(e,q,cred,{...adapters,archive:adapters.archive??mongoDriverArchive,connectionPayload:{host:e.host,port:e.port,database:e.database,authSource:e.authSource??e.database,username:cred.username,password:cred.password,tls:e.tls===true,...(e.replicaSet?{replicaSet:e.replicaSet}:{}),readConcern:e.readConcern??'local',timeoutMs:q.timeoutMs,collections:q.collections,requiredFilters:q.requiredFilters??[],accountPolicy:e.accountPolicy??'strict-readonly'}});
  return {request:async(op,args={})=>(await connection.request({op,args,timeout:q.timeoutMs},q.timeoutMs))[0],destroy:connection.destroy};
 }

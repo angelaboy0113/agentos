@@ -80,13 +80,15 @@ export const controlMetadata=controlMetadataBatch();
 
 export function websiteFields({secretSelector,full=false}){
  const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
- return [...document.querySelectorAll('input,textarea,select')].filter(e=>visible(e)&&!e.matches(secretSelector)&&!e.closest('[data-sensitive],[data-agentos-secret]')).slice(0,full?undefined:101).map(e=>{
+ return [...document.querySelectorAll('input,textarea,select,[role="switch"],[role="checkbox"],[role="radio"]')].filter(e=>visible(e)&&!e.matches(secretSelector)&&!e.closest('[data-sensitive],[data-agentos-secret]')).slice(0,full?undefined:101).map(e=>{
   const group=e.closest('.el-form-item,.ant-form-item,.el-col,.ant-col,label,[role="group"]');
   const labels=[...group?.querySelectorAll('label,.el-form-item__label,.ant-form-item-label,span')??[]].filter(n=>n!==e&&/[:：]$/.test(n.innerText?.trim()??''));
   const local=group&&[...group.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(visible).length===1?group.innerText?.trim():'';
   const label=(e.getAttribute('aria-label')||labels[0]?.innerText||e.labels?.[0]?.innerText||(local&&local.length<=100?local:'')||e.placeholder||e.name||e.id||'字段').trim().slice(0,100);
   if(/password|passwd|secret|token|credential|authorization|api.?key|app.?key|密码|令牌|密钥/i.test([label,e.name,e.id,e.placeholder].join(' ')))return {label,value:'[已隐藏]',readOnly:true,disabled:!!e.disabled};
-  return {label,value:String(e.tagName==='SELECT'?e.selectedOptions[0]?.textContent??e.value:e.value).slice(0,full?undefined:500),readOnly:!!e.readOnly,disabled:!!e.disabled};
+  const checkable=e.matches('input[type=checkbox],input[type=radio],[role=switch],[role=checkbox],[role=radio]');
+  const selected=checkable?(e.matches('input')?(e.indeterminate?'mixed':e.checked):e.getAttribute('aria-checked')):undefined;
+  return {label,...(checkable?{checked:selected===true||selected==='true'?true:selected===false||selected==='false'?false:selected==='mixed'?'mixed':null}:{}),value:String(e.tagName==='SELECT'?e.selectedOptions[0]?.textContent??e.value:e.value).slice(0,full?undefined:500),readOnly:!!e.readOnly,disabled:!!e.disabled};
  });
 }
 
