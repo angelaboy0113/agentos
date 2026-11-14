@@ -10,7 +10,7 @@
 
 ## 执行与核验
 
-Runner将模型内容交给受信任渲染器，不授予模型任意shell、联网或全机写入权限。输出仅位于 `data/exports/<jobId>/report-<uuid>.<format>`；符号链接/错任务路径拒绝。实际文件重新读取并校验摘要、Office ZIP CRC及必要部件、PDF/PNG签名、JSON语法和HTML离线策略。PDF/PNG在无网络的独立无头浏览器中实际渲染、检查可见内容与横向溢出。每份文件保存版本2核验收据与生成配方。
+Runner将模型内容交给受信任渲染器，不授予模型任意shell、联网或全机写入权限。输出仅位于 `data/exports/<jobId>/report-<uuid>.<format>`；符号链接/错任务路径拒绝。实际文件重新读取并校验摘要、Office ZIP CRC及必要部件、PDF/PNG签名、JSON语法和HTML离线策略。PDF及用户明确指定HTML/H5截图的PNG在无网络独立无头浏览器中渲染；默认PNG图片创作走Codex原生生图，见 [原生图片生成](native-image-generation.md)，不以网页截图代替。每份文件保存版本2核验收据与生成配方。
 
 结构核验不证明业务金额或口径正确。已有CSV金额、范围、独立基准的原有核验不变；业务报表转XLSX使用 `content={"sourceReportId":"已核验CSV引用","sheetName":"数据"}`，逐格复用原CSV，不重查或损失大整数。不能通过新增排版工具绕过原业务核验。
 

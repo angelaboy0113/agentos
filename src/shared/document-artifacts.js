@@ -1,3 +1,4 @@
+import {htmlImageRequested,creativeImageRequested,generateNativeImage} from './image-generation.js';
 import {currentUserQuestion} from './user-request-scope.js';
 import {mkdir,writeFile,readFile,lstat,realpath,rm} from 'node:fs/promises';
 import path from 'node:path';
@@ -73,11 +74,11 @@ async function encodeNative(dataDir,job,request){
  const bytes=['html','csv','json','txt','md','svg'].includes(format)?await encode(format,artifact.bytes.toString('utf8')):artifact.bytes;
  return {bytes,request:{...request,nativeSource:{sha256:artifact.sha256,...(source?{buildScript:source.bytes.toString('utf8'),buildScriptSha256:source.sha256}:{})}}};
 }
-export async function createDocuments(dataDir,job,requests){
+export async function createDocuments(dataDir,job,requests,options={}){
  if(requests==null)return [];
  if(!Array.isArray(requests)||!requests.length)fail('documentRequests需要非空数组或null');
  const directory=await documentDirectory(dataDir,job.id),files=[];
- try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const native=typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;const bytes=native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;
+ try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'&&!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;if(request.format==='png')audit.generation=image?'codex-native':'explicit-html-screenshot';
  const item={id,filename,format:request.format,kind:'document',title:request.title,contentType:documentMime[request.format],bytes:bytes.length,sha256:hash(bytes),rowCount:0,complete:true};
  const {officePreview}=await import('./office-preview.js');const preview=await officePreview(bytes,request.format,directory);if(preview)audit.preview=preview;
  const receipt={version:2,kind:'document',status:'verified',file:item,coverage:{rowCount:0},binding:{jobId:job.id,projectId:job.projectId,profile:job.originProfile??job.agentProfile,questionId:job.questionId,sourceEnvironment:job.sourceEnvironment??null},purpose:request.purpose,contentAudit:audit,businessVerification:'结构和实际文件核验不等于业务金额核验；业务结论沿用任务独立证据与handoff门控',request};
@@ -86,7 +87,7 @@ export async function createDocuments(dataDir,job,requests){
 }
 export async function documentInputText(dataDir,jobId,item){
  const {reportFile}=await import('./report-files.js');const {file}=await reportFile(dataDir,jobId,item,{includeContent:false});const receipt=JSON.parse(await readFile(path.join(path.dirname(file),item.id+'.verification.json'),'utf8'));
- return JSON.stringify({format:item.format,title:item.title,purpose:receipt.purpose,...(receipt.request.nativeSource?{actualFile:file,buildScript:receipt.request.nativeSource.buildScript??null,nativeSource:receipt.request.nativeSource}:{content:receipt.request.content}),sourceSha256:item.sha256,note:'这是已交付实际文件的哈希绑定生成配方；修改应派生新文件，不能改原件。'});
+ return JSON.stringify({format:item.format,title:item.title,purpose:receipt.purpose,...(receipt.request.nativeSource?{actualFile:file,buildScript:receipt.request.nativeSource.buildScript??null,nativeSource:receipt.request.nativeSource}:{content:receipt.request.content}),...(receipt.request.imageGeneration?{actualFile:file,imageGeneration:receipt.request.imageGeneration}:{}),sourceSha256:item.sha256,note:'这是已交付实际文件的哈希绑定生成配方；修改应派生新文件，不能改原件。'});
 }
 export function requestedDocumentFormats(question=''){
  const rules={html:/\bhtml?\b|\bh5\b|网页文件/i,pptx:/\bpptx?\b|幻灯片|演示文稿/i,docx:/\bdocx\b|\bword\b/i,pdf:/\bpdf\b/i,png:/\bpng\b/i,xlsx:/\bxlsx\b/i,json:/\bjson文件\b|(?:生成|输出|导出).{0,8}json/i,md:/markdown|\.md\b/i,svg:/\bsvg\b/i,zip:/\bzip\b/i};
@@ -94,12 +95,12 @@ export function requestedDocumentFormats(question=''){
  return Object.entries(rules).filter(([,re])=>clauses.some(c=>re.test(c)&&/(?:生成|输出|产出|提供|给我|做成|制作|导出|整理成|交付|改成|转换|转成|存为|保存为|发我)/i.test(c))).map(([f])=>f);
 }
 export function documentFailureResult(result,error){
- const code=error.code??'DOCUMENT_RENDER',message=String(error.message);
- return {...result,outcome:'partial',documentFailure:{code,message},handoff:{...result.handoff,returnTo:'none',risks:[...(result.handoff?.risks??[]),'文件生成或实际核验未完成：'+message]},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'文件步骤 '+code+'：'+message}],nextStep:'保留现有业务证据与产物工作区，修正文件构建或布局后重新提交documentRequests；内置渲染器完成实际核验，不重新业务查询。'},finalMessage:result.finalMessage+'\n文件生成或实际核验未完成：'+message+'。已有调查证据保留，不能声称文件已交付。'};
+ const code=error.code??'DOCUMENT_RENDER',message=String(error.message),imageWait=/^IMAGE_/.test(code)&&code!=='IMAGE_PROMPT';
+ return {...result,outcome:'partial',documentFailure:{code,message},handoff:{...result.handoff,returnTo:'none',risks:[...(result.handoff?.risks??[]),'文件生成或实际核验未完成：'+message]},investigation:{...result.investigation,status:imageWait?'wait':'continue',blocker:imageWait?{kind:'unavailable',needed:'维护者核对本次原生生图会话、已保存文件与请求收据后接续原问题，不重复业务查询或盲目重生',evidence:code+'：'+message}:null,goals:[{id:'original-question',required:true,status:'open',evidence:'文件步骤 '+code+'：'+message}],nextStep:imageWait?'核对原生生图具体失败环节和已有尝试；原结果保留，不降级截图或自动重放生图':'保留现有业务证据与产物工作区，修正文件构建或布局后重新提交documentRequests；内置渲染器完成实际核验，不重新业务查询。'},finalMessage:result.finalMessage+'\n文件生成或实际核验未完成：'+message+'。已有调查证据保留，不能声称文件已交付。'};
 }
 export function enforceDocumentOutput(job,result){
  if(result.outcome!=='ready')return result;
- const required=requestedDocumentFormats(currentUserQuestion(job)),files=[...(job.reportFiles??[]),...(result.exportFiles??[])];
+ const required=requestedDocumentFormats(currentUserQuestion(job));if(creativeImageRequested(currentUserQuestion(job))&&!required.includes('png'))required.push('png');const files=[...(job.reportFiles??[]),...(result.exportFiles??[])];
  const missing=required.filter(format=>!files.some(f=>f.format===format&&f.verificationHash));
  if(!missing.length)return result;
  return {...result,outcome:'partial',reportReviewRequired:true,handoff:{...result.handoff,returnTo:'none',risks:[...(result.handoff?.risks??[]),'用户要求的实际文件尚未生成并核验']},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'用户要求的实际文件尚缺：'+missing.join(',')}],nextStep:'用documentRequests生成缺少的实际文件，复用已有证据，不重查业务。'},finalMessage:result.finalMessage+'\n用户要求的 '+missing.join('/')+' 文件尚未生成并核验，不能声称已完整交付。'};

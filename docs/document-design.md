@@ -23,3 +23,7 @@ H5 是离线 HTML 附件，继续禁用任意脚本、外链资源、网络和�
 执行 `node scripts/test.js test/document-design.test.js test/document-artifacts.test.js test/artifact-workspace.test.js`，核验双系统/双环境选择、无格式追问、普通查询不加载、上游资源摘要、真实 Runner 提示注入、旧配方原生表格/精确值/分页及投递边界。`node scripts/verify-capability-package.mjs` 检查技能资源随包齐全。实际模型制作、视觉预览与群交付应分别记验收，不能仅凭提示里出现技能名判定美观或业务已交付。
 
 新任务无加载事件时，检查当前问句、绑定输入 MIME/格式和发行版本；不要通过读取其它任务文件补猜。文件失败继续原任务工作区和既有证据，不重新查询业务。回退保留当前数据、凭据与产物；旧 JSON 配方仍可读取，原生产物收据兼容规则不变。其他操作系统及完整跨机迁移需单独验证。
+
+## 图片创作
+
+图片、海报、插画和头像不走H5技能截图。可信Runner单独启用原生生图工具，见 [原生图片生成](native-image-generation.md)。PPT/H5原有设计技能与网页取证截图保持；不向无动作的聊天分类器开放生图。

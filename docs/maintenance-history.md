@@ -1937,3 +1937,7 @@ Transport-suppressed withdrawn cards without positive withdrawal proof remain ca
 ## 1.117.0 — Durable delivery attention and operator recovery
 
 Cards/completion mentions, report files, screenshot images, native stickers and registration receipts stop automatically after permanent rejection or sustained repeated failure of the same payload. Transient failures keep retrying; no model/query/job deadline changes. Immutable payload fingerprints fence new content and late failures. Local administrator console exposes redacted attention records and CSRF-protected CAS resume; part receipts and idempotency keys survive. Each matching bot administrator receives at most one private alert attempt per payload. Alert failure remains unconfirmed and never creates a new infinite retry queue. Historical terminal deliveries migrate without forging success.
+
+## 1.118.0 — 原生生图默认路由
+
+图片/海报/插画/头像/PNG默认通过可信独立Codex原生生图会话，不再默认HTML截图。仅用户明确选择H5/HTML截图才保留旧渲染；网页证据、Office预览、PDF及其它文件流程保持。新增请求/身份/环境/参考图摘要、进程锁、实际文件来源核验及已生成复用。未完成尝试保留待维护，不盲目重生/降级。所有机器人共用适配；原有对话无动作权限保持。无新npm依赖/数据库权限/全局Codex设置。合成原生新图、参考图编辑和相同请求复用另留部署方审计，普通回归不调用真实生图；其它OS/完整私有迁移仍须实测。

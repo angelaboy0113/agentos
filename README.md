@@ -448,3 +448,5 @@ TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使�
 撤回原提问/话题会停止对应后台任务，具体检测延迟与边界见[撤回关联取消](docs/withdrawal-cancellation.md)。
 
 投递长期失败的停止、管理员提醒及原文件重投见 [投递待维护](docs/delivery-maintenance.md)。
+
+图片、海报、插画、头像等创作默认由 Codex 原生生图工具生成，只有用户明确指定 HTML/H5 截图才采用浏览器渲染。网页取证截图保持独立用途。见 [原生图片生成](docs/native-image-generation.md)。

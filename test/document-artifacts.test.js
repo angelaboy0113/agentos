@@ -14,7 +14,7 @@ const content={html:'<h1>生产服务架构</h1><table><tr><td>gateway</td><td>�
 const request=f=>({format:f,title:'架构与接口',purpose:'核对固定源码及实例证据后按要求交付',content:content[f]});
 for(const format of documentFormats)test('actual '+format+' generation and digest-bound followup',async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'aos-doc-'));
- try{const [item]=await createDocuments(dir,job,[request(format)]),files=await validateReportFiles(dir,job.id,[item]);assert.equal(files[0].format,format);const {content:bytes}=await reportFile(dir,job.id,item);assert.ok(bytes.length);assert.equal(JSON.parse(await documentInputText(dir,job.id,item)).content,content[format]);
+ try{const [item]=await createDocuments(dir,format==='png'?{...job,originalQuestion:'用HTML截图生成PNG'}:job,[request(format)]),files=await validateReportFiles(dir,job.id,[item]);assert.equal(files[0].format,format);const {content:bytes}=await reportFile(dir,job.id,item);assert.ok(bytes.length);assert.equal(JSON.parse(await documentInputText(dir,job.id,item)).content,content[format]);
  const view=await inspectReport(dir,{...job,reportFiles:[item]},{fileId:item.id});assert.equal(view.contentAudit.structure,'passed');
  if(format==='xlsx'){const wb=new ExcelJS.Workbook();await wb.xlsx.load(bytes);assert.equal(wb.worksheets[0].getCell('A2').value,'9007199254740993');assert.equal(wb.worksheets[0].getCell('B2').value,'1234567890123.45');}
  if(format==='pptx'){const zip=await JSZip.loadAsync(bytes);assert.match(await zip.file('ppt/slides/slide1.xml').async('string'),/生产架构/);}
