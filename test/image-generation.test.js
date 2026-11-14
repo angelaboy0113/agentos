@@ -5,8 +5,8 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
 const job={id:'JOB-image',questionId:'QST-image',projectId:'alpha',agentProfile:'bot-alpha',sourceEnvironment:'prd',originalQuestion:'设计一张海报'};
 async function setup(t){const root=await mkdtemp(path.join(os.tmpdir(),'aos-native-image-'));t.after(()=>rm(root,{recursive:true,force:true}));let calls=0;const generate=async()=>{calls++;const dir=path.join(root,'generated-'+calls);await mkdir(dir);const file=path.join(dir,'image.png');await writeFile(file,png);return {root:dir,file,threadId:'thread-'+calls};};return {root,generate,calls:()=>calls};}
 test('image routing requires explicit positive HTML screenshot instruction, negation and input screenshots do not opt in',()=>{
- for(const text of ['制作一张图片','设计成一个图片给我看看','根据截图设计海报','参考这张H5截图设计海报','不要用H5截图，生成PNG','无需HTML截图；制作长图'])assert.equal(htmlImageRequested({...job,originalQuestion:text}),false);
- for(const text of ['用H5渲染然后截图给我','HTML截图生成PNG','use HTML screenshot'])assert.equal(htmlImageRequested({...job,originalQuestion:text}),true);
+ for(const text of ['制作一张图片','设计成一个图片给我看看','根据截图设计海报','参考这张H5截图设计海报','用这张H5截图生成海报','根据这张HTML截图制作图片','参考H5截图输出PNG','不要用H5截图，生成PNG','无需HTML截图；制作长图'])assert.equal(htmlImageRequested({...job,originalQuestion:text}),false);
+ for(const text of ['用H5渲染然后截图给我','先做HTML再截图','通过HTML页面截图生成图片','HTML截图生成PNG','use HTML screenshot'])assert.equal(htmlImageRequested({...job,originalQuestion:text}),true);
  for(const text of ['设计一张海报','设计成一个图片给我看看','制作PNG给我','画一张插画'])assert.equal(creativeImageRequested(text),true);
  assert.equal(creativeImageRequested('不要图片，只要文字'),false);
 });

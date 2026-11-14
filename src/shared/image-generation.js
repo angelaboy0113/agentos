@@ -8,7 +8,13 @@ import {resolveCodexBinary,codexEnvironment,loadCodexRuntimeSettings} from './co
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const failure=(code,message)=>Object.assign(new Error(message),{code});
 export function htmlImageRequested(job){
- return String(currentUserQuestion(job)).split(/[。；;\n，,]/).some(c=>!/(?:不要|不需要|无需|别|禁止|不许|不必|without|do not|don't)/i.test(c)&&(/(?:用|使用|通过|采用|先|use|using).{0,12}(?:h5|html|网页).{0,30}(?:截图|截成|截为|截取|screenshot|capture)/i.test(c)||/(?:h5|html).{0,8}(?:截图|screenshot).{0,8}(?:生成|输出|制作|PNG)/i.test(c)));
+ // An input described as “this HTML screenshot” is a reference, not permission to render HTML.
+ return String(currentUserQuestion(job)).split(/[。；;\n，,]/).some(c=>{
+  if(/(?:不要|不需要|无需|别|禁止|不许|不必|without|do not|don't)/i.test(c))return false;
+  const method=/(?:使用|通过|采用|用|先)\s*(?:(?:制作|做|生成|编写|渲染)(?:成|一个|一份)?\s*)?(?:h5|html|网页).{0,30}(?:截图|截成|截为|截取)|\b(?:use|using)\s+(?:h5|html|web(?:page)?)\b.{0,30}(?:screenshot|capture)/i;
+  const direct=/^\s*(?:请|直接|就)?\s*(?:h5|html)\s*(?:截图|screenshot).{0,8}(?:生成|输出|制作|PNG)/i;
+  return method.test(c)||direct.test(c);
+ });
 }
 export function creativeImageRequested(question=''){
  // Embedded illustrations do not create a second PNG delivery requirement for a PPT/PDF/H5 request.
