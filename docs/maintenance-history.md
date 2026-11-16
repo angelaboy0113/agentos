@@ -1979,3 +1979,7 @@ Cards/completion mentions, report files, screenshot images, native stickers and 
 ## 1.119.1
 
 修复群任务等待用户补充时未生成真实 @、以及等待状态被投递就绪检查阻挡的问题。提醒绑定原提问者/原助手/原话题，独立等待幂等键保留最终完成通知，拒绝过期或已接续提醒；自动恢复及内部证据缺失不会催用户。详见 clarification-notices.md；不新增权限、配置或任务截止。
+
+## 1.122.1
+
+Preserve Runner-produced commit metadata receipts across model continuation, final artifact handoff and saved-stage recovery. Reject model-invented receipts. The real executor-to-handoff regression reproduces the prior blocked result and verifies partial evidence can be delivered without inventing a platform merge actor. No new permissions, dependencies or task cutoff.

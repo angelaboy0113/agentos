@@ -24,3 +24,36 @@ test('handoff metadata is bound to the trusted task receipt and rejects tamperin
 test('actual handoff accepts the metadata receipt in its own namespace without opening unrelated files',async t=>{const x=await fixture(t),r=await prepareSourceCommitMetadata({},x.sync,x.q,x.opts),job={...x.job,sourceReferenceScope:x.sync,context:[{result:{sourceHistory:r}}]},result={outcome:'partial',handoff:{artifacts:[{kind:'code',path:r.artifact}],checks:[{id:'AC-1',required:true,status:'passed',evidence:'Commit identity and pinned membership checked'}],risks:['Platform merge actor not verified'],returnTo:'none'}};const h=await validateHandoff(job,result,x.sync.workspace,{dataDir:x.opts.dataDir});assert.equal(h.issues.length,0,JSON.stringify(h.issues));assert.equal(h.verifiedArtifacts[0].namespace,'task-source-metadata');});
 
 test('only idempotent temporary GET failures retry, while authentication is retained without replay',async t=>{const x=await fixture(t);let calls=0;const r=await prepareSourceCommitMetadata({},x.sync,{...x.q,repositories:['client']},{...x.opts,fetcher:async(url)=>{calls++;if(calls===1)throw Error('temporary network');if(calls===2)return new Response('',{status:503});return Response.json(url.includes('/commits/')?commit():{base_commit:{sha:target},head_commit:{sha:pin},merge_base_commit:{sha:target}});}});assert.equal(calls,4);assert.equal(r.rows[0].status,'found');calls=0;await prepareSourceCommitMetadata({},x.sync,{...x.q,repositories:['client']},{...x.opts,fetcher:async()=>{calls++;return new Response('',{status:401});}});assert.equal(calls,1);});
+
+
+test('complete executor carries a newly produced receipt from model continuation through final artifact verification',async t=>{
+ const x=await fixture(t),cwd=path.join(x.sync.workspace,'client');
+ await writeFile(path.join(cwd,'source.txt'),'portable source');
+ execFileSync('git',['-C',cwd,'checkout','-b','qa']);execFileSync('git',['-C',cwd,'add','.']);execFileSync('git',['-C',cwd,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false','commit','-qm','fixture']);
+ const origin=path.join(x.root,'origin.git');execFileSync('git',['clone','--bare',cwd,origin]);execFileSync('git',['-C',cwd,'remote','add','origin',origin]);
+ const project={repoPath:x.sync.workspace,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(x.root,'cache'),analysisEnvironments:{qa:{repositories:[{path:'client',branch:'qa'}]}}};
+ const {executeJob}=await import('../src/runner/codex-executor.js');let turns=0;
+ const job={...x.job,sourceEnvironment:'qa',stage:'developer',context:[],originalQuestion:'Who authored this commit and is its platform merge actor verified?'};
+ const result=await executeJob(job,{executor:'codex',dataDir:x.opts.dataDir,worktreeRoot:path.join(x.root,'worktrees'),projects:{alpha:project}},async()=>{}, {
+  sourceMetadata:async(p,s,q,o)=>prepareSourceCommitMetadata(p,s,q,{...x.opts,...o,fetcher:async url=>Response.json(url.includes('/commits/')?commit():{base_commit:{sha:target},head_commit:{sha:s.repositories[0].commit},merge_base_commit:{sha:base}})}),
+  runModel:async input=>{if(++turns===1)return {threadId:'same-thread',sourceHistoryQuery:{...x.q,repositories:['client']}};
+   const receipt=input.job.context.at(-1).result.sourceHistory;
+   return {threadId:'same-thread',sourceHistoryQuery:null,outcome:'partial',summary:'Author confirmed; platform merge actor unavailable',finalMessage:'Author is Original; platform merge actor has not been verified.',investigation:{status:'wait',blocker:{kind:'unavailable',needed:'platform merge audit',evidence:'commit metadata cannot establish the platform operator'},goals:[{id:'original-question',required:true,status:'open',evidence:'merge operator still unavailable'}],attempts:['read fixed commit metadata'],nextStep:'consult platform audit if access becomes available'},handoff:{artifacts:[{kind:'code',path:receipt.artifact}],checks:[{id:'commit-identity',required:false,status:'passed',evidence:'author and pinned ancestry checked'}],risks:['Platform merge actor not verified'],returnTo:'none'}};
+  }
+ });assert.equal(turns,2);assert.equal(result.outcome,'partial',result.finalMessage);assert.equal(result.handoffGate.passed,true);assert.equal(result.verifiedArtifacts[0].namespace,'task-source-metadata');
+});
+
+test('separate metadata batches retain all runner receipts and survive a saved-stage continuation',async t=>{
+ const x=await fixture(t);let turns=0;
+ const final=await runWithSourceHistory({project:{},sourceSync:x.sync,job:x.job,config:{dataDir:x.opts.dataDir},emit:async()=>{}},{metadata:async(p,s,q)=>prepareSourceCommitMetadata(p,s,q,x.opts),history:async()=>assert.fail('history download'),run:async input=>++turns<3?{threadId:'same',sourceHistoryQuery:{...x.q,repositories:[turns===1?'client':'service']}}:{outcome:'partial',sourceHistoryQuery:null,handoff:{artifacts:input.job.context.map(c=>({kind:'code',path:c.result.sourceHistory.artifact})),checks:[{id:'identity',required:true,status:'passed',evidence:'actual metadata read'}],risks:['Platform merge actor unavailable'],returnTo:'none'}}});
+ assert.equal(final.sourceEvidenceReceipts.length,2);
+ const restored={...x.job,sourceReferenceScope:x.sync,context:[{result:JSON.parse(JSON.stringify(final))}]};
+ const gate=await validateHandoff(restored,final,x.sync.workspace,{dataDir:x.opts.dataDir});assert.deepEqual(gate.issues,[]);assert.equal(gate.verifiedArtifacts.length,2);
+});
+
+test('model-invented metadata receipts cannot cross the runner boundary even if a real task file is named',async t=>{
+ const x=await fixture(t),receipt=await prepareSourceCommitMetadata({},x.sync,x.q,x.opts);
+ const final=await runWithSourceHistory({project:{},sourceSync:x.sync,job:x.job,config:{dataDir:x.opts.dataDir},emit:async()=>{}},{run:async()=>({outcome:'ready',sourceHistoryQuery:null,sourceHistory:receipt,sourceEvidenceReceipts:[receipt]})});
+ assert.deepEqual(final.sourceEvidenceReceipts,[]);assert.equal(final.sourceHistory,null);
+ await assert.rejects(sourceCommitMetadataArtifact(x.opts.dataDir,{...x.job,sourceReferenceScope:x.sync,sourceEvidenceReceipts:final.sourceEvidenceReceipts},receipt.artifact),e=>e.code==='SOURCE_METADATA_ARTIFACT_SCOPE');
+});

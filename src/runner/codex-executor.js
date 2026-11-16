@@ -81,13 +81,13 @@ export async function executeJob(job, config, emit, adapters = {}) {
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
   let generated;
-  try { generated = await runWithSourceHistory({ job, project, sourceSync, config, workspace, attachmentPaths, prompt, emit },{run:adapters.runModel??runCodexWithCapacityRetry}); }
+  try { generated = await runWithSourceHistory({ job, project, sourceSync, config, workspace, attachmentPaths, prompt, emit },{run:adapters.runModel??runCodexWithCapacityRetry,metadata:adapters.sourceMetadata}); }
   catch(error) {
     if(job.taskIntent==='analysis'&&capacityError(error))return modelCapacityWait({stage:'source',harnessFingerprint:harness.metadata.fingerprint,agentStage:job.stage,questionId:job.questionId,workspace,threadId:error.threadId??analysisThreadId(job,workspace)},job.modelRecovery);
     if(error.code!=='ANALYSIS_TURN_TIMEOUT'||job.taskIntent!=='analysis')throw error;
     generated=analysisTimeoutResult(job,error);
   }
-  if(sourceSync)job={...job,sourceReferenceScope:sourceSync};
+  if(sourceSync)job={...job,sourceReferenceScope:sourceSync,sourceEvidenceReceipts:generated.sourceEvidenceReceipts??[]};
   // Normalize a reliable blocked/wait result to partial before restoring prior
   // environment records; otherwise blocked model output drops earlier evidence.
   const scopedResult = preserveEnvironmentEvidence(job, assessInvestigation(job, generated));
@@ -115,7 +115,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed)try{await rememberSourceMethod(job,sourceSync,{...codexResult,workspace},{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});}catch{/* Optional evidence index cannot block a valid task. */}
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
-  return { ...(design.receipts.length?{designSkills:design.receipts}:{}),...(job.artifactWorkspace?{artifactPolicy}:{}),...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),...(codexResult.reportReviewRequired?{reportReviewRequired:true}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { ...(design.receipts.length?{designSkills:design.receipts}:{}),...(job.artifactWorkspace?{artifactPolicy}:{}),...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),...(codexResult.reportReviewRequired?{reportReviewRequired:true}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceEvidenceReceipts:generated.sourceEvidenceReceipts??[],sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({status:e.status,binding:e.binding,calculationAudit:e.calculationAudit,populationAudit:e.populationAudit,...(e.contentAudit?{contentAudit:e.contentAudit}:{})})),
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     sourceEnvironmentQuery:codexResult.sourceEnvironmentQuery??null,environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate, protocolRepair:codexResult.protocolRepair??null,

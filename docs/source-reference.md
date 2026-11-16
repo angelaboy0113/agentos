@@ -26,3 +26,5 @@
 返回的 author、committer、平台作者及固定分支祖先关系是不同证据。cherry-pick 或单亲提交不能证明谁点击了平台合并；分支包含目标也不等于生产已部署。比较失败保留已取得的提交证据，不降级为整项全无。只有需要旧文件、逐行差异、blame/show/diff及完整祖先时，再使用原历史工具。
 
 元数据保存在本任务 `exports/<jobId>/source-metadata`，工具返回 artifact 和摘要，可作为 `handoff.artifacts` 的 `kind:"code"` 引用；这是提交元数据命名空间，不冒称源码文件。交接核验绑定原问题、机器人、项目、环境、缓存键、原固定仓提交和可信执行收据，校验实际文件摘要、符号链接及硬链接；不允许模型伪造文件后自证。重启、备份和私有迁移须保留 exports 及原执行收据。凭据仅在内存使用，不存文件或日志。无需新增配置或重新登录；如原代码凭据无权读取，明确报告具体权限，不自动扩大。
+
+Current-turn metadata receipts are carried by the Runner through both document materialization and final handoff validation. Multiple query batches retain separate task-bound receipts; saved-stage continuations reuse those receipts. Model-supplied receipt fields are discarded. A successful read does not bypass artifact hash, profile, project, environment or fixed-commit checks.
