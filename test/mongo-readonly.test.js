@@ -95,3 +95,23 @@ test('planner recovers from rejected Mongo native sum and retains exact raw evid
  planner:async()=>({next:async input=>{planning++;if(planning===1)return{tool:'group_dataset',arguments:JSON.stringify({collections:['Evidence'],groupColumns:['id'],aggregates:[{op:'sum',column:'amount',as:'total'}]})};if(planning===2){assert.ok(input.results.some(x=>x.error?.code==='MONGO_AMOUNT_TYPE'&&x.executed));return{tool:'group_dataset',arguments:JSON.stringify({collections:['Evidence'],columns:['id','amount']})};}return{tool:'finish',complete:false,summary:'Exact raw evidence retained; independent validation still required'};},close:async()=>{}})});
  assert.equal(rejected,1);assert.equal(out.failure,null);assert.ok(out.toolInputErrors.some(x=>x.code==='MONGO_AMOUNT_TYPE'&&x.executed&&x.resolved));assert.equal(out.partial,true);
 });
+
+test('Mongo raw nested arrays are explicit in the catalog and survive save/restore without numeric loss',async t=>{
+ const dir=await temp(t),parent={conditions:[{level:1,amount:'9007199254740993.25'},{level:2,amount:null}]};
+ const tools=await createEnvironmentTools(e,q,{username:'synthetic',password:'hidden'},{exportDirectory:dir,mongoConnection:async()=>({destroy(){},request:async()=>({rows:[{id:'a',settings:parent}],complete:true})})});
+ const spec=tools.spec.find(x=>x.tool==='group_dataset');assert.ok(spec.args.columns);assert.match(spec.description,/父对象/);assert.ok(tools.spec.find(x=>x.tool==='schema').args.filters);
+ const out=await tools.run('group_dataset',{collections:['Evidence'],columns:['id','settings']});
+ const saved=await new TaskDatasetStore(dir,fingerprint(e)).get(out.datasetRef);assert.deepEqual(JSON.parse(saved.data.rows[0].settings),parent);assert.deepEqual(out.projectionDiagnostics,[]);await tools.close();
+});
+test('array projection is unresolved rather than a missing field, while real null/missing remain distinct',async t=>{
+ const dir=await temp(t),tools=await createEnvironmentTools(e,q,{username:'synthetic',password:'hidden'},{exportDirectory:dir,mongoConnection:async()=>({destroy(){},request:async()=>({rows:[{id:'a',settings:{conditions:[{level:1},{level:null}]},nullable:null}],complete:true})})});
+ const out=await tools.run('group_dataset',{collections:['Evidence'],columns:['id','settings.conditions.level','nullable','absent']});
+ assert.deepEqual(JSON.parse(out.preview[0].__mongo_missing),['absent']);assert.equal(out.preview[0].nullable,null);
+ assert.deepEqual(out.projectionDiagnostics.map(x=>[x.code,x.column,x.parent]),[['MONGO_ARRAY_PATH_UNRESOLVED','settings.conditions.level','settings.conditions']]);
+ const saved=await new TaskDatasetStore(dir,fingerprint(e)).get(out.datasetRef);assert.deepEqual(saved.data.sourceRead.projectionDiagnostics,out.projectionDiagnostics);await tools.close();
+});
+test('parent-array read still enforces collection scope and sensitive-field rejection',async t=>{
+ const dir=await temp(t);let reads=0;const tools=await createEnvironmentTools(e,q,{username:'synthetic',password:'hidden'},{exportDirectory:dir,mongoConnection:async()=>({destroy(){},request:async()=>{reads++;return{rows:[],complete:true};}})});
+ await assert.rejects(tools.run('group_dataset',{collections:['Other'],columns:['settings']}));
+ await assert.rejects(tools.run('group_dataset',{collections:['Evidence'],columns:['password']}));assert.equal(reads,0);await tools.close();
+});
