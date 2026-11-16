@@ -38,6 +38,19 @@ async function setup(t, decide, overrides = {}) {
   return { app, context, send, inputs, replies, directory };
 }
 
+test('second authenticated bot projection arriving during classification reaches both public jobs without linking member identities',async t=>{
+ let release,entered;const waiting=new Promise(r=>{release=r;}),started=new Promise(r=>{entered=r;});let first=true;
+ t.after(()=>release());
+ const {app}=await setup(t,async()=>{if(first){first=false;entered();await waiting;}return decision({action:'create_task',intent:'analysis',instruction:'read each own system source'});},{
+  projects:{chatProfileProjectMap:{group:{one:'alpha',two:'beta'}},projects:{alpha:{displayName:'Alpha',repoPath:'/alpha'},beta:{displayName:'Beta',repoPath:'/beta'}},ownerOpenIdsByProfile:{one:['ou_owner_a'],two:['ou_owner_b']}},
+  agents:{agents:{alpha:{profile:'one',openId:'bot-a',projectId:'alpha',systemAssistant:true,allowedChatIds:['group']},beta:{profile:'two',openId:'bot-b',projectId:'beta',systemAssistant:true,allowedChatIds:['group']}}}
+ });
+ await app.conversations.enqueue(message('same-public-message','compare both systems',{agent_role:'developer',agent_profile:'one',sender_id:'ou_member_a',mentions:[{id:'bot-a'}]}));await started;
+ await app.conversations.enqueue(message('same-public-message','compare both systems',{agent_role:'developer',agent_profile:'two',sender_id:'ou_member_b',mentions:[{id:'bot-b'}]}));release();await app.conversations.idle();
+ const state=await app.store.read();assert.equal(state.jobs.length,2);
+ for(const job of state.jobs){assert.equal(job.inquiryCoordination.members.length,2);assert.equal(job.inquiryCoordination.identityLinked,false);assert.equal(job.inquiryCoordination.grantsShared,false);assert.equal(job.senderId,job.originProfile==='one'?'ou_member_a':'ou_member_b');}
+});
+
 test('all greetings and identity/project questions invoke AI, without jobs or phrase filters', async (t) => {
   const { send, app, inputs, replies } = await setup(t, (input) => decision({ reply: `真实 AI 回答：${input.message}` }));
   for (const [i, text] of ['你好', '你是谁？', '你在哪个项目下现在', '今天怎么样', '如果改一下会怎样？'].entries()) await send(message(`m${i}`, text));

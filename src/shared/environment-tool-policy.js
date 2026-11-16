@@ -32,6 +32,6 @@ export function validateToolQuery(e, q) {
   if (q.maxCalls !== undefined && (!Number.isInteger(q.maxCalls) || q.maxCalls < 1)) throw new Error('排查工具次数无效');
   if (e.kind === 'nacos' && (!Array.isArray(q.namespaces) || !q.namespaces.length || q.namespaces.length > 20 || q.namespaces.some(x => typeof x !== 'string' || x.length > 128))) throw new Error('需明确 Nacos 命名空间范围');
   if (e.kind === 'mysql' && (!Array.isArray(q.tables) || !q.tables.length || q.tables.some(x => x !== '*' && !ident(x)))) throw new Error('需明确数据库表范围');
-  if(e.kind==='mongodb'&&(!Array.isArray(q.collections)||!q.collections.length||q.collections.some(c=>typeof c!=='string'||! /^[\p{L}\p{N}_][\p{L}\p{N}_.-]*\*?$/u.test(c)||c.startsWith('system.'))))throw new Error('需明确MongoDB集合名或前缀范围');
+  if(e.kind==='mongodb'&&(!Array.isArray(q.collections)||!q.collections.length||q.collections.some(c=>typeof c!=='string'||c!=='*'&&(! /^[\p{L}\p{N}_][\p{L}\p{N}_.-]*\*?$/u.test(c)||c.startsWith('system.')))))throw new Error('需明确MongoDB集合名、前缀或管理员配置的全业务集合范围');
   return true;
 }

@@ -19,15 +19,18 @@ export function sameTrustedHuman(projects,left,right){
 // only that bot in `mentions`. The already accepted per-profile events are then
 // stronger evidence than display names, while still carrying no shared grant.
 export function jointInquiryFromAcceptedTurns(turns,current,agents,projects){
- if(current.chatType!=='group'||!current.messageId||!current.chatId||!current.senderId)return null;
+ if(current.chatType!=='group'||current.visibility==='requester'||!current.messageId||!current.chatId||!current.senderId)return null;
  const bindings=projects.chatProfileProjectMap?.[current.chatId]??{},catalog=agents?.agents??{};
- const candidates=(turns??[]).filter(t=>t.chatType==='group'&&t.messageId===current.messageId&&t.chatId===current.chatId&&sameTrustedHuman(projects,t,current)&&t.visibility!=='requester');
+ // These are already authenticated, accepted projections of one immutable
+ // platform message, not a display-name identity match. This only establishes
+ // public duty hints: it must never link credentials, private context or grants.
+ const candidates=(turns??[]).filter(t=>t.chatType==='group'&&t.messageId===current.messageId&&t.chatId===current.chatId&&t.senderId&&t.visibility!=='requester');
  // Production agent catalogs are keyed by project (for example `ltx`) while
  // accepted Feishu events carry the bot profile (`knowledge-ltx`). Never rely
  // on the catalog object key: profile is the stable cross-layer identity.
  const byProfile=new Map(Object.values(catalog).filter(a=>a?.profile).map(a=>[a.profile,a]));
  const members=[...new Map(candidates.map(t=>{const a=byProfile.get(t.profile);if(!a?.systemAssistant||bindings[a.profile]!==a.projectId||t.projectId!==a.projectId||a.allowedChatIds&&!a.allowedChatIds.includes(current.chatId))return null;return[a.profile,{profile:a.profile,projectId:a.projectId,name:a.displayName??a.projectId}];}).filter(Boolean)).values()];
  if(members.length<2||!members.some(m=>m.profile===current.profile))return null;
- return{version:2,messageId:current.messageId,chatId:current.chatId,members,policy:'same-message-split-by-system',detectedBy:'accepted-assistant-events',grantsShared:false};
+ return{version:3,messageId:current.messageId,chatId:current.chatId,members,policy:'same-message-split-by-system',detectedBy:'accepted-assistant-events',identityLinked:false,grantsShared:false};
 }
 export function normalizeSelfContinuation(job,result){if(job.taskIntent!=='analysis'||job.stage!=='developer'||!job.continuousInvestigation||result.outcome!=='partial'||result.handoff?.returnTo!=='developer'||result.investigation?.status!=='continue'||result.investigation?.blocker)return result;return{...result,handoff:{...result.handoff,returnTo:'none'},protocolRepair:{kind:'analysis-self-continuation',originalReturnTo:'developer',businessCompletionClaimed:false}};}

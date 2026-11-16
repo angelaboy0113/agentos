@@ -131,7 +131,7 @@ export class ConversationService {
       }
       state.conversations.push(turn);
       const merged=coordination??(!requestsPrivateCard(turn.content)?jointInquiryFromAcceptedTurns(state.conversations,turn,this.context.agents,this.context.projects):null);
-      if(merged)for(const related of state.conversations)if(related.messageId===turn.messageId&&related.chatId===turn.chatId&&sameTrustedHuman(this.context.projects,related,turn)&&related.chatType==='group')related.inquiryCoordination=structuredClone(merged);
+      if(merged)for(const related of state.conversations)if(related.messageId===turn.messageId&&related.chatId===turn.chatId&&related.senderId&&related.visibility!=='requester'&&related.chatType==='group'&&merged.members.some(m=>m.profile===related.profile&&m.projectId===related.projectId))related.inquiryCoordination=structuredClone(merged);
       return { conversation: true, turnId: turn.id, duplicate: false };
     });
     this.wake();
@@ -593,7 +593,7 @@ export class ConversationService {
         sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
         requestedAgentRole: turn.role, requestedAgentProfile: turn.profile,
         ...routing, ...route, continuousInvestigation: route.workflow === 'continuous_analysis', taskIntent: decision.intent, instruction: decision.instruction,
-        tabularDelivery:decision.requiresTabularDelivery===true,inquiryCoordination:turn.inquiryCoordination??null,
+        tabularDelivery:decision.requiresTabularDelivery===true,inquiryCoordination:await stateView(store,s=>(s.conversations??[]).find(t=>t.id===turn.id)?.inquiryCoordination??turn.inquiryCoordination??null),
         currentQuestion:turn.questionId?await stateView(store,s=>questionObjective(s,turn.questionId)):turn.content,
         originalQuestion: turn.questionId ? await stateView(store,s=>questionRequest(s, turn.questionId)) : turn.content,
         attachments: [...(turn.resumeAttachments??[]),...attachments],

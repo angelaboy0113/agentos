@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "projects": [
+    "system_a",
+    "system_b"
+  ],
+  "tiers": [
+    "uat",
+    "prd"
+  ]
+}

@@ -460,3 +460,5 @@ TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使�
 补充信息的真实 @、去重与恢复规则见 [补充信息提醒](docs/clarification-notices.md)。
 
 已登记表/集合的发现、网页无行时同环境数据库接续、已验报表与同任务产物证据交接规则见 [报表与查询效率](docs/report-efficiency.md)。
+
+已接入数据库的长期只读授权配置见[只读范围准备](docs/connected-read-scope.md)。

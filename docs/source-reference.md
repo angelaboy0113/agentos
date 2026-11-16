@@ -28,3 +28,6 @@
 元数据保存在本任务 `exports/<jobId>/source-metadata`，工具返回 artifact 和摘要，可作为 `handoff.artifacts` 的 `kind:"code"` 引用；这是提交元数据命名空间，不冒称源码文件。交接核验绑定原问题、机器人、项目、环境、缓存键、原固定仓提交和可信执行收据，校验实际文件摘要、符号链接及硬链接；不允许模型伪造文件后自证。重启、备份和私有迁移须保留 exports 及原执行收据。凭据仅在内存使用，不存文件或日志。无需新增配置或重新登录；如原代码凭据无权读取，明确报告具体权限，不自动扩大。
 
 Current-turn metadata receipts are carried by the Runner through both document materialization and final handoff validation. Multiple query batches retain separate task-bound receipts; saved-stage continuations reuse those receipts. Model-supplied receipt fields are discarded. A successful read does not bypass artifact hash, profile, project, environment or fixed-commit checks.
+
+
+固定旧快照恢复按父仓优先、独立同级最多3仓并行准备；失败先等待已启动操作结束再清理。已复制的本地固定提交及树能真实检出并核对HEAD时，不重复远端fetch；缺对象才获取同一个SHA。新问题仍核对指定远端分支，历史仍须独立补齐，不能将旧缓存冒充最新。

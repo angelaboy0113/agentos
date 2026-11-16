@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,readFile,writeFile,rm,symlink,link,access} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,symlink,link,access,rename} from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
-import {syncSnapshot,verifySnapshot,prepareSnapshotHistory,restoreSnapshot} from '../src/runner/source-snapshot.js';
+import {syncSnapshot,verifySnapshot,prepareSnapshotHistory,restoreSnapshot,restorePinnedCommit} from '../src/runner/source-snapshot.js';
 import {prepareAnalysisSources} from '../src/runner/source-sync.js';
 import {pruneSourceSnapshots,snapshotReferences} from '../src/shared/source-snapshot-gc.js';
 import {runWithSourceHistory} from '../src/runner/source-history-runner.js';
@@ -56,6 +56,23 @@ test('old metadata-free provenance remains readable, and reclaimed caches restor
  await f.commit('third');const b=await syncSnapshot(f.project,f.environment);let state={jobs:[]};let projected=0;const gc=()=>pruneSourceSnapshots(f.project,{getState:async()=>{throw Error('Full history copy forbidden');},readReferences:async(p,root,ids)=>{projected++;return structuredClone(snapshotReferences(state,p,root,ids));},withState:fn=>fn(state),apply:true});
  const removed=await gc();assert.ok(projected>=2);assert.equal(removed.removed.length,1);await assert.rejects(access(a.workspace));const audit=JSON.parse(await readFile(path.join(f.project.analysisSnapshotRoot,'.snapshot-audit',path.basename(path.dirname(a.workspace))+'.json')));assert.equal(audit.status,'deleted');assert.deepEqual(audit.manifest,manifest);
  const restored=await restoreSnapshot(f.project,a);assert.equal(restored.workspace,a.workspace);assert.equal(await readFile(path.join(a.workspace,'service/rule.txt'),'utf8'),'second');await verifySnapshot(f.project,a);await access(b.workspace);
+});
+test('reclaimed multi-repository snapshots restore every original SHA independently after the remote advances',async t=>{
+ const f=await fixture(t);await git(f.base,'clone','--no-local','--depth=1','--branch','business',f.origin,path.join(f.source,'sibling'));
+ f.project.analysisEnvironments[f.environment].repositories.push({path:'sibling',branch:'business'});
+ const original=await syncSnapshot(f.project,f.environment);await f.commit('advanced');const newer=await syncSnapshot(f.project,f.environment);
+ await pruneSourceSnapshots(f.project,{getState:async()=>({jobs:[]}),withState:fn=>fn({jobs:[]}),apply:true});await assert.rejects(access(original.workspace));
+ await rename(f.origin,f.origin+'.offline');
+ const restored=await restoreSnapshot(f.project,original);assert.deepEqual(restored.repositories.map(r=>r.commit),original.repositories.map(r=>r.commit));
+ for(const repo of original.repositories){assert.equal(await git(path.join(restored.workspace,repo.path),'rev-parse','HEAD'),repo.commit);assert.equal(await readFile(path.join(restored.workspace,repo.path,'rule.txt'),'utf8'),'second');}
+ await verifySnapshot(f.project,original);await verifySnapshot(f.project,newer);
+});
+test('fixed restoration reuses exact local objects; missing objects fetch only that SHA and reject a mismatched result',async()=>{
+ const sha='a'.repeat(40),calls=[];const run=async(cwd,args)=>{calls.push(args);return args[0]==='rev-parse'?sha:'';};
+ assert.deepEqual(await restorePinnedCommit('/cache',sha,'true',run),{localObjectsReused:true,remoteFetchPerformed:false});assert.equal(calls.some(a=>a[0]==='fetch'),false);
+ calls.length=0;const missing=async(cwd,args)=>{calls.push(args);if(args[0]==='cat-file')throw Error('missing');return args[0]==='rev-parse'?sha:'';};
+ assert.deepEqual(await restorePinnedCommit('/cache',sha,'true',missing),{localObjectsReused:false,remoteFetchPerformed:true});assert.equal(calls.filter(a=>a[0]==='fetch').length,1);assert.equal(calls.find(a=>a[0]==='fetch').at(-1),sha);
+ await assert.rejects(restorePinnedCommit('/cache',sha,'true',async(cwd,args)=>{if(args[0]==='cat-file')throw Error('missing');return args[0]==='rev-parse'?'b'.repeat(40):'';}),/提交不一致/);
 });
 test('GC observes the authoritative latest writer state and protects partial multi-part delivery and unsent mentions',async t=>{
  const f=await fixture(t),a=await syncSnapshot(f.project,f.environment);await f.commit('third');await syncSnapshot(f.project,f.environment);

@@ -381,3 +381,6 @@ since应设置为实际启用时点，避免启动补发历史红卡；不能用
 
 
 Memory headroom and durable overload waiting: see [memory-admission.md](memory-admission.md). Independent launcher mainHeapMiB defaults to 6144; existing Runner/intake concurrency is unchanged. New work waits under memory pressure; active work is not terminated.
+
+
+同一公开群消息由多个已绑定助手真实受理时，即使普通成员在不同应用的open_id不同，也建立各系统职责提示。仅共享公开分工，不链接成员身份、凭据或私有上下文；分类期间迟到的第二助手事件在创建任务前重新读取。单助手仍按完整原题验收。

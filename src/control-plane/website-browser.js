@@ -1,4 +1,5 @@
 import {websiteFrames,websiteDOM,assertWebsiteFrame} from './website-frames.js';
+import {advanceWebsiteDocumentDiagnostics}from'../shared/website-document-diagnostics.js';
 import {readWebsiteAsset} from './website-assets.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
@@ -76,6 +77,7 @@ export class WebsiteBrowser {
   const session=await this.session(e),page=await session.context.newPage();
   const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),authHandled:new WeakSet(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
   page.on('crash',()=>{s.crashed=true;});
+  page.on('framenavigated',frame=>{if(frame===page.mainFrame())advanceWebsiteDocumentDiagnostics(s,frame.url());});
   page.on('pageerror',error=>{s.pageErrors.add(/^[A-Za-z]+Error$/.test(error.name)?error.name:'RuntimeError');pageDiagnostic(s,{name:error.name,message:error.message});});
   page.on('console',message=>{if(['error','warning'].includes(message.type())){const loc=message.location();pageDiagnostic(s,{kind:'console-'+message.type(),source:loc.url,line:loc.lineNumber,column:loc.columnNumber,message:message.text()});}});
   page.on('request',request=>{

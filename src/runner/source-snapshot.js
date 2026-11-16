@@ -240,6 +240,13 @@ export async function prepareSnapshotHistory(project,report,{repositories:reques
  });
 }
 
+export async function restorePinnedCommit(cwd,commit,shallow,run=git){
+ if(!/^[a-f0-9]{40,64}$/.test(commit??''))throw Error('固定提交格式无效');
+ let local=false;try{await run(cwd,['cat-file','-e',commit+'^{commit}']);await run(cwd,['cat-file','-e',commit+'^{tree}']);await run(cwd,['checkout','--detach',commit]);local=true;}catch{}
+ if(!local){await run(cwd,['fetch',...(shallow==='true'?['--depth=1']:[]),'--no-tags','--no-recurse-submodules','origin',commit]);if(await run(cwd,['rev-parse','FETCH_HEAD'])!==commit)throw Error('提交不一致');await run(cwd,['checkout','--detach',commit]);}
+ if(await run(cwd,['rev-parse','HEAD'])!==commit)throw Error('固定提交不一致');
+ return {localObjectsReused:local,remoteFetchPerformed:!local};
+}
 export async function restoreSnapshot(project,report){
  const prepared=await settings(project,report.environment);
  return withSnapshotLock(prepared.snapshotRoot,async(checkLock)=>{
@@ -255,7 +262,9 @@ export async function restoreSnapshot(project,report){
    await writeFile(path.join(tmp,'build-owner.json'),JSON.stringify({policy:'snapshot-build-v1',sourceRoot,environment:id}),{mode:0o600});
    const workspace=path.join(tmp,'workspace');await mkdir(workspace);
    if(repos.length!==report.repositories.length)throw new Error('仓库配置已变化');
-   for(const repo of repos){
+   // Use the same parent-before-child bounded preparation as fresh caches.
+   // All in-flight workers drain before cleanup if one repository fails.
+   await prepareRepositoryLayers(repos,async(repo)=>{
     const proof=report.repositories.find(r=>r.path===repo.path&&r.branch===repo.branch),origin=await git(repo.cwd,['remote','get-url','origin']);
     const source=audit.repositorySources.find(r=>r.path===repo.path);
     if(!proof||!source||source.originHash!==createHash('sha256').update(origin).digest('hex'))throw new Error('仓库来源已变化');
@@ -266,9 +275,8 @@ export async function restoreSnapshot(project,report){
     await git(workspace,['clone','--local','--no-hardlinks','--dissociate','--no-checkout','--no-tags','--',seed,target]);await git(target,['remote','set-url','origin',origin]);
     const head=await git(target,['rev-parse','--verify','HEAD']).catch(()=>null);if(head)await git(target,['update-ref','refs/heads/agentos-object-seed',head]);
     const shallow=await git(seed,['rev-parse','--is-shallow-repository']);
-    checkLock();await git(target,['fetch',...(shallow==='true'?['--depth=1']:[]),'--no-tags','--no-recurse-submodules','origin',proof.commit]);
-    if(await git(target,['rev-parse','FETCH_HEAD'])!==proof.commit)throw new Error('提交不一致');await git(target,['checkout','--detach',proof.commit]);await discardSeedHistory(target);await verifyIndependentGit(target);
-   }
+    checkLock();await restorePinnedCommit(target,proof.commit,shallow);await discardSeedHistory(target);await verifyIndependentGit(target);
+   });
    await writeFile(path.join(tmp,'source-manifest.json'),JSON.stringify(immutable),{mode:0o600});checkLock();await rename(tmp,container);return await verifySnapshotUnlocked(project,report);
   }catch{await rm(tmp,{recursive:true,force:true});throw new Error('历史源码缓存恢复失败：原提交或仓库来源不可用。请维护者恢复原提交后继续，或明确新建问题核对最新版本；没有改用旧缓存或其它提交。');}
  });

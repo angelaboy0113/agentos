@@ -233,3 +233,6 @@ Memory headroom and durable overload waiting: see [memory-admission.md](memory-a
 环境取证写入任务本地datasets/tool-results；Runner按原身份、运行分级和当前配置权限验证路径与摘要，生成轻量只读索引交给源码模型，随后进入文档渲染、独立核验和原话题outbox。索引不复制原始行、不触发重新查询。见source-saved-evidence.md。
 
 产物构建：调查源码保持固定只读，独立任务working目录允许程序批量生成文件，经文档导入器校验后复制为不可变交付文件；详见[通用文件输出](document-artifacts.md)。环境数据交接使用同任务原授权与摘要绑定索引，不重新查询或混用其它任务数据。
+
+
+已接入数据库长期只读策略与独立查询模板见[只读范围准备](connected-read-scope.md)。部署授权与模型参数分离，逐集合授权不是必需产品步骤。
