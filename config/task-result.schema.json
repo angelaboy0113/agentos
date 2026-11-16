@@ -712,6 +712,38 @@
               "pattern": "^[a-f0-9]{40,64}$"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "repositories",
+            "commit",
+            "reason"
+          ],
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "commit_metadata"
+              ]
+            },
+            "repositories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{7,64}$"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
         }
       ]
     },

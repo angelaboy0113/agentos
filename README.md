@@ -1,6 +1,6 @@
 # Angel AgentOS
 
-版本化公共资源及扫码会话复用见[网页登录导航](docs/login-navigation.md)；独立参考固定祖先补取见[源码分支对照](docs/source-reference.md)。
+版本化公共资源及扫码会话复用见[网页登录导航](docs/login-navigation.md)；提交身份快速核对与独立参考固定祖先补取见[源码分支对照](docs/source-reference.md)。
 
 环境执行器按数据源加载指令、批量浏览器观察及审核后固定只读POST说明见[接口调查链路](docs/interface-investigation.md)。
 
