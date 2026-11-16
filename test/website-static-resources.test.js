@@ -43,3 +43,8 @@ test('reviewed versioned public roots support rotating hashes and encoded Next c
  for(const url of ['https://cdn.example.test/monorepo/not-a-hash/12345678/_next/static/a.js','https://cdn.example.test/monorepo/12345678/12345678/_next/api/read.json'])assert.equal(allow('https://app.test',{url,method:'GET',resourceType:'script'},[],roots),false);
  for(const bad of ['https://cdn.example.test/{anything}/static/','https://cdn.example.test/product/*/static/','https://cdn.example.test/product/prefix{hex}/static/'])assert.throws(()=>validateWebsiteStaticRoots([bad]));
 });
+
+test('public worker script classified as other stays constrained to the reviewed directory and JS type',()=>{
+ const roots=['https://cdn.example.test/product/{hex}/{hex}/'];const r={url:'https://cdn.example.test/product/12345678/abcdef01/worker.js',method:'GET',resourceType:'other'};assert.ok(allow('https://app.test',r,[],roots));
+ for(const change of [{method:'POST'},{url:r.url+'?credential=x'},{url:r.url.replace('worker.js','records.json')},{url:r.url.replace('/product/','/api/')},{url:r.url.replace('cdn.example.test','foreign.test')},{resourceType:'document'},{resourceType:'fetch'}])assert.equal(allow('https://app.test',{...r,...change},[],roots),false);
+});
