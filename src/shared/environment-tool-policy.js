@@ -6,6 +6,7 @@ import {validateTctQuery} from './tct-policy.js';
 import {validateWebsiteReadEndpoints,validateWebsiteStaticResources,validateWebsiteStaticRoots,validateWebsiteLoginReads} from './website-policy.js';
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 export function validateToolQuery(e, q) {
+  if(q.logReadWindow!==undefined&&e.kind!=='tsf')throw Error('Log read windows require a TSF environment');
   if(q.requiredFilters!==undefined){
     if(e.kind!=='mongodb'||q.mode!=='investigate'||q.reviewed!==true||!Array.isArray(q.requiredFilters)||!q.requiredFilters.length)throw Error('固定记录范围仅支持审核后的Mongo查询');
     for(const f of q.requiredFilters)if(!f||Object.keys(f).some(k=>!['column','op','type','value'].includes(k))||!/^[_\p{L}][\p{L}\p{N}_.-]*$/u.test(f.column??'')||/password|secret|token|credential|__proto__|constructor|prototype/i.test(f.column)||f.op!=='='||!['string','objectId','int64'].includes(f.type)||typeof f.value!=='string'||!f.value.length||(f.type==='objectId'&&!/^[a-f0-9]{24}$/i.test(f.value))||(f.type==='int64'&&(!/^-?\d+$/.test(f.value)||BigInt(f.value)<-(2n**63n)||BigInt(f.value)>=2n**63n)))throw Error('Mongo固定记录范围需要明确字段与类型的等值条件');

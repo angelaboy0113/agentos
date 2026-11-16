@@ -11,6 +11,10 @@ export function validateTsfQuery(q){
  if(q.configurationApplications!==undefined&&(!Array.isArray(q.configurationApplications)||new Set(q.configurationApplications).size!==q.configurationApplications.length||q.configurationApplications.some(x=>!q.applications.some(a=>a.applicationId===x))))throw Error('Configuration discovery requires an explicit application subset');
  if(q.logApplications!==undefined&&(!Array.isArray(q.logApplications)||new Set(q.logApplications).size!==q.logApplications.length||q.logApplications.some(x=>!q.applications.some(a=>a.applicationId===x))))throw Error('Log reads require an explicit application subset');
  if(q.containerLogApplications!==undefined&&(!Array.isArray(q.containerLogApplications)||new Set(q.containerLogApplications).size!==q.containerLogApplications.length||q.containerLogApplications.some(x=>!q.logApplications?.includes(x))))throw Error('Container log tails require an explicit log-enabled application subset');
+ if(q.logReadWindow!==undefined){
+  const w=q.logReadWindow,valid=v=>{if(typeof v!=='string'||!/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(v))return false;const d=new Date(v.replace(' ','T')+'Z');return Number.isFinite(+d)&&d.toISOString().slice(0,19)===v.replace(' ','T');};
+  if(!w||Object.keys(w).length!==2||!valid(w.startTime)||!valid(w.endTime)||w.startTime>w.endTime||!q.logApplications?.length||q.containerLogApplications?.length)throw Error('Log read window requires valid explicit platform-local bounds and archived log reads only');
+ }
  const apps=new Set(),groups=new Set();
  for(const a of q.applications){if(!a||Object.keys(a).some(k=>!['applicationId','applicationName','groups'].includes(k))||!id(a.applicationId,'application')||apps.has(a.applicationId)||typeof a.applicationName!=='string'||!a.applicationName||!Array.isArray(a.groups)||!a.groups.length)throw Error('Invalid TSF application scope');apps.add(a.applicationId);
   for(const g of a.groups){if(!g||Object.keys(g).some(k=>!['groupId','namespaceId'].includes(k))||!id(g.groupId,'group')||!id(g.namespaceId,'namespace')||groups.has(g.groupId))throw Error('Invalid or duplicate TSF group scope');groups.add(g.groupId);}

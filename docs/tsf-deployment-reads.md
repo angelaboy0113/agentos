@@ -63,6 +63,8 @@ Retry-After 超过现有单次读取窗口或仍持续限流时，返回独立 T
 
 `queries.investigate.logApplications` 显式列出允许读日志的 applicationId，必须是同模板 applications 的子集；未登记则不暴露日志工具，旧配置兼容。授权仍以原 profile、项目、环境、应用/部署组/命名空间为界，不能因同一云账号能看到多系统而省略登记。
 
+若授权只覆盖一个历史时段，另设 `queries.investigate.logReadWindow`，例如 `{"startTime":"2026-01-05 09:00:00","endTime":"2026-01-05 09:02:00"}`。时间按该入口 `tsf.timeZone` 解释；必须是有效日期且起止有序。工具目录展示边界，每次归档日志读取都强制在窗口内，分页和更窄的查询仍可继续，窗口外请求在读取平台记录前拒绝。它不是整个任务的执行时限，不会截停其它取证。未配置时保留原行为。此模式不能同时启用当前容器尾部日志，因为尾部接口不能保证历史时间边界。修改私有配置后按维护流程空闲重启；旧版本不识别此边界，回退前必须停用整个对应入口，不能只删除窗口字段而扩大权限。
+
 - `log_configurations(applicationId,groupId)` 读取部署组实际关联的业务日志采集配置。共享 ConfigId 不授权其他组；不修改配置。
 - `search_logs` 提供应用、组、source、明确本地起止时间、字面关键词数组和offset/limit。stdout调用SearchStdoutLog；business还须提供当前组关联的configId，调用SearchBusinessLog。固定NORMAL检索、固定组筛选，逐页返回nextOffset。空关键词数组明确检索所给窗口。不接受模型传URL、动作、任意查询语言或关闭鉴权。
 - 私有容器直接日志需另登记 `containerLogApplications`（logApplications子集），开放 `container_log_tail(applicationId,groupId,tailLines)`。维护者须先核实目标控制台SearchContainerStdoutLog的读取协议。工具只读取各容器当前保留的末尾日志，不创建持续订阅；返回complete=false、historicalCoverageVerified=false，标注未知时间、多副本和实际条数，不能冒充指定期间完整归档。公共云或其它私有云未实测该接口时不得直接启用。

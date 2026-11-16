@@ -103,7 +103,7 @@ export function cleanWebsiteText(value,limit=10000) {
 }
 
 export function validateWebsiteReadEndpoints(value){
- if(!Array.isArray(value)||value.length>32)throw new Error('网站只读接口配置必须为最多32项');
+ if(!Array.isArray(value)||value.length>512)throw new Error('网站只读接口配置必须为最多512项');
  for(const e of value){
   if(!e||Object.keys(e).some(k=>!['method','path','reviewed','queryParameters','bodyParameters'].includes(k))||!['GET','POST'].includes(e.method)||e.reviewed!==true||typeof e.path!=='string'||!/^\/[A-Za-z0-9_./{}-]+$/.test(e.path)||e.path.includes('..')||e.path.includes('//'))throw new Error('网站只读接口必须为审核后的固定路径和GET/POST方法');
   const segments=e.path.split('/');if(segments.some(s=>/[{}]/.test(s)&&!Object.hasOwn(readPathIds,/^\{([A-Za-z]+)\}$/.exec(s)?.[1]??''))||e.method!=='GET'&&/[{}]/.test(e.path))throw new Error('动态只读路径仅允许GET和完整的objectId/uuid/integerId占位段');
