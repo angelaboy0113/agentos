@@ -34,3 +34,12 @@ export function jointInquiryFromAcceptedTurns(turns,current,agents,projects){
  return{version:3,messageId:current.messageId,chatId:current.chatId,members,policy:'same-message-split-by-system',detectedBy:'accepted-assistant-events',identityLinked:false,grantsShared:false};
 }
 export function normalizeSelfContinuation(job,result){if(job.taskIntent!=='analysis'||job.stage!=='developer'||!job.continuousInvestigation||result.outcome!=='partial'||result.handoff?.returnTo!=='developer'||result.investigation?.status!=='continue'||result.investigation?.blocker)return result;return{...result,handoff:{...result.handoff,returnTo:'none'},protocolRepair:{kind:'analysis-self-continuation',originalReturnTo:'developer',businessCompletionClaimed:false}};}
+
+// Use the same acceptance boundary in initial and continuation instructions.
+// This changes neither evidence validation nor the result's outcome.
+export function inquiryAcceptanceGuidance(job){
+ const c=job.inquiryCoordination,profile=job.originProfile??job.agentProfile;
+ const own=c?.members?.find(m=>m.profile===profile&&m.projectId===job.projectId);
+ if(!own||c.grantsShared!==false||!c.messageId||c.messageId!==(job.replyToMessageId??job.originMessageId)||c.chatId!==job.chatId||new Set(c.members.map(m=>m.profile)).size<2)return '本任务original-question覆盖用户原始问题的全部问句；必须逐项核实，不能删除尚未解决的核心要求。';
+ return '控制面已核对同一公开消息的多助手分工：本任务original-question只覆盖当前系统'+own.projectId+'的真实贡献，逐项核对当前系统相关记录、出口/入口条件和可证明的结论。不可把同伴系统的内部根因再次列作本任务required目标；在finalMessage明确本系统结论、交界证据及同伴仍需回答的部分，不宣称整个跨系统问题已解决。原因证据仍须核验本系统结论，不得把本系统尚未执行、受阻或无证据标为verified。已有旧original-question包含同伴范围时，按当前可信分工重述同id的本系统验收内容，旧总目标及证据保留在上下文；不能仅因收到分工就自动变绿，也不取消金额/文件/授权核验。';
+}
