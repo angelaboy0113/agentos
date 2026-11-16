@@ -1987,3 +1987,8 @@ Cards/completion mentions, report files, screenshot images, native stickers and 
 ## 1.122.1
 
 Preserve Runner-produced commit metadata receipts across model continuation, final artifact handoff and saved-stage recovery. Reject model-invented receipts. The real executor-to-handoff regression reproduces the prior blocked result and verifies partial evidence can be delivered without inventing a platform merge actor. No new permissions, dependencies or task cutoff.
+
+
+## 1.123.1 — 同任务产物取证交接
+
+原卡实际复跑发现，模型在受控working产物目录写了复核JSON，但旧handoff只认不可变源码目录，导致已核验CSV也被连带拦截。新增task-artifacts/证据命名空间，按可信任务ID派生working目录、核对独立普通文件和哈希；兼容该任务working下的规范绝对路径。拒绝跨任务、越界、凭据路径、软链、共享inode。此证据不成为已登记交付文件，不改变partial、业务缺口、必需失败检查或发送回执。实际原任务结果离线只读重验通过，不等于原卡正式恢复或真人同题通过。

@@ -88,3 +88,36 @@ test('legacy session key preserves known project identity, unknown history stays
   assert.equal(conversationProject({ projectId: 'b', sessionKey: 'bad' }), 'b');
   assert.equal(conversationProject({ sessionKey: 'bad' }), undefined);
 });
+
+test('analysis handoff verifies same-task working evidence outside immutable source',async t=>{
+ const root=await fixture(t),dataDir=path.join(root,'data');
+ const {prepareArtifactWorkspace}=await import('../src/shared/artifact-workspace.js');
+ const task={...job,id:'JOB-evidence-a'},working=await prepareArtifactWorkspace(dataDir,task.id);
+ await writeFile(path.join(working.directory,'review.json'),' {"checked":true}');
+ for(const ref of ['task-artifacts/review.json',path.join(working.directory,'review.json')]){
+  const r=result();r.outcome='partial';r.handoff.risks=['历史信息未核实'];r.handoff.artifacts=[{kind:'report',path:ref}];
+  const gate=await validateHandoff(task,r,root,{dataDir});assert.deepEqual(gate.issues,[]);
+  assert.equal(gate.verifiedArtifacts[0].namespace,'task-working-evidence');assert.equal(gate.verifiedArtifacts[0].sourceJobId,task.id);
+  assert.equal(gate.verifiedArtifacts[0].path,'task-artifacts/review.json');assert.equal(enforceHandoff(r,gate).outcome,'partial');
+  assert.equal(gate.verifiedArtifacts[0].fileId,undefined); // Evidence is not a registered deliverable.
+ }
+});
+test('working evidence cannot cross tasks, source boundary, credentials or implementation intent',async t=>{
+ const root=await fixture(t),dataDir=path.join(root,'data');const{prepareArtifactWorkspace}=await import('../src/shared/artifact-workspace.js');
+ const task={...job,id:'JOB-evidence-a'},a=await prepareArtifactWorkspace(dataDir,task.id),b=await prepareArtifactWorkspace(dataDir,'JOB-evidence-b');
+ await writeFile(path.join(b.directory,'review.json'),'other task');await writeFile(path.join(a.directory,'.env'),'private');
+ for(const ref of [path.join(b.directory,'review.json'),'task-artifacts/../review.json','task-artifacts/.env','task-artifacts/node_modules/review.json','task-artifacts/missing.json',path.join(root,'spec.md')]){
+  const r=result();r.handoff.artifacts=[{kind:'report',path:ref}];assert.ok((await validateHandoff(task,r,root,{dataDir})).issues.length,ref);
+ }
+ const r=result();r.handoff.artifacts=[{kind:'report',path:'task-artifacts/review.json'}];
+ assert.ok((await validateHandoff({...task,taskIntent:'implementation'},r,root,{dataDir})).issues.length);
+});
+test('working evidence rejects symbolic links and shared inodes, retains failed checks',async t=>{
+ const root=await fixture(t),dataDir=path.join(root,'data');const{prepareArtifactWorkspace}=await import('../src/shared/artifact-workspace.js');
+ const task={...job,id:'JOB-evidence-a'},a=await prepareArtifactWorkspace(dataDir,task.id);await writeFile(path.join(a.directory,'review.json'),'verified local evidence');
+ const r=result();r.handoff.artifacts=[{kind:'decision',path:'task-artifacts/review.json'}];r.handoff.checks[0].status='failed';assert.ok((await validateHandoff(task,r,root,{dataDir})).issues.length);
+ r.handoff.checks[0].status='passed';await symlink(path.join(root,'spec.md'),path.join(a.directory,'escape.json'));
+ assert.ok((await validateHandoff(task,r,root,{dataDir})).issues.length);await rm(path.join(a.directory,'escape.json'));
+ const{link}=await import('node:fs/promises');await link(path.join(root,'spec.md'),path.join(a.directory,'shared.json'));
+ assert.ok((await validateHandoff(task,r,root,{dataDir})).issues.length);
+});

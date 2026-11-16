@@ -267,3 +267,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 模型明确给出 `reportAssessment.fileId`（或 deliverables）并选择 deliver/deliver_partial 时，程序可补入漏写的 report 工件引用。必须属于当前任务登记文件，并与执行器独立读取的文件/核验记录摘要和代际一致，最终仍重新读取实际文件核验。不会补造 passed 检查、去掉风险、将 partial 改为 ready 或声称已发送；业务历史缺失继续保留。
 
 验证：`test/read-source-recovery.test.js`、`test/document-handoff.test.js`、`test/query-efficiency.test.js`；部署后同原题真人新卡和原卡恢复需单独验收。无需新增配置或权限，现有私有迁移保留规则不变。
+
+同任务working中复核记录使用handoff工件`task-artifacts/文件名`，由运行器独立读取/哈希核验。它是取证材料，不是最终文件；最终文件仍须登记、内容核验及投递回执。源码目录继续不可变，不能为了保存复核记录写入源码。

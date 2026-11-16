@@ -3,6 +3,7 @@ import{sourceReferenceArtifact}from './source-reference.js';
 import{requiresTabularFile}from '../shared/count-answer.js';
 import { hashFile } from '../shared/file-digest.js';
 import { reportFile } from '../shared/report-files.js';
+import {prepareArtifactWorkspace,readArtifactFile} from '../shared/artifact-workspace.js';
 import { investigationComplete, QUESTION_GOAL_ID } from '../shared/investigation-review.js';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -71,9 +72,24 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
   const root = await realpath(workspace);
   for (const item of h.artifacts) {
     try {
-      if (!kinds.has(item.kind) || !nonempty(item.path) || path.isAbsolute(item.path) || /^[a-z]:/i.test(item.path) || item.path.includes(':')) throw new Error();
-      const segments = item.path.replaceAll('\\', '/').split('/');
+      if (!kinds.has(item.kind) || !nonempty(item.path)) throw new Error();
+      // The model's writable evidence workspace is deliberately outside source.
+      // Derive it from the trusted task id, never from a model-provided root.
+      let taskRelative=null;
+      if(job.taskIntent==='analysis'&&dataDir&&job.id&&(item.path.startsWith('task-artifacts/')||path.isAbsolute(item.path))){
+        const task=await prepareArtifactWorkspace(dataDir,job.id);
+        if(item.path.startsWith('task-artifacts/'))taskRelative=item.path.slice('task-artifacts/'.length);
+        else if(inside(task.directory,item.path)&&path.normalize(item.path)===item.path)taskRelative=path.relative(task.directory,item.path);
+      }
+      const checkedPath=taskRelative??item.path;
+      if(path.isAbsolute(checkedPath)||/^[a-z]:/i.test(checkedPath)||checkedPath.includes(':'))throw new Error();
+      const segments = checkedPath.replaceAll('\\', '/').split('/');
       if (segments.some((s) => ['..', '.git', 'node_modules'].includes(s) || /^(\.env(?:\..*)?|\.npmrc|settings\.xml|auth\.json|.*\.(?:pem|key|p12))$/i.test(s))) throw new Error();
+      if(taskRelative!==null){
+        const file=await readArtifactFile(dataDir,job.id,taskRelative);
+        verifiedArtifacts.push({kind:item.kind,namespace:'task-working-evidence',path:'task-artifacts/'+taskRelative,sourceJobId:job.id,sha256:file.sha256,bytes:file.bytes.length});
+        continue;
+      }
       const registered = item.kind === 'report' && job.reportFiles?.find(f => item.path === f.filename || item.path === f.id);
       if (registered) {
         if (!dataDir) throw new Error('REPORT_LOCATION');
