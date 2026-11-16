@@ -63,3 +63,22 @@ test('concurrent systems in one state preserve independent environment pins, pro
  await Promise.all([store.switchContinuousSourceEnvironment(job.id,identity,result(job,'sit'),{environmentId:'prd',reason:'compare one'},project),store.switchContinuousSourceEnvironment(second.id,secondIdentity,{...result(second,'sit'),sourceSync:otherProof,workspace:otherProof.workspace},{environmentId:'prd',reason:'compare two'},project)]);
  const a=await store.getJob(job.id),b=await store.getJob(second.id);assert.equal(a.sourceEnvironmentEvidence.sit.workspace,'/immutable/sit');assert.equal(b.sourceEnvironmentEvidence.sit.workspace,'/other-system/sit');assert.equal(b.originProfile,'other-bot');assert.equal(b.chatId,'other-group');assert.equal(a.sourceEnvironmentEvidence.prd,undefined);
 });
+
+test('independent environment questions retain both scopes without a conjunction or comparison keyword',()=>{
+ const cases=['`PRD`环境中有几个？`SIT`环境中有几个？','PRD environment has one owner. SIT environment has multiple owners?', '测试机有几个负责人？生产机有几个负责人？','PRD环境中 一个大区只有一个大区总吗 SIT环境中一个大区有多个大区总吗','SIT环境怎么取订单？PRD环境怎么取订单？','生产环境的组织岗位怎么配\n测试环境的组织岗位怎么配','PRD有一个负责人，SIT有多个负责人吗','SIT数据库有哪些字段；PRD数据库有哪些字段','请核对UAT环境中的菜单。Production环境中的菜单也查一下'];
+ for(const originalQuestion of cases){for(const sourceEnvironment of ['prd','sit']){const job={sourceEnvironment,originalQuestion};assert.deepEqual(requestedSourceEnvironments(job,project),sourceEnvironment==='prd'?['prd','sit']:['sit','prd'],originalQuestion);assert.equal(comparisonTarget(job,project,{environmentId:sourceEnvironment==='prd'?'sit':'prd',reason:'核对原题另一环境'}),sourceEnvironment==='prd'?'sit':'prd');}}
+});
+test('quoted code, URLs, descriptive names and explicit exclusions never create another environment grant',()=>{
+ for(const originalQuestion of ['只查PRD环境，SIT环境不要查','PRD环境有一个吗？不查SIT环境','SIT环境有几位？不要生产环境','PRD环境里的接口名称是 SIT环境，不需要访问测试','PRD环境里文档提到 SIT环境','PRD环境参考 https://example.invalid/sit?compare=prd','PRD环境代码示例 `SIT环境有多个，PRD环境有一个`','生产环境代码片段：\n```\nSIT环境和PRD环境比较\n```'])assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'prd',originalQuestion},project),['prd'],originalQuestion);
+ const job={sourceEnvironment:'prd',originalQuestion:'PRD环境有几位',instruction:'SIT环境也查一下',context:[{result:{summary:'SIT环境中有多个'}}]};assert.deepEqual(requestedSourceEnvironments(job,project),['prd']);
+ assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'prd',originalQuestion:'PRD环境有几位？SIT环境有几位？'},{...project,analysisSourceMode:'folder'}),['prd']);
+ assert.deepEqual(requestedSourceEnvironments({sourceEnvironment:'prd',originalQuestion:'PRD环境有几位？SIT环境有几位？'},{...project,analysisEnvironments:{sit:{},staging:{runtimeTier:'uat'},prd:{}}}),['prd']);
+});
+test('independent clause scope survives restart and continues the original job with original identity and evidence',async t=>{
+ const {dir,store,job,identity}=await pinned(t);
+ await store.transact(s=>{s.jobs.find(x=>x.id===job.id).originalQuestion='SIT环境中的岗位有几位负责人？PRD环境中的岗位有几位负责人？';});
+ await store.appendEvent(job.id,{type:'progress',...identity,sourceSnapshot:snapshot('sit')});
+ const fresh=new JsonStore(path.join(dir,'state.json')),next=await fresh.switchContinuousSourceEnvironment(job.id,identity,result(job,'sit'),{environmentId:'prd',reason:'继续原题第二句'},project);
+ assert.equal(next.id,job.id);assert.equal(next.questionId,job.questionId);assert.equal(next.originProfile,'bot');assert.equal(next.chatId,'group');assert.equal(next.sourceEnvironment,'prd');assert.equal(next.sourceEnvironmentEvidence.sit.summary,'sit verified rules');assert.equal(next.environmentAccess,undefined);
+ const continued=requireComparisonContinuation({...next,sourceEnvironment:'sit',sourceEnvironmentEvidence:{}},project,{outcome:'ready'});assert.equal(continued.sourceEnvironmentQuery.environmentId,'prd');assert.equal(continued.outcome,'needs_clarification');
+});
