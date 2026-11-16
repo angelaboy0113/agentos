@@ -10,3 +10,13 @@ test('transported program inspections survive Store lifecycle without depending 
 test('unreviewed population omissions cannot be released as partial components',()=>{const{job,result}=fixture();result.reportInspections[1].populationAudit.comparisons=[{datasetRef:'all-objects',keyColumn:'id',onlyReferenceCount:2}];recordReportReview(job,result);assert.equal(job.reportPartialDeliverySet,undefined);});
 
 test('a foreign source-job inspection cannot release a file under a different task identity',()=>{const{job,result}=fixture();delete job.reportEvidence;job.reportFiles[0].sourceJobId='own-task';result.reportInspections[0].binding.sourceJobId='foreign-task';recordReportReview(job,result);assert.equal(job.reportPartialDeliverySet,undefined);});
+
+test('incomplete partial-delivery selection continues file review instead of silently finishing without an attachment',async()=>{
+ const{pendingPartialReportReview}=await import('../src/shared/report-acceptance.js');
+ for(const deliverables of [null,undefined,[],[{fileId:'foreign',evidence:'not our file'}]]){const{job,result}=fixture();result.reportAssessment.deliverables=deliverables;const r=pendingPartialReportReview(job,result);assert.equal(r.outcome,'partial');assert.equal(r.investigation.status,'continue');assert.equal(r.investigation.blocker,null);assert.equal(r.reportReviewRequired,true);assert.match(r.investigation.nextStep,/不重复查询业务/);assert.equal(result.investigation.status,'blocked');assert.equal(job.reportPartialDeliverySet,undefined);}
+ const{job,result}=fixture();assert.equal(pendingPartialReportReview(job,result),result);
+});
+test('structure-only document cannot replace independently verified statistical component delivery',async()=>{
+ const{pendingPartialReportReview}=await import('../src/shared/report-acceptance.js');const{job,result}=fixture();job.tabularDelivery=true;delete job.reportEvidence;job.reportFiles[1].kind='document';delete result.reportInspections[1].calculationAudit;result.reportInspections[1].contentAudit={structure:'passed'};assert.equal(pendingPartialReportReview(job,result).reportReviewRequired,true);
+ const other=fixture();other.result.handoffGate.passed=false;assert.equal(pendingPartialReportReview(other.job,other.result),other.result);
+});

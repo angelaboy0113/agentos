@@ -270,7 +270,24 @@ export class WebsiteBrowser {
      if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务页面导航范围已失效');
      s.currentReadTarget=target;
      await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
-    }else await ref.el.click({timeout:8000});
+    }else {
+     // A reviewed read action may synchronously use window.open instead of an
+     // anchor. Capture its destination without opening an unbound page; then
+     // apply the same application and request authorization as normal links.
+     const popupKey='__agentos_read_popup_'+randomUUID();
+     await ref.el.evaluate((el,key)=>{const w=el.ownerDocument.defaultView,original=w.open;const capture={urls:[],original};capture.hook=function(url){capture.urls.push(String(url??''));return null;};w[key]=capture;w.open=capture.hook;},popupKey);
+     let popupTargets=[];
+     try{await ref.el.click({timeout:8000});}
+     finally{try{popupTargets=await ref.el.evaluate((el,key)=>{const w=el.ownerDocument.defaultView,c=w[key];if(!c)return [];if(w.open===c.hook)w.open=c.original;delete w[key];return c.urls;},popupKey);}catch{/* Navigation destroyed the old document and its local capture. */}}
+     if(popupTargets.length){
+      if(popupTargets.length!==1)throw new BrowserInputError('BROWSER_POPUP_AMBIGUOUS','本次只读操作出现多个新窗口目标；保留当前页面，不猜测选择或重复点击。');
+      if(!popupTargets[0]||popupTargets[0]==='about:blank')throw new BrowserInputError('BROWSER_POPUP_TARGET_PENDING','详情新窗口尚无实际地址；没有把空白页当证据或重复打开。');
+      const target=websiteNavigationTarget(new URL(popupTargets[0],websiteDOM(s).url()).href,s.environment.baseUrl);
+      if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw new BrowserInputError('BROWSER_NAVIGATION_SCOPE','新窗口详情不在本任务批准的读取范围，保留当前页。');
+      s.currentReadTarget=target;s.dom=null;s.frameRefs=new Map();
+      await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
+     }
+    }
    }
   }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};

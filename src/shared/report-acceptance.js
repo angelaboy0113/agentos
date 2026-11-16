@@ -106,3 +106,15 @@ export function pendingDocumentReview(job,result){
  if(!pending.length)return result;
  return {...result,reportReviewRequired:true,environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,status:'continue',blocker:null,nextStep:'先审阅已经生成且由内置渲染器核验的文档，不重复查询业务。按实际文件哈希、contentAudit、目的与源码证据填写reportAssessment；完整交付用deliver，整体仍缺其它内容但文档准确覆盖自身已核实范围时显式deliver_partial/coverage=incomplete，deliverables逐份列出fileId和范围证据，只将其它尚缺输出记required_output。保持原问题缺口和黄色状态；当前文件内容错误或来源不实仍需revise。文件：'+pending.map(f=>f.id+' ('+f.title+')').join('、')}};
 }
+
+// An explicit partial file decision must really be deliverable before ending the
+// turn. Preserve the business gaps; repair only the file review, not the query.
+export function pendingPartialReportReview(job,result){
+ if(job.taskIntent!=='analysis'||result?.outcome!=='partial'||result.handoffGate?.passed!==true||result.reportAssessment?.decision!=='deliver_partial')return result;
+ const reviewed={...job,reportReviews:structuredClone(job.reportReviews??{})};delete reviewed.reportPartialDeliverySet;
+ const inspections=[...(result.reportInspections??[]),job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified');
+ recordReportReview(reviewed,{...result,reportInspections:inspections});
+ if(reviewed.reportPartialDeliverySet?.files?.length)return result;
+ return {...result,reportReviewRequired:true,environmentQuery:null,websiteQuery:null,environmentSetup:null,
+  investigation:{...result.investigation,status:'continue',blocker:null,nextStep:'部分文件交付审核尚未接通；先修正当前文件的review，不重复查询业务。reportAssessment.deliverables必须逐份列出fileId和自身覆盖范围，包含主文件。每份文件须登记且实际核验、hash相符；统计主表还需计算和完整对象范围核验，只有文档结构校验不能替代。复用已有compose_report草稿和finalization资料，finalize_report产生本轮可交付CSV；若用户明确要求其他格式，须补齐该格式实际内容核验。原问题真实历史/外部证据缺口仍保留required_output与partial，不改成已查清。'}};
+}

@@ -1,3 +1,4 @@
+import {pendingPartialReportReview} from '../shared/report-acceptance.js';
 import {countAnswerOnly} from '../shared/count-answer.js';
 import {prepareDocumentHandoff} from './document-handoff.js';
 import {documentDesignInstructions} from '../shared/document-design.js';
@@ -103,7 +104,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if(generated.definitionUpdates?.length)try{definitionReceipts=await recordTaskDefinitions(job,generated.definitionUpdates,{dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile});}
   catch{codexResult={...codexResult,finalMessage:codexResult.finalMessage+'\n共享口径版本尚未保存，不能声称已长期记住；已有调查成果保留。'};}
   delete codexResult.documentRequests;
-  codexResult=pendingDocumentReview(job,enforceDocumentOutput(job,codexResult));
+  codexResult=pendingPartialReportReview(job,pendingDocumentReview(job,enforceDocumentOutput(job,codexResult)));
   const aiCompleted = Date.now();
   const verifyCommands = verificationCommands(job, project, codexResult.outcome);
   if (verifyCommands.length) {

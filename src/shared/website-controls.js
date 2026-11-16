@@ -1,5 +1,5 @@
 // Fixed DOM adapter shared by all applications; no model-supplied selectors or scripts.
-export const websiteControls='.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
+export const websiteControls='.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,textarea,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
 export function controlMetadataBatch({elements,options,limit=Infinity}={elements:null}){
  function metadata(el,{readNavigationSelectors=[],hoverTooltip=null}={}){
  const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
@@ -34,7 +34,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  const singleField=fieldGroup&&[...fieldGroup.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(x=>x.getClientRects().length).length===1;
  const localLabel=singleField?fieldGroup.innerText?.trim():'';
  const fieldLabel=fieldGroup?.querySelector('.el-form-item__label,.ant-form-item-label,label')?.innerText?.trim()||(localLabel&&localLabel.length<=100?localLabel:'');
- if(tag==='input'&&fieldLabel)label=fieldLabel+' / '+label;
+ if(['input','textarea'].includes(tag)&&fieldLabel)label=fieldLabel+' / '+label;
  const expansion=el.matches('.ant-table-row-expand-icon,.el-table__expand-icon');
  if(expansion)label=(el.classList.contains('ant-table-row-expanded')||el.classList.contains('el-table__expand-icon--expanded')||el.getAttribute('aria-expanded')==='true'?'收起':'展开')+'行详情：'+(el.closest('tr,[role="row"]')?.innerText??'').trim().slice(0,70);
  const panel=el.matches('.el-collapse-item__header,.ant-collapse-header');
@@ -49,13 +49,17 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  if(pagination&&!label)label=tag==='input'?'前往页码':el.matches('.btn-next,.ant-pagination-next')?'下一页':el.matches('.btn-prev,.ant-pagination-prev')?'上一页':'';
  if(!label)return {visible:true,label,type:null};
  const mutation=/立即执行|执行一次|单次执行|立即运行|运行一次|重放|重发|重新发送|试运行|测试接口|接口测试|新增|创建|保存|修改|编辑|删除|启动|停止|触发|重跑|终止|发布|启用|禁用|提交|支付|注销|退出|作废|驳回|撤回|取消订单|关闭订单|确认收货|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|cancel|resend|replay)\b/i;
+ const querySubmit=/^(?:(?:开始|执行)?(?:查询|搜索)|(?:run|start|execute) (?:query|search))$/i.test(label);
  const navigation=reviewedNavigation||el.matches('.ant-card-hoverable,[role="link"],[role="menuitem"],[role="treeitem"],[role="tab"],.el-submenu__title,.ant-menu-submenu-title');
  let type=null,kind=row?'row':'action';
- if(tag==='input'){
+ if(['input','textarea'].includes(tag)){
   const identity=[label,el.name,el.id,el.placeholder,el.getAttribute('aria-label')].join(' ');
   if(/password|passwd|secret|token|credential|authorization|api.?key|app.?key|密码|令牌|密钥/i.test(identity))return {visible:true,label,type:null};
-  if(picker){type='read-action';kind='picker';}
-  else if(!el.readOnly&&/^(text|search|date|datetime-local|number|month|week|time|tel)$/.test(el.type)){type='search';kind='field';}
+  const queryScope=el.closest('form,[role=search],.el-form,.ant-form,[role=group]');
+  const queryTextArea=tag==='textarea'&&!el.readOnly&&/搜索条件|查询条件|过滤条件|筛选条件|search|query|filter/i.test(label)&&queryScope&&[...queryScope.querySelectorAll('button,[role=button]')].some(b=>b.getClientRects().length&&/^(?:(?:开始|执行)?(?:查询|搜索)|(?:run|start|execute) (?:query|search))$/i.test(b.innerText.trim()));
+  if(queryTextArea){type='search';kind='field';}
+  else if(picker){type='read-action';kind='picker';}
+  else if(tag==='input'&&!el.readOnly&&/^(text|search|date|datetime-local|number|month|week|time|tel)$/.test(el.type)){type='search';kind='field';}
  }else if(tag==='select'){type='select';kind='field';}
  else if(picker){type='read-action';kind='picker';}
  else if(expansion){type='read-action';kind='expansion';}
@@ -63,13 +67,14 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  else if(dismiss){type='read-action';kind='dismiss';}
  else if(option||calendar&&el.matches('button,td,[role="gridcell"]')||pagination){type='read-action';kind=option?'option':calendar?'calendar':'pagination';}
  else if(navigation){type='read-action';kind='navigation';}
+ else if(querySubmit&&el.matches('button,[role=button]')){type='read-action';kind='query';}
  else if(tag==='a'||row||el.matches('[role="combobox"],[aria-haspopup="listbox"],[aria-haspopup="dialog"]')){type='read-action';}
  else if(localExpansion){type='read-action';kind='expansion-toggle';}
  else if(/^(?:更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|重置|查询|搜索|查看|详情|刷新|展开|收起|确定|返回|下一页|上一页|search|query|view|detail|refresh|next|previous|more|reset)$/i.test(label)||/查看|详情|日志/.test(label)){type='read-action';}
  if(tag==='span'&&!picker&&!calendar&&!option&&!expansion&&!panel&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!localExpansion&&!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
  if(title||el.matches('[role="tab"]')&&[...el.querySelectorAll('button,[role="button"]')].some(child=>child.innerText?.trim()===label))type=null;
  // Fields, options and date cells change local query state; server writes remain independently blocked.
- const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion','row'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
+ const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion','row','query'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
  if(blocked)type=null;
  return {visible:true,label:row?'行详情：'+label:label,type,kind,blocked,...(type==='select'?{options:[...el.options].slice(0,100).map(x=>({value:x.value,label:x.textContent}))}:{})};
 }
@@ -88,7 +93,18 @@ export function websiteFields({secretSelector,full=false}){
   if(/password|passwd|secret|token|credential|authorization|api.?key|app.?key|密码|令牌|密钥/i.test([label,e.name,e.id,e.placeholder].join(' ')))return {label,value:'[已隐藏]',readOnly:true,disabled:!!e.disabled};
   const checkable=e.matches('input[type=checkbox],input[type=radio],[role=switch],[role=checkbox],[role=radio]');
   const selected=checkable?(e.matches('input')?(e.indeterminate?'mixed':e.checked):e.getAttribute('aria-checked')):undefined;
-  return {label,...(checkable?{checked:selected===true||selected==='true'?true:selected===false||selected==='false'?false:selected==='mixed'?'mixed':null}:{}),value:String(e.tagName==='SELECT'?e.selectedOptions[0]?.textContent??e.value:e.value).slice(0,full?undefined:500),readOnly:!!e.readOnly,disabled:!!e.disabled};
+  let context='',selectedLabel='';
+  if(checkable){
+   const component=e.closest('[role=switch],.el-switch,.ant-switch,.el-radio,.ant-radio-wrapper,.el-checkbox,.ant-checkbox-wrapper')??e;
+   selectedLabel=[...component.querySelectorAll('.el-switch__label.is-active,.ant-switch-inner,.el-radio__label,.ant-radio-wrapper > span:not(.ant-radio),.el-checkbox__label')].filter(visible).map(n=>n.innerText.trim()).filter(Boolean).join(' ').slice(0,160);
+   for(let node=component.parentElement,depth=0;node&&depth<7;node=node.parentElement,depth++){
+    const roots=new Set([...node.querySelectorAll('input[type=checkbox],input[type=radio],[role=switch],[role=checkbox],[role=radio]')].map(x=>x.closest('[role=switch],.el-switch,.ant-switch,.el-radio,.ant-radio-wrapper,.el-checkbox,.ant-checkbox-wrapper')??x));
+    if(roots.size>1)break;
+    const title=[...node.querySelectorAll('legend,h1,h2,h3,h4,.el-card__header,.ant-card-head-title,.title,[title]')].find(n=>visible(n)&&!component.contains(n)&&!n.closest('[data-sensitive],[data-agentos-secret]')&&n.innerText?.trim()&&n.innerText.trim().length<=160);
+    if(title){context=title.innerText.trim();break;}
+   }
+  }
+  return {label,...(context?{context}:{}),...(selectedLabel?{selectedLabel}:{}),...(checkable?{checked:selected===true||selected==='true'?true:selected===false||selected==='false'?false:selected==='mixed'?'mixed':null}:{}),value:String(e.tagName==='SELECT'?e.selectedOptions[0]?.textContent??e.value:e.value).slice(0,full?undefined:500),readOnly:!!e.readOnly,disabled:!!e.disabled};
  });
 }
 

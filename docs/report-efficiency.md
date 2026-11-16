@@ -269,3 +269,5 @@ MySQL `schema` 保留旧 `tables` 字段名结构，新增 `columnMetadata`：�
 验证：`test/read-source-recovery.test.js`、`test/document-handoff.test.js`、`test/query-efficiency.test.js`；部署后同原题真人新卡和原卡恢复需单独验收。无需新增配置或权限，现有私有迁移保留规则不变。
 
 同任务working中复核记录使用handoff工件`task-artifacts/文件名`，由运行器独立读取/哈希核验。它是取证材料，不是最终文件；最终文件仍须登记、内容核验及投递回执。源码目录继续不可变，不能为了保存复核记录写入源码。
+
+部分交付必须显式列出`reportAssessment.deliverables`，逐份包含文件ID与自身覆盖范围，并通过实际内容/计算和对象范围核验。缺少这些信息时程序继续文件审核，不将“生成了文件”当成“已经送达”；原问题历史证据缺口继续保留。表格主表不能用只有ZIP/文档结构通过的文件替代。

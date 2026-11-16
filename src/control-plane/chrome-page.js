@@ -13,7 +13,7 @@ export function chromePage(request, adapters={}) {
  const write=/新增|创建|保存|修改|编辑|删除|启动|停止|执行|触发|重跑|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout)\b/i;
  const read=/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|search|query|view|detail|log|next|previous|refresh/i;
  const isRow=el=>el.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');
- const expansionInfo=el=>{const info=adapters.metadata?.(el);return info?.type&&['expansion-toggle','panel'].includes(info.kind)?info:null;};
+ const expansionInfo=el=>{const info=adapters.metadata?.(el);return info?.type&&(['expansion-toggle','panel','query'].includes(info.kind)||el.tagName==='TEXTAREA'&&info.type==='search')?info:null;};
  const label=el=>{
   const expansion=expansionInfo(el);if(expansion)return expansion.label;
   let text=(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);
@@ -22,8 +22,9 @@ export function chromePage(request, adapters={}) {
  };
  function type(el){
   if(!visible(el)||el.disabled||el.closest('[contenteditable="true"]'))return null;
-  const text=label(el),tag=el.tagName.toLowerCase();if(!text||write.test(text))return null;
-  if(expansionInfo(el))return 'read-action';
+  const text=label(el),tag=el.tagName.toLowerCase();if(!text)return null;
+  const observed=expansionInfo(el);if(observed)return observed.type;
+  if(write.test(text))return null;
   if(['div','span','i'].includes(tag)&&!el.matches('[role],.ant-menu-submenu-title'))return null;
   if(el.closest('[role=menu]')&&(el.matches('[role=menuitem]')||el.classList.contains('ant-menu-submenu-title')))return 'read-action';
   if(tag==='input')return /^(text|search|date|datetime-local|number)$/.test(el.type)&&/搜索|查询|日期|时间|名称|编号|search|filter|date|name|id/i.test(text)?'search':null;
@@ -48,7 +49,7 @@ export function chromePage(request, adapters={}) {
   if(tool==='browser_inspect')return {url:current.origin+current.pathname,label:ref.label,...adapters.inspect(el)};
   if(tool==='browser_click'&&ref.type==='read-action')el.click();
   else if(tool==='browser_search'&&ref.type==='search'&&typeof args.text==='string'&&args.text.length<=200){
-   const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(el,args.text);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+   const setter=Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype,'value').set;setter.call(el,args.text);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
   }else if(tool==='browser_select'&&ref.type==='select'&&typeof args.value==='string'&&args.value.length<=200&&[...el.options].some(o=>o.value===args.value)){
    el.value=args.value;el.dispatchEvent(new Event('change',{bubbles:true}));
   }else return {error:'本次只开放查询、查看与分页操作'};
@@ -56,7 +57,7 @@ export function chromePage(request, adapters={}) {
  }
  if(credentialFormVisible)return {loginRequired:true,credentialFormVisible:true,verificationRequired:false,stage:'等待日常Chrome页面登录',message:`需要登录 ${base.href}；可在此Chrome页面完成，或直接回复原任务卡“账号 / 密码”，登录后自动继续。`};
  const generationKey='__agentos_generation_'+token,refs={},controls=[],generation=(globalThis.window[generationKey]??0)+1;globalThis.window[generationKey]=generation;let n=0;
- for(const el of [...document.querySelectorAll('div,span,i,.el-collapse-item__header,.ant-collapse-header,a,[role=link],button,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]')].slice(0,500)){
+ for(const el of [...document.querySelectorAll('div,span,i,.el-collapse-item__header,.ant-collapse-header,a,[role=link],button,textarea,select,[role=button],input,[role=menuitem],.ant-menu-submenu-title,tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]')].slice(0,500)){
   const t=type(el);if(!t)continue;const ref=token+'-'+generation+'-'+n++;
   const text=label(el);refs[ref]={el,type:t,label:text,href:el.getAttribute('href')};
   controls.push({ref,type:t,label:text,...(t==='select'?{options:[...el.options].slice(0,100).map(o=>({value:o.value,label:o.textContent}))}:{})});

@@ -86,3 +86,9 @@ test('empty Chrome snapshots wait boundedly, recheck access and can recover',asy
  const r=await b.run({id:'j'},e,'browser_open');assert.equal(r.pageStatus,'ready');assert.equal(snapshots,3);assert.ok(checks>=4);
  let allowed=true;const c=new SharedChromeBrowser(async()=>allowed,async q=>q.operation==='find'?{tabId:'1',windowId:'1'}:{pageStatus:'empty',partial:true,controls:[]},async()=>{allowed=false;});await assert.rejects(c.run({id:'k'},e,'browser_open'),/授权/);
 });
+
+test('daily Chrome uses the shared query textarea classification and the native textarea value setter',async t=>{
+ const{controlMetadata}=await import('../src/shared/website-controls.js');const b=await chromium.launch({headless:true});t.after(()=>b.close());const p=await b.newPage();await p.route('**/*',r=>r.fulfill({contentType:'text/html',body:`<form role="search" onsubmit="return false"><textarea placeholder="Query filters"></textarea><button type="button" onclick="document.querySelector('h1').textContent=document.querySelector('textarea').value">Start query</button></form><h1>Ready</h1><textarea aria-label="Business note"></textarea><button>Save</button>`}));await p.goto(e.baseUrl);
+ const run=q=>p.evaluate(`(${chromePage.toString()})(${JSON.stringify({baseUrl:e.baseUrl,token:'textarea',...q})},{metadata:(${controlMetadata.toString()})})`);
+ let s=await run({tool:'browser_snapshot'});assert.equal(s.controls.filter(c=>c.type==='search').length,1);assert.ok(!s.controls.some(c=>c.label==='Save'));assert.equal((await run({tool:'browser_search',args:{ref:s.controls.find(c=>c.type==='search').ref,text:'read-only trace'}})).acted,true);s=await run({tool:'browser_snapshot'});assert.equal((await run({tool:'browser_click',args:{ref:s.controls.find(c=>c.label==='Start query').ref}})).acted,true);assert.equal(await p.locator('h1').textContent(),'read-only trace');
+});
