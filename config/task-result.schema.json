@@ -638,6 +638,41 @@
               ]
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "repository",
+            "branch",
+            "reason"
+          ],
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "list_branches",
+                "read_branch"
+              ]
+            },
+            "repository": {
+              "type": "string"
+            },
+            "branch": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
         }
       ]
     },
