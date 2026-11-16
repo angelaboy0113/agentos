@@ -208,7 +208,7 @@ test('question clarification reopens same card and owner-profile approval create
   assert.equal((await handleCardAction(context, approve)).ok, true);
   s = await app.store.read(); assert.equal(s.jobs.length, 2); assert.equal(s.jobs[1].questionId, first.questionId);
   assert.equal(s.cardMessages[key].terminal, false); assert.equal(calls.filter((c) => c.type === 'send').length, 1);
-  assert.equal(calls.filter((c) => c.type === 'mention').length, 0);
+  const reminders=calls.filter((c)=>c.type==='mention');assert.equal(reminders.length,1);assert.match(reminders[0].text,/<at user_id="ou_admin"><\/at>.*请补充/);assert.equal(reminders[0].id,'m');
 });
 test('question pagination is display-only and source-sync blocking mentions asker and administrator once', async (t) => {
   const { app, context, send, calls } = await setup(t, () => decision({ action: 'create_task', intent: 'analysis', instruction: '检查' }));
