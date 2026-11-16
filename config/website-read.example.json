@@ -63,7 +63,7 @@
             "https://assets.example.invalid/static/framework.js"
           ],
           "staticResourceRoots": [
-            "https://assets.example.invalid/releases/build42/static/"
+            "https://assets.example.invalid/product/{hex}/{hex}/static/"
           ],
           "loginReads": [
             {

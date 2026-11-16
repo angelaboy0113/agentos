@@ -130,7 +130,7 @@ export function validateWebsiteStaticResources(value,base){
  return value;
 }
 export function validateWebsiteStaticRoots(value){
- if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return u.protocol!=='https:'||u.search||u.hash||u.href!==url||!/^\/(?:[A-Za-z0-9_-]+\/){2,}$/.test(u.pathname);}catch{return true;}}))throw Error('公共静态目录须为审核后的HTTPS多段目录，不能含通配符、查询或业务接口');
+ if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return u.protocol!=='https:'||u.search||u.hash||u.href.replace(/%7Bhex%7D/gi,'{hex}')!==url||!/^\/(?:[A-Za-z0-9_-]+\/|\{hex\}\/){2,}$/.test(decodeURIComponent(u.pathname));}catch{return true;}}))throw Error('公共静态目录须为审核后的HTTPS多段目录，仅可用整段{hex}表示8至64位哈希，不能含任意通配符、查询或业务接口');
  return value;
 }
 export function validateWebsiteLoginReads(value){
@@ -143,7 +143,7 @@ export function websiteLoginReadAllowed(request,waiting,reads=[],base){
 }
 export function websiteStaticResourceAllowed(base,request,resources=[],roots=[]){
  if(!Array.isArray(resources)||request.method!=='GET')return false;
- let rooted=false;try{validateWebsiteStaticRoots(roots);const u=new URL(request.url);rooted=!u.search&&!u.hash&&!/%|\\/.test(u.pathname)&&roots.some(root=>u.href.startsWith(root));}catch{return false;}
+ let rooted=false;try{validateWebsiteStaticRoots(roots);const u=new URL(request.url);const decoded=decodeURIComponent(u.pathname);const safe=!/%(?:2e|2f|5c|25)/i.test(u.pathname)&&!/[\\%\x00-\x1f]/.test(decoded)&&!decoded.split('/').includes('..');rooted=!u.search&&!u.hash&&safe&&roots.some(root=>{const b=new URL(root);if(b.origin!==u.origin)return false;const prefix=decodeURIComponent(b.pathname).split('/').filter(Boolean),parts=decoded.split('/').filter(Boolean);return parts.length>prefix.length&&prefix.every((segment,i)=>segment==='{hex}'?/^[a-f0-9]{8,64}$/i.test(parts[i]):parts[i]===segment);});}catch{return false;}
  if(!resources.includes(request.url)&&!rooted)return false;
  try{const u=new URL(request.url);validateWebsiteStaticResources([request.url],base);const types={script:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|webp|gif|svg|ico)$/i,xhr:/\.json$/i,fetch:/\.json$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
 }

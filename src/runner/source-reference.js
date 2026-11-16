@@ -10,11 +10,12 @@ const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 async function directory(p){await mkdir(p,{recursive:true,mode:0o700});const s=await lstat(p);if(!s.isDirectory()||s.isSymbolicLink()||await realpath(p)!==p)throw Error('Reference cache boundary invalid');}
 // A separately labelled source reference can explain a missing symbol. It is never a replacement environment snapshot.
 export async function prepareSourceReference(project,sync,query,{job,dataDir,run=git,verify=verifySnapshot}={}){
- if(job?.taskIntent!=='analysis'||sync?.policy!=='isolated-environment-source-v1'||!['list_branches','read_branch'].includes(query.operation)||typeof query.reason!=='string'||!query.reason.trim())throw Error('Invalid source reference request');
+ if(job?.taskIntent!=='analysis'||sync?.policy!=='isolated-environment-source-v1'||!['list_branches','read_branch','reference_history'].includes(query.operation)||typeof query.reason!=='string'||!query.reason.trim())throw Error('Invalid source reference request');
  const repo=sync.repositories.find(r=>r.path===query.repository);if(!repo)throw Error('Source reference repository is outside the original scope');
  await verify(project,sync);
  const source=path.resolve(sync.workspace,repo.path);await verifyIndependentGit(source);
  const origin=await run(source,['remote','get-url','origin']);
+ if(query.operation==='reference_history')return hydrateSourceReference(project,sync,query,{job,dataDir,run,verify,origin});
  const raw=await run(source,['ls-remote','--heads','origin']);
  const branches=raw.split('\n').filter(Boolean).map(l=>{const[commit,ref]=l.split(/\s+/);if(!/^[a-f0-9]{40,64}$/.test(commit)||!ref?.startsWith('refs/heads/'))throw Error('Invalid remote branch response');return{branch:ref.slice(11),commit};});
  if(new Set(branches.map(r=>r.branch)).size!==branches.length)throw Error('Duplicate remote branch response');
@@ -63,4 +64,25 @@ export async function sourceReferenceArtifact(dataDir,job,relative){
  const file=path.join(ref.workspace,match[2]);if(await realpath(file)!==file)throw Error('Linked reference file');const info=await lstat(file);if(!info.isFile()||info.nlink!==1)throw Error('Invalid reference file');
  if(await git(ref.workspace,['rev-parse','HEAD'])!==ref.commit||await git(ref.workspace,['remote','get-url','origin']).then(origin=>digest(origin))!==ref.originHash||await git(ref.workspace,['rev-parse',ref.commit+':'+match[2]])!==await git(ref.workspace,['hash-object','--',match[2]]))throw Error('Reference file differs from the fixed commit');
  return{file,bytes:info.size,branch:ref.branch,commit:ref.commit,repository:b.repository,environmentSnapshotUnchanged:true,deploymentVerified:false};
+}
+
+// Hydrate only an already materialized, receipt-bound reference. A new remote tip
+// cannot replace its fixed commit, and no model-provided directory is accepted.
+async function hydrateSourceReference(project,sync,query,{job,dataDir,run,verify,origin}){
+ if(typeof query.branch!=='string'||!query.branch||!/^[a-f0-9]{40,64}$/.test(query.commit??''))throw Error('Reference history requires its exact branch and fixed commit');
+ const repo=sync.repositories.find(r=>r.path===query.repository),binding={jobId:job.id,questionId:job.questionId,profile:job.originProfile??job.agentProfile,projectId:job.projectId,environment:sync.environment,repository:repo.path,originalCommit:repo.commit,originalCacheKey:sync.cacheKey};
+ const parent=path.join(await documentDirectory(dataDir,job.id),'source-references');await directory(parent);
+ const container=path.join(parent,digest([binding,origin,{branch:query.branch,commit:query.commit}])),workspace=path.join(container,'workspace');
+ return withSnapshotLock(parent,async check=>{
+  for(const p of [container,workspace,path.join(container,'reference.json')]){const st=await lstat(p);if(st.isSymbolicLink()||await realpath(p)!==p||st.isFile()&&st.nlink!==1)throw Error('Reference history boundary invalid');}
+  const saved=JSON.parse(await readFile(path.join(container,'reference.json'),'utf8'));
+  if(saved.policy!=='separate-source-reference-v1'||digest(saved.binding)!==digest(binding)||saved.branch!==query.branch||saved.commit!==query.commit||saved.workspace!==workspace||saved.originHash!==digest(origin))throw Error('Reference history receipt mismatch');
+  const inspect=async()=>{await verifyIndependentGit(workspace);if(await run(workspace,['rev-parse','HEAD'])!==saved.commit||await run(workspace,['remote','get-url','origin'])!==origin||await run(workspace,['status','--porcelain','--untracked-files=all']))throw Error('Reference history identity or content changed');};
+  await inspect();check();const shallow=await run(workspace,['rev-parse','--is-shallow-repository'])==='true';let fetchDiagnostic;
+  if(shallow){try{await run(workspace,['fetch','--unshallow','--no-tags','--no-recurse-submodules','origin',saved.commit]);}catch(error){if(await run(workspace,['rev-parse','--is-shallow-repository'])!=='false')throw error;fetchDiagnostic={code:error.code??'SOURCE_GIT_UNAVAILABLE'};}}
+  check();await inspect();await verify(project,sync);
+  if(await run(workspace,['rev-parse','--is-shallow-repository'])!=='false')throw Error('Reference history is still shallow');
+  await run(workspace,['rev-list','--objects','--missing=error','--quiet',saved.commit]);
+  return {...saved,operation:'reference_history',checkedAt:new Date().toISOString(),history:{status:'complete',scope:'reference-fixed-commit-ancestors',commits:Number(await run(workspace,['rev-list','--count',saved.commit])),reused:!shallow,...(fetchDiagnostic?{fetchDiagnostic}:{})},environmentSnapshotUnchanged:true,deploymentVerified:false};
+ });
 }

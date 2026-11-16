@@ -13,3 +13,23 @@ test('runner resumes branch discovery in same thread and carries unavailable cod
  test('equivalent reference requests with reworded reasons cannot loop repeated downloads',async()=>{let calls=0,n=0;const out=await runWithSourceHistory({project:{},sourceSync:{policy:'isolated-environment-source-v1',repositories:[{path:'.'}]},job:{taskIntent:'analysis',context:[]},config:{dataDir:'/data'},workspace:'/source',emit:async()=>{}},{reference:async()=>{calls++;return{branches:[],complete:true};},run:async()=>({threadId:'thread',outcome:'blocked',finalMessage:'Evidence retained',sourceHistoryQuery:{...query,reason:String(n++)}})});assert.equal(calls,1);assert.equal(out.outcome,'partial');assert.equal(out.sourceHistoryQuery,null);});
 
 test('reference code artifact handoff validates task receipt and exact fixed blob, rejects other tasks and tampering',async t=>{const x=await setup(t),ref=await prepareSourceReference({},x.sync,query,x.options),key=path.basename(path.dirname(ref.workspace)),relative='source-references/'+key+'/workspace/code.java',job={...x.job,sourceReferenceScope:x.sync};const a=await sourceReferenceArtifact(x.options.dataDir,job,relative);assert.equal(a.commit,x.ref);assert.equal(a.deploymentVerified,false);await assert.rejects(sourceReferenceArtifact(x.options.dataDir,{...job,originProfile:'other'},relative),/identity/);await writeFile(path.join(ref.workspace,'code.java'),'changed');await assert.rejects(sourceReferenceArtifact(x.options.dataDir,job,relative),/differs/);});
+
+test('reference ancestor history is pinned, complete, reusable and cross-process locked without changing original evidence',async t=>{
+ const x=await setup(t);const ref=await prepareSourceReference({},x.sync,query,x.options),receipt=await readFile(path.join(path.dirname(ref.workspace),'reference.json'),'utf8'),head=g(x.workspace,['rev-parse','HEAD']);
+ await writeFile(path.join(x.origin,'new.txt'),'advance remote after reference');g(x.origin,['add','.']);g(x.origin,['commit','-m','remote moved']);
+ const q={operation:'reference_history',repository:'.',branch:ref.branch,commit:ref.commit,reason:'Locate an older change'};
+ const out=await Promise.all([prepareSourceReference({},x.sync,q,x.options),prepareSourceReference({},x.sync,q,x.options)]);
+ assert.ok(out.every(r=>r.commit===x.ref&&r.history.status==='complete'&&r.history.commits===2));assert.equal(out.filter(r=>r.history.reused).length,1);
+ assert.equal(g(ref.workspace,['rev-parse','HEAD']),x.ref);assert.equal(g(ref.workspace,['status','--porcelain']),'');assert.equal(g(ref.workspace,['rev-parse','--is-shallow-repository']),'false');assert.equal(g(x.workspace,['rev-parse','HEAD']),head);assert.equal(await readFile(path.join(path.dirname(ref.workspace),'reference.json'),'utf8'),receipt);
+ assert.match(g(ref.workspace,['show',x.pinned+':code.java']),/Empty/);
+ const reused=await prepareSourceReference({},x.sync,q,{...x.options,run:async(p,args)=>{assert.notEqual(args[0],'fetch');assert.notEqual(args[0],'ls-remote');return g(p,args);}});assert.equal(reused.history.reused,true);
+ await assert.rejects(prepareSourceReference({},x.sync,{...q,commit:g(x.origin,['rev-parse','HEAD'])},x.options));
+ await assert.rejects(prepareSourceReference({},x.sync,q,{...x.options,job:{...x.job,originProfile:'other'}}));
+});
+test('reference history failure and shared metadata retain usable fixed source and do not switch HEAD',async t=>{
+ const x=await setup(t),ref=await prepareSourceReference({},x.sync,query,x.options),q={operation:'reference_history',repository:'.',branch:ref.branch,commit:ref.commit,reason:'Check history'};
+ await assert.rejects(prepareSourceReference({},x.sync,q,{...x.options,run:async(p,args)=>{if(args[0]==='fetch')throw Object.assign(Error('authentication unavailable'),{code:'SOURCE_GIT_AUTH'});return g(p,args);}}),e=>e.code==='SOURCE_GIT_AUTH');
+ assert.equal(g(ref.workspace,['rev-parse','HEAD']),x.ref);assert.match(await readFile(path.join(ref.workspace,'code.java'),'utf8'),/missingMethod/);
+ await writeFile(path.join(ref.workspace,'.git','objects','info','alternates'),path.join(x.origin,'.git','objects'));
+ await assert.rejects(prepareSourceReference({},x.sync,q,x.options),/共享/);
+});

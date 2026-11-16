@@ -673,6 +673,45 @@
               "type": "string"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "repository",
+            "branch",
+            "reason",
+            "commit"
+          ],
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "reference_history"
+              ]
+            },
+            "repository": {
+              "type": "string"
+            },
+            "branch": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40,64}$"
+            }
+          }
         }
       ]
     },
