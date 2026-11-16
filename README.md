@@ -1,5 +1,7 @@
 # Angel AgentOS
 
+环境执行器按数据源加载指令、批量浏览器观察及审核后固定只读POST说明见[接口调查链路](docs/interface-investigation.md)。
+
 用户指定HTML/PPT/Word等格式、实际核验、原话题交付与文件追问见[通用文件输出](docs/document-artifacts.md)。
 
 内存与故障检查点恢复说明见[状态存储与内存](docs/state-memory.md)。
@@ -16,7 +18,7 @@
 
 共享管理平台的入口判断、现有凭据复用和取证缺口接续见[网页调查诊断](docs/website-findings.md)。
 
-**成品版本：v1.117.0** · GitHub：<https://github.com/angelaboy0113/agentos>
+**成品版本：v1.120.0** · GitHub：<https://github.com/angelaboy0113/agentos>
 
 维护备份登记、空闲自动去重及恢复见[维护备份整理](docs/maintenance-backups.md)。
 

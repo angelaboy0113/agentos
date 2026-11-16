@@ -274,7 +274,8 @@ export class WebsiteBrowser {
    }
   }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
-  return this.snapshot(s);
+  const readiness=(current.kind==='navigation'||s.pendingReads.size)?await waitForCaptureReady(s):null;
+  return {...await this.snapshot(s),...(readiness?{observationReadiness:readiness}:{})};
  }
  async readVisible(s,{section,offset,limit,contentHash,find}){
   // Reuse the same authenticated, authorised page. No URL, hidden DOM, selector,

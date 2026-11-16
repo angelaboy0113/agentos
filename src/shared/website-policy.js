@@ -1,3 +1,4 @@
+import {parseExactJson} from './exact-json.js';
 import { createHash } from 'node:crypto';
 export const writeAction = /新增|创建|保存|修改|编辑|删除|启动|停止|执行一次|立即执行|触发|重跑|重发|重新发送|重放|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|resend|replay)\b/i;
 const reads = /^(?:get|list|page|pageList|query|search|find|detail|view|info|index|home|dashboard|status|log|logs|logDetailCat|logDetailPage|toLogin|login|auth|check|count|select|load|read)[a-z0-9_-]*$/i;
@@ -59,6 +60,14 @@ export function websiteRequestAllowed(base, request, manualLogin=false, readEndp
    const reviewed=readEndpoints.some(e=>e.reviewed===true&&e.method==='POST'&&reviewedPathMatches(e.path,u.pathname));
    if((!reads.test(tail)||/login|auth/i.test(tail))&&!reviewed)return false;
    if((request.body??'').length>16000)return false;
+   if(reviewedEndpoint?.bodyParameters){
+     if([...u.searchParams].some(([k,v])=>Object.hasOwn(reviewedEndpoint.bodyParameters,k)||!reviewedEndpoint.queryParameters?.[k]?.includes(v)))return false;
+     let body;try{parseExactJson(request.body??'{}');body=JSON.parse(request.body??'{}');}catch{if(/^\s*[\[{]/.test(request.body??''))return false;try{const entries=[...new URLSearchParams(request.body??'')];if(new Set(entries.map(([k])=>k)).size!==entries.length)return false;body=Object.fromEntries(entries);}catch{return false;}}
+     const expected=reviewedEndpoint.bodyParameters;
+     if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==Object.keys(expected).length
+       ||Object.entries(expected).some(([key,values])=>!Object.hasOwn(body,key)||!values.includes(body[key])))return false;
+   }
+
    try { const values=JSON.stringify(JSON.parse(request.body??'{}')); if(/"(?:action|operation|command|cmd|method)"\s*:\s*"(?:save|delete|update|execute|trigger|start|stop)"/i.test(values))return false;}catch{if(/(?:^|&)(?:action|operation|cmd|method)=(?:save|delete|update|execute|trigger|start|stop)(?:&|$)/i.test(request.body??''))return false;}
    return true;
  }
@@ -96,12 +105,17 @@ export function cleanWebsiteText(value,limit=10000) {
 export function validateWebsiteReadEndpoints(value){
  if(!Array.isArray(value)||value.length>32)throw new Error('网站只读接口配置必须为最多32项');
  for(const e of value){
-  if(!e||Object.keys(e).some(k=>!['method','path','reviewed','queryParameters'].includes(k))||!['GET','POST'].includes(e.method)||e.reviewed!==true||typeof e.path!=='string'||!/^\/[A-Za-z0-9_./{}-]+$/.test(e.path)||e.path.includes('..')||e.path.includes('//'))throw new Error('网站只读接口必须为审核后的固定路径和GET/POST方法');
+  if(!e||Object.keys(e).some(k=>!['method','path','reviewed','queryParameters','bodyParameters'].includes(k))||!['GET','POST'].includes(e.method)||e.reviewed!==true||typeof e.path!=='string'||!/^\/[A-Za-z0-9_./{}-]+$/.test(e.path)||e.path.includes('..')||e.path.includes('//'))throw new Error('网站只读接口必须为审核后的固定路径和GET/POST方法');
   const segments=e.path.split('/');if(segments.some(s=>/[{}]/.test(s)&&!Object.hasOwn(readPathIds,/^\{([A-Za-z]+)\}$/.exec(s)?.[1]??''))||e.method!=='GET'&&/[{}]/.test(e.path))throw new Error('动态只读路径仅允许GET和完整的objectId/uuid/integerId占位段');
   if(e.queryParameters!==undefined){
    const filters=e.queryParameters;
    if(!filters||typeof filters!=='object'||Array.isArray(filters)||Object.keys(filters).length>32)throw new Error('只读筛选参数必须为固定值映射');
    for(const [key,values]of Object.entries(filters))if(!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)||/^(?:action|operation|command|cmd|method|__proto__|constructor|prototype)$/i.test(key)||/password|secret|token|credential/i.test(key)||!Array.isArray(values)||!values.length||values.length>32||values.some(v=>typeof v!=='string'||!v.length||v.length>100||/[\x00-\x1f\x7f]/.test(v)))throw new Error('只读筛选仅允许审核后的固定非敏感值；不能覆盖动作或执行参数');
+  }
+  if(e.bodyParameters!==undefined){
+   if(e.method!=='POST'||!e.bodyParameters||typeof e.bodyParameters!=='object'||Array.isArray(e.bodyParameters)||!Object.keys(e.bodyParameters).length)throw new Error('固定只读请求体仅适用于POST');
+   // Reuse fixed non-secret value validation without accepting action/credential fields.
+   validateWebsiteReadEndpoints([{method:'POST',path:e.path,reviewed:true,queryParameters:e.bodyParameters}]);
   }
   const parts=e.path.replace(/([a-z])([A-Z])/g,'$1 $2').split(/[\/._\s-]/).filter(Boolean);
   if(parts.some(p=>writeAction.test(p))&&!reviewedQueryObjectPath(e.path,e.method))throw new Error('网站只读接口不能包含修改操作');

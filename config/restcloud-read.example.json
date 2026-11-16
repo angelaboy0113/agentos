@@ -78,6 +78,17 @@
               "method": "GET",
               "path": "/restcloud/rest/core/services/{objectId}",
               "reviewed": true
+            },
+            {
+              "method": "POST",
+              "path": "/restcloud/rest/apiportal/guide/value",
+              "reviewed": true,
+              "bodyParameters": {
+                "configId": [
+                  "FrontendJavaScriptCallAPI",
+                  "JavaRestClientDemo"
+                ]
+              }
             }
           ],
           "readNavigationSelectors": [
