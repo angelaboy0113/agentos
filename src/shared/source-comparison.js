@@ -7,8 +7,8 @@ function independentEnvironmentSubjects(text){
  const names={uat:['sit','uat','test','testing','测试'],prd:['prd','prod','production','生产']};
  const subject=tier=>{
   const labels=[...new Set(names[tier])].sort((a,b)=>b.length-a.length).map(escapeRegex).join('|');
-  const pattern=new RegExp('(?:^|[\\s，,。！？!?；;：:]|核对|查看|查询|看看|查一下|看下|检查|以及|同时|另外|还有|而在|和|与|及|、)(?:在|对于)?\\s*(?:'+labels+')(?:\\s*(?:环境|机|机器|系统|数据库|分支|库|端|environment\\b)(?:中|下|里)?|(?=\\s*(?:有|没有|能|不能|是否|是不是|为什么|怎么|查|看|has\\b|have\\b|can\\b)))','g');
-  let match;while((match=pattern.exec(text))){const prefix=text.slice(Math.max(0,match.index-24),match.index);if(!/(?:叫|名为|名字是|名称是|示例为|示例是|提到|写着|包含字样)\s*$/.test(prefix))return true;}
+  const pattern=new RegExp('(?:^|[\\s\\p{P}]|核对|查看|查询|看看|查一下|看下|检查|以及|同时|另外|还有|而在|和|与|及|、)(?:在|对于)?\\s*(?:'+labels+')(?:\\s*(?:环境|机|机器|系统|数据库|分支|库|端|environment\\b)(?:中|下|里)?|(?=\\s*(?:有|没有|能|不能|是否|是不是|为什么|怎么|查|看|has\\b|have\\b|can\\b)))','gu');
+  let match;while((match=pattern.exec(text))){const prefix=text.slice(Math.max(0,match.index-24),match.index).replace(/[\s\p{P}]+$/gu,'');if(!/(?:叫|名为|名字是|名称是|示例为|示例是|提到|写着|包含字样)\s*$/.test(prefix))return true;}
   return false;
  };
  return subject('uat')&&subject('prd');
