@@ -30,7 +30,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  // Never turn a container/ordinary paragraph into an action because its descendants contain a label.
  if(customContainer&&!reviewedNavigation&&!(el.matches('.ant-table-row-expand-icon,.el-table__expand-icon')||panelCandidate(el)||localExpansion&&localInteractive&&el.querySelectorAll('button,a,input,select,[role=button]').length===0))return {visible:true,label,type:null};
  function panelCandidate(node){return node.matches('.el-collapse-item__header,.ant-collapse-header');}
- const fieldGroup=el.closest('.el-form-item,.ant-form-item,.el-col,.ant-col,[role="group"],label');
+ const fieldGroup=el.closest('.el-form-item,.ant-form-item,[role="group"],label')??el.closest('.el-col,.ant-col');
  const singleField=fieldGroup&&[...fieldGroup.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(x=>x.getClientRects().length).length===1;
  const localLabel=singleField?fieldGroup.innerText?.trim():'';
  const fieldLabel=fieldGroup?.querySelector('.el-form-item__label,.ant-form-item-label,label')?.innerText?.trim()||(localLabel&&localLabel.length<=100?localLabel:'');
@@ -86,7 +86,7 @@ export const controlMetadata=controlMetadataBatch();
 export function websiteFields({secretSelector,full=false}){
  const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
  return [...document.querySelectorAll('input,textarea,select,[role="switch"],[role="checkbox"],[role="radio"]')].filter(e=>visible(e)&&!e.matches(secretSelector)&&!e.closest('[data-sensitive],[data-agentos-secret]')).slice(0,full?undefined:101).map(e=>{
-  const group=e.closest('.el-form-item,.ant-form-item,.el-col,.ant-col,label,[role="group"]');
+  const group=e.closest('.el-form-item,.ant-form-item,label,[role="group"]')??e.closest('.el-col,.ant-col');
   const labels=[...group?.querySelectorAll('label,.el-form-item__label,.ant-form-item-label,span')??[]].filter(n=>n!==e&&/[:：]$/.test(n.innerText?.trim()??''));
   const local=group&&[...group.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(visible).length===1?group.innerText?.trim():'';
   const label=(e.getAttribute('aria-label')||labels[0]?.innerText||e.labels?.[0]?.innerText||(local&&local.length<=100?local:'')||e.placeholder||e.name||e.id||'字段').trim().slice(0,100);
