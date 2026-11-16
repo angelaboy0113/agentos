@@ -1,3 +1,4 @@
+import {jobTerminalMention} from './requester-mention.js';
 import{deliveryHeld,deliveryFailure,deliveryFingerprint}from'../shared/delivery-retry.js';
 import {withdrawnCardInert} from '../shared/withdrawn-delivery.js';
 import {fitNativeCardTables} from './card-markdown-tables.js';
@@ -44,16 +45,16 @@ export class LiveCards {
       state.cardMessages ??= {};
       let existing = state.cardMessages[key];
       // A resolved/manual wait can become automatic recovery before dispatch.
-      // Do not keep an obsolete login mention when the latest view needs none.
-      if(existing?.terminalMention?.kind==='browser_login'&&!terminalMention)existing={...existing,terminalMention:null,mentionDelivered:false};
+      // Do not keep an obsolete waiting mention when the latest view needs none.
+      if(['browser_login','clarification'].includes(existing?.terminalMention?.kind)&&!terminalMention)existing={...existing,terminalMention:null,mentionDelivered:false};
       if (generation && (!key.startsWith('question:') || !Number.isSafeInteger(generation) || generation < 1)) throw new Error('Invalid card generation');
       if ((existing?.generation ?? 0) > generation) return;
       if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
       const reopening = generation > (existing?.generation ?? 0);
       if (deliveryToken && existing?.deliveryToken === deliveryToken && existing.terminal && terminal && !reopening) return;
       if (existing?.terminal && !terminal && !reopening) return; // Late progress cannot overwrite a conclusion.
-      const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval', 'environment_setup_missing'].includes(existing?.terminalMention?.kind)
-        && terminalMention && !terminalMention.kind;
+      const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval', 'environment_setup_missing','clarification'].includes(existing?.terminalMention?.kind)
+        && terminalMention && (!terminalMention.kind||existing.terminalMention.kind==='clarification'&&terminalMention.kind==='clarification'&&existing.terminalMention.requestKey!==terminalMention.requestKey);
       if (!reopening && !replacingWaitingMention && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
       state.cardMessages[key] = { ...existing, destination, card, terminal, generation, overflow: [],
@@ -61,7 +62,7 @@ export class LiveCards {
         deliveryToken: deliveryToken ?? (!reopening ? existing?.deliveryToken : undefined),
         mentionDelivered: reopening || replacingWaitingMention ? false : existing?.mentionDelivered,
         publicCompletionMention: publicCompletionMention || (!reopening && existing?.publicCompletionMention) || false,
-        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval','environment_setup_missing'].includes(terminalMention?.kind) ? terminalMention : null),
+        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval','environment_setup_missing','clarification'].includes(terminalMention?.kind) ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });
@@ -159,13 +160,13 @@ export class LiveCards {
        const question=key.startsWith('question:')?fresh.questions?.[key.slice(9)]:null;
        return {latest:fresh.cardMessages[key],questionReady:!question||(question.generation<=entry.generation
         &&!fresh.conversations.some(t=>t.questionId===question.id&&['queued','thinking','decided'].includes(t.status))
-        &&!fresh.jobs.some(j=>j.questionId===question.id&&['queued','running','cancelling','awaiting_approval',...(entry.terminalMention?.kind==='browser_login'?[]:['awaiting_clarification']),...(entry.terminalMention?.kind==='environment_approval'?[]:['awaiting_environment_approval'])].includes(j.status)))};
+        &&!fresh.jobs.some(j=>j.questionId===question.id&&['queued','running','cancelling','awaiting_approval',...(['browser_login','clarification'].includes(entry.terminalMention?.kind)?[]:['awaiting_clarification']),...(entry.terminalMention?.kind==='environment_approval'?[]:['awaiting_environment_approval'])].includes(j.status)))};
       });
-      if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady) {
+      if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady && (entry.terminalMention.kind!=='clarification'||await stateView(this.store,s=>{const jobs=(s.jobs??[]).filter(j=>key.startsWith('question:')?j.questionId===key.slice(9):j.id===entry.terminalMention.jobId),j=jobs.at(-1);return j?.id===entry.terminalMention.jobId&&jobTerminalMention(j)?.requestKey===entry.terminalMention.requestKey;}))) {
         if(entry.publicCompletionMention)await this.authorizeDestination?.(entry.destination,entry);
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile, replyInThread: entry.terminalMention.replyInThread ?? entry.destination.replyInThread,
-          idempotencyKey: `aos-mention-${createHash('sha256').update(entry.generation ? `${key}:${entry.generation}` : key).digest('hex').slice(0, 32)}`,
+          idempotencyKey: `aos-mention-${createHash('sha256').update(entry.terminalMention.kind==='clarification'?`${key}:${entry.generation}:clarification:${entry.terminalMention.requestKey}`:entry.generation ? `${key}:${entry.generation}` : key).digest('hex').slice(0, 32)}`,
         });
         await this.store.transact((state) => {
           if (state.cardMessages[key].generation === entry.generation) Object.assign(state.cardMessages[key], { mentionDelivered: true, failures: 0, retryAt: 0 });

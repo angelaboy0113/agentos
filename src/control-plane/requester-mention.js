@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 const OPEN_ID = /^ou_[A-Za-z0-9]+$/;
 
 export function requesterMentionText(userId, message) {
@@ -36,6 +37,19 @@ export function jobTerminalMention(job, projects = {}) {
     if (!ids.length) return null;
     return { kind: 'environment_approval', replyTo: job.originMessageId ?? job.replyToMessageId, profile: job.originProfile,
       text: `${ids.filter((id) => OPEN_ID.test(id)).map((id) => `<at user_id="${id}"></at>`).join(' ')} 请审核原卡中的环境、查询范围、参数及结果展示范围；未批准前不会访问环境。` };
+  }
+  // Only an actual human-input wait is a request to the originating author.
+  // Source/environment continuations and capacity/login recovery are internal work.
+  const result=job.result??{}, blocker=result.investigation?.blocker;
+  const needsInput=job.status==='awaiting_clarification'||job.status==='completed'&&blocker?.kind==='user_input';
+  if(needsInput&&!result.browserLoginRequired&&!result.modelCapacityWaiting
+    &&!result.environmentQuery&&!result.websiteQuery&&!result.sourceHistoryQuery&&!result.sourceEnvironmentQuery&&!result.environmentSetup
+    &&(!blocker||blocker.kind==='user_input')){
+    const value=mention(job.originMessageId??job.replyToMessageId,job.originProfile,job.senderId,
+      '请补充原卡中列出的信息，可在原话题 @ 对应助手回复，或使用卡片内的补充入口；已有结果会保留。请勿在群里发送密码或令牌。');
+    if(!value)return null;
+    const round=(job.events??[]).filter(e=>e.type==='clarification_received').at(-1);
+    return {...value,kind:'clarification',jobId:job.id,requestKey:createHash('sha256').update(JSON.stringify([job.id,round?.id??round?.at??null,blocker?.needed??null])).digest('hex')};
   }
   if (!['completed', 'blocked', 'failed', 'cancelled'].includes(job.status)) return null;
   const replyTo = job.originMessageId ?? job.replyToMessageId;

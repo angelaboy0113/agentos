@@ -452,3 +452,5 @@ TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使�
 图片、海报、插画、头像等创作默认由 Codex 原生生图工具生成，只有用户明确指定 HTML/H5 截图才采用浏览器渲染。网页取证截图保持独立用途。见 [原生图片生成](docs/native-image-generation.md)。
 
 源码缺失时可使用[独立分支对照](docs/source-reference.md)，保留原环境快照，区分参考实现与生产部署。
+
+补充信息的真实 @、去重与恢复规则见 [补充信息提醒](docs/clarification-notices.md)。
