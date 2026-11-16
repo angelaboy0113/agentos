@@ -13,7 +13,7 @@ export function continuationCatalog(config,plan,job,projects=null){
 }
 export function continuationSpec(entries){return entries.length?[{
   tool:'continue_environment',args:{environmentId:'exact next database environmentId in continuationCatalog',queryId:'exact queryId',parameters:['brief single-line purpose with known tables, keys, filters and formulas'],repairResultRef:'optional: latest saved finalize_report REPORT_INPUT resultRef when the missing independent evidence is in another authorized database'},
-  description:'当前来源已取得成果，剩余目标需要另一个已登记数据库且规则/参数已明确时，优先本工具直接接续，不要finish后让源码模型重新规划相同步骤。先保存完整数据集；程序关闭当前步骤后重新校验范围和权限，再领取下一步，不执行本工具中的数据库查询。不能用于猜口径、访问目录外系统或切换测试生产、跳过尚未解决的工具失败或声明原问题完成；唯一允许的未解决输入接续是finalize_report的已保存REPORT_INPUT：明确repairResultRef去另一已授权库补独立证据，原核验仍未通过。源码不足时finish complete=false返回源码调查。'
+  description:'当前来源已取得数据或可核验网页观察，剩余目标需要另一个已登记数据库且规则/参数已明确时，优先本工具直接接续，不要finish后让源码模型重新规划相同步骤。有数据集先保存；网页接口未开放且没有业务行时，仍可按continuationCatalog.readSources选择已有同环境完整数据库源，不必为了接续制造一行数据。保留网页缺口，不将数据库值冒充网页复现。程序关闭当前步骤后重新校验范围和权限，再领取下一步，不执行本工具中的数据库查询。不能用于猜口径、访问目录外系统或切换测试生产、跳过尚未解决的工具失败或声明原问题完成；唯一允许的未解决输入接续是finalize_report的已保存REPORT_INPUT：明确repairResultRef去另一已授权库补独立证据，原核验仍未通过。源码不足时finish complete=false返回源码调查。'
 }]:[];}
 export function validateContinuation(config,plan,job,args,projects=null){
   const entries=continuationCatalog(config,plan,job,projects),entry=entries.find(e=>e.environmentId===args?.environmentId);

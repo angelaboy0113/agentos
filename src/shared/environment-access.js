@@ -63,6 +63,11 @@ export function catalog(config, projectId) {
     queries: Object.entries(e.queries).map(([queryId, q]) => ({ queryId, description: q.description, ...(e.kind==='mysql'&&q.mode==='investigate'?{capabilities:['schema返回真实库名、SQL类型/长度精度/可空性和注释；支持search按已授权库表的表列名与注释定向检索，metadataEvidence不是业务记录，分页无匹配不证明业务不存在','database_clock：固定只读查询核对数据库会话时间、UTC、偏移和时区，业务字段时区另按源码核实','filters支持is_null/is_not_null固定空值判断，value省略或null，仍须真实schema字段','group_dataset与linked_group_dataset支持实际分组字段，按实际唯一主键和全部所需字段分组可保留完整原始记录；compose_report支持实际所需列，宽表自动小页读取，不删列' ]}:{}), ...(e.kind==='cnb'?{capabilities:['CNB原生API构建历史只读，按本系统/环境精确仓库隔离；build_history分页、分支/提交/事件/状态/开始时间；无需网页登录，需repo-cnb-history:r；流水线成功不是当前实际运行版本或上线完成时间；不读取原始日志或执行构建']}:{}), ...(e.kind==='tsf'?{capabilities:['TSF container deployment history and actual pod image tag/digest/status; fixed read actions, application/group/namespace isolation; explicit time range and full pagination; TaskTime is change-record time, not exact completion; no YAML/env/credentials or deploy/rollback actions; prefer this native path for current version, correlate with CNB/source SHA',...(q.containerLogApplications?.length?['container_log_tail: explicitly enabled private TSF current container logs; not complete historical evidence']:[]),...(q.logApplications?.length?['log_configurations/search_logs: credential-redacted existing application stdout/business logs; enabled applications only, fixed deployment-group scope and explicit time range; no request replay']:[]),...(q.configurationApplications?.length?['data_sources: explicitly enabled applications only; discover current released database endpoints, never credentials/raw config or automatic DB access']:[])]}:{}), ...(e.kind==='tct'?{capabilities:['TCT分组、任务时间规则/状态与执行批次；固定只读接口和分组隔离；完整分页，不暴露任务参数、日志或凭据；不能触发/停止/修改任务，也不能把调度更新时间视为应用部署时间']}:{}), ...(e.kind==='mongodb'?{capabilities:['MongoDB fixed read tools via SSH; collections/schema/indexes, typed date/string/int64/objectId filters; complete group_dataset across explicitly named month collections; same-job datasets and independent verification; no raw pipelines or writes']}:{ }), ...(e.kind === 'nacos' && q.mode === 'investigate' ? { capabilities: ['数据库端点解析', 'XXL-JOB非敏感管理入口、启用开关和执行器名称发现；不读取原始配置或凭据', ...(q.configKeys?['read_config_values：审核的非敏感精确键/类型投影，显式同命名空间依赖；不访问发现地址；可读键：'+JSON.stringify(q.configKeys)]:[])] } : {}), ...(q.exportMaxRows?{exportMaxRows:q.exportMaxRows,exportTimeoutMs:q.exportTimeoutMs??30000,exportSnapshotWindowMs:q.exportSnapshotWindowMs??null,exportDataBudgetBytes:q.exportDataBudgetBytes??null}:{}), parameters: effectiveQueryParameters(q), maxRows: q.maxRows, ...(q.mode === 'investigate' ? { mode: q.mode, browser: q.browser === true, progressPolicy: 'evidence-driven', scope: e.kind === 'website' ? {origin:new URL(e.baseUrl).origin,entryUrl:e.baseUrl} : e.kind === 'mysql' ? { tables: q.tables } : e.kind==='mongodb'?{collections:q.collections}:e.kind==='cnb'?{repositories:q.repositories}:e.kind==='tsf'?{applications:q.applications.map(a=>({applicationId:a.applicationId,applicationName:a.applicationName})),...(q.configurationApplications?.length?{configurationApplications:q.configurationApplications}:{}),...(q.logApplications?.length?{logApplications:q.logApplications}:{}),...(q.containerLogApplications?.length?{containerLogApplications:q.containerLogApplications}:{})}:e.kind==='tct'?{groupIds:q.groupIds}:{ namespaces: q.namespaces } } : {}) })) }));
 }
 // Repeated capability contracts are shared, while every authorized endpoint stays visible.
+// Small identifiers remain explicit even when verbose query contracts are interned.
+// These are discovery hints, not grants: planQuery/planTaskRead still authorize reads.
+export function readSourceIndex(entries){
+ return entries.flatMap(e=>e.queries.filter(q=>q.mode==='investigate'&&['mysql','mongodb'].includes(e.kind)).map(q=>({environmentId:e.environmentId,queryId:q.queryId,tier:e.tier,kind:e.kind,...(e.subjectProjectId?{subjectProjectId:e.subjectProjectId}:{}),...(e.kind==='mysql'?{tables:q.scope?.tables??[]}:{collections:q.scope?.collections??[]})})));
+}
 export function compactCatalog(entries) {
  const profiles={},indices=new Map();
  const environments=entries.map(e=>({...e,queries:e.queries.map(q=>{
@@ -71,7 +76,7 @@ export function compactCatalog(entries) {
   if(!profileId){profileId='query_'+indices.size;indices.set(key,profileId);profiles[profileId]=contract;}
   return {queryId,profileId,description};
  })}));
- return {environments,queryProfiles:profiles,rule:'每个queries项用profileId引用queryProfiles中的完整参数、范围及导出能力；environmentId和queryId保持原值，不能跨环境借用。'};
+ return {environments,queryProfiles:profiles,readSources:readSourceIndex(entries),rule:'每个queries项用profileId引用queryProfiles中的完整参数、范围及导出能力；environmentId和queryId保持原值，不能跨环境借用。'};
 }
 export function routingCatalog(entries){
  const profiles={},sets={},contracts=new Map(),bindings=new Map();
@@ -84,7 +89,7 @@ export function routingCatalog(entries){
   const key=JSON.stringify(queries);let querySetId=bindings.get(key);if(!querySetId){querySetId='set_'+bindings.size;bindings.set(key,querySetId);sets[querySetId]=queries;}
   return {environmentId:e.environmentId,tier:e.tier,kind:e.kind,querySetId};
  });
- return {environments,querySets:sets,queryProfiles:profiles,phase:'routing',rule:'environment.querySetId引用querySets的queryId/profileId列表；profileId引用参数模板。这里仅用于选择环境与参数；详细查询能力和完整范围在执行阶段按选中环境重新读取，授权不由目录决定。环境ID全部保留，禁止跨环境借用。'};
+ return {environments,querySets:sets,queryProfiles:profiles,readSources:readSourceIndex(entries),phase:'routing',rule:'environment.querySetId引用querySets的queryId/profileId列表；profileId引用参数模板。这里仅用于选择环境与参数；详细查询能力和完整范围在执行阶段按选中环境重新读取，授权不由目录决定。环境ID全部保留，禁止跨环境借用。'};
 }
 export function planQuery(config, request, projectId, actor, now = Date.now()) {
   const original = config.environments[request?.environmentId];

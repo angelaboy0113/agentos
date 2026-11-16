@@ -458,3 +458,5 @@ TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使�
 源码缺失时可使用[独立分支对照](docs/source-reference.md)，保留原环境快照，区分参考实现与生产部署。
 
 补充信息的真实 @、去重与恢复规则见 [补充信息提醒](docs/clarification-notices.md)。
+
+已登记表/集合的发现、网页无行时同环境数据库接续与已验报表交接规则见 [报表与查询效率](docs/report-efficiency.md)。
