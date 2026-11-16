@@ -86,6 +86,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
     if(error.code!=='ANALYSIS_TURN_TIMEOUT'||job.taskIntent!=='analysis')throw error;
     generated=analysisTimeoutResult(job,error);
   }
+  if(sourceSync)job={...job,sourceReferenceScope:sourceSync};
   // Normalize a reliable blocked/wait result to partial before restoring prior
   // environment records; otherwise blocked model output drops earlier evidence.
   const scopedResult = preserveEnvironmentEvidence(job, assessInvestigation(job, generated));

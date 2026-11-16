@@ -51,3 +51,16 @@ export async function prepareSourceReference(project,sync,query,{job,dataDir,run
   }catch(e){await rm(temp,{recursive:true,force:true});throw e;}
  });
 }
+
+export async function sourceReferenceArtifact(dataDir,job,relative){
+ const match=/^source-references\/([a-f0-9]{64})\/workspace\/(.+)$/.exec(relative??'');if(!match)throw Error('Invalid reference artifact path');
+ const scope=job.sourceReferenceScope;if(scope?.policy!=='isolated-environment-source-v1')throw Error('Missing trusted original source scope');
+ const container=path.join(await documentDirectory(dataDir,job.id),'source-references',match[1]),manifest=path.join(container,'reference.json');
+ for(const p of [path.dirname(container),container,manifest]){const s=await lstat(p);if(s.isSymbolicLink()||await realpath(p)!==p||s.isFile()&&s.nlink!==1)throw Error('Reference artifact boundary invalid');}
+ const ref=JSON.parse(await readFile(manifest,'utf8')),b=ref.binding,original=scope.repositories.find(r=>r.path===b?.repository);
+ if(ref.policy!=='separate-source-reference-v1'||b.jobId!==job.id||b.questionId!==job.questionId||b.profile!==(job.originProfile??job.agentProfile)||b.projectId!==job.projectId||b.environment!==scope.environment||b.originalCacheKey!==scope.cacheKey||original?.commit!==b.originalCommit||ref.workspace!==path.join(container,'workspace')||!/^[a-f0-9]{40,64}$/.test(ref.commit))throw Error('Reference artifact identity mismatch');
+ await verifyIndependentGit(ref.workspace);
+ const file=path.join(ref.workspace,match[2]);if(await realpath(file)!==file)throw Error('Linked reference file');const info=await lstat(file);if(!info.isFile()||info.nlink!==1)throw Error('Invalid reference file');
+ if(await git(ref.workspace,['rev-parse','HEAD'])!==ref.commit||await git(ref.workspace,['remote','get-url','origin']).then(origin=>digest(origin))!==ref.originHash||await git(ref.workspace,['rev-parse',ref.commit+':'+match[2]])!==await git(ref.workspace,['hash-object','--',match[2]]))throw Error('Reference file differs from the fixed commit');
+ return{file,bytes:info.size,branch:ref.branch,commit:ref.commit,repository:b.repository,environmentSnapshotUnchanged:true,deploymentVerified:false};
+}

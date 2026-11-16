@@ -1,3 +1,4 @@
+import{sourceReferenceArtifact}from './source-reference.js';
 import{requiresTabularFile}from '../shared/count-answer.js';
 import { hashFile } from '../shared/file-digest.js';
 import { reportFile } from '../shared/report-files.js';
@@ -90,6 +91,12 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
         continue;
       }
       if (item.kind === 'report' && /^report-[a-f0-9-]{36}(?:\.csv)?$/.test(item.path)) throw new Error('REPORT_UNREGISTERED');
+      if(item.path.startsWith('source-references/')){
+        if(!dataDir||item.kind!=='code')throw Error('REFERENCE_LOCATION');
+        const ref=await sourceReferenceArtifact(dataDir,job,item.path);
+        verifiedArtifacts.push({kind:item.kind,path:item.path,namespace:'task-source-reference',sha256:await hashFile(ref.file),bytes:ref.bytes,branch:ref.branch,commit:ref.commit,repository:ref.repository,deploymentVerified:false});
+        continue;
+      }
       const candidate = path.resolve(root, item.path);
       if (!inside(root, candidate)) throw new Error();
       const resolved = await realpath(candidate);
