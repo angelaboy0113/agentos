@@ -273,7 +273,7 @@ async function route(context) {
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
-      analysisWorkflow: 'continuous-developer-tools-v2', runnerConcurrency: context.runnerConcurrency, sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1', analysisSnapshotPolicy: 'isolated-environment-source-v1',
+      analysisWorkflow: 'continuous-developer-tools-v2', analysisEngineForNewTasks:process.env.AGENTOS_ANALYSIS_ENGINE??'legacy', runnerConcurrency: context.runnerConcurrency, sourcePolicy: 'folder-evidence-v1', analysisSourcePolicy: 'origin-ff-before-analysis-v1', analysisSnapshotPolicy: 'isolated-environment-source-v1',
       resultPresentation: 'analysis-adaptive-tables-v4', identityPolicy: 'profile-linked-human-v1',
       executionPolicy: 'admin-write-members-analysis-v1', harnessPolicy: 'standard-handoff-v1', now: new Date().toISOString() });
   }

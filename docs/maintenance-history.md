@@ -2054,3 +2054,7 @@ The full-scope human test additionally exposed a response-body disconnect after 
 ## 1.132.0｜持续会话工具执行器（候选，默认关闭）
 
 新增本机 App Server 动态工具通道及环境执行器协程；工具仍走原范围、持久化和文件核验。任务/thread/turn绑定、宿主回执去重、未知执行不重放、旧CLI线程兼容、双环境先源码交接。收据只通过宿主内部通道进入最终核验，不能信任模型同名字段。无新增依赖、外部权限或整任务限额。真实Codex合成双来源已验证，不能冒称正式业务速度验收。正式切换须完成同题真人新卡与空闲维护验收；见single-session-investigation.md。
+
+## 1.132.1｜实例级调查引擎切换
+
+独立实例启动器从可信instance.local.json读取analysisEngine，经校验后在清理继承环境变量之后传入Runner，避免设置在启动时丢失。health和Runner心跳暴露新任务引擎，已有CLI任务保持原路径。默认legacy；正式切换需空闲备份、配置native-tools-v1、八消费者及新卡验收。实际启动器测试覆盖默认、新引擎和无效值拒绝，无新权限或任务限额。

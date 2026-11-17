@@ -23,7 +23,7 @@ flowchart TD
 
 ## 配置与兼容
 
-Runner 配置 `analysisEngine` 对应环境变量 `AGENTOS_ANALYSIS_ENGINE`，可取 `legacy` 或 `native-tools-v1`。默认 `legacy`，新引擎先在隔离验证中启用；正式启用必须在空闲维护窗口更新服务环境并重启。不能仅设置变量就声称已完成真实卡片验收。
+Runner 配置 `analysisEngine` 对应环境变量 `AGENTOS_ANALYSIS_ENGINE`，可取 `legacy` 或 `native-tools-v1`。默认 `legacy`，新引擎先在隔离验证中启用；独立实例在 runtime/instance.local.json 配置 analysisEngine: "native-tools-v1"，启动器校验并在清除继承环境变量后传给本实例 Runner；默认 legacy。正式启用必须在空闲维护窗口更新实例配置并重启，health.analysisEngineForNewTasks 和 Runner 心跳可核对实际选择。不能仅设置变量就声称已完成真实卡片验收。
 
 `native-tools-v1` 只适用于连续只读调查的 developer 阶段。已有 CLI 会话继续使用原引擎；已持久化新引擎检查点的任务保持新引擎，不能在恢复时静默换成 CLI。回退新代码前必须先完成或明确处理这些新检查点，不可把它们交给不支持动态工具的旧版本。
 

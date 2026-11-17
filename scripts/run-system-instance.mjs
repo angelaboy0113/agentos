@@ -13,6 +13,8 @@ if (!['--check', '--start'].includes(mode)) throw new Error('Use --check or --st
 if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('请用 Node 22 启动独立实例');
 const instance = JSON.parse(await readFile(path.join(runtime, 'instance.local.json'), 'utf8'));
 mainHeapMiB(instance);
+const analysisEngine=instance.analysisEngine??'legacy';
+if(!['legacy','native-tools-v1'].includes(analysisEngine))throw Error('Unsupported instance analysisEngine');
 const officeEnvironment={};
 for(const [field,key] of [['officeRendererPath','AGENTOS_OFFICE_RENDERER'],['pdfRasterizerPath','AGENTOS_PDF_RASTERIZER']]){
  if(instance[field]===undefined)continue;
@@ -46,12 +48,13 @@ for (const project of Object.values(projects.projects)) {
     try { await access(path.join(project.repoPath, repo.path, '.git')); } catch { pending.push(`缺少源码仓：${repo.path}`); }
   }
 }
-console.log(JSON.stringify({ branch, port: instance.port, assistants: Object.values(agents).map(a => a.displayName), pending: [...new Set(pending)], readyToStart: !pending.length }, null, 2));
+console.log(JSON.stringify({ branch, port: instance.port, analysisEngine, assistants: Object.values(agents).map(a => a.displayName), pending: [...new Set(pending)], readyToStart: !pending.length }, null, 2));
 if (mode === '--check') process.exit(pending.length ? 2 : 0);
 if (pending.length) throw new Error('接入尚未完成，拒绝连接事件或启动服务');
 for (const key of Object.keys(process.env)) if (/^(AGENTOS_|FEISHU_|LARKSUITE_CLI_CONFIG_DIR$)/.test(key)) delete process.env[key];
 Object.assign(process.env, {
   ...officeEnvironment,
+  AGENTOS_ANALYSIS_ENGINE: analysisEngine,
   AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),
   AGENTOS_DATA_DIR: path.join(runtime, 'data'), AGENTOS_RUNNER_WORKTREE_ROOT: path.join(runtime, 'data', 'worktrees'),

@@ -38,6 +38,7 @@ export class AgentRunner {
       platform: process.platform,
       nodeVersion: process.version,
       executor: this.config.executor,
+      analysisEngine: this.config.analysisEngine??'legacy',
       capabilities: ['owner_intake', 'pm', 'developer', 'qa', 'owner_audit', 'owner_report'],
     });
   }
