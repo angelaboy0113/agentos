@@ -105,6 +105,17 @@ export class CodexAppServer extends EventEmitter {
       }
       else entry?.resolve(message.result);
     } else if (message.id !== undefined) {
+      if (message.method === 'item/tool/call' && this.options.onToolCall) {
+        // Explicit host adapter only. Built-in command/file/permission approvals
+        // continue to fail closed, including on investigation connections.
+        const child = this.child;
+        Promise.resolve().then(() => this.options.onToolCall(message.params)).then(result => {
+          if (this.child === child) this.write({id:message.id,result});
+        }, () => {
+          if (this.child === child) this.write({id:message.id,error:{code:-32602,message:'AgentOS tool call rejected'}});
+        }).catch(() => {});
+        return;
+      }
       // Conversation process has no permission to approve tools or perform actions.
       this.write({ id: message.id, error: { code: -32601, message: 'AgentOS conversation does not authorize tool requests' } });
     } else this.emit('notification', message);

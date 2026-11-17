@@ -14,6 +14,7 @@ import {comparisonContext,requireComparisonContinuation} from '../shared/source-
 import {loadSourceMethod,rememberSourceMethod,loadComparisonSourceHints} from './source-method-cache.js';
 import {readBusinessDefinitions,definitionActor,recordTaskDefinitions} from '../shared/business-definitions.js';
 import {runWithSourceHistory} from './source-history-runner.js';
+import {runNativeInvestigation,useNativeInvestigation} from './native-investigation.js';
 import {failureDetails,failureDiagnostic} from '../shared/failure-diagnostic.js';
 import { assistantInstructions } from '../shared/project-scope.js';
 import {reportOutputPolicy} from '../shared/report-output-policy.js';
@@ -81,12 +82,26 @@ export async function executeJob(job, config, emit, adapters = {}) {
 固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标,targets:[{repository:仓库相对路径,commit:本次要补齐祖先的固定提交SHA}]（无明确目标时targets=null），Runner按需补取并恢复同一会话。该工具仅补齐当前固定提交的祖先，不能用它获取另一个生产构建提交或独立生产分支；此时先读取现有缓存对象，仍缺失就明确目标版本的源码范围缺口，不能把另一提交写在reason里发起无效全量下载。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
   await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
-  let generated;
-  try { generated = await runWithSourceHistory({ job, project, sourceSync, config, workspace, attachmentPaths, prompt, emit },{run:adapters.runModel??runCodexWithCapacityRetry,metadata:adapters.sourceMetadata,branchCommits:adapters.sourceBranchCommits}); }
+  let generated,nativeState;
+  const nativeRun=async options=>{
+    if(nativeState?.threadId)options={...options,job:{...options.job,analysisContinuation:{questionId:job.questionId,workspace,threadId:nativeState.threadId,executionEngine:'native-tools-v1',artifactPolicy}}};
+    const result=await runNativeInvestigation(options);
+    nativeState={job:result.hostCurrentJob,threadId:result.threadId,sourceHistory:result.sourceHistory,receipts:[...(nativeState?.receipts??[]),...(result.sourceEvidenceReceipts??[])],timing:result.nativeTiming};
+    return result;
+  };
+  try { generated = await runWithSourceHistory({ job, project, sourceSync, config, workspace, attachmentPaths, prompt, emit },{run:adapters.runModel??(useNativeInvestigation(job,config,analysisThreadId(job,workspace))?nativeRun:runCodexWithCapacityRetry),metadata:adapters.sourceMetadata,branchCommits:adapters.sourceBranchCommits}); }
   catch(error) {
     if(job.taskIntent==='analysis'&&capacityError(error))return modelCapacityWait({stage:'source',harnessFingerprint:harness.metadata.fingerprint,agentStage:job.stage,questionId:job.questionId,workspace,threadId:error.threadId??analysisThreadId(job,workspace)},job.modelRecovery);
     if(error.code!=='ANALYSIS_TURN_TIMEOUT'||job.taskIntent!=='analysis')throw error;
     generated=analysisTimeoutResult(job,error);
+  }
+  // Only the host adapter can supply state/receipts. Never trust identically
+  // named fields in legacy model JSON or injected model test responses.
+  delete generated.hostCurrentJob;
+  if(nativeState){job={...nativeState.job,artifactWorkspace:job.artifactWorkspace};generated.sourceEvidenceReceipts.push(...nativeState.receipts);generated.sourceHistory??=nativeState.sourceHistory;}
+  if(nativeState&&generated.browserLoginRequired){
+    const {hostCurrentJob,...waiting}=generated;
+    return {...waiting,sourceSync,workspace,harness:harness.metadata,timing:{prepareMs:prepared-began,codexMs:Date.now()-prepared,totalMs:Date.now()-began}};
   }
   if(sourceSync)job={...job,sourceReferenceScope:sourceSync,sourceEvidenceReceipts:generated.sourceEvidenceReceipts??[]};
   // Normalize a reliable blocked/wait result to partial before restoring prior
@@ -116,7 +131,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if (codexResult.handoffGate.passed) codexResult = enforceHandoff(codexResult, await validateHandoff(job, codexResult, workspace, {dataDir:config.dataDir??path.dirname(config.worktreeRoot)}));
   if(job.taskIntent==='analysis'&&codexResult.handoffGate?.passed)try{await rememberSourceMethod(job,sourceSync,{...codexResult,workspace},{dataDir:config.dataDir??path.dirname(config.worktreeRoot)});}catch{/* Optional evidence index cannot block a valid task. */}
   const sourcePreparation=job.taskIntent==='analysis'?(await buildSourceQueryContext({...codexResult,workspace,sourceSync})).preparation:null;
-  return { ...(design.receipts.length?{designSkills:design.receipts}:{}),...(job.artifactWorkspace?{artifactPolicy}:{}),...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),...(codexResult.reportReviewRequired?{reportReviewRequired:true}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceEvidenceReceipts:generated.sourceEvidenceReceipts??[],sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
+  return { ...(nativeState?{executionEngine:'native-tools-v1',nativeTiming:nativeState.timing}:{}),...(nativeState&&generated.browserLoginRequired?{browserLoginRequired:true,browserCheckpoint:generated.browserCheckpoint,loginUrl:generated.loginUrl}:{}),...(design.receipts.length?{designSkills:design.receipts}:{}),...(job.artifactWorkspace?{artifactPolicy}:{}),...(codexResult.exportFiles?.length?{exportFiles:codexResult.exportFiles}:{}),...(codexResult.documentFailure?{documentFailure:codexResult.documentFailure}:{}),...(codexResult.reportReviewRequired?{reportReviewRequired:true}:{}),definitionReceipts,sourceHistory:generated.sourceHistory??null,sourceEvidenceReceipts:generated.sourceEvidenceReceipts??[],sourceQuestionId:job.questionId,sourcePreparation, workspace, ledgerEvidence: ledger.map(({ excerpt, ...evidence }) => evidence), ...(sourceSync ? { sourceSync } : {}), threadId: codexResult.threadId, model: codexResult.model ?? null, reasoningEffort: codexResult.reasoningEffort ?? null, outcome: codexResult.outcome, summary: codexResult.summary, finalMessage: codexResult.finalMessage, verification,
     reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({status:e.status,binding:e.binding,calculationAudit:e.calculationAudit,populationAudit:e.populationAudit,...(e.contentAudit?{contentAudit:e.contentAudit}:{})})),
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     sourceEnvironmentQuery:codexResult.sourceEnvironmentQuery??null,environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate, protocolRepair:codexResult.protocolRepair??null,

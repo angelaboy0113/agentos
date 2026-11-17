@@ -2050,3 +2050,7 @@ Preserve Runner-produced commit metadata receipts across model continuation, fin
 The batch source metadata guidance changed the harness fingerprint. Pin reviewed prior fingerprints to the exact current content hash so saved investigations can resume; future role edits remain fail-closed. No task authority, environment scope or business-write permission changes. Regression covers both old saved and 1.130 in-flight harness metadata plus an unreviewed future edit.
 
 The full-scope human test additionally exposed a response-body disconnect after 30 pages. Fixed same-page transport retry and fixed-SHA saved-page recovery, with independent regression for both paths. Prior complete pages and immutable receipts are preserved.
+
+## 1.132.0｜持续会话工具执行器（候选，默认关闭）
+
+新增本机 App Server 动态工具通道及环境执行器协程；工具仍走原范围、持久化和文件核验。任务/thread/turn绑定、宿主回执去重、未知执行不重放、旧CLI线程兼容、双环境先源码交接。收据只通过宿主内部通道进入最终核验，不能信任模型同名字段。无新增依赖、外部权限或整任务限额。真实Codex合成双来源已验证，不能冒称正式业务速度验收。正式切换须完成同题真人新卡与空闲维护验收；见single-session-investigation.md。

@@ -19,7 +19,7 @@ import { readEnvironment } from './environment-connector.js';
 import { CodexConversationEngine } from '../control-plane/codex-conversation.js';
 import path from 'node:path';
 import { publicText } from '../control-plane/result-presentation.js';
-export async function executeEnvironmentJob(job, config, emit) {
+export async function executeEnvironmentJob(job, config, emit, {planner} = {}) {
   const began = Date.now();
   let heartbeat;
   const startHeartbeat = () => {
@@ -38,6 +38,7 @@ export async function executeEnvironmentJob(job, config, emit) {
     job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile,actor:definitionActor(job),projectId:job.projectId,environment:job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
     const subjectJob=plan.projectId===job.projectId?job:{...job,projectId:plan.projectId,requestingProjectId:job.projectId,businessDefinitions:[]};
     const adapters={priorToolResultCatalog:[...priorToolResults(job,cfg,plan)].map(([resultRef,p])=>({resultRef,tool:p.tool,...(p.applicationId?{applicationId:p.applicationId}:{}),...(p.groupId?{groupId:p.groupId}:{}),provenance:p})),authorizePriorToolResult:async(ref,scope)=>{const current=await loadEnvironments();const p=priorToolResults(job,current,plan).get(ref);if(!p||p.scope!==scope)return null;await assertTaskReadScope(await loadIntegrationProjects(config.projectsFile),job,current,{environmentId:p.environmentId,queryId:p.queryId});return p;},continuationJob:job,priorDatasetScopes:verifiedPriorDatasetScopes(job,cfg,plan),loadIntegrationProjects:()=>loadIntegrationProjects(config.projectsFile),readTaskInput:async id=>{if(!subjectJob.attachments?.some(x=>x.id===id))throw new Error('Foreign input');const response=await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/attachments/${encodeURIComponent(id)}`,{headers:{authorization:`Bearer ${config.runnerToken}`}});if(!response.ok)throw new Error('Task input read failed');return Buffer.from(await response.arrayBuffer());},authorizeTaskScope:plan.projectId!==job.projectId?authorizeTaskScope:null,capacityCheckpoint:job.modelCheckpoint?.stage==='environment'?job.modelCheckpoint:null,renewPlan,reportJob:subjectJob,dataDir:config.dataDir??path.dirname(config.worktreeRoot),exportDirectory:path.join(config.dataDir??path.dirname(config.worktreeRoot),'exports',job.id),investigationContext:{...reportInvestigationContext(subjectJob),requestingProjectId:job.projectId,subjectProjectId:plan.projectId,scopeNote:plan.projectId!==job.projectId?'关联系统独立只读取证：本轮表结构和口径以目标系统真实来源核验，不能把原系统源码或字段含义套用到此库。':''},sourceQueryContext:plan.projectId===job.projectId?sourceQueryContext:null,...(environment.kind==='website'?{tools:async()=>websiteTools(job,config,environment),checkpoint:job.browserCheckpoint}:{})};
+    if(planner)adapters.planner=planner;
     result=environment?.queries[plan.queryId]?.mode==='investigate'?await investigateEnvironment(plan,emit,adapters):await readEnvironment(plan);
   }
   catch (error) {
@@ -58,7 +59,7 @@ export async function executeEnvironmentJob(job, config, emit) {
   // Investigate planners already synthesize their evidence. The final source
   // review still checks the full user request; avoid a second prose-only model
   // call after every intermediate database hop. Fixed templates keep theirs.
-  const needsExplanation=environment?.queries[plan.queryId]?.mode!=='investigate';
+  const needsExplanation=!planner&&environment?.queries[plan.queryId]?.mode!=='investigate';
   if(needsExplanation){
   const engine = new CodexConversationEngine({ dataDir: path.join(config.worktreeRoot, 'environment-summary') });
   try {

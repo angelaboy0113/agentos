@@ -241,3 +241,7 @@ Memory headroom and durable overload waiting: see [memory-admission.md](memory-a
 1.126.0: reviewed interactive website login can deliver a task-bound QR privately to the original robot administrator and resume the original job after validation. See [remote login verification](remote-login-qr.md). API credentials and browser login remain separate; no authentication state or data scope is shared across systems.
 
 1.127.0: unchanged repositories in a new environment bundle reuse independent copy-on-write files after exact SHA/origin/cleanliness checks; overlapping questions can share a remote branch observation completed after both requests began. Later requests still read the remote. Preparation metrics are runtime observations, separate from the immutable source manifest. See [source efficiency](source-efficiency.md).
+
+## 持续会话直接取证候选架构
+
+1.132.0新增可选 `native-tools-v1`，由主调查会话直接选择原授权工具，复用环境执行器协程，避免每个环境再启动规划模型。默认仍为legacy，尚不改变正式实例；现有线程不自动迁移。实现、隔离验证和待验收边界见[持续会话调查](single-session-investigation.md)。

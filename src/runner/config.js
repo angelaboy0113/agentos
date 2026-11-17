@@ -12,6 +12,8 @@ export async function runnerConfig(overrides = {}) {
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('AGENTOS_RUNNER_CONCURRENCY must be an integer from 1 to 8');
   // Kept as disabled compatibility fields; legacy env/overrides cannot restore a task cutoff.
   const analysisTurnTimeoutMs = 0, analysisResumeTimeoutMs = 0;
+  const analysisEngine=overrides.analysisEngine??process.env.AGENTOS_ANALYSIS_ENGINE??'legacy';
+  if(!['legacy','native-tools-v1'].includes(analysisEngine))throw new Error('Unsupported analysis execution engine');
   return {
     ...(overrides.localExecutionRegistry?{localExecutionRegistry:overrides.localExecutionRegistry}:{}),
     knowledgeFile:path.resolve(overrides.knowledgeFile??process.env.AGENTOS_KNOWLEDGE_FILE??'./config/knowledge.local.json'),
@@ -22,6 +24,7 @@ export async function runnerConfig(overrides = {}) {
     pollMs: Number(overrides.pollMs ?? process.env.AGENTOS_RUNNER_POLL_MS ?? 3000),
     worktreeRoot: path.resolve(overrides.worktreeRoot ?? process.env.AGENTOS_RUNNER_WORKTREE_ROOT ?? './data/worktrees'),
     executor: overrides.executor ?? process.env.AGENTOS_RUNNER_EXECUTOR ?? 'mock',
+    analysisEngine,
     codexBin: overrides.codexBin ?? process.env.CODEX_BIN ?? 'codex',
     concurrency,
     analysisTurnTimeoutMs,
