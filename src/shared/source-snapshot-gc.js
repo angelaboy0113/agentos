@@ -7,6 +7,7 @@ import {promisify} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 import {withSnapshotLock} from './snapshot-lock.js';
 import {inactiveRecordFingerprint} from './maintenance-backups.js';
+import {withdrawnCardInert} from './withdrawn-delivery.js';
 const execute=promisify(execFile),terminal=new Set(['completed','failed','cancelled','blocked']);
 const inside=(root,p)=>p===root||p.startsWith(root+path.sep);
 // Use explicit argv, never commands from manifests or source text.
@@ -25,7 +26,7 @@ export function snapshotReferences(state,project,root,protectIds=[],inactiveCard
  for(const [k,c]of Object.entries(state.cardMessages??{}))if(c.revision!==c.deliveredRevision||(c.terminalMention&&!c.mentionDelivered)){
   // Only operator-reviewed stable content can retire a transport-only pin.
   // Live jobs, conversations and actual attachment deliveries remain independent pins.
-  if(inactiveCards[k]===inactiveRecordFingerprint('cardMessages',c))continue;
+  if(withdrawnCardInert(state,k,c)||inactiveCards[k]===inactiveRecordFingerprint('cardMessages',c))continue;
   if(k.startsWith('question:'))q.add(k.slice(9));else if(k.startsWith('job:'))ids.add(k.split(':')[1]);
  }
  for(const j of jobs)if(!terminal.has(j.status)||q.has(j.questionId)&&j.questionId||ids.has(j.id))visit(j,v=>{if(path.isAbsolute(v)&&inside(root,path.resolve(v)))pins.add(path.resolve(v));});
