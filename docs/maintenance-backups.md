@@ -143,3 +143,5 @@ node scripts/maintenance-backups.mjs restore-dependencies YOUR_RUNTIME LEDGER_JS
 ```
 
 The restore verifies retained and restored hashes and copies package links without dereferencing them. Restore dependencies before using such a historical rollback point; do not assume its absent directory means the dependencies were never installed. A quarantined tree whose verification failed remains in the ledger's `retired` location for operator review. Logical bytes and actual free disk space must be reported separately; APFS sharing can make deletion release little physical space.
+
+The npm root `.package-lock.json` install receipt may differ only because the application version changed. It is saved byte-for-byte with its mode in the recovery ledger; package payload comparison excludes only this root receipt and includes every other file, link target and file mode. Restoration reinstates the original receipt and verifies the original full tree hash. Distinct package payloads stay intact.

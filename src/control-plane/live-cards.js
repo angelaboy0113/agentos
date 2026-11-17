@@ -30,7 +30,7 @@ export class LiveCards {
     this.timer = setInterval(() => this.retry().catch(() => {}), 1000); this.timer.unref();
   }
   async stop() { this.closed = true; clearInterval(this.timer); await Promise.allSettled(this.workers.values()); }
-  async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '', terminalMention = null, generation = 0, guard, publicCompletionMention = false, deliveryToken, questionRound } = {}) {
+  async upsert(key, card, destination, { terminal = false, immediate = false, resultText = '', terminalMention = null, generation = 0, guard, publicCompletionMention = false, deliveryToken, questionRound, forceRevision = false } = {}) {
     if(destination.visibility==='requester'&&(!destination.chatId||!/^ou_[A-Za-z0-9]+$/.test(destination.openId??'')))throw new Error('Private card destination invalid');
     if(publicCompletionMention&&!(terminal&&terminalMention?.kind==='directory_completion'&&destination.visibility==='requester'&&destination.strictGroup&&destination.contactChannel&&destination.openId===destination.contactChannel.requesterId))throw new Error('Public completion reminder requires the dedicated requester result');
     if(destination.visibility==='requester'&&card.body?.elements){
@@ -72,7 +72,7 @@ export class LiveCards {
       // A startup repair/duplicate progress must not create a new outbox revision
       // when payload, identity, details and notification semantics are identical.
       const prior=state.cardMessages[key];
-      if(prior&&Object.keys(proposed).every(k=>['revision','updatedAt'].includes(k)||JSON.stringify(proposed[k])===JSON.stringify(prior[k])))return;
+      if(!forceRevision&&prior&&Object.keys(proposed).every(k=>['revision','updatedAt'].includes(k)||JSON.stringify(proposed[k])===JSON.stringify(prior[k])))return;
       state.cardMessages[key]=proposed;
     });
     if(withdrawn)return;

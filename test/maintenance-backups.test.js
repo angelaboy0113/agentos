@@ -43,7 +43,7 @@ test('failed proof reports a concrete safe code and durable audit without changi
 
 test('accepted old backup dependencies deduplicate only identical trees and restore with symlinks',async t=>{
  const f=await fixture(t);f.c.backupDependencies={enabled:true};
- for(const b of f.c.checkpoints){const tree=path.join(b.path,'node_modules');await fs.mkdir(tree);await fs.writeFile(path.join(tree,'package.js'),'same version');await fs.symlink('package.js',path.join(tree,'binary'));}
+ for(const [index,b]of f.c.checkpoints.entries()){const tree=path.join(b.path,'node_modules');await fs.mkdir(tree);await fs.writeFile(path.join(tree,'.package-lock.json'),JSON.stringify({version:index}));await fs.writeFile(path.join(tree,'package.js'),'same version');await fs.symlink('package.js',path.join(tree,'binary'));}
  const before=await fs.readFile(path.join(f.candidate.path,'job/data.csv'));
  const result=await compactBackups(f.c,f.options);assert.equal(result.backupDependencies.removedTrees,1);
  const original=path.join(f.c.checkpoints[0].path,'node_modules');await assert.rejects(fs.stat(original),{code:'ENOENT'});
@@ -51,7 +51,7 @@ test('accepted old backup dependencies deduplicate only identical trees and rest
  const sidecar=JSON.parse(await fs.readFile(original+'.restore.json'));const {restoreBackupDependencies}=await import('../src/shared/backup-dependencies.js');
  const destination=path.join(f.root,'dependency-restored');await fs.mkdir(destination);
  assert.equal((await restoreBackupDependencies(sidecar.ledger,{managedRoot:f.root,destination})).hashesVerified,true);
- assert.equal(await fs.readlink(path.join(destination,'binary')),'package.js');assert.equal(await fs.readFile(path.join(destination,'package.js'),'utf8'),'same version');
+ assert.deepEqual(JSON.parse(await fs.readFile(path.join(destination,'.package-lock.json'))),{version:0});assert.equal(await fs.readlink(path.join(destination,'binary')),'package.js');assert.equal(await fs.readFile(path.join(destination,'package.js'),'utf8'),'same version');
  await fs.writeFile(path.join(sidecar.retained,'package.js'),'corrupted');const empty=path.join(f.root,'dependency-bad');await fs.mkdir(empty);
  await assert.rejects(restoreBackupDependencies(sidecar.ledger,{managedRoot:f.root,destination:empty}),/ANCHOR_CHANGED/);
  assert.deepEqual(before,Buffer.from('same'));

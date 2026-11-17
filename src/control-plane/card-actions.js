@@ -14,10 +14,10 @@ const parse = (value) => typeof value === 'string' ? JSON.parse(value || '{}') :
 
 async function refreshActionCard(context, { questionId, key, job, savedCard, shown, event }) {
   try {
-    if (questionId) await publishQuestion(context, questionId);
+    if (questionId) await publishQuestion(context, questionId, {forceRevision:true});
     else await context.cards.upsert(key, jobCard(shown ?? await context.store.getJob(job.id)), savedCard.destination, {
       terminal: shown ? !['queued', 'running', 'cancelling'].includes(shown.status) : true,
-      immediate: true,
+      immediate: true, forceRevision:true,
       resultText: shown?.result?.finalMessage,
     });
     return true;
