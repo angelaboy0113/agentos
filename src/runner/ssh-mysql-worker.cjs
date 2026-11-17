@@ -11,7 +11,7 @@ const send=x=>process.stdout.write(JSON.stringify(x)+'\n');
 rl.on('line',line=>{queue=queue.then(async()=>{
  let x;try{x=JSON.parse(line);if(!initialized){
   initialized=true;const c=x.connection;
-  conn=await mysql.createConnection({...c,multipleStatements:false,enableCleartextPlugin:false,supportBigNumbers:true,bigNumberStrings:true,dateStrings:true});
+  conn=await mysql.createConnection({...c,multipleStatements:false,enableCleartextPlugin:false,supportBigNumbers:true,bigNumberStrings:true,dateStrings:true,jsonStrings:true});
   send({id:x.id,ok:true});return;
  }
  if(!allowed(x.sql)||!Array.isArray(x.params))throw Object.assign(new Error(),{code:'REMOTE_READONLY_SQL'});

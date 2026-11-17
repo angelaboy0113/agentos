@@ -8,5 +8,8 @@ export function inspectWebsiteControl(el){
  }
  const scope=el.closest('form,[role="search"],[role="group"],.el-form,.ant-form')??el.parentElement;
  const fields=scope?[...scope.querySelectorAll('input:not([type=hidden]):not([type=password]),select,textarea')].filter(x=>!x.closest('[data-sensitive],[data-agentos-secret]')&&!/password|secret|token|credential|密码|密钥/i.test([x.name,x.id,x.placeholder].join(' '))):[];
- return {chain,scopeFields:{total:fields.length,visible:fields.filter(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden').length},note:'当前控件的布局与筛选字段可见数量；不读取隐藏字段值。诊断本身不点击、不发业务请求，不能单独证明部署版本或业务根因。'};
+ // A visible attachment/detail link may point at another registered application.
+ // Explain the boundary without following it or exposing signed query values.
+ let link=null;const anchor=el.closest('a[href]');if(anchor)try{const u=new URL(anchor.getAttribute('href'),el.ownerDocument.location.href);if(['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!/\/(?:token|secret|credential|authorization|password|qrcode|login\/state)(?:\/|$)/i.test(u.pathname)){const current=new URL(el.ownerDocument.location.href);link={origin:u.origin,path:u.pathname,target:anchor.target||'_self',crossOrigin:u.origin!==current.origin,queryKeys:[...new Set([...u.searchParams.keys()].filter(k=>/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(k)&&!/password|passwd|pwd|secret|token|authorization|cookie|credential|api.?key/i.test(k)))].sort(),queryValuesRedacted:true,followed:false};}}catch{}
+ return {chain,...(link?{link}:{}),scopeFields:{total:fields.length,visible:fields.filter(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden').length},note:'当前控件的布局与筛选字段可见数量；不读取隐藏字段值。诊断本身不点击、不发业务请求，不能单独证明部署版本或业务根因。'};
 }

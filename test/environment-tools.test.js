@@ -148,7 +148,7 @@ test('MySQL dynamic tools verify grants, use only base table metadata, bind valu
   }, rollback:async()=>calls.push('rollback'), destroy:()=>calls.push('destroy') };
   const tools=await createEnvironmentTools({...environment,kind:'mysql',host:'localhost',port:3306,database:'demo'},query,credentials,{mysql:{createConnection:async options=>{connectionOptions=options;return c;}}});
   await tools.run('connection');const schema=await tools.run('schema');assert.deepEqual(schema.tables.orders,['id','status']);
-  assert.equal(connectionOptions.dateStrings,true);assert.equal(connectionOptions.supportBigNumbers,true);assert.equal(connectionOptions.bigNumberStrings,true);
+  assert.equal(connectionOptions.jsonStrings,true);assert.equal(connectionOptions.dateStrings,true);assert.equal(connectionOptions.supportBigNumbers,true);assert.equal(connectionOptions.bigNumberStrings,true);
   const r=await tools.run('select',{table:'orders',columns:['status'],filters:[{column:'id',op:'=',value:"' OR 1=1"}]});
   assert.deepEqual(r.rows,[{status:'ok'}]);assert.ok(calls.includes('START TRANSACTION READ ONLY'));
   const metadata=calls.find(x=>x.sql?.includes('information_schema'));assert.match(metadata.sql,/BASE TABLE/);assert.match(metadata.sql,/GENERATED/);

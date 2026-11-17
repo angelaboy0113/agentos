@@ -69,3 +69,7 @@ Native large observations identify `agentos_read_result` and include exact reade
 原生 `agentos_read_result` 返回的页已由可信读取器限制为最多24000字符，仍沿用原引用、offset、nextOffset及哈希。该页经过相同脱敏处理后直接交还主会话，不因中文UTF-8字节数或JSON转义开销再套一层大结果引用，也不重复写一份分页副本。其它工具的大结果仍完整持久化并分页。此调整不增加业务查询量、取消范围校验或引入整任务限制。
 
 撤回的同一问题身份在 `LiveCards.upsert` 持久事务内直接拒绝后续进度、终态与启动重渲染（包括误传的新generation），保持原撤回凭据、原payload与未送达revision；不触发外发、不伪造投递。新问题须使用新的问题身份。静态撤回哈希校验和活任务/投递发布守卫保持。升级前遗留的本人已撤回自测展示差异只凭同profile API确认根及卡均deleted、精确指纹登记为闲置，保留原记录；不会批量豁免真实用户待投递。
+
+### 普通未完成工作保持同一原生会话
+
+原生主模型返回 `partial` 且 `investigation.status=continue`、没有 blocker 时，宿主先保存当前来源和中间结果，再将实际待办送回当前 App Server 的同一 thread。不会退出后重新准备固定源码、重载技能和启动 App Server。真实登录/审批等待、明确 blocker、独立源码环境交接仍走原有持久化接续；最终文件核验和投递仍在完整任务结果后执行。`native_analysis_continuing`、`nativeTiming.modelTurns/hostContinuations` 可区别同进程续做与重复启动。没有新增任务时间或总轮次上限。

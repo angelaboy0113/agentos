@@ -1,3 +1,4 @@
+import {mysqlJsonText} from '../shared/mysql-json-text.js';
 import {extendDimension} from '../shared/dimension-extension.js';
 import {datasetHash,datasetBytes} from '../shared/dataset-json.js';
 import {buildWindowDataset} from '../shared/window-dataset.js';
@@ -47,7 +48,7 @@ export class ReportDatasets {
    await this.check();pages++;if(!Array.isArray(page)||page.length>size)throw new ReportInputError('报表分页返回异常');
    for(const row of page){
     if(rows.length===this.maxRows)break;
-    const clean=Object.fromEntries(statement.columns.map(c=>{const v=row[c];if(v!==null&&!['string','number','bigint'].includes(typeof v))throw new ReportInputError(`报表含不支持的字段值：列${c}，类型${v instanceof Date?'Date':Array.isArray(v)?'array':typeof v}；日期应由驱动dateStrings保留原值，结构化字段须先核实类型，不可猜值或删列`);if(typeof v==='number'&&!Number.isSafeInteger(v))throw new ReportInputError('报表数值未以精确字符串返回，停止导出');return [c,v===null?null:this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v))];}));
+    const clean=Object.fromEntries(statement.columns.map(c=>{const v=statement.jsonColumns?.includes(c)&&row[c]!==null?mysqlJsonText(row[c]):row[c];if(v!==null&&!['string','number','bigint'].includes(typeof v))throw new ReportInputError(`报表含不支持的字段值：列${c}，类型${v instanceof Date?'Date':Array.isArray(v)?'array':typeof v}；日期应由驱动dateStrings保留原值，结构化字段须先核实类型，不可猜值或删列`);if(typeof v==='number'&&!Number.isSafeInteger(v))throw new ReportInputError('报表数值未以精确字符串返回，停止导出');return [c,v===null?null:this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v))];}));
     if(statement.rowKey)clean[statement.rowKey.column]=hash(statement.rowKey.fields.map(c=>clean[c]));
     rows.push(clean);
    }
@@ -60,7 +61,7 @@ export class ReportDatasets {
   }
   await progress('collected');
   // A short final page proves completion; exactly-at-cap requires one look-ahead.
-  const ref=`dataset-${randomUUID()}`,data={rows,columns:[...statement.columns,...(statement.rowKey?[statement.rowKey.column]:[])],complete,numericColumns:statement.numericColumns??[],queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
+  const ref=`dataset-${randomUUID()}`,data={rows,columns:[...statement.columns,...(statement.rowKey?[statement.rowKey.column]:[])],complete,numericColumns:statement.numericColumns??[],...(statement.jsonColumns?.length?{columnEncoding:Object.fromEntries(statement.jsonColumns.map(c=>[c,'mysql-json-text-v1']))}:{}),queryHash,queryDefinition:{sql:statement.sql,params:statement.params.map(v=>this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),String(v)))}};
   if(statement.recipe){const original=JSON.stringify(statement.recipe),safe=this.secrets.reduce((text,secret)=>text.split(secret).join('[已隐藏]'),original);data.recipe={...JSON.parse(safe),replayable:original===safe};}
   let dataHash;
   let readAt=new Date().toISOString();if(complete&&this.storage){await this.check();const saved=await this.storage.save(ref,data,this.snapshotId);readAt=saved.readAt;dataHash=saved.dataHash;await this.check();}

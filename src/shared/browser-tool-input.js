@@ -2,7 +2,7 @@
 export class BrowserInputError extends Error {
  constructor(code,message){super(message);this.name='BrowserInputError';this.code=code;this.statusCode=400;}
 }
-export const correctableBrowserCodes=new Set(['BROWSER_ARGUMENTS','BROWSER_REF_STALE','BROWSER_CONTROL_TYPE','BROWSER_CONTROL_CHANGED','BROWSER_OPERATION_TIMEOUT','BROWSER_CONTENT_CHANGED','BROWSER_ASSET_RESPONSE']);
+export const correctableBrowserCodes=new Set(['BROWSER_ARGUMENTS','BROWSER_REF_STALE','BROWSER_CONTROL_TYPE','BROWSER_CONTROL_CHANGED','BROWSER_OPERATION_TIMEOUT','BROWSER_CONTENT_CHANGED','BROWSER_ASSET_RESPONSE','BROWSER_NAVIGATION_SCOPE']);
 export function validateBrowserTool(tool,args={}){
  if(tool==='browser_navigate'){
   if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).length!==1||typeof args.url!=='string'||!args.url.trim())throw new BrowserInputError('BROWSER_ARGUMENTS','browser_navigate仅接受同一已授权应用中、由页面或源码发现的只读url；不能传JS、选择器或凭据');return;

@@ -181,3 +181,18 @@ test('published continue_environment and finish aliases retain validated same-th
  assert.equal(next.state,'tools');assert.equal(next.previousSource.result.finalMessage,'first data saved');assert.deepEqual(routes,['continuous-environment-result','continuous-environment']);
  assert.equal((await direct.call('agentos_environment_tool',{tool:'finish',arguments:'{}',summary:'saved',complete:true})).state,'saved');assert.equal(executed,2);assert.equal(chosen.complete,true);await direct.close();
 });
+
+test('ordinary partial work continues in one live native app without repeated initial catalogs',async t=>{
+ const directory=await temp(t),app=new EventEmitter(),events=[],requests=[];let turns=0,starts=0,closed=0,initials=0;
+ app.start=async()=>starts++;app.readAccount=async()=>({account:{type:'chatgpt'}});app.close=async()=>closed++;app.request=async(method,params)=>{requests.push(method);return{thread:{id:'original-live-thread'}};};
+ const direct={job,sourceReceipts:[],openInitial:async()=>{initials++;return null;},close:async()=>{}};
+ app.turn=async params=>{turns++;assert.equal(params.threadId,'original-live-thread');app.emit('notification',{method:'turn/started',params:{threadId:params.threadId,turn:{id:'turn-'+turns}}});if(turns>1){assert.match(params.input[0].text,/当前会话|analysis_continuing/);assert.ok(!params.input[0].text.includes('original expensive prompt'));}return{text:JSON.stringify(turns<4?{outcome:'partial',finalMessage:'Artifact and actual evidence saved '+turns,investigation:{status:'continue',goals:[{id:'original',status:'open'}]}}:{outcome:'ready',finalMessage:'Verified original complete file'})};};
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'original expensive prompt',emit:async e=>events.push(e)},{app,direct,runtime:async()=>({}),bindToolCall:()=>{}});
+ assert.equal(result.outcome,'ready');assert.equal(turns,4);assert.equal(starts,1);assert.equal(closed,1);assert.equal(initials,1);assert.deepEqual(requests,['thread/start']);assert.equal(result.nativeTiming.modelSessions,1);assert.equal(result.nativeTiming.hostContinuations,3);assert.equal(events.filter(e=>e.phase==='native_analysis_continuing').length,3);
+});
+for(const boundary of ['blocker','waiting','source'])test('native self continuation retains genuine '+boundary+' handoff',async t=>{
+ const directory=await temp(t),app=new EventEmitter();let turns=0;app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.close=async()=>{};app.request=async()=>({thread:{id:'bounded'}});
+ const direct={job,sourceReceipts:[],close:async()=>{},...(boundary==='waiting'?{waiting:{outcome:'needs_clarification',browserLoginRequired:true,finalMessage:'actual login required'}}:{})};
+ app.turn=async()=>{turns++;return{text:JSON.stringify({outcome:'partial',finalMessage:'preserved evidence',investigation:{status:'continue',...(boundary==='blocker'?{blocker:{kind:'permission',message:'real missing authorization'}}:{})},...(boundary==='source'?{sourceEnvironmentQuery:{environmentId:'explicit-sit'}}:{})})};};
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({}),bindToolCall:()=>{}});assert.equal(turns,1);assert.equal(result.nativeTiming.hostContinuations,0);if(boundary==='waiting')assert.equal(result.browserLoginRequired,true);if(boundary==='source')assert.equal(result.sourceEnvironmentQuery.environmentId,'explicit-sit');
+});

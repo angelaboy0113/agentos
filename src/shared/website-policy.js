@@ -11,7 +11,7 @@ export function websiteUrl(input) {
 }
 // Navigation is task scope, not an application identity or credential key.
 export function websiteNavigationTarget(input,base,readEndpoints=[]) {
- const reject=()=>Object.assign(new Error('网页目标地址未通过只读校验'),{queryDiagnostic:{code:'WEBSITE_TARGET_INVALID',reason:'本次页面地址无效、含凭据/写操作，或超出原应用范围。',correction:'使用源码、实际菜单或页面证据中的同应用只读地址；保留经销商、期间等筛选参数，不传账号、令牌或操作指令。'}});
+ const reject=()=>Object.assign(new Error('网页目标地址未通过只读校验'),{code:'BROWSER_NAVIGATION_SCOPE',statusCode:400,queryDiagnostic:{code:'WEBSITE_TARGET_INVALID',reason:'本次页面地址无效、含凭据/写操作，或超出原应用范围。',correction:'使用源码、实际菜单或页面证据中的同应用只读地址；保留经销商、期间等筛选参数，不传账号、令牌或操作指令。'}});
  try {
   const u=new URL(input),entry=new URL(u);if(/[\x00-\x20\x7f]/.test(String(input)))throw reject();entry.search='';entry.hash='';websiteUrl(entry.href);
   const effective=new URL(u);if(u.hash){if(!u.hash.startsWith('#/'))throw reject();const route=new URL(u.hash.slice(1),u.origin);effective.pathname=route.pathname;effective.search=route.search;effective.hash='';}
@@ -42,6 +42,17 @@ function reviewedQueryObjectPath(pathname,method){
 export function websiteRequestAllowed(base, request, manualLogin=false, readEndpoints=[]) {
  let u; try {u=new URL(request.url);}catch{return false;}
  if(u.origin!==new URL(base).origin || !['GET','HEAD','POST','OPTIONS'].includes(request.method))return false;
+ // Next.js data navigation carries the same reviewed route as the document,
+ // behind a build/locale transport prefix. It is not a new API permission.
+ // Require an explicit reviewed GET for the reconstructed route and reapply
+ // its exact query/method rules; never grant arbitrary .json/static fetches.
+ if(request.method==='GET'&&['xhr','fetch'].includes(request.resourceType)){
+  const m=/^\/_next\/data\/[A-Za-z0-9_-]+\/([a-z]{2}(?:-[A-Za-z]{2})?)\/(.+)\.json$/.exec(u.pathname);
+  if(m&&!/[\\%]/.test(m[2])&&!m[2].split('/').some(p=>p==='..'||p==='.'||!p)){
+   const route=new URL(u);route.pathname='/'+m[2];
+   if(readEndpoints.some(e=>e.reviewed===true&&e.method==='GET'&&reviewedPathMatches(e.path,route.pathname)))return websiteRequestAllowed(base,{...request,url:route.href},manualLogin,readEndpoints);
+  }
+ }
  // Static GET dependencies are not business mutation routes (e.g. reset.css).
  // Keep origin/method/type checks: a POST or XHR named delete.css is not exempt.
  if(request.method==='GET'&&(['stylesheet','script','font','image'].includes(request.resourceType)||['xhr','fetch'].includes(request.resourceType)&&/\.(?:css|less)$/i.test(u.pathname))&&/\.(?:css|less|js|mjs|png|jpe?g|gif|webp|svg|ico|woff2?|ttf)$/i.test(u.pathname)&&![...u.searchParams].some(([k,v])=>writeAction.test(k)||/^(action|operation|command|cmd|method)$/i.test(k)&&writeAction.test(v)))return true;

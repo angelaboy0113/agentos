@@ -5,6 +5,7 @@ import {CodexAppServer} from '../shared/codex-app-server.js';
 import {codexEnvironment,loadCodexRuntimeSettings,resolveCodexBinary,conversationServerArgs} from '../shared/codex-runtime.js';
 import {artifactPermissionArgs,artifactPolicy} from '../shared/artifact-workspace.js';
 import {failureDiagnostic} from '../shared/failure-diagnostic.js';
+import {continuousReviewDecision} from '../shared/investigation-review.js';
 import {ToolResultStore} from './tool-result-store.js';
 import {InvestigationDirectTools,investigationDynamicTools} from './investigation-direct-tools.js';
 
@@ -91,7 +92,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     const initialInput=initial?'\n接单时已批准的首个只读来源已在同一会话内打开。先使用此目录继续取证，勿重复打开或重复查询；结束来源后再核对完整原问题：\n'+JSON.stringify(await presentNativeToolResult(store,'initial_environment',initial)):'';
     let result;let input;
     for(;;){
-    modelTurns++;const answer=await app.turn({threadId,approvalPolicy:'never',effort:runtime.reasoningEffort??'low',input:input??[{type:'text',text:options.prompt+initialInput+'\n执行方式：优先直接使用agentos_*工具，保持当前会话。environment_open只申请既有范围，返回目录后用environment_tool直接执行；close保存每个来源的核验收据，再按需打开另一来源。来源结束不等于原问题完成。无需输出中间environmentQuery/sourceHistoryQuery结束本轮；最终仍按原schema和真实证据交付。源码通过现有只读shell；业务数据库/网页/日志/历史补取必须使用受控工具。缺登录或权限保留等待；禁止自行连接数据库或绕过受控网页。'},...attachmentPaths.filter(x=>x.type==='image').map(x=>({type:'localImage',path:x.path}))],outputSchema:JSON.parse(await readFile(new URL('../../config/task-result.schema.json',import.meta.url),'utf8'))},{onEvent:method=>{if(method==='item/started')emit({type:'progress',phase:'codex_working'}).catch(()=>{});}});
+    modelTurns++;const answer=await app.turn({threadId,approvalPolicy:'never',effort:runtime.reasoningEffort??'low',input:input??[{type:'text',text:options.prompt+initialInput+'\n执行方式：优先直接使用agentos_*工具，保持当前会话。environment_open只申请既有范围，返回目录后用environment_tool直接执行；close保存每个来源的核验收据，再按需打开另一来源。来源结束不等于原问题完成。按用户要求的粒度交付：完整列齐对象不等于穷尽每个对象的所有内部实现、历史和副作用；未被要求且不影响结论的深挖不能升级为交付前置条件。已取得足够证据后集中核验交付，不逐个子步骤回报partial。单个来源鉴权、范围或查询失败只约束该来源，不得重复失败操作或扩大权限；关闭并保存其缺口后，继续可独立完成的源码核对、其它已授权来源、文件制作与核验。用户要求文件时，可交付明确标注已核实范围与缺项的有用部分文件，不能因部署核验缺口而连源码接口清单都不整理；不得把源码接口冒称为线上已部署接口，亦不得将部分交付说成全部成功。无需输出中间environmentQuery/sourceHistoryQuery结束本轮；最终仍按原schema和真实证据交付。源码通过现有只读shell；业务数据库/网页/日志/历史补取必须使用受控工具。缺登录或权限保留等待；禁止自行连接数据库或绕过受控网页。'},...attachmentPaths.filter(x=>x.type==='image').map(x=>({type:'localImage',path:x.path}))],outputSchema:JSON.parse(await readFile(new URL('../../config/task-result.schema.json',import.meta.url),'utf8'))},{onEvent:method=>{if(method==='item/started')emit({type:'progress',phase:'codex_working'}).catch(()=>{});}});
     active=false;
     result=JSON.parse(answer.text);
     if(!['ready','partial','needs_clarification','blocked'].includes(result.outcome)||!result.finalMessage?.trim())throw failure('CODEX_RESULT_INVALID');
@@ -105,12 +106,21 @@ export async function runNativeInvestigation(options,adapters={}) {
     // A premature finish is corrective feedback, not a closed channel. Return
     // that observation to the same model instead of opening a second source or
     // waiting indefinitely during teardown.
-    if(!direct.channel){if(!continuation)break;observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));}
+    if(!direct.channel){
+      if(continuation)observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));
+      else if(continuousReviewDecision(direct.job,result).continue){
+        // A normal work-in-progress result belongs to this live thread. Sending
+        // it back through the runner reopens the app and reloads source/skills.
+        // Persist the intermediate evidence, but never publish it as delivery.
+        observation={state:'analysis_continuing',result};
+        await emit({type:'progress',phase:'native_analysis_continuing',message:'继续同一调查会话处理尚未完成的原需求，已有来源和成果保持'});
+      }else break;
+    }
     hostContinuations++;
     if(observation.state==='source_transition_required'){result={...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:observation.sourceEnvironmentQuery};break;}
     if(direct.waiting)break;
     const presented=await store.present('host_continuation',observation,24000,{persist:true,reader:'agentos_read_result'});
-    input=[{type:'text',text:'你输出了旧式接续申请；宿主已按原身份与范围在本会话执行，结果如下。继续使用agentos_*工具完成同一原问题，不需要结束本轮交回OS或再写environmentQuery/websiteQuery/sourceHistoryQuery。只有真实等待、最终交付或独立源码环境交接才结束。关闭当前来源后可直接打开下一已授权来源。最终结果把已经执行的旧式申请字段设为null。\n'+JSON.stringify(presented)}];
+    input=[{type:'text',text:(observation.state==='analysis_continuing'?'原需求仍有可执行工作；保持用户实际要求的粒度，不把未要求的逐对象深层规则穷尽当作完成前置条件。中间证据已持久化，继续在当前会话直接完成取证、制作和核验，不必交回OS重新准备源码或技能。保留原身份、固定源码和工具范围，不重复已经完成的查询；真实外部缺口则准确记录，不虚报成功。':'你输出了旧式接续申请；宿主已按原身份与范围在本会话执行，结果如下。')+'继续使用agentos_*工具完成同一原问题，不需要结束本轮交回OS或再写environmentQuery/websiteQuery/sourceHistoryQuery。只有真实等待、最终交付或独立源码环境交接才结束。关闭当前来源后可直接打开下一已授权来源。最终结果把已经执行的旧式申请字段设为null。\n'+JSON.stringify(presented)}];
     active=true;
     }
     if(direct.channel){await direct.call('agentos_environment_close',{summary:'外层结束前保存已有证据；本来源尚未声明完成。',complete:false});result={...result,outcome:'partial',summary:'已有取证已保存，仍需完成原问题核验'};}

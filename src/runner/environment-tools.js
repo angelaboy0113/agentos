@@ -1,3 +1,4 @@
+import {mysqlJsonText} from '../shared/mysql-json-text.js';
 import {reportFile} from '../shared/report-files.js';
 import {nativeInputDataset} from '../shared/feishu-cloud-sheet.js';
 import {reviseReportFile} from '../shared/report-revision.js';
@@ -38,6 +39,7 @@ function safeStructured(value,depth=0,seen=new WeakSet()){
 const bounded = (x, secrets = []) => {
  if(x===null||x===undefined)return null;
  let s=typeof x==='object'&&x!==null?JSON.stringify(safeStructured(x)):String(x??'');
+ if(typeof x==='string'&&/^\s*[\[{]/.test(x))try{s=mysqlJsonText(x);}catch{/* Ordinary text is not implicitly JSON. */}
  for(const v of secrets.filter(Boolean))s=s.split(v).join('[已隐藏]');
  return s;
 };
@@ -212,7 +214,7 @@ export function groupedDatasetStatement(args,tables,types,q,valueSets=new Map(),
  // A verified unique cursor already totally orders these rows/groups. Extra
  // projected fields defeat index ordering on MySQL and repeat a wide filesort per page.
  const order=cursor?cursor.expressions:quoted;
- return {...base,...(cursor?{cursor,batchSize:50}:groupNames.length>12?{batchSize:Math.max(5,Math.floor(1000/(groupNames.length+base.columns.length)))}:{}),sql:projected?projected+` ORDER BY ${order.join(', ')}`:base.sql.replace(/^SELECT /,`SELECT ${quoted.join(', ')}, `)+` GROUP BY ${quoted.join(', ')} ORDER BY ${order.join(', ')}`,columns:[...groupNames,...base.columns],...(args.rowKey?{rowKey:{column:args.rowKey,fields:groupNames}}:{}),numericColumns:args.aggregates.filter(a=>['sum','avg','count','count_distinct'].includes(a.op)||numericTypes.has(types.get(a.table??args.table)?.get(a.column))).map(a=>a.as)};
+ return {...base,...(cursor?{cursor,batchSize:50}:groupNames.length>12?{batchSize:Math.max(5,Math.floor(1000/(groupNames.length+base.columns.length)))}:{}),sql:projected?projected+` ORDER BY ${order.join(', ')}`:base.sql.replace(/^SELECT /,`SELECT ${quoted.join(', ')}, `)+` GROUP BY ${quoted.join(', ')} ORDER BY ${order.join(', ')}`,columns:[...groupNames,...base.columns],jsonColumns:groups.filter(g=>types.get(linked?g.table:args.table)?.get(linked?g.column:g)==='json').map(g=>linked?g.column:g),...(args.rowKey?{rowKey:{column:args.rowKey,fields:groupNames}}:{}),numericColumns:args.aggregates.filter(a=>['sum','avg','count','count_distinct'].includes(a.op)||numericTypes.has(types.get(a.table??args.table)?.get(a.column))).map(a=>a.as)};
 }
 
 export function phaseReportRegistry(job){const view={...(job??{id:'none'}),reportFiles:[...(job?.reportFiles??[])]};return{view,register(result){const file=result?.exportFile;if(file?.id&&!view.reportFiles.some(item=>item.id===file.id))view.reportFiles.push(file);return result;}};}
@@ -257,7 +259,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
       const driver = adapters.mysql ?? await import('mysql2/promise');
       conn = e.transport ? await sshMysqlConnection(e,q,cred,adapters) : await driver.createConnection({ host: e.host, port: e.port, database: e.database, user: cred.username, password: cred.password, connectTimeout: q.timeoutMs, multipleStatements: false, enableCleartextPlugin: false,
         // Business IDs frequently exceed Number.MAX_SAFE_INTEGER. Keep BIGINT/DECIMAL values lossless so a value returned by one read can be used by the next read unchanged.
-        supportBigNumbers: true, bigNumberStrings: true, dateStrings: true,
+        supportBigNumbers: true, bigNumberStrings: true, dateStrings: true, jsonStrings:true,
         ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
       if (!active) { conn.destroy(); conn = null; throw new Error('连接已超时'); }
       try { const [g] = await conn.query({sql:'SHOW GRANTS FOR CURRENT_USER',timeout:q.timeoutMs}); checkAccountGrants(e, g); await conn.query({sql:`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`,timeout:q.timeoutMs}); await conn.query({sql:'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',timeout:q.timeoutMs}); await conn.query({sql:'START TRANSACTION READ ONLY',timeout:q.timeoutMs}); }
