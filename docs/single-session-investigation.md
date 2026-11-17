@@ -65,3 +65,5 @@ Native large observations identify `agentos_read_result` and include exact reade
 ### 1.132.5：分页结果不再递归分页
 
 原生 `agentos_read_result` 返回的页已由可信读取器限制为最多24000字符，仍沿用原引用、offset、nextOffset及哈希。该页经过相同脱敏处理后直接交还主会话，不因中文UTF-8字节数或JSON转义开销再套一层大结果引用，也不重复写一份分页副本。其它工具的大结果仍完整持久化并分页。此调整不增加业务查询量、取消范围校验或引入整任务限制。
+
+撤回的同一问题身份在 `LiveCards.upsert` 持久事务内直接拒绝后续进度、终态与启动重渲染（包括误传的新generation），保持原撤回凭据、原payload与未送达revision；不触发外发、不伪造投递。新问题须使用新的问题身份。静态撤回哈希校验和活任务/投递发布守卫保持。升级前遗留的本人已撤回自测展示差异只凭同profile API确认根及卡均deleted、精确指纹登记为闲置，保留原记录；不会批量豁免真实用户待投递。

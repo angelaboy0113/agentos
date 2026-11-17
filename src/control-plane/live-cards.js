@@ -40,7 +40,11 @@ export class LiveCards {
     }
     card=fitResultCard(card);
     if (Buffer.byteLength(JSON.stringify(card)) > 28_000) throw new Error('Card exceeds safe message limit');
+    let withdrawn=false;
     await this.store.transact((state) => {
+      // Recall is final for this question identity, including late terminal views
+      // and startup re-rendering. Preserve the exact bound payload/receipt.
+      if(key.startsWith('question:')&&state.questions?.[key.slice(9)]?.withdrawnAt){withdrawn=true;return;}
       guard?.(state);
       state.cardMessages ??= {};
       let existing = state.cardMessages[key];
@@ -66,6 +70,7 @@ export class LiveCards {
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     });
+    if(withdrawn)return;
     if (immediate) return this.flush(key, true);
     this.flush(key).catch(() => {});
   }
