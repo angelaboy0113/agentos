@@ -50,3 +50,5 @@ loginNavigation.renewal 是默认关闭的维护配置，包含 page（已登记
 
 
 Reviewed GET endpoints can declare `queryParameterTypes: {start: "isoTimestamp", end: "isoTimestamp"}`. Only canonical UTC ISO timestamps (optional milliseconds) pass; invalid dates, missing timezone, mutation values and unreviewed methods remain rejected. This distinguishes read-range start from a start operation. Bind types only after verifying actual request and deployed client evidence.
+
+1.132.9: Reviewed read-page time filters now use the same typed query validation during navigation and plan verification. Compound query/search-analysis buttons and dialog-local date/time range apply controls are available; mutation labels and off-dialog lookalikes remain blocked. Native custom range navigation/query integration regression included.

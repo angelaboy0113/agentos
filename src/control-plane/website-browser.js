@@ -69,7 +69,7 @@ export class WebsiteBrowser {
   })();this.opening.set(key,p);try{return await p;}finally{this.opening.delete(key);}
  }
  async state(job,e){
-  const initialTarget=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl);
+  const initialTarget=websiteNavigationTarget(job.environmentAccess?.websiteTarget??e.baseUrl,e.baseUrl,e.queries?.[job.environmentAccess?.queryId]?.readEndpoints??[]);
   if(this.pages.has(job.id)){
    const existing=this.pages.get(job.id);
    if(existing.page.isClosed()||existing.crashed||websiteSessionKey(e.projectId,e.tier,e.baseUrl)!==websiteSessionKey(existing.environment.projectId,existing.environment.tier,existing.environment.baseUrl)||e.baseUrl!==existing.environment.baseUrl||initialTarget!==existing.initialTarget)await this.release(job.id);
@@ -257,7 +257,7 @@ export class WebsiteBrowser {
   if(tool==='browser_frames')return websiteFrames(s);
   if(tool==='browser_frame'){await websiteFrames(s,args.ref);return this.snapshot(s);}
   if(tool==='browser_navigate'){
-   let target;try{target=websiteNavigationTarget(args.url,s.environment.baseUrl);}catch{throw new BrowserInputError('BROWSER_ARGUMENTS','目标地址未通过同应用只读校验；使用已观察到的菜单或源码地址，不能传凭据、修改动作或其它应用地址。');}
+   let target;try{target=websiteNavigationTarget(args.url,s.environment.baseUrl,s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{throw new BrowserInputError('BROWSER_ARGUMENTS','目标地址未通过同应用只读校验；使用已观察到的菜单或源码地址，不能传凭据、修改动作或其它应用地址。');}
    if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务页面导航范围已失效');
    s.currentReadTarget=target;s.restoreTarget=true;s.dom=null;s.frameRefs=new Map();
    // Navigation only: never replay the query, login submission or business action.
@@ -317,7 +317,7 @@ export class WebsiteBrowser {
    else {
     const link=await ref.el.evaluate(el=>{const a=el.closest('a[href]');return a?.target==='_blank'?a.href:null;});
     if(link){
-     const target=websiteNavigationTarget(link,s.environment.baseUrl);
+     const target=websiteNavigationTarget(link,s.environment.baseUrl,s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readEndpoints??[]);
      if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务页面导航范围已失效');
      s.currentReadTarget=target;
      await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
@@ -333,7 +333,7 @@ export class WebsiteBrowser {
      if(popupTargets.length){
       if(popupTargets.length!==1)throw new BrowserInputError('BROWSER_POPUP_AMBIGUOUS','本次只读操作出现多个新窗口目标；保留当前页面，不猜测选择或重复点击。');
       if(!popupTargets[0]||popupTargets[0]==='about:blank')throw new BrowserInputError('BROWSER_POPUP_TARGET_PENDING','详情新窗口尚无实际地址；没有把空白页当证据或重复打开。');
-      const target=websiteNavigationTarget(new URL(popupTargets[0],websiteDOM(s).url()).href,s.environment.baseUrl);
+      const target=websiteNavigationTarget(new URL(popupTargets[0],websiteDOM(s).url()).href,s.environment.baseUrl,s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readEndpoints??[]);
       if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw new BrowserInputError('BROWSER_NAVIGATION_SCOPE','新窗口详情不在本任务批准的读取范围，保留当前页。');
       s.currentReadTarget=target;s.dom=null;s.frameRefs=new Map();
       await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});

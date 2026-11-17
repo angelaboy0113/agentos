@@ -2091,3 +2091,5 @@ Native compatibility also consumes legacy-shaped environment/website/history con
 
 
 1.132.8: Added reviewed GET ISO timestamp query bindings after real LTX.Log selector evidence showed `start` misclassified as an operation. Invalid dates/actions/unreviewed methods remain denied. Login recovery and duplicate-entry fixes from1.132.7 retained.
+
+1.132.9: Reviewed read-page time filters now use the same typed query validation during navigation and plan verification. Compound query/search-analysis buttons and dialog-local date/time range apply controls are available; mutation labels and off-dialog lookalikes remain blocked. Native custom range navigation/query integration regression included.

@@ -466,3 +466,5 @@ TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使�
 持续会话直接取证执行器（隔离验证、默认未启用）：[架构、权限、恢复与验收说明](docs/single-session-investigation.md)。
 
 1.132.8: reviewed website GET time-filter bindings prevent range-start parameters from being mistaken for mutation actions.
+
+1.132.9: Reviewed read-page time filters now use the same typed query validation during navigation and plan verification. Compound query/search-analysis buttons and dialog-local date/time range apply controls are available; mutation labels and off-dialog lookalikes remain blocked. Native custom range navigation/query integration regression included.

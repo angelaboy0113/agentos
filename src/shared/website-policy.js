@@ -10,14 +10,14 @@ export function websiteUrl(input) {
  u.hash=''; return u.toString();
 }
 // Navigation is task scope, not an application identity or credential key.
-export function websiteNavigationTarget(input,base) {
+export function websiteNavigationTarget(input,base,readEndpoints=[]) {
  const reject=()=>Object.assign(new Error('网页目标地址未通过只读校验'),{queryDiagnostic:{code:'WEBSITE_TARGET_INVALID',reason:'本次页面地址无效、含凭据/写操作，或超出原应用范围。',correction:'使用源码、实际菜单或页面证据中的同应用只读地址；保留经销商、期间等筛选参数，不传账号、令牌或操作指令。'}});
  try {
   const u=new URL(input),entry=new URL(u);if(/[\x00-\x20\x7f]/.test(String(input)))throw reject();entry.search='';entry.hash='';websiteUrl(entry.href);
   const effective=new URL(u);if(u.hash){if(!u.hash.startsWith('#/'))throw reject();const route=new URL(u.hash.slice(1),u.origin);effective.pathname=route.pathname;effective.search=route.search;effective.hash='';}
   for(const query of [u.searchParams,effective.searchParams])for(const [key]of query)if(/password|passwd|pwd|secret|token|authorization|cookie|credential|api.?key/i.test(key))throw reject();
   for(const url of [u,effective]){const decoded=decodeURIComponent(url.pathname);if(decoded.includes('\\')||decoded.split('/').includes('..')||/%(?:2e|2f|5c)/i.test(decoded))throw reject();}
-  for(const url of [u,effective])if(!websiteRequestAllowed(u.origin,{url:url.href,method:'GET',resourceType:'document'}))throw reject();
+  for(const url of [u,effective])if(!websiteRequestAllowed(u.origin,{url:url.href,method:'GET',resourceType:'document'},false,readEndpoints))throw reject();
   if(base){const root=new URL(websiteUrl(base)),prefix=root.pathname.replace(/\/$/,'');if(root.origin!==u.origin||!(u.pathname===prefix||u.pathname.startsWith(prefix+'/')))throw reject();}
   return u.href;
  }catch{throw reject();}

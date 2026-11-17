@@ -40,6 +40,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  const panel=el.matches('.el-collapse-item__header,.ant-collapse-header');
  if(panel)label=(el.classList.contains('is-active')||el.getAttribute('aria-expanded')==='true'?'收起':'展开')+(el.closest('form,.el-form,.ant-form')?'筛选：':'面板：')+label;
  const dismiss=!!el.closest('[role="dialog"],.el-dialog,.el-drawer,.ant-modal,.ant-drawer')&&(el.matches('.el-dialog__headerbtn,.el-drawer__close-btn,.ant-modal-close,.ant-drawer-close,[aria-label="Close" i],[aria-label="关闭"]')||/^(关闭|取消|返回|close|cancel|back)$/i.test(label));
+ const localRangeApply=el.matches('button,[role="button"]')&&/^(?:应用(?:日期|时间)范围|apply (?:date|time) range)$/i.test(label)&&!!el.closest('[role="dialog"],dialog,.el-dialog,.ant-modal')?.querySelector('input[type="date"],input[type="datetime-local"],input[aria-label*="时间"],input[aria-label*="日期"],input[aria-label*="date" i],input[aria-label*="time" i]');
  const picker=el.matches('.el-date-editor,.ant-picker,.ant-calendar-picker')||el.matches('input[readonly]')&&!!el.closest('.el-date-editor,.ant-picker,.ant-calendar-picker,.el-select,[role="combobox"]');
  if(el.matches('.el-date-editor,.ant-picker,.ant-calendar-picker')&&el.querySelector('input:not([disabled])'))return {visible:true,label,type:null};
  if(el.matches('.el-date-editor,.ant-picker,.ant-calendar-picker'))label=fieldLabel||el.getAttribute('aria-label')||'日期范围选择';
@@ -49,19 +50,19 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  if(pagination&&!label)label=tag==='input'?'前往页码':el.matches('.btn-next,.ant-pagination-next')?'下一页':el.matches('.btn-prev,.ant-pagination-prev')?'上一页':'';
  if(!label)return {visible:true,label,type:null};
  const mutation=/立即执行|执行一次|单次执行|立即运行|运行一次|重放|重发|重新发送|试运行|测试接口|接口测试|新增|创建|保存|修改|编辑|删除|启动|停止|触发|重跑|终止|发布|启用|禁用|提交|支付|注销|退出|作废|驳回|撤回|取消订单|关闭订单|确认收货|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|cancel|resend|replay)\b/i;
- const querySubmit=/^(?:(?:开始|执行)?(?:查询|搜索)|(?:run|start|execute) (?:query|search))$/i.test(label);
+ const querySubmit=/^(?:(?:开始|执行)?(?:查询|搜索|检索)(?:\s*[\/／]\s*分析)?|(?:run|start|execute) (?:query|search))$/i.test(label);
  const navigation=reviewedNavigation||el.matches('.ant-card-hoverable,[role="link"],[role="menuitem"],[role="treeitem"],[role="tab"],.el-submenu__title,.ant-menu-submenu-title');
  let type=null,kind=row?'row':'action';
  if(['input','textarea'].includes(tag)){
   const identity=[label,el.name,el.id,el.placeholder,el.getAttribute('aria-label')].join(' ');
   if(/password|passwd|secret|token|credential|authorization|api.?key|app.?key|密码|令牌|密钥/i.test(identity))return {visible:true,label,type:null};
   const queryScope=el.closest('form,[role=search],.el-form,.ant-form,[role=group]');
-  const queryTextArea=tag==='textarea'&&!el.readOnly&&/搜索条件|查询条件|过滤条件|筛选条件|search|query|filter/i.test(label)&&queryScope&&[...queryScope.querySelectorAll('button,[role=button]')].some(b=>b.getClientRects().length&&/^(?:(?:开始|执行)?(?:查询|搜索)|(?:run|start|execute) (?:query|search))$/i.test(b.innerText.trim()));
+  const queryTextArea=tag==='textarea'&&!el.readOnly&&/搜索条件|查询条件|过滤条件|筛选条件|search|query|filter/i.test(label)&&queryScope&&[...queryScope.querySelectorAll('button,[role=button]')].some(b=>b.getClientRects().length&&/^(?:(?:开始|执行)?(?:查询|搜索|检索)(?:\s*[\/／]\s*分析)?|(?:run|start|execute) (?:query|search))$/i.test(b.innerText.trim()));
   if(queryTextArea){type='search';kind='field';}
-  else if(picker){type='read-action';kind='picker';}
+  else if(picker||localRangeApply){type='read-action';kind='picker';}
   else if(tag==='input'&&!el.readOnly&&/^(text|search|date|datetime-local|number|month|week|time|tel)$/.test(el.type)){type='search';kind='field';}
  }else if(tag==='select'){type='select';kind='field';}
- else if(picker){type='read-action';kind='picker';}
+ else if(picker||localRangeApply){type='read-action';kind='picker';}
  else if(expansion){type='read-action';kind='expansion';}
  else if(panel){type='read-action';kind='panel';}
  else if(dismiss){type='read-action';kind='dismiss';}

@@ -119,7 +119,7 @@ export function planQuery(config, request, projectId, actor, now = Date.now()) {
     return v;
   });
   if(request.websiteTarget!==undefined&&e.kind!=='website')throw new Error('网页目标不能用于其他环境类型');
-  const websiteTarget=request.websiteTarget!==undefined?websiteNavigationTarget(request.websiteTarget,e.baseUrl):undefined;
+  const websiteTarget=request.websiteTarget!==undefined?websiteNavigationTarget(request.websiteTarget,e.baseUrl,q.readEndpoints??[]):undefined;
   const scope = { expiresAt: new Date(now + 15 * 60000).toISOString(), approvalProfile: actor.profile, environmentId: request.environmentId, queryId: request.queryId, projectId, parameters, configHash: fingerprint(e), maxRows: q.maxRows, timeoutMs: queryTimeout(config,e,q) };
   if(websiteTarget)scope.websiteTarget=websiteTarget;
   const approvalRequired = false;
@@ -136,7 +136,7 @@ function verifyPlanIntegrity(config, plan) {
   const e = config.environments[plan.environmentId];
   if (!e || fingerprint(e) !== plan.configHash || !Number.isFinite(Date.parse(plan.expiresAt))) throw new Error('查询授权已过期或配置已变更，请重新申请');
   const scope = Object.fromEntries(['expiresAt','approvalProfile','environmentId','queryId','projectId','parameters','configHash','maxRows','timeoutMs'].map((k) => [k, plan[k]]));
-  if(plan.websiteTarget!==undefined){if(e.kind!=='website'||websiteNavigationTarget(plan.websiteTarget,e.baseUrl)!==plan.websiteTarget)throw new Error('网页目标与批准内容不一致');scope.websiteTarget=plan.websiteTarget;}
+  if(plan.websiteTarget!==undefined){if(e.kind!=='website'||websiteNavigationTarget(plan.websiteTarget,e.baseUrl,e.queries?.[plan.queryId]?.readEndpoints??[])!==plan.websiteTarget)throw new Error('网页目标与批准内容不一致');scope.websiteTarget=plan.websiteTarget;}
   if (fingerprint(scope) !== plan.scopeHash || e.projectId !== plan.projectId) throw new Error('查询范围与批准内容不一致');
   return e;
 }
