@@ -21,3 +21,6 @@
 `deliveryRetry`、`deliveryMaintenanceNotices`、adminAudit、原文件及分卷回执随私有runtime/data备份/迁移。待维护是未送达，不是业务失败或绿色完成。没有worker且只有精确相同的待维护payload时，不阻挡空闲发布；新内容、活任务及投递worker仍阻挡。原文件依赖保留，不当垃圾清理。
 
 旧版不识别attention：回退前保留最新状态/回执，对仍待维护的原消息安装精确人工暂停，不可让旧队列恢复无限重试或倒灌agentos.json。无需新增凭据/权限。其它OS及完整跨机未实际验收时须标注。
+
+
+A card transport reporting that its source was recalled remains a withdrawal-check candidate even when its retry is held. The watcher must positively match the original message ID, bot identity, chat and deleted=true before retiring its delivery/source reference. A missing response, foreign chat or deleted=false does not retire it. This closes the race where transport failed just before recall polling or a maintenance restart; it does not resume business execution or fabricate a sent receipt.

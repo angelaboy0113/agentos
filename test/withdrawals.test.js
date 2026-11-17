@@ -28,3 +28,10 @@ test('startup and late terminal upserts cannot change any recalled question payl
  for(const generation of [1,2])await cards.upsert('question:q',{elements:[{text:'rebuilt without owner'}]},{profile:'ltx',replyTo:'question'},{terminal:true,generation,immediate:true,guard:()=>{guard++;}});
  const after=await store.snapshot();assert.deepEqual(after.cardMessages['question:q'],before);assert.equal(sent,0);assert.equal(guard,0);assert.equal(maintenanceBusy(after),false);assert.equal(after.cardMessages['question:q'].deliveredRevision,2);await cards.stop();
 });
+
+test('held transport recall hint is still checked against the original scoped message before retirement',async t=>{
+ const {deliveryFingerprint}=await import('../src/shared/delivery-retry.js'),dir=await mkdtemp(path.join(os.tmpdir(),'withdraw-held-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new JsonStore(path.join(dir,'s.json'));
+ await store.transact(s=>{const c={revision:2,deliveredRevision:1,error:'原消息已撤回，停止更新',destination:{profile:'ltx',replyTo:'question'},card:{text:'complete'}};c.deliveryRetry={state:'attention',fingerprint:deliveryFingerprint('cardMessages',c)};Object.assign(s,{questions:{q:{id:'q',...target}},jobs:[],conversations:[],cardMessages:{'question:q':c}});});
+ assert.equal(withdrawalCandidates(await store.snapshot()).length,1);let response={message_id:'question',chat_id:'other',deleted:true},calls=0;const watcher=new WithdrawalWatcher({store,feishu:{getMessage:async()=>{calls++;return response;}}});await watcher.tick();assert.equal((await store.snapshot()).questions.q.withdrawnAt,undefined);
+ response={message_id:'question',chat_id:'chat',deleted:false};await watcher.tick();assert.equal((await store.snapshot()).questions.q.withdrawnAt,undefined);response={message_id:'question',chat_id:'chat',deleted:true};await watcher.tick();const s=await store.snapshot();assert.ok(s.questions.q.withdrawnAt);assert.equal(s.cardMessages['question:q'].deliveredRevision,1);assert.equal(withdrawalCandidates(s).length,0);assert.equal(calls,3);await watcher.close();
+});
