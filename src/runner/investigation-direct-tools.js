@@ -4,7 +4,7 @@ import {controlPost} from './control-client.js';
 import {runWithSourceHistory} from './source-history-runner.js';
 import {loadEnvironments} from '../shared/environment-access.js';
 import {requestedSourceEnvironments} from '../shared/source-comparison.js';
-import {sourceRuntimeTier} from '../shared/source-environments.js';
+import {sourceRuntimeTier,assertSourceRuntimeTier} from '../shared/source-environments.js';
 import {environmentPlannerInstructions} from './environment-planner-instructions.js';
 import {sourceCommitMetadataArtifact} from './source-commit-metadata.js';
 import {readFile} from 'node:fs/promises';
@@ -29,6 +29,19 @@ export class InvestigationDirectTools {
   }
   identity() {return {runnerId:this.job.lease.runnerId,leaseId:this.job.lease.id};}
   route(suffix) {return `/api/v1/jobs/${encodeURIComponent(this.job.id)}/${suffix}`;}
+  async openInitial() {
+    if(!this.job.environmentAccess||this.initialOpened)return null;
+    assertSourceRuntimeTier(this.options.project,this.job.sourceEnvironment,this.job.environmentAccess.tier);
+    this.initialOpened=true;
+    return this.beginEnvironment();
+  }
+  async beginEnvironment() {
+    if(this.closed||this.channel)throw new Error('Close the current environment before opening another');
+    this.channel=new InvestigationToolChannel();
+    const channel=this.channel;
+    this.running=this.execute(this.job,this.options.config,this.options.emit,{planner:async({kind}={})=>{if(!this.instructionKinds.has(kind)){channel.instructions=environmentPlannerInstructions(kind);this.instructionKinds.add(kind);}return channel.planner();}}).then(result=>channel.settle(result),error=>channel.fail(error));
+    return this.observe(await channel.observe());
+  }
   async readSourceMetadata({resultRef,offset=0,limit=24000}) {
     if(this.closed)throw new Error('Investigation tools closed');
     if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>24000)throw Object.assign(new Error('源码证据分页参数无效；offset非负，limit为1至24000字符'),{code:'REPORT_INPUT'});
@@ -67,10 +80,7 @@ export class InvestigationDirectTools {
       const prepared=await this.post(this.route('continuous-environment'),{...this.identity(),result:sourceResult});
       if(prepared.job)this.job=prepared.job;
       if(!prepared.planned)return {state:'not_opened',diagnostic:prepared.diagnostic,sourcePreparedNext:prepared.sourcePreparedNext===true,terminalResult:prepared.terminalResult};
-      this.channel=new InvestigationToolChannel();
-      const channel=this.channel;
-      this.running=this.execute(this.job,this.options.config,this.options.emit,{planner:async({kind}={})=>{if(!this.instructionKinds.has(kind)){channel.instructions=environmentPlannerInstructions(kind);this.instructionKinds.add(kind);}return channel.planner();}}).then(result=>channel.settle(result),error=>channel.fail(error));
-      return this.observe(await channel.observe());
+      return this.beginEnvironment();
     }
     if(!this.channel)throw new Error('No authorized environment is open');
     if(name==='agentos_environment_tool') {

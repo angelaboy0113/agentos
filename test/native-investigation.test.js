@@ -13,6 +13,28 @@ import {planQuery} from '../src/shared/environment-access.js';
 
 async function temp(t){const dir=await realpath(await mkdtemp(path.join(os.tmpdir(),'agentos-native-')));t.after(()=>rm(dir,{recursive:true,force:true}));return dir;}
 const job={id:'JOB-synthetic',questionId:'QST-synthetic',taskIntent:'analysis',stage:'developer',continuousInvestigation:true,projectId:'a',senderId:'owner',originProfile:'a',lease:{runnerId:'runner',id:'lease'}};
+test('initial grant uses the validated executor coroutine, closes to original state and rejects another tier',async()=>{
+ const granted={...job,sourceEnvironment:'prd',environmentAccess:{environmentId:'db-a',tier:'prd',queryId:'investigate',parameters:['original goal'],signature:'host-approved'}};
+ const project={analysisEnvironments:{prd:{runtimeTier:'prd'},sit:{runtimeTier:'uat'}}};let executions=0,posts=0;
+ const direct=new InvestigationDirectTools({job:granted,project,config:{},emit:async()=>{},workspace:'/fixed'}, {
+  execute:async(j,_c,_e,{planner})=>{executions++;assert.deepEqual(j.environmentAccess,granted.environmentAccess);const p=await planner({kind:'mysql'});const choice=await p.next({tools:[{tool:'schema'}],results:[]});assert.equal(choice.tool,'schema');await p.next({tools:[],results:[{tool:'schema',result:{columns:['id']}}]});await p.close();return{outcome:'ready',finalMessage:'verified original data'};},
+  post:async(route,body)=>{posts++;assert.ok(route.endsWith('continuous-environment-result'));assert.equal(body.leaseId,'lease');return{job:{...granted,environmentAccess:null}};}
+ });
+ assert.equal((await direct.openInitial()).state,'tools');assert.equal(await direct.openInitial(),null);
+ await direct.call('agentos_environment_tool',{tool:'schema',arguments:'{}',summary:'inspect'});
+ assert.equal((await direct.call('agentos_environment_close',{summary:'saved',complete:true})).state,'saved');
+ assert.equal(executions,1);assert.equal(posts,1);await direct.close();
+ const wrong=new InvestigationDirectTools({job:{...granted,sourceEnvironment:'sit'},project},{execute:async()=>{throw Error('Must not execute');}});
+ await assert.rejects(()=>wrong.openInitial(),e=>e.queryDiagnostic?.code==='ENVIRONMENT_MISMATCH');
+});
+test('main native model receives an already approved initial catalog and keeps one thread',async t=>{
+ const directory=await temp(t),app=new EventEmitter();let handler,opened=0,turns=0;
+ const direct={job,sourceReceipts:[],openInitial:async()=>{opened++;direct.channel={};return{state:'tools',input:{tools:[{tool:'schema'}],results:[]}};},call:async()=>{direct.channel=null;return{state:'saved'};},close:async()=>{}};
+ app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.request=async()=>({thread:{id:'initial-thread'}});app.close=async()=>{};
+ app.turn=async p=>{turns++;assert.match(p.input[0].text,/initial_environment|首个只读来源/);assert.match(p.input[0].text,/schema/);app.emit('notification',{method:'turn/started',params:{threadId:'initial-thread',turn:{id:'one'}}});await handler({threadId:'initial-thread',turnId:'one',namespace:null,callId:'close-initial',tool:'agentos_environment_close',arguments:{summary:'saved',complete:true}});return{text:JSON.stringify({outcome:'ready',summary:'verified',finalMessage:'complete original answer'})};};
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({}),bindToolCall:h=>handler=h});
+ assert.equal(opened,1);assert.equal(turns,1);assert.equal(result.nativeTiming.modelSessions,1);assert.equal(result.nativeTiming.environmentModelSessions,0);assert.equal(result.outcome,'ready');
+});
 test('engine opt-in preserves old threads and non-analysis workflows',()=>{
   assert.equal(useNativeInvestigation(job,{analysisEngine:nativeInvestigationEngine},null),true);
   assert.equal(useNativeInvestigation(job,{analysisEngine:'legacy'},null),false);

@@ -8,7 +8,8 @@ import {failureDiagnostic} from '../shared/failure-diagnostic.js';
 import {ToolResultStore} from './tool-result-store.js';
 import {InvestigationDirectTools,investigationDynamicTools} from './investigation-direct-tools.js';
 
-export const nativeInvestigationEngine='native-tools-v1';
+import {nativeInvestigationEngine,useNativeInvestigation} from './investigation-entry.js';
+export {nativeInvestigationEngine,useNativeInvestigation} from './investigation-entry.js';
 // A reader page is already bounded by its trusted host reader. Do not page the
 // JSON envelope again (Unicode and escaped JSON can exceed the byte display size).
 export const presentNativeToolResult=(store,tool,result)=>store.present(tool,result,tool==='agentos_read_result'?Number.MAX_SAFE_INTEGER:24000,{persist:tool!=='agentos_read_result',reader:'agentos_read_result'});
@@ -45,14 +46,6 @@ export class InvestigationCallJournal {
       await handle.write(bytes,0,bytes.length,0);await handle.truncate(bytes.length);await handle.sync();return response;
     } finally {await handle.close();}
   }
-}
-
-export function useNativeInvestigation(job,config,legacyThreadId) {
-  const continuation=job.analysisContinuation;
-  if(job.taskIntent!=='analysis'||!job.continuousInvestigation||job.stage!=='developer')return false;
-  if(continuation?.executionEngine===nativeInvestigationEngine)return true;
-  // Existing CLI threads remain on their original engine. No mid-task migration.
-  return config.analysisEngine===nativeInvestigationEngine&&!legacyThreadId;
 }
 
 export async function runNativeInvestigation(options,adapters={}) {
@@ -94,9 +87,11 @@ export async function runNativeInvestigation(options,adapters={}) {
     await emit({type:'progress',phase:'native_investigation_started',sourceContinuation:{questionId:job.questionId,workspace,threadId,artifactPolicy,executionEngine:nativeInvestigationEngine},message:'同一调查会话已接通授权工具，直接取证并继续分析'});
     active=true;
     progressTimer=setInterval(()=>emit({type:'progress',phase:'codex_working',elapsedSeconds:Math.round((Date.now()-began)/1000),executionEngine:nativeInvestigationEngine}).catch(()=>{}),10000);progressTimer.unref();
+    const initial=await direct.openInitial?.();
+    const initialInput=initial?'\n接单时已批准的首个只读来源已在同一会话内打开。先使用此目录继续取证，勿重复打开或重复查询；结束来源后再核对完整原问题：\n'+JSON.stringify(await presentNativeToolResult(store,'initial_environment',initial)):'';
     let result;let input;
     for(;;){
-    modelTurns++;const answer=await app.turn({threadId,approvalPolicy:'never',effort:runtime.reasoningEffort??'low',input:input??[{type:'text',text:options.prompt+'\n执行方式：优先直接使用agentos_*工具，保持当前会话。environment_open只申请既有范围，返回目录后用environment_tool直接执行；close保存每个来源的核验收据，再按需打开另一来源。来源结束不等于原问题完成。无需输出中间environmentQuery/sourceHistoryQuery结束本轮；最终仍按原schema和真实证据交付。源码通过现有只读shell；业务数据库/网页/日志/历史补取必须使用受控工具。缺登录或权限保留等待；禁止自行连接数据库或绕过受控网页。'},...attachmentPaths.filter(x=>x.type==='image').map(x=>({type:'localImage',path:x.path}))],outputSchema:JSON.parse(await readFile(new URL('../../config/task-result.schema.json',import.meta.url),'utf8'))},{onEvent:method=>{if(method==='item/started')emit({type:'progress',phase:'codex_working'}).catch(()=>{});}});
+    modelTurns++;const answer=await app.turn({threadId,approvalPolicy:'never',effort:runtime.reasoningEffort??'low',input:input??[{type:'text',text:options.prompt+initialInput+'\n执行方式：优先直接使用agentos_*工具，保持当前会话。environment_open只申请既有范围，返回目录后用environment_tool直接执行；close保存每个来源的核验收据，再按需打开另一来源。来源结束不等于原问题完成。无需输出中间environmentQuery/sourceHistoryQuery结束本轮；最终仍按原schema和真实证据交付。源码通过现有只读shell；业务数据库/网页/日志/历史补取必须使用受控工具。缺登录或权限保留等待；禁止自行连接数据库或绕过受控网页。'},...attachmentPaths.filter(x=>x.type==='image').map(x=>({type:'localImage',path:x.path}))],outputSchema:JSON.parse(await readFile(new URL('../../config/task-result.schema.json',import.meta.url),'utf8'))},{onEvent:method=>{if(method==='item/started')emit({type:'progress',phase:'codex_working'}).catch(()=>{});}});
     active=false;
     result=JSON.parse(answer.text);
     if(!['ready','partial','needs_clarification','blocked'].includes(result.outcome)||!result.finalMessage?.trim())throw failure('CODEX_RESULT_INVALID');

@@ -5,6 +5,21 @@ import {compactBackups,restorePlan,atomicJson,dueKey,maintenanceBusy,inactiveRec
 import {BackupMaintenance} from '../src/control-plane/maintenance-backups.js';
 import {JsonStore} from '../src/shared/store.js';
 const hash=x=>createHash('sha256').update(x).digest('hex');
+test('finished dependency cleanup precedes bulk indexing and preserves its receipts when a new task interrupts',async t=>{
+ const f=await fixture(t),{dependencyDigest}=await import('../src/shared/maintenance-backups.js');
+ const tree=path.join(f.root,'completed-test/node_modules');await fs.mkdir(tree,{recursive:true});await fs.writeFile(path.join(tree,'dependency.js'),'rebuildable dependency');
+ const proof=path.join(f.root,'completed-tests.log');await fs.writeFile(proof,'# pass 12\n# fail 0\n');
+ f.c.testTrees=[{path:tree,sha256:await dependencyDigest(tree),proof:{path:proof,sha256:hash('# pass 12\n# fail 0\n')}}];
+ let dependencyReclaimed=false;
+ await assert.rejects(compactBackups(f.c,{...f.options,gate:async(item,remove)=>{
+  if(item?.checkpoint===path.dirname(tree)){const value=remove();dependencyReclaimed=true;return value;}
+  return !dependencyReclaimed;
+ }}),e=>e.message==='MAINTENANCE_BUSY'&&e.partial.testTreesRemoved===1);
+ await assert.rejects(fs.stat(tree),{code:'ENOENT'});
+ assert.equal(await fs.readFile(path.join(f.candidate.path,'job/data.csv'),'utf8'),'same');
+ assert.ok((await fs.readdir(f.audit)).some(n=>n.startsWith('retired-dependencies-')&&n.endsWith('.json')));
+ for(const b of f.c.checkpoints.slice(1))assert.equal(await fs.readFile(path.join(b.path,'runtime-data/exports/job/data.csv'),'utf8'),'same');
+});
 async function fixture(t){const runtime=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'backup-maintenance-')));t.after(()=>fs.rm(runtime,{recursive:true,force:true}));const root=path.join(runtime,'migration');await fs.mkdir(root);const c={version:1,enabled:true,hour:3,minute:30,timeZone:'Asia/Shanghai',managedRoot:root,pins:[],checkpoints:[],candidates:[]};
  for(let i=0;i<4;i++){const p=path.join(root,'release'+i);await fs.mkdir(path.join(p,'runtime-data','exports','job'),{recursive:true});await fs.writeFile(path.join(p,'runtime-data','agentos.json'),'{}');const proof=path.join(root,'accept'+i+'.json');await fs.writeFile(proof,'accepted'+i);c.checkpoints.push({path:p,acceptedAt:`2026-11-0${i+1}T00:00:00Z`,proof:{path:proof,sha256:hash('accepted'+i)}});await fs.writeFile(path.join(p,'runtime-data','exports','job','data.csv'),'same');}
  const candidate={checkpoint:c.checkpoints[0].path,kind:'exports',path:path.join(c.checkpoints[0].path,'runtime-data','exports')};c.candidates.push(candidate);await fs.writeFile(path.join(candidate.path,'unique.csv'),'unique');const audit=path.join(root,'run');await fs.mkdir(audit);const options={runtime,audit,openCheck:async()=>true,gate:async(item,fn)=>fn?fn():true,apply:true};return {runtime,root,c,candidate,audit,options};}

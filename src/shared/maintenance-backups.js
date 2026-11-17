@@ -90,9 +90,29 @@ await safePath(audit,c.managedRoot);
  const index=new Map();let steps=0;
  const check=async()=>{if(!await gate())throw Object.assign(Error('MAINTENANCE_BUSY'),{deferred:true,partial:{...result}});};
  const pulse=async()=>{if(++steps%100===0)await check();};await check();
+ const before=await fs.statfs(runtime);
+ // Finished dependency trees are independent of the expensive backup index.
+ // Reclaim them first so normal inbound/delivery activity cannot starve them
+ // behind a bulk scan. Every existing proof, open-file and writer fence remains.
+ result.testTreesRemoved=0;
+ for(const tree of c.testTrees??[]){
+  await check();try{await safePath(tree.path,c.managedRoot);}catch(e){if(e.code==='ENOENT')continue;throw e;}await safePath(tree.proof.path,c.managedRoot);
+  if(path.basename(tree.path)!=='node_modules'||[...data.keys()].some(p=>within(tree.path,p)||within(p,tree.path)))throw Error('MAINTENANCE_TEST_TREE');
+  const proof=await fs.readFile(tree.proof.path);if(sha(proof)!==tree.proof.sha256||!/# pass [1-9]\d*\b/.test(proof.toString())||!/# fail 0\b/.test(proof.toString()))throw Error('MAINTENANCE_TEST_PROOF');
+  if(await dependencyDigest(tree.path)!==tree.sha256)throw Error('MAINTENANCE_TEST_CHANGED');
+  if(!await openCheck(path.dirname(tree.path))){result.deferred=true;continue;}
+  if(!apply)continue;
+  const retired=path.join(audit,'retired-dependencies-'+randomUUID());
+  await atomicJson(retired+'.json',{original:tree.path,sha256:tree.sha256,proof:tree.proof,rebuild:'npm ci in the original isolated test checkout'});
+  const moved=await gate({checkpoint:path.dirname(tree.path)},()=>{if(realpathSync(tree.path)!==tree.path)throw Error('MAINTENANCE_SYMLINK');renameSync(tree.path,retired);return true;});
+  if(!moved){result.deferred=true;break;}
+  // Rename detaches only verified closed test dependencies. Recursive rm never follows links.
+  if(await dependencyDigest(retired)!==tree.sha256)throw Error('MAINTENANCE_TEST_QUARANTINED');
+  await fs.rm(retired,{recursive:true});result.testTreesRemoved++;
+ }
  const eligible=c.candidates.filter(x=>!protectedPaths.has(x.checkpoint));
  for(const a of eligible.length?anchors:[])for await(const f of files(a.base)){await pulse();const s=await fs.lstat(f);const key=[a.kind,path.relative(a.base,f),s.size].join('\0');if(!index.has(key))index.set(key,[]);index.get(key).push({file:f,checkpoint:a.checkpoint});}
- const before=await fs.statfs(runtime);const anchorHashes=new Map();
+ const anchorHashes=new Map();
  for(const x of c.candidates){
   if(protectedPaths.has(x.checkpoint))continue;await check();
   if(!await openCheck(x.checkpoint)){result.deferred=true;continue;}
@@ -126,22 +146,6 @@ await safePath(audit,c.managedRoot);
    if(!removed){result.deferred=true;break;}result.removed++;result.logicalBytes+=item.bytes;
   }
   await atomicJson(ledger+'.result.json',{removed:result.removed,restorePlan:ledger});if(result.deferred)break;
- }
- result.testTreesRemoved=0;
- for(const tree of c.testTrees??[]){
-  await check();try{await safePath(tree.path,c.managedRoot);}catch(e){if(e.code==='ENOENT')continue;throw e;}await safePath(tree.proof.path,c.managedRoot);
-  if(path.basename(tree.path)!=='node_modules'||[...data.keys()].some(p=>within(tree.path,p)||within(p,tree.path)))throw Error('MAINTENANCE_TEST_TREE');
-  const proof=await fs.readFile(tree.proof.path);if(sha(proof)!==tree.proof.sha256||!/# pass [1-9]\d*\b/.test(proof.toString())||!/# fail 0\b/.test(proof.toString()))throw Error('MAINTENANCE_TEST_PROOF');
-  if(await dependencyDigest(tree.path)!==tree.sha256)throw Error('MAINTENANCE_TEST_CHANGED');
-  if(!await openCheck(path.dirname(tree.path))){result.deferred=true;continue;}
-  if(!apply)continue;
-  const retired=path.join(audit,'retired-dependencies-'+randomUUID());
-  await atomicJson(retired+'.json',{original:tree.path,sha256:tree.sha256,proof:tree.proof,rebuild:'npm ci in the original isolated test checkout'});
-  const moved=await gate({checkpoint:path.dirname(tree.path)},()=>{if(realpathSync(tree.path)!==tree.path)throw Error('MAINTENANCE_SYMLINK');renameSync(tree.path,retired);return true;});
-  if(!moved){result.deferred=true;break;}
-  // Rename detaches only verified closed test dependencies. Recursive rm never follows links.
-  if(await dependencyDigest(retired)!==tree.sha256)throw Error('MAINTENANCE_TEST_QUARANTINED');
-  await fs.rm(retired,{recursive:true});result.testTreesRemoved++;
  }
  const after=await fs.statfs(runtime);result.observedFreeBytesChange=Number(after.bavail)*Number(after.bsize)-Number(before.bavail)*Number(before.bsize);result.logicalIsNotPhysical=true;
  return contentResult?{...contentResult,testTreesRemoved:result.testTreesRemoved,deferred:result.deferred,observedFreeBytesChange:contentResult.observedFreeBytesChange+result.observedFreeBytesChange}:result;

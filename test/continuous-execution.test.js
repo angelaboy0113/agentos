@@ -7,6 +7,21 @@ import { AgentRunner, createRunnerPool } from '../src/runner/index.js';
 import { runnerConfig } from '../src/runner/config.js';
 import { JsonStore } from '../src/shared/store.js';
 import { planQuery } from '../src/shared/environment-access.js';
+import {nativeGrantedEntry} from '../src/runner/investigation-entry.js';
+
+test('native initial approved source enters the main worker once without an outer environment model',async()=>{
+ const root={id:'native-initial',questionId:'q',projectId:'a',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,lease:{id:'lease',runnerId:'r'},context:[],environmentAccess:{environmentId:'db',tier:'prd'}};
+ const calls=[];const runner=new AgentRunner({runnerId:'r',analysisEngine:'native-tools-v1'},async j=>{calls.push(j);return{outcome:'ready',finalMessage:'same-thread evidence'};});
+ runner.post=async()=>{throw Error('No outer environment handoff');};
+ assert.equal((await runner.executeContinuous(root,async()=>{},new AbortController().signal)).outcome,'ready');
+ assert.equal(calls.length,1);assert.deepEqual(calls[0].environmentAccess,root.environmentAccess);
+ assert.equal(nativeGrantedEntry(root,{analysisEngine:'native-tools-v1'}),true);
+ for(const prior of [{analysisContinuation:{threadId:'legacy'}},{modelCheckpoint:{threadId:'legacy'}},{context:[{stage:'developer',result:{threadId:'legacy'}}]}])assert.equal(nativeGrantedEntry({...root,...prior},{analysisEngine:'native-tools-v1'}),false);
+ assert.equal(nativeGrantedEntry({...root,context:[{kind:'questionResult',stage:'developer',result:{threadId:'other-question',sourceQuestionId:'another-q'}}]},{analysisEngine:'native-tools-v1'}),true);
+ assert.equal(nativeGrantedEntry({...root,analysisContinuation:{threadId:'native',executionEngine:'native-tools-v1'}},{analysisEngine:'legacy'}),true);
+ assert.equal(nativeGrantedEntry({...root,taskIntent:'implementation'},{analysisEngine:'native-tools-v1'}),false);
+ assert.equal(nativeGrantedEntry({environmentAccess:{kind:'mysql'}},{}),false);
+});
 
 test('continuous analysis keeps source and environment turns inside one leased job', async () => {
   const calls = [];

@@ -2093,3 +2093,9 @@ Native compatibility also consumes legacy-shaped environment/website/history con
 1.132.8: Added reviewed GET ISO timestamp query bindings after real LTX.Log selector evidence showed `start` misclassified as an operation. Invalid dates/actions/unreviewed methods remain denied. Login recovery and duplicate-entry fixes from1.132.7 retained.
 
 1.132.9: Reviewed read-page time filters now use the same typed query validation during navigation and plan verification. Compound query/search-analysis buttons and dialog-local date/time range apply controls are available; mutation labels and off-dialog lookalikes remain blocked. Native custom range navigation/query integration regression included.
+# 1.133.0
+
+- 新原生调查任务在接单时已获批的首个只读来源直接连接主模型工具协程，避免环境规划模型先执行一轮后再创建主调查会话。旧线程保持原执行器；权限、固定源码、等待及交付核验继续执行。
+- 空闲维护先核验并清理已登记结束测试依赖，再建立大型历史备份去重索引，避免短暂活动反复打断索引使独立资源回收长期饥饿。删除栅栏、证明和恢复审计不变。
+- 真实同题、并发和空间收益按部署实例的验收记录报告；代码回归不等于这些实际结果。
+

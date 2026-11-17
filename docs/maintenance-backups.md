@@ -34,6 +34,8 @@ node scripts/maintenance-backups.mjs register-test RUNTIME RUNTIME/migration/iso
 
 要求完整通过的测试证明和依赖树内容摘要，删除前核验、检查打开文件，先移入独立审计隔离目录，再核对树摘要才删除。异常时保留隔离树，按该run里的original路径恢复，不能当垃圾继续清理。重建使用该隔离检出的package-lock执行npm ci。程序不会自动猜测某套测试是否结束。
 
+已登记的结束测试依赖先于历史备份的全量匹配索引处理。这样批量索引被新消息或投递打断时，不会让可独立核验的小型资源一直排在后面。新活动仍在每个删除栅栏处使整理停止；已完成的回收数量及恢复回执保留，未处理的备份和依赖留待下一次空闲重试。不缩短业务历史、不删除正在使用的依赖，也不放宽发布或清理的忙闲判定。
+
 ## 审计、恢复与停用
 
 `runtime/maintenance-backups/status.json` 保存成功日及发布标识；`runtime/migration/backup-maintenance-runs/<时间>/` 保存 gzip计划和结果。health的backupMaintenance只展示运行结果计数，不暴露消息/凭据。logicalBytes表示目录文件减少；observedFreeBytesChange是同期磁盘可用量变化，受APFS共享块及并行系统写入影响，两者不等同。审计本身不按年龄删。

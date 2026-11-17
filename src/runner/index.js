@@ -1,5 +1,6 @@
 import{preserveAvailableEvidence}from '../shared/available-evidence.js';
 import {continuationSourceResult} from './environment-continuation.js';
+import {nativeGrantedEntry} from './investigation-entry.js';
 import {failureDetails,failureDiagnostic} from '../shared/failure-diagnostic.js';
 import {controlPost} from './control-client.js';
 import {recordReportFiles,recordReportReview} from '../shared/report-acceptance.js';
@@ -126,7 +127,7 @@ export class AgentRunner {
   async continueInvestigation(job,emit,signal,save){
     const identity = { runnerId: this.config.runnerId, leaseId: job.lease.id };
     let current = job;
-    if (current.environmentAccess) {
+    if (current.environmentAccess&&!nativeGrantedEntry(current,this.config)) {
       save(current);const environmentResult = await this.execute(current, this.config, emit, signal);
       if(environmentResult?.investigationStopped)return interruptedInvestigation(current,environmentResult.investigationStopped.reason,environmentResult.investigationStopped.code,environmentResult.executionFailure??environmentResult.environmentFailure);
       if (!['ready', 'partial'].includes(environmentResult?.outcome) || environmentResult.browserLoginRequired) {
