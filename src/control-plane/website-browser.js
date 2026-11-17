@@ -3,7 +3,7 @@ import {websiteFrames,websiteDOM,assertWebsiteFrame} from './website-frames.js';
 import {advanceWebsiteDocumentDiagnostics}from'../shared/website-document-diagnostics.js';
 import {readWebsiteAsset} from './website-assets.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
-import {loginNavigationPage,validateLoginNavigation} from '../shared/login-navigation.js';
+import {loginNavigationPage,loginRenewalPage,validateLoginNavigation} from '../shared/login-navigation.js';
 import {websiteControls,controlMetadata,controlMetadataBatch,websiteFields} from '../shared/website-controls.js';
 import {pageDiagnostic,websiteDiagnostics} from '../shared/website-diagnostics.js';
 export {controlMetadata} from '../shared/website-controls.js';
@@ -143,7 +143,7 @@ export class WebsiteBrowser {
   }
   if(state.loginRequired&&s.authResult&&!state.verificationRequired&&!state.passwordChangeRequired)Object.assign(state,s.authResult);
   if(state.loginRequired){s.waiting=true;s.sawLogin=true;if(s.bootstrapFailure&&!state.credentialRejected&&!state.verificationRequired&&!state.passwordChangeRequired){const code=s.bootstrapFailure.status;Object.assign(state,code===429?{loginState:'rate_limited',rateLimited:true}:code>=500?{loginState:'service_error',serviceUnavailable:true}:{loginState:'request_error',requestFailed:true});}}
-  else if(state.pageReady){if(s.waiting&&s.sawLogin)s.reloadAfterLogin=s.restoreTarget===true&&s.page.url()!==s.initialTarget;s.waiting=false;s.credentialAttempted=false;s.authResult=null;s.bootstrapFailure=null;}
+  else if(state.pageReady){if(s.waiting&&s.sawLogin)s.reloadAfterLogin=s.restoreTarget===true&&s.page.url()!==s.initialTarget;s.waiting=false;s.credentialAttempted=false;s.authResult=null;s.bootstrapFailure=null;s.renewalAttempted=false;}
   if(s.blockedLoginReads.size&&state.loginRequired&&!state.credentialRejected)state.blockedRequests=[...s.blockedLoginReads].slice(-8);
   return {...state,diagnostic:{credentialAttempted:s.credentialAttempted===true,authRequestObserved:s.authPostSeen===true,authResult:s.authResult?.loginState??null,blockedRequests:[...s.blockedLoginReads].slice(-8),bootstrapFailure:s.bootstrapFailure??null}};
  }
@@ -155,7 +155,14 @@ export class WebsiteBrowser {
   const before=await this.loginStatus(s);if(before.verificationRequired)return before;
   s.waiting=true;
   await this.readAcrossNavigation(s,()=>waitForCaptureReady(s));
-  if(loginPageAllowed(s.page.url(),navigation))return this.loginStatus(s);
+  if(loginPageAllowed(s.page.url(),navigation)){
+   if(navigation.renewal&&!s.renewalAttempted){
+    const rules=e.queries?.[job.environmentAccess?.queryId]?.loginReads??[];
+    if(!rules.some(r=>r.method==='POST'&&r.reviewed===true&&r.bodyParameters&&Object.keys(r.bodyParameters).length>=3))throw Error('已有授权恢复缺少原应用、账号和权限的固定认证请求绑定');
+    const result=await s.page.evaluate(loginRenewalPage,navigation.renewal);if(result.attempted)s.renewalAttempted=true;
+   }
+   return this.loginStatus(s);
+  }
   for(const step of navigation.steps){const r=await s.page.evaluate(loginNavigationPage,{...navigation,baseUrl:e.baseUrl,step});if(r.error)throw Error(r.error);if(r.ready)break;}
   return this.loginStatus(s);
  }

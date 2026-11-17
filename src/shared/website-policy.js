@@ -135,7 +135,11 @@ export function validateWebsiteStaticRoots(value){
  return value;
 }
 export function validateWebsiteLoginReads(value){
- if(!Array.isArray(value)||value.some(e=>!e||Object.keys(e).some(k=>!['origin','path','types','method','reviewed'].includes(k))||(()=>{try{const u=new URL(websiteUrl(e.origin));return u.protocol!=='https:'||u.origin!==e.origin;}catch{return true;}})()||(e.method!==undefined&&!['GET','POST'].includes(e.method))||e.method==='POST'&&(e.reviewed!==true||writeAction.test((e.path??'').replace(/[\/_-]/g,' '))||/register|grant|consent|revoke/i.test(e.path??'')||e.path?.endsWith('/'))||typeof e.path!=='string'||!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\/?$/.test(e.path)||!Array.isArray(e.types)||!e.types.length||e.types.some(t=>!['document','image','script','xhr','fetch'].includes(t))))throw Error('认证读取仅允许审核后的HTTPS来源、明确路径与资源类型，POST仅允许人工审核的精确认证路径，不支持业务写入');
+ if(!Array.isArray(value)||value.some(e=>!e||Object.keys(e).some(k=>!['origin','path','types','method','reviewed','bodyParameters'].includes(k))||(()=>{try{const u=new URL(websiteUrl(e.origin));return u.protocol!=='https:'||u.origin!==e.origin;}catch{return true;}})()||(e.method!==undefined&&!['GET','POST'].includes(e.method))||e.method==='POST'&&(e.reviewed!==true||writeAction.test((e.path??'').replace(/[\/_-]/g,' '))||/register|grant|consent|revoke/i.test(e.path??'')||e.path?.endsWith('/'))||typeof e.path!=='string'||!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\/?$/.test(e.path)||!Array.isArray(e.types)||!e.types.length||e.types.some(t=>!['document','image','script','xhr','fetch'].includes(t))))throw Error('认证读取仅允许审核后的HTTPS来源、明确路径与资源类型，POST仅允许人工审核的精确认证路径，不支持业务写入');
+ for(const e of value)if(e.bodyParameters!==undefined){
+  const b=e.bodyParameters;
+  if(e.method!=='POST'||!b||typeof b!=='object'||Array.isArray(b)||!Object.keys(b).length||Object.keys(b).length>16||Object.entries(b).some(([k,values])=>! /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(k)||/password|secret|token|cookie|credential/i.test(k)||!Array.isArray(values)||!values.length||values.length>16||values.some(v=>typeof v!=='string'||!v.length||v.length>300||/[\x00-\x1f\x7f]/.test(v))))throw Error('认证确认必须绑定审核后的固定非秘密请求字段');
+ }
  return value;
 }
 function loginRedirectAllowed(value,base,navigation,depth=0){
@@ -143,7 +147,11 @@ function loginRedirectAllowed(value,base,navigation,depth=0){
 }
 export function websiteLoginReadAllowed(request,waiting,reads=[],base,navigation){
  if(!waiting||!['GET','POST'].includes(request.method))return false;
- try{validateWebsiteLoginReads(reads);const u=new URL(request.url);if(u.username||u.password||/%|\\/.test(u.pathname))return false;for(const[key,value]of u.searchParams)if(/^(?:redirect_?uri|redirect_?url|callback_?url|return_?url)$/i.test(key)&&(!base||!loginRedirectAllowed(value,base,navigation)))return false;return reads.some(e=>(e.method??'GET')===request.method&&u.origin===e.origin&&e.types.includes(request.resourceType)&&(u.pathname===e.path||request.method==='GET'&&e.path.endsWith('/')&&u.pathname.startsWith(e.path)));}catch{return false;}
+ try{validateWebsiteLoginReads(reads);const u=new URL(request.url);if(u.username||u.password||/%|\\/.test(u.pathname))return false;for(const[key,value]of u.searchParams)if(/^(?:redirect_?uri|redirect_?url|callback_?url|return_?url)$/i.test(key)&&(!base||!loginRedirectAllowed(value,base,navigation)))return false;return reads.some(e=>{
+   if((e.method??'GET')!==request.method||u.origin!==e.origin||!e.types.includes(request.resourceType)||!(u.pathname===e.path||request.method==='GET'&&e.path.endsWith('/')&&u.pathname.startsWith(e.path)))return false;
+   if(e.bodyParameters!==undefined){let body;try{body=parseExactJson(request.body);}catch{return false;}if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==Object.keys(e.bodyParameters).length||Object.entries(e.bodyParameters).some(([k,values])=>typeof body[k]!=='string'||!values.includes(body[k])))return false;}
+   return true;
+  });}catch{return false;}
 }
 export function websiteStaticResourceAllowed(base,request,resources=[],roots=[],{identityPage=false}={}){
  if(!Array.isArray(resources)||request.method!=='GET')return false;

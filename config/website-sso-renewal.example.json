@@ -1,0 +1,45 @@
+{
+  "loginNavigation": {
+    "interactive": true,
+    "remoteQr": true,
+    "steps": [
+      "登录"
+    ],
+    "pages": [
+      "https://identity.example.com/oauth/authorize"
+    ],
+    "renewal": {
+      "page": "https://identity.example.com/oauth/authorize",
+      "application": "Your existing log application",
+      "account": "Your existing account display name",
+      "markers": [
+        "Renew existing authorization",
+        "These permissions were previously granted"
+      ],
+      "button": "Authorize"
+    }
+  },
+  "loginReads": [
+    {
+      "origin": "https://identity.example.com",
+      "path": "/oauth/confirm",
+      "method": "POST",
+      "types": [
+        "xhr"
+      ],
+      "reviewed": true,
+      "bodyParameters": {
+        "app_id": [
+          "your-app-id"
+        ],
+        "user_id": [
+          "your-existing-user-id"
+        ],
+        "scope": [
+          "your-existing-identity-read-scope"
+        ]
+      }
+    }
+  ],
+  "note": "Optional private maintenance configuration after observing the original granted identity and exact confirmation body. Never use for initial consent or newly requested permissions."
+}

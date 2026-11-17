@@ -14,7 +14,7 @@ required.unshift('test/cloud-read-recovery.test.js','test/website-read-boundary.
 required.unshift('src/shared/job-tool-results.js','test/job-tool-results.test.js');
 required.unshift('src/shared/tsf-policy.js','src/runner/cloud-read-session.js','src/runner/tsf-tools.js','test/tsf-tools.test.js','docs/tsf-deployment-reads.md','config/tsf-deployment.example.json');
 required.unshift('docs/mongo-record-scope.md','test/idle-poll-projection.test.js','test/website-qr-login.test.js');
-required.unshift('config/website-login-preferences.example.json');
+required.unshift('config/website-login-preferences.example.json','config/website-sso-renewal.example.json');
 required.unshift('test/instance-vault-start.test.js');
 required.unshift('src/shared/maintenance-backups.js','src/shared/backup-content-store.js','src/shared/backup-clone-dedup.js','src/shared/clone-file.js','test/backup-clone-dedup.test.js','src/control-plane/maintenance-backups.js','scripts/maintenance-backups.mjs','scripts/restore-backup-content.mjs','config/maintenance-cleanup.example.json','test/maintenance-backups.test.js','test/backup-content-store.test.js','test/source-retired-reference.test.js','docs/maintenance-backups.md');
 required.unshift('src/shared/state-draft.js','src/shared/state-encoding.js','src/shared/state-view.js','test/state-draft.test.js','test/empty-memory-exit.test.js','docs/state-memory.md');
