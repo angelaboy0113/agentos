@@ -2099,3 +2099,9 @@ Native compatibility also consumes legacy-shaped environment/website/history con
 - 空闲维护先核验并清理已登记结束测试依赖，再建立大型历史备份去重索引，避免短暂活动反复打断索引使独立资源回收长期饥饿。删除栅栏、证明和恢复审计不变。
 - 真实同题、并发和空间收益按部署实例的验收记录报告；代码回归不等于这些实际结果。
 
+
+## 1.133.1
+
+Native source catalogs' `continue_environment` and `finish` aliases now use their existing investigator validation and persist the current source before requesting the next standard grant in the same model thread. Invalid continuation parameters remain rejected; no broader peer/environment permissions are introduced. Real rolling-week replay found the previously mismatched alias caused an execution error after valid initial database reads.
+
+Optional accepted-backup dependency compaction preserves the newest three full checkpoints, unique dependency versions and all pinned anchors, with durable restore ledgers and verified empty-destination restoration. This addresses repeated installed dependencies in historical deployment backups, separately from current source evidence or business data retention. Real disk and business replay acceptance are recorded by each deployment; unit tests do not establish a storage saving or task speedup.

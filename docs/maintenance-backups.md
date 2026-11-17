@@ -131,3 +131,15 @@ directory and verify it before attempting a recovery. Never restore old business
 state over the running instance. No secret, business source, login session, current
 exports or arbitrary operator directory is in the archival scope. Other operating
 systems and complete cross-machine restoration require separate validation.
+
+### Accepted backup dependency trees
+
+Optional `backupDependencies.enabled: true` deduplicates only the `node_modules` child of already registered, acceptance-proven historical checkpoints. The latest three complete checkpoints and every restore anchor/pin stay complete. Whole-tree hashes include package file content and symlink targets; different historical versions remain untouched. The service checks idle state, task references and open files, writes and fsyncs a recovery ledger, pins the retained checkpoint, rechecks both trees, then quarantines and verifies the old tree before removing it. Live installations, business worktrees, credentials and unregistered directories are never candidates. This pass runs after finished test dependencies and before the larger export index; activity defers further work.
+
+Each removed tree has `node_modules.restore.json` naming its immutable ledger, retained checkpoint and hash. To inspect an old rollback point, restore its dependencies into a new empty directory under your managed migration root:
+
+```sh
+node scripts/maintenance-backups.mjs restore-dependencies YOUR_RUNTIME LEDGER_JSON NEW_EMPTY_DIRECTORY
+```
+
+The restore verifies retained and restored hashes and copies package links without dereferencing them. Restore dependencies before using such a historical rollback point; do not assume its absent directory means the dependencies were never installed. A quarantined tree whose verification failed remains in the ledger's `retired` location for operator review. Logical bytes and actual free disk space must be reported separately; APFS sharing can make deletion release little physical space.

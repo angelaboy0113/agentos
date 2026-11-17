@@ -3,7 +3,9 @@ import fs from 'node:fs/promises';import path from 'node:path';import {createHas
 import {atomicJson,safePath,dependencyDigest,restorePlan,validateRegistry,acquire} from '../src/shared/maintenance-backups.js';
 const [action,runtimeArg,arg,extra]=process.argv.slice(2),runtime=path.resolve(runtimeArg??'.'),file=path.join(runtime,'maintenance-cleanup.local.json'),root=path.join(runtime,'migration');
 const sha=b=>createHash('sha256').update(b).digest('hex');
-if(action==='restore-fragments'){
+if(action==='restore-dependencies'){
+ const release=await acquire(root);if(!release)throw Error('Maintenance locked');try{const {restoreBackupDependencies}=await import('../src/shared/backup-dependencies.js');console.log(JSON.stringify(await restoreBackupDependencies(path.resolve(arg),{managedRoot:root,destination:path.resolve(extra)})));}finally{await release();}
+}else if(action==='restore-fragments'){
  const release=await acquire(root);if(!release)throw Error('Maintenance locked');try{console.log(JSON.stringify(await restorePlan(path.resolve(arg),{destination:path.resolve(extra),managedRoot:root})));}finally{await release();}
 }else if(['register-checkpoint','register-test'].includes(action)){
  const release=await acquire(root);if(!release)throw Error('Maintenance locked');

@@ -10,5 +10,11 @@
   "candidates": [],
   "testTrees": [],
   "referenceAliases": [],
-  "contentStore": {"enabled": false,"mode":"clone"}
+  "contentStore": {
+    "enabled": false,
+    "mode": "clone"
+  },
+  "backupDependencies": {
+    "enabled": false
+  }
 }

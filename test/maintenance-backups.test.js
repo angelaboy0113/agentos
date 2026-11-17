@@ -40,3 +40,29 @@ test('closed registered test dependencies removed, changed dependencies and Git 
 test('lsof detects an actual open historical file and clears after close (macOS)',{skip:process.platform!=='darwin'},async t=>{const f=await fixture(t),{noOpenFiles}=await import('../src/shared/maintenance-backups.js');const handle=await fs.open(path.join(f.candidate.path,'unique.csv'),'r');try{assert.equal(await noOpenFiles(f.candidate.checkpoint),false);}finally{await handle.close();}assert.equal(await noOpenFiles(f.candidate.checkpoint),true);});
 test('reviewed inactive delivery permits transport-only retries, never payload, destination or task changes',()=>{const c={revision:2,deliveredRevision:1,card:{body:'original'},destination:{profile:'a'}};const state={cardMessages:{old:c}};const context={maintenanceInert:{cardMessages:{old:inactiveRecordFingerprint('cardMessages',c)}}};assert.equal(maintenanceBusy(state,context),false);c.revision++;c.retryAt=123;c.failures=2;assert.equal(maintenanceBusy(state,context),false);c.card.body='new question';assert.equal(maintenanceBusy(state,context),true);c.card.body='original';c.destination.profile='b';assert.equal(maintenanceBusy(state,context),true);c.destination.profile='a';state.jobs=[{status:'running'}];assert.equal(maintenanceBusy(state,context),true);});
 test('failed proof reports a concrete safe code and durable audit without changing backup',async t=>{const f=await fixture(t),store=new JsonStore(path.join(f.runtime,'state.json'));await store.write({jobs:[]});await atomicJson(path.join(f.runtime,'maintenance-cleanup.local.json'),f.c);await fs.writeFile(f.c.checkpoints[0].proof.path,'invalid');const service=new BackupMaintenance({config:{runtimeDir:f.runtime,dataDir:path.join(f.runtime,'data')},store},{now:()=>new Date('2026-11-11T20:00:00Z'),openCheck:async()=>true});const r=await service.tick();assert.equal(r.code,'MAINTENANCE_PROOF_CHANGED');assert.equal(r.ok,false);assert.equal(await fs.readFile(path.join(f.candidate.path,'job/data.csv'),'utf8'),'same');assert.ok(JSON.parse(await fs.readFile(path.join(service.runDir,'result.json'))));await service.stop();});
+
+test('accepted old backup dependencies deduplicate only identical trees and restore with symlinks',async t=>{
+ const f=await fixture(t);f.c.backupDependencies={enabled:true};
+ for(const b of f.c.checkpoints){const tree=path.join(b.path,'node_modules');await fs.mkdir(tree);await fs.writeFile(path.join(tree,'package.js'),'same version');await fs.symlink('package.js',path.join(tree,'binary'));}
+ const before=await fs.readFile(path.join(f.candidate.path,'job/data.csv'));
+ const result=await compactBackups(f.c,f.options);assert.equal(result.backupDependencies.removedTrees,1);
+ const original=path.join(f.c.checkpoints[0].path,'node_modules');await assert.rejects(fs.stat(original),{code:'ENOENT'});
+ for(const b of f.c.checkpoints.slice(1))assert.equal(await fs.readFile(path.join(b.path,'node_modules/package.js'),'utf8'),'same version');
+ const sidecar=JSON.parse(await fs.readFile(original+'.restore.json'));const {restoreBackupDependencies}=await import('../src/shared/backup-dependencies.js');
+ const destination=path.join(f.root,'dependency-restored');await fs.mkdir(destination);
+ assert.equal((await restoreBackupDependencies(sidecar.ledger,{managedRoot:f.root,destination})).hashesVerified,true);
+ assert.equal(await fs.readlink(path.join(destination,'binary')),'package.js');assert.equal(await fs.readFile(path.join(destination,'package.js'),'utf8'),'same version');
+ await fs.writeFile(path.join(sidecar.retained,'package.js'),'corrupted');const empty=path.join(f.root,'dependency-bad');await fs.mkdir(empty);
+ await assert.rejects(restoreBackupDependencies(sidecar.ledger,{managedRoot:f.root,destination:empty}),/ANCHOR_CHANGED/);
+ assert.deepEqual(before,Buffer.from('same'));
+});
+test('unique backup dependencies and active/changed backup paths are never reclaimed',async t=>{
+ const f=await fixture(t);const {compactBackupDependencies}=await import('../src/shared/backup-dependencies.js');
+ for(const [i,b]of f.c.checkpoints.entries()){await fs.mkdir(path.join(b.path,'node_modules'));await fs.writeFile(path.join(b.path,'node_modules/pkg'),i?'shared':'unique old version');}
+ let r=await compactBackupDependencies(f.c,{...f.options,openCheck:async()=>true});assert.equal(r.removedTrees,0);assert.equal(r.uniqueTreesPreserved,1);
+ await fs.writeFile(path.join(f.c.checkpoints[0].path,'node_modules/pkg'),'shared');
+ r=await compactBackupDependencies(f.c,{...f.options,gate:async(item,remove)=>!item});assert.equal(r.removedTrees,0);assert.equal(r.deferred,true);assert.equal(await fs.readFile(path.join(f.c.checkpoints[0].path,'node_modules/pkg'),'utf8'),'shared');
+ r=await compactBackupDependencies(f.c,{...f.options,openCheck:async()=>false});assert.equal(r.removedTrees,0);
+ const old=path.join(f.c.checkpoints[0].path,'node_modules');await fs.rm(old,{recursive:true});await fs.symlink(path.join(f.c.checkpoints[1].path,'node_modules'),old);
+ await assert.rejects(compactBackupDependencies(f.c,f.options),/SYMLINK/);
+});

@@ -29,6 +29,7 @@ export function dueKey(config,now=new Date()){
 export function validateRegistry(c,runtime){
  if(c.version!==1||typeof c.enabled!=='boolean'||!Number.isInteger(c.hour)||c.hour<0||c.hour>23||!Number.isInteger(c.minute)||c.minute<0||c.minute>59)throw Error('MAINTENANCE_CONFIG');
  if(c.contentStore&&(typeof c.contentStore.enabled!=='boolean'||![undefined,'gzip','clone'].includes(c.contentStore.mode)))throw Error('MAINTENANCE_CONFIG');
+ if(c.backupDependencies&&typeof c.backupDependencies.enabled!=='boolean')throw Error('MAINTENANCE_CONFIG');
  new Intl.DateTimeFormat('en',{timeZone:c.timeZone}).format();
  if(c.managedRoot!==path.join(runtime,'migration')||!Array.isArray(c.checkpoints)||!Array.isArray(c.pins)||!Array.isArray(c.candidates))throw Error('MAINTENANCE_REGISTRY');
  for(const b of c.checkpoints)if(!b.path||!Number.isFinite(Date.parse(b.acceptedAt))||!b.proof?.path||!/^[a-f0-9]{64}$/.test(b.proof.sha256))throw Error('MAINTENANCE_PROOF');
@@ -109,6 +110,11 @@ await safePath(audit,c.managedRoot);
   // Rename detaches only verified closed test dependencies. Recursive rm never follows links.
   if(await dependencyDigest(retired)!==tree.sha256)throw Error('MAINTENANCE_TEST_QUARANTINED');
   await fs.rm(retired,{recursive:true});result.testTreesRemoved++;
+ }
+ if(c.backupDependencies?.enabled===true){
+  const {compactBackupDependencies}=await import('./backup-dependencies.js');
+  result.backupDependencies=await compactBackupDependencies(c,{runtime,audit,gate,apply,openCheck});
+  if(result.backupDependencies.deferred){result.deferred=true;return result;}
  }
  const eligible=c.candidates.filter(x=>!protectedPaths.has(x.checkpoint));
  for(const a of eligible.length?anchors:[])for await(const f of files(a.base)){await pulse();const s=await fs.lstat(f);const key=[a.kind,path.relative(a.base,f),s.size].join('\0');if(!index.has(key))index.set(key,[]);index.get(key).push({file:f,checkpoint:a.checkpoint});}

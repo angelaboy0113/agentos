@@ -84,8 +84,17 @@ export class InvestigationDirectTools {
     }
     if(!this.channel)throw new Error('No authorized environment is open');
     if(name==='agentos_environment_tool') {
-      parse(args.arguments);
-      if(['finish','continue_environment'].includes(args.tool))throw new Error('Use environment_close, then explicitly open the next source');
+      const parameters=parse(args.arguments);
+      if(args.tool==='finish')return this.call('agentos_environment_close',{summary:args.summary,complete:args.complete===true});
+      if(args.tool==='continue_environment'){
+        if(typeof parameters.environmentId!=='string'||typeof parameters.queryId!=='string'||!Array.isArray(parameters.parameters)||!parameters.parameters.length||parameters.parameters.some(x=>typeof x!=='string'))throw new Error('Use an explicitly selected authorized environmentId, queryId and parameters');
+        // The published inner catalog offers this alias. Let its existing validator
+        // save current evidence, then issue the next normal host-approved grant.
+        const saved=await this.observe(await this.channel.choose({...args,complete:false}));
+        if(saved.state!=='saved'||!saved.result?.nextEnvironmentQuery)return saved;
+        const next=await this.call('agentos_environment_open',{request:JSON.stringify(saved.result.nextEnvironmentQuery),website:false});
+        return {...next,previousSource:saved};
+      }
       return this.observe(await this.channel.choose({...args,complete:false}));
     }
     if(name==='agentos_environment_close')return this.observe(await this.channel.choose({tool:'finish',arguments:'{}',summary:args.summary,complete:args.complete===true}));

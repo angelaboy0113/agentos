@@ -170,3 +170,14 @@ test('native bounded Unicode and escaped JSON reader pages never rewrap into rec
  assert.ok(pages>1);assert.deepEqual(JSON.parse(restored),JSON.parse(JSON.stringify(value).replaceAll('synthetic-secret','[已隐藏]')));
  const metadataPage={resultRef:'source-metadata/a.json',offset:0,text:'证据'.repeat(12000),nextOffset:24000,sha256:'proof'};const shown=await presentNativeToolResult(store,'agentos_read_result',metadataPage);assert.deepEqual(shown,metadataPage);
 });
+
+test('published continue_environment and finish aliases retain validated same-thread peer handoff',async()=>{
+ const first={...job,sourceEnvironment:'prd',environmentAccess:{environmentId:'first',tier:'prd'}};let chosen,executed=0;const routes=[];
+ const direct=new InvestigationDirectTools({job:first,config:{},emit:async()=>{},workspace:'/fixed',sourceSync:{}},{
+  execute:async(_j,_c,_e,{planner})=>{const p=await planner({kind:'mysql'});executed++;const choice=await p.next({tools:[{tool:executed===1?'continue_environment':'finish'}]});chosen=choice;if(executed===1){assert.equal(choice.tool,'continue_environment');return{outcome:'partial',finalMessage:'first data saved',nextEnvironmentQuery:{environmentId:'second',queryId:'investigate',parameters:['use saved keys']}};}assert.equal(choice.tool,'finish');return{outcome:'ready',finalMessage:'second data saved'};},
+  post:async(route,body)=>{routes.push(route.split('/').at(-1));if(route.endsWith('/continuous-environment')){assert.equal(body.result.environmentQuery.environmentId,'second');return{planned:true,job:{...first,environmentAccess:{environmentId:'second',tier:'prd'}}};}return{job:{...first,environmentAccess:null}};}
+ });
+ await direct.openInitial();const next=await direct.call('agentos_environment_tool',{tool:'continue_environment',arguments:JSON.stringify({environmentId:'second',queryId:'investigate',parameters:['use saved keys']}),summary:'read peer'});
+ assert.equal(next.state,'tools');assert.equal(next.previousSource.result.finalMessage,'first data saved');assert.deepEqual(routes,['continuous-environment-result','continuous-environment']);
+ assert.equal((await direct.call('agentos_environment_tool',{tool:'finish',arguments:'{}',summary:'saved',complete:true})).state,'saved');assert.equal(executed,2);assert.equal(chosen.complete,true);await direct.close();
+});
