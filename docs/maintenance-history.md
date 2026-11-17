@@ -2044,3 +2044,5 @@ Preserve Runner-produced commit metadata receipts across model continuation, fin
 ## 1.130.1 — Reviewed guidance continuity
 
 The batch source metadata guidance changed the harness fingerprint. Pin reviewed prior fingerprints to the exact current content hash so saved investigations can resume; future role edits remain fail-closed. No task authority, environment scope or business-write permission changes. Regression covers both old saved and 1.130 in-flight harness metadata plus an unreviewed future edit.
+
+The full-scope human test additionally exposed a response-body disconnect after 30 pages. Fixed same-page transport retry and fixed-SHA saved-page recovery, with independent regression for both paths. Prior complete pages and immutable receipts are preserved.

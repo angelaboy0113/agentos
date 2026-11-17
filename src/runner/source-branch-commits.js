@@ -34,19 +34,22 @@ async function prepareBranchCommits(project,sync,query,{job,dataDir,run=git,veri
   const row={repository,status:'partial',branch:query.branch,commit:head,pinnedCommit:pinned.commit,checkedAt:new Date().toISOString(),commits:[],pages:0,complete:false,platformMergeActorVerified:false,originHash:createHash('sha256').update(origin).digest('hex')};
   let secret;
   try{secret=await credential(cwd,origin);if(typeof secret!=='string'||!secret)throw fail('SOURCE_METADATA_CREDENTIAL_UNAVAILABLE');}catch{return{...row,status:'unavailable',code:'SOURCE_METADATA_CREDENTIAL_UNAVAILABLE'};}
-  const clean=v=>cleanWebsiteText(String(v??'').split(secret).join('[redacted]'),20000),person=p=>({name:clean(p?.name),email:clean(p?.email),date:clean(p?.date)}),seen=new Set();
+  const resume=prior?.commit===head&&prior.originHash===originHash&&Array.isArray(prior.commits)&&Number.isInteger(prior.pages)&&prior.pages>0&&['SOURCE_METADATA_NETWORK','SOURCE_METADATA_UNAVAILABLE','SOURCE_METADATA_HTTP_429','SOURCE_METADATA_HTTP_502','SOURCE_METADATA_HTTP_503','SOURCE_METADATA_HTTP_504'].includes(prior.code);
+  if(resume){row.commits=structuredClone(prior.commits);row.pages=prior.pages;row.checkedAt=prior.checkedAt;}
+  const clean=v=>cleanWebsiteText(String(v??'').split(secret).join('[redacted]'),20000),person=p=>({name:clean(p?.name),email:clean(p?.email),date:clean(p?.date)}),seen=new Set(row.commits.map(c=>c.commit));
+  if(seen.size!==row.commits.length||row.commits.some(c=>!sha.test(c.commit)||!Array.isArray(c.parents)||c.parents.some(p=>!sha.test(p))))throw fail('SOURCE_METADATA_ARTIFACT_SCOPE');
   const params=new URLSearchParams({sha:head,page_size:'100'});if(query.since)params.set('since',query.since);if(query.until)params.set('until',query.until);
   try{
-   for(let page=1;;page++){
-    params.set('page',String(page));let response;
+   for(let page=row.pages+1;;page++){
+    params.set('page',String(page));let values;
     for(let attempt=0;attempt<3;attempt++){
-     try{response=await fetcher('https://api.cnb.cool/'+u.pathname.slice(1).replace(/\.git$/,'')+'/-/git/commits?'+params,{method:'GET',redirect:'manual',headers:{Authorization:'Bearer '+secret,Accept:'application/vnd.cnb.api+json'},signal:AbortSignal.timeout(600000)});}
-     catch{if(attempt===2)throw fail('SOURCE_METADATA_NETWORK');await pause(1000*(attempt+1));continue;}
-     if([429,502,503,504].includes(response.status)&&attempt<2){await response.body?.cancel();await pause(1000*(attempt+1));continue;}break;
+     try{
+      const response=await fetcher('https://api.cnb.cool/'+u.pathname.slice(1).replace(/\.git$/,'')+'/-/git/commits?'+params,{method:'GET',redirect:'manual',headers:{Authorization:'Bearer '+secret,Accept:'application/vnd.cnb.api+json'},signal:AbortSignal.timeout(600000)});
+      if(response.status!==200){await response.body?.cancel();if([429,502,503,504].includes(response.status)&&attempt<2){await pause(1000*(attempt+1));continue;}throw fail(response.status===401?'SOURCE_METADATA_AUTH':response.status===403?'SOURCE_METADATA_PERMISSION':response.status===404?'SOURCE_METADATA_NOT_FOUND':'SOURCE_METADATA_HTTP_'+response.status);}
+      const chunks=[];let bytes=0;const reader=response.body.getReader();try{for(;;){const{done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>8*1024*1024)throw fail('SOURCE_METADATA_RESPONSE_SIZE');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+      try{values=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw fail('SOURCE_METADATA_RESPONSE');}break;
+     }catch(e){if(e.code?.startsWith('SOURCE_'))throw e;if(attempt===2)throw fail('SOURCE_METADATA_NETWORK');await pause(1000*(attempt+1));}
     }
-    if(response.status!==200){await response.body?.cancel();throw fail(response.status===401?'SOURCE_METADATA_AUTH':response.status===403?'SOURCE_METADATA_PERMISSION':response.status===404?'SOURCE_METADATA_NOT_FOUND':'SOURCE_METADATA_HTTP_'+response.status);}
-    const chunks=[];let bytes=0;const reader=response.body.getReader();try{for(;;){const{done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>8*1024*1024)throw fail('SOURCE_METADATA_RESPONSE_SIZE');chunks.push(value);}}finally{await reader.cancel();}
-    let values;try{values=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw fail('SOURCE_METADATA_RESPONSE');}
     if(!Array.isArray(values)||values.length>100)throw fail('SOURCE_BRANCH_METADATA_PAGINATION');
     // An empty terminating page is required even after a short page. Failed or
     // repeated pages never establish a complete/empty branch history.

@@ -15,3 +15,5 @@ Runner 在每个仓库已有授权 origin 上仅查询指定分支，第一次�
 验证见 `test/source-branch-commits.test.js`：分页/图完整性、失败恢复、固定 SHA、四路 I/O、双系统环境身份隔离、原始证据不可变、收据和同会话接续。合成回归不代替真人新卡性能验收。
 
 接口依据：[CNB 官方 OpenAPI](https://docs.cnb.cool/zh/develops/openapi.html)，`GET /{repo}/-/git/commits` 的 sha/page/page_size/since/until 参数（2026-11-17核对 Swagger）。
+
+Interrupted response bodies retry the same idempotent page; persisted transient partial results resume at the first incomplete page under the same fixed SHA. Complete pages are not downloaded again. Authentication, malformed pagination and integrity failures remain distinct and are not silently declared complete.
