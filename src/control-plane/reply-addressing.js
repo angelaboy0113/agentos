@@ -28,7 +28,7 @@ export function addressText(text, name) {
   if(!name || typeof text !== 'string' || !text.trim())return text;
   // Replace only a leading salutation from an older presentation. Never rewrite
   // quoted text, headings, table cells, evidence or names within the answer.
-  if(!name.endsWith('老师'))text=text.replace(/^(?:\*\*)?([^，,:：\n<>*#|]{1,24}(?:老师|宝宝)|聪哥)(?:\*\*)?[，,:：][ \t]*/u,'');
+  if(!name.endsWith('老师'))text=text.replace(/^(?:\*\*)?[^，,:：\n<>*#|]{1,24}(?:老师|宝宝|哥|姐)(?:\*\*)?[，,:：][ \t]*/u,'');
   if(text.trimStart().startsWith(name))return text;
   return name+(/^[\s]*(?:#|```|>|\|)/.test(text)?'，\n\n':'，')+text;
 }

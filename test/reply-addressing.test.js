@@ -73,7 +73,7 @@ test('display-name mode uses full names and only explicit suffix overrides; unkn
  assert.equal(salutation('王小明',addressingSettings(policy)),'小明老师');
 });
 test('configured full-name replies replace obsolete greeting prefixes without touching evidence, quoted passages, headings or repeated formatting',()=>{
- for(const old of ['小明老师，','**小明老师**，','聪哥，','小明宝宝：'])assert.equal(addressText(old+'已核实。王老师在记录中出现。','王小明'),'王小明，已核实。王老师在记录中出现。');
+ for(const old of ['小明老师，','**小明老师**，','聪哥，','小雨姐，','小明宝宝：'])assert.equal(addressText(old+'已核实。王老师在记录中出现。','王小明'),'王小明，已核实。王老师在记录中出现。');
  assert.equal(addressText('王小明老师，结果。','王小明'),'王小明，结果。');
  assert.equal(addressText('王小雨宝宝，结果。','王小雨宝宝'),'王小雨宝宝，结果。');
  assert.equal(addressText('> 王老师，引用内容','王小明'),'王小明，\n\n> 王老师，引用内容');
