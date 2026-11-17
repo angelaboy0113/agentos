@@ -2088,3 +2088,6 @@ Native compatibility also consumes legacy-shaped environment/website/history con
 ## 1.132.7 — 已有SSO身份授权恢复
 
 支持显式配置恢复原账号、原应用的已授身份权限；认证POST绑定精确请求体键及允许值，拒绝新权限、其它身份或模糊请求。默认关闭，首次授权不自动点击，原应用回跳仍须实际验收。
+
+
+1.132.8: Added reviewed GET ISO timestamp query bindings after real LTX.Log selector evidence showed `start` misclassified as an operation. Invalid dates/actions/unreviewed methods remain denied. Login recovery and duplicate-entry fixes from1.132.7 retained.

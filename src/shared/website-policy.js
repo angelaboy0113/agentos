@@ -2,6 +2,7 @@ import {loginPageAllowed} from './website-sso.js';
 import {parseExactJson} from './exact-json.js';
 import { createHash } from 'node:crypto';
 export const writeAction = /新增|创建|保存|修改|编辑|删除|启动|停止|执行一次|立即执行|触发|重跑|重发|重新发送|重放|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|resend|replay)\b/i;
+function typedReadParameter(type,value){if(type!=='isoTimestamp'||typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value))return false;const n=Date.parse(value);return Number.isFinite(n)&&new Date(n).toISOString()===value.replace(/Z$/,value.includes('.')?'Z':'.000Z');}
 const reads = /^(?:get|list|page|pageList|query|search|find|detail|view|info|index|home|dashboard|status|log|logs|logDetailCat|logDetailPage|toLogin|login|auth|check|count|select|load|read)[a-z0-9_-]*$/i;
 export function websiteUrl(input) {
  const u = new URL(input);
@@ -51,7 +52,8 @@ export function websiteRequestAllowed(base, request, manualLogin=false, readEndp
  if(parts.some(x=>writeAction.test(x))&&!(reviewedEndpoint&&reviewedQueryObjectPath(u.pathname,request.method)))return false;
  for(const [key,value] of u.searchParams){
    const values=reviewedEndpoint?.queryParameters?.[key];
-   const fixedFilter=Object.hasOwn(reviewedEndpoint?.queryParameters??{},key)&&Array.isArray(values)&&values.includes(value);
+   const typed=reviewedEndpoint?.queryParameterTypes?.[key];if(typed&&!typedReadParameter(typed,value))return false;
+   const fixedFilter=typedReadParameter(typed,value)||Object.hasOwn(reviewedEndpoint?.queryParameters??{},key)&&Array.isArray(values)&&values.includes(value);
    if(writeAction.test(key)&&!fixedFilter||/^(action|operation|command|cmd|method)$/i.test(key)&&writeAction.test(value))return false;
  }
  const tail=u.pathname.split('/').filter(Boolean).at(-1)??'index';
@@ -106,13 +108,14 @@ export function cleanWebsiteText(value,limit=10000) {
 export function validateWebsiteReadEndpoints(value){
  if(!Array.isArray(value)||value.length>512)throw new Error('网站只读接口配置必须为最多512项');
  for(const e of value){
-  if(!e||Object.keys(e).some(k=>!['method','path','reviewed','queryParameters','bodyParameters'].includes(k))||!['GET','POST'].includes(e.method)||e.reviewed!==true||typeof e.path!=='string'||!/^\/[A-Za-z0-9_./{}-]+$/.test(e.path)||e.path.includes('..')||e.path.includes('//'))throw new Error('网站只读接口必须为审核后的固定路径和GET/POST方法');
+  if(!e||Object.keys(e).some(k=>!['method','path','reviewed','queryParameters','queryParameterTypes','bodyParameters'].includes(k))||!['GET','POST'].includes(e.method)||e.reviewed!==true||typeof e.path!=='string'||!/^\/[A-Za-z0-9_./{}-]+$/.test(e.path)||e.path.includes('..')||e.path.includes('//'))throw new Error('网站只读接口必须为审核后的固定路径和GET/POST方法');
   const segments=e.path.split('/');if(segments.some(s=>/[{}]/.test(s)&&!Object.hasOwn(readPathIds,/^\{([A-Za-z]+)\}$/.exec(s)?.[1]??''))||e.method!=='GET'&&/[{}]/.test(e.path))throw new Error('动态只读路径仅允许GET和完整的objectId/uuid/integerId占位段');
   if(e.queryParameters!==undefined){
    const filters=e.queryParameters;
    if(!filters||typeof filters!=='object'||Array.isArray(filters)||Object.keys(filters).length>32)throw new Error('只读筛选参数必须为固定值映射');
    for(const [key,values]of Object.entries(filters))if(!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)||/^(?:action|operation|command|cmd|method|__proto__|constructor|prototype)$/i.test(key)||/password|secret|token|credential/i.test(key)||!Array.isArray(values)||!values.length||values.length>32||values.some(v=>typeof v!=='string'||!v.length||v.length>100||/[\x00-\x1f\x7f]/.test(v)))throw new Error('只读筛选仅允许审核后的固定非敏感值；不能覆盖动作或执行参数');
   }
+  if(e.queryParameterTypes!==undefined){const types=e.queryParameterTypes;if(e.method!=='GET'||!types||typeof types!=='object'||Array.isArray(types)||!Object.keys(types).length||Object.keys(types).length>32||Object.entries(types).some(([k,t])=>!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(k)||/^(?:action|operation|command|cmd|method|__proto__|constructor|prototype)$/i.test(k)||/password|secret|token|credential/i.test(k)||t!=='isoTimestamp'||Object.hasOwn(e.queryParameters??{},k)))throw Error('只读时间参数必须绑定审核GET及ISO UTC时间类型');}
   if(e.bodyParameters!==undefined){
    if(e.method!=='POST'||!e.bodyParameters||typeof e.bodyParameters!=='object'||Array.isArray(e.bodyParameters)||!Object.keys(e.bodyParameters).length)throw new Error('固定只读请求体仅适用于POST');
    // Reuse fixed non-secret value validation without accepting action/credential fields.

@@ -464,3 +464,5 @@ TSF 应用异常调查可按既有应用范围另登记 `logApplications`，使�
 已接入数据库的长期只读授权配置见[只读范围准备](docs/connected-read-scope.md)。
 
 持续会话直接取证执行器（隔离验证、默认未启用）：[架构、权限、恢复与验收说明](docs/single-session-investigation.md)。
+
+1.132.8: reviewed website GET time-filter bindings prevent range-start parameters from being mistaken for mutation actions.

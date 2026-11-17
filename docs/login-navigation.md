@@ -47,3 +47,6 @@ loginNavigation.renewal 是默认关闭的维护配置，包含 page（已登记
 认证确认接口必须显式审核固定 POST，并以 loginReads.bodyParameters 精确绑定原应用ID、原身份ID和原权限范围。每项为允许的字符串数组，请求体键集合必须完全相同；缺字段、新字段、权限增加、其他身份、重复JSON键均拒绝。例如 bodyParameters: {app_id: ["your-app-id"], user_id: ["your-existing-identity-id"], scope: ["your-already-granted-scope"]}。真实身份与应用ID仅在私有配置，不向模型暴露。不是业务写授权，不自动增加OAuth权限。
 
 须先核对实际原授权页面和请求字段。若需要新权限，应按权限申请流程处理；二维码出现不能代替授权确认及原应用回跳验收。
+
+
+Reviewed GET endpoints can declare `queryParameterTypes: {start: "isoTimestamp", end: "isoTimestamp"}`. Only canonical UTC ISO timestamps (optional milliseconds) pass; invalid dates, missing timezone, mutation values and unreviewed methods remain rejected. This distinguishes read-range start from a start operation. Bind types only after verifying actual request and deployed client evidence.
