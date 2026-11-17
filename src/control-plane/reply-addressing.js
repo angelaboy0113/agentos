@@ -10,20 +10,26 @@ export function addressingSettings(value = {}) {
   const overrides=value.displayNameOverrides??{};
   if(!overrides || typeof overrides !== 'object' || Array.isArray(overrides) || Object.entries(overrides).some(([k,v])=>!clean(k)||!clean(v))) throw Error('Invalid reply addressing names');
   if(value.fallback !== undefined && value.fallback !== '' && !clean(value.fallback)) throw Error('Invalid reply addressing fallback');
+  if(value.style !== undefined && !['teacher','display-name'].includes(value.style)) throw Error('Invalid reply addressing style');
   return {enabled:value.enabled===true,profiles:value.profiles??[],chatIds:value.chatIds??[],enabledSince:value.enabledSince??null,
-    displayNameOverrides:overrides,fallback:value.fallback??''};
+    style:value.style??'teacher',displayNameOverrides:overrides,fallback:value.fallback??''};
 }
 // Display names are presentation only. No gender inference, permissions or ID mapping.
 export function salutation(name, settings) {
   name=clean(name);
   if(!name)return settings.fallback;
   if(Object.hasOwn(settings.displayNameOverrides,name))return clean(settings.displayNameOverrides[name]);
+  if(settings.style==='display-name')return name;
   if(name.endsWith('老师'))return name;
   const short=/^[\u3400-\u9fff]{3}$/.test(name)&&singleSurnames.has(name[0])&&!compoundSurnames.test(name)?name.slice(1):name;
   return short+'老师';
 }
 export function addressText(text, name) {
-  if(!name || typeof text !== 'string' || !text.trim() || text.trimStart().startsWith(name))return text;
+  if(!name || typeof text !== 'string' || !text.trim())return text;
+  // Replace only a leading salutation from an older presentation. Never rewrite
+  // quoted text, headings, table cells, evidence or names within the answer.
+  if(!name.endsWith('老师'))text=text.replace(/^(?:\*\*)?([^，,:：\n<>*#|]{1,24}(?:老师|宝宝)|聪哥)(?:\*\*)?[，,:：][ \t]*/u,'');
+  if(text.trimStart().startsWith(name))return text;
   return name+(/^[\s]*(?:#|```|>|\|)/.test(text)?'，\n\n':'，')+text;
 }
 export function addressCard(card, name) {

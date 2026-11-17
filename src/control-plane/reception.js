@@ -9,7 +9,7 @@ import {publishQuestion} from './questions.js';
 import {loadHarness} from '../runner/harness.js';
 const active=j=>['queued','running','cancelling'].includes(j?.status),iso=n=>new Date(n).toISOString();
 const ids=e=>(e.mentions??[]).flatMap(m=>[m.id?.open_id??m.id?.app_id??m.id,m.open_id,m.user_id]).filter(x=>typeof x==='string');
-const variants={help:['老大暂时还没接话，我先接住这条求助 👀 原卡和已有结果都留着，有新进展就在这里同步。','这条求助我记下啦，先帮你盯住原卡 👀 有确认的进展会继续在这里说，不用重新提问。','老师，我来接个班 👀 已记下这张卡的求助，接下来只沿原问题核对，不让已有结果白忙。'],reminder:['老师，这句看起来是在追加需求～@ 一下本话题的对应助手，我就能沿原问题接着处理 👀','老师，需求我看见啦。记得 @ 本话题的助手，让这句正式接上原任务，别让它混进聊天里～'],recovery:['老师，这一步没接上，我先核对中断环节，已有结果都留着。','老师，我来看看这次停在哪一步，核实后就在原卡更新。','老师，这里碰到个绊脚石，我先检查执行记录，不用重新描述问题 👀']};
+const variants={help:['老大暂时还没接话，我先接住这条求助 👀 原卡和已有结果都留着，有新进展就在这里同步。','这条求助我记下啦，先帮你盯住原卡 👀 有确认的进展会继续在这里说，不用重新提问。','我来接个班 👀 已记下这张卡的求助，接下来只沿原问题核对，不让已有结果白忙。'],reminder:['这句看起来是在追加需求～@ 一下本话题的对应助手，我就能沿原问题接着处理 👀','需求我看见啦。记得 @ 本话题的助手，让这句正式接上原任务，别让它混进聊天里～'],recovery:['这一步没接上，我先核对中断环节，已有结果都留着。','我来看看这次停在哪一步，核实后就在原卡更新。','这里碰到个绊脚石，我先检查执行记录，不用重新描述问题 👀']};
 export class ReceptionService{
  constructor(context,policy,{now=()=>Date.now(),intervalMs=2000,decide,verifyResume}={}){this.context=context;this.policy=policy;this.enabled=policy.enabled===true;this.now=now;this.intervalMs=intervalMs;this.decide=decide??((input,signal,options)=>context.conversations.decide(input,signal,options));this.verifyResume=verifyResume??(async j=>{if(!j.analysisSourceSnapshot?.workspace)throw Error('No fixed source snapshot');const h=await loadHarness({...j,context:[]});const old=[j.result,...(j.context??[]).map(c=>c.result)].find(r=>r?.harness?.fingerprint)?.harness;if(!old||old.fingerprint!==h.metadata.fingerprint)throw Error('Harness changed');});this.abort=new AbortController();if(this.enabled)for(const profile of policy.profiles){const senderId=receptionIdentity(context.projects,policy,profile);if(!senderId||!isAdministrator(context.projects,{senderId,profile}))throw Error('Reception owner identity must map to a trusted administrator for each profile');}}
  owner(event){const id=receptionIdentity(this.context.projects,this.policy,event.agent_profile);return Boolean(id&&id===event.sender_id&&isAdministrator(this.context.projects,{senderId:event.sender_id,profile:event.agent_profile}));}
@@ -90,7 +90,7 @@ export class ReceptionService{
  async sendInbox(entry,text){
   const fresh=await stateView(this.context.store,s=>{const e=s.receptionInbox?.[entry.key];return {receptionInbox:e?{[entry.key]:e}:{},questions:e?{[e.questionId]:s.questions?.[e.questionId]}:{}};}),e=fresh.receptionInbox?.[entry.key];if(!e||!this.valid(fresh,e)||!['waiting','reminding'].includes(e.status)||e.notice?.messageId)return;
   const name=e.notice?'':await this.context.replyAddressing?.forTurn({...e,chatType:'group'})??'';
-  const addressed=name?addressText(text.replace(/^老师，/,''),name):text;
+  const addressed=addressText(text,name);
   const notice=e.notice??{text:requesterMentionText(e.senderId,addressed),replyTo:e.replyTo,idempotencyKey:'aos-reception-'+e.key.slice(0,32),firstAttemptAt:this.now()};
   if(!notice.text){await this.patchInbox(e.key,{status:'reconciliation_required',error:'提问者身份格式无法核验，未发送接待消息'});return;}
   if(this.now()-notice.firstAttemptAt>=55*60000){await this.patchInbox(e.key,{status:'reconciliation_required'});return;}

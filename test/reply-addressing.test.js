@@ -64,3 +64,26 @@ test('table-only cards get a separate greeting rather than altering a flow foote
  const table={tag:'table',rows:[{amount:'100.00'}]},footer={tag:'markdown',text_size:'notation',content:'流程：开发'};
  const metrics={tag:'column_set',columns:[{elements:[{tag:'markdown',content:'**16 分钟**'}]},{elements:[{tag:'markdown',content:'**20 次**'}]}]};const x=addressCard({body:{elements:[table,metrics,footer]}},'小明老师');assert.equal(x.body.elements[0].content,'小明老师：');assert.deepEqual(x.body.elements.slice(1),[table,metrics,footer]);assert.equal(addressText('## 结论','小明老师'),'小明老师，\n\n## 结论');
 });
+
+
+test('display-name mode uses full names and only explicit suffix overrides; unknown and unlisted people never receive inferred suffixes',()=>{
+ const p=addressingSettings({...policy,style:'display-name',fallback:'',displayNameOverrides:{'王小雨':'王小雨宝宝'}});
+ for(const [name,want] of [['王小明','王小明'],['欧阳明','欧阳明'],['魏强','魏强'],['王小雨','王小雨宝宝'],['李小丽','李小丽'],['Atreus','Atreus'],['',''],['<at user_id=x>','']])assert.equal(salutation(name,p),want);
+ assert.throws(()=>addressingSettings({...policy,style:'guess-gender'}));
+ assert.equal(salutation('王小明',addressingSettings(policy)),'小明老师');
+});
+test('configured full-name replies replace obsolete greeting prefixes without touching evidence, quoted passages, headings or repeated formatting',()=>{
+ for(const old of ['小明老师，','**小明老师**，','聪哥，','小明宝宝：'])assert.equal(addressText(old+'已核实。王老师在记录中出现。','王小明'),'王小明，已核实。王老师在记录中出现。');
+ assert.equal(addressText('王小明老师，结果。','王小明'),'王小明，结果。');
+ assert.equal(addressText('王小雨宝宝，结果。','王小雨宝宝'),'王小雨宝宝，结果。');
+ assert.equal(addressText('> 王老师，引用内容','王小明'),'王小明，\n\n> 王老师，引用内容');
+ const c={body:{elements:[{tag:'markdown',content:'小明老师，已核实。'},{tag:'table',rows:[{name:'小明老师',amount:'12.30'}]}]}};
+ const out=addressCard(c,'王小明');assert.equal(out.body.elements[0].content,'王小明，已核实。');assert.deepEqual(out.body.elements[1],c.body.elements[1]);assert.deepEqual(addressCard(out,'王小明'),out);
+});
+test('same current member names can be reformatted after a local settings update without refetching or borrowing another bot identity',async t=>{
+ const{mkdtemp,writeFile,rm}=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');const dir=await mkdtemp(path.join(os.tmpdir(),'address-style-'));t.after(()=>rm(dir,{recursive:true,force:true}));const file=path.join(dir,'settings.json');let calls=[];
+ const p={...policy,style:'display-name',fallback:'',displayNameOverrides:{'王小雨':'王小雨宝宝'}};await writeFile(file,JSON.stringify(p));
+ const service=new ReplyAddressing(context({groupMembersPage:async(chat,args,o)=>{calls.push(o.profile);return{items:[{member_id:'ou_a',name:o.profile==='two'?'李小丽':'王小雨'}],has_more:false};}}),{file});
+ assert.equal(await service.forTurn(turn),'王小雨宝宝');assert.equal(await service.forTurn({...turn,profile:'two'}),'李小丽');assert.equal(await service.forTurn({...turn,senderId:'ou_unknown'}),'');
+ await writeFile(file,JSON.stringify({...p,displayNameOverrides:{}}));assert.equal(await service.forTurn(turn),'王小雨');assert.deepEqual(calls,['one','two']);
+});
