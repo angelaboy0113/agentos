@@ -124,7 +124,8 @@ test('in-flight progress coalesces, then terminal wins without concurrent PATCH 
     if (patches.length === 1) { entered.resolve(); await gate.promise; } concurrent--;
   } });
   await cards.upsert('x', conversationCard(chat()), destination, { immediate: true });
-  const running = cards.upsert('x', conversationCard(chat()), destination, { immediate: true });
+  const progressing=conversationCard(chat());progressing.header.title.content+=' · next step';
+  const running = cards.upsert('x', progressing, destination, { immediate: true });
   await entered.promise;
   const final = cards.upsert('x', conversationCard(chat({ status: 'ready', response: '完成' })), destination, { terminal: true, immediate: true });
   gate.resolve(); await Promise.all([running, final]);
@@ -311,3 +312,13 @@ test('analysis receipt stays silent until the continuous developer investigation
  await cards.upsert('job:login',jobCard({...job,status:'completed',result:{outcome:'ready'}}),dest,{terminal:true,immediate:true,terminalMention:{replyTo:'root',profile:'owner',text:'Actual completion'}});
  assert.equal(calls.filter(x=>x.type==='text').length,1);assert.equal(calls.find(x=>x.type==='text').text,'Actual completion');
  });
+
+test('identical terminal publication preserves revision and receipts, real payload changes still update',async t=>{
+ const {store,cards,calls}=await setup(t);
+ const dest={profile:'developer',replyTo:'root'},card=conversationCard(chat({status:'ready',response:'same final answer'}));
+ await cards.upsert('chat:dedup',card,dest,{terminal:true,immediate:true,resultText:'details'});
+ const before=(await store.read()).cardMessages['chat:dedup'];
+ await cards.upsert('chat:dedup',card,dest,{terminal:true,immediate:true,resultText:'details'});
+ assert.deepEqual((await store.read()).cardMessages['chat:dedup'],before);assert.deepEqual(calls.map(c=>c.type),['send']);
+ await cards.upsert('chat:dedup',card,dest,{terminal:true,immediate:true,resultText:'changed details'});assert.equal((await store.read()).cardMessages['chat:dedup'].revision,before.revision+1);assert.deepEqual(calls.map(c=>c.type),['send','patch']);
+});

@@ -2105,3 +2105,7 @@ Native compatibility also consumes legacy-shaped environment/website/history con
 Native source catalogs' `continue_environment` and `finish` aliases now use their existing investigator validation and persist the current source before requesting the next standard grant in the same model thread. Invalid continuation parameters remain rejected; no broader peer/environment permissions are introduced. Real rolling-week replay found the previously mismatched alias caused an execution error after valid initial database reads.
 
 Optional accepted-backup dependency compaction preserves the newest three full checkpoints, unique dependency versions and all pinned anchors, with durable restore ledgers and verified empty-destination restoration. This addresses repeated installed dependencies in historical deployment backups, separately from current source evidence or business data retention. Real disk and business replay acceptance are recorded by each deployment; unit tests do not establish a storage saving or task speedup.
+
+## 1.133.2
+
+Identical card publications preserve revision, payload and notification receipts rather than enqueueing another patch at startup. Changed details, scope, generation or notifications still publish and pending transport failures still retry; no delivery success is fabricated. This removes redundant old-card transport and disk/state churn observed during the full-week replay.

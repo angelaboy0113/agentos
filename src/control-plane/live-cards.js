@@ -61,7 +61,7 @@ export class LiveCards {
         && terminalMention && (!terminalMention.kind||existing.terminalMention.kind==='clarification'&&terminalMention.kind==='clarification'&&existing.terminalMention.requestKey!==terminalMention.requestKey);
       if (!reopening && !replacingWaitingMention && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
-      state.cardMessages[key] = { ...existing, destination, card, terminal, generation, overflow: [],
+      const proposed = { ...existing, destination, card, terminal, generation, overflow: [],
         ...(questionRound?{questionRound:structuredClone(questionRound)}:{}),
         deliveryToken: deliveryToken ?? (!reopening ? existing?.deliveryToken : undefined),
         mentionDelivered: reopening || replacingWaitingMention ? false : existing?.mentionDelivered,
@@ -69,6 +69,11 @@ export class LiveCards {
         terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval','environment_setup_missing','clarification'].includes(terminalMention?.kind) ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
+      // A startup repair/duplicate progress must not create a new outbox revision
+      // when payload, identity, details and notification semantics are identical.
+      const prior=state.cardMessages[key];
+      if(prior&&Object.keys(proposed).every(k=>['revision','updatedAt'].includes(k)||JSON.stringify(proposed[k])===JSON.stringify(prior[k])))return;
+      state.cardMessages[key]=proposed;
     });
     if(withdrawn)return;
     if (immediate) return this.flush(key, true);
