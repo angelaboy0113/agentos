@@ -49,6 +49,22 @@ export class InvestigationCallJournal {
   }
 }
 
+// Files registered by an authorized read must become available in this live
+// session, rather than requiring a new Runner/model session to load them.
+export async function materializeNativeInputs(value,options,download){
+  const found=new Map(),job=options.job;
+  function visit(v){if(!v||typeof v!=='object')return;
+    if(v.inputAttachment){const a=v.inputAttachment,source=a.source;
+      if(a.type==='file'&&/^ATT-cloud-[a-f0-9]{64}$/.test(a.id??'')&&source?.jobId===job.id&&source.projectId===job.projectId&&source.originProfile===(job.originProfile??job.agentProfile)&&['authorized-native-cloud-file','authorized-native-cloud-document'].includes(source.kind)&&/^[a-f0-9]{64}$/.test(source.sha256??''))found.set(a.id,a);
+    }
+    for(const [k,x]of Object.entries(v))if(k!=='inputAttachment'&&x&&typeof x==='object')visit(x);
+  }
+  visit(value);if(!found.size)return value;
+  const load=download??(await import('./codex-executor.js')).downloadAttachments;
+  const inputs=await load({...job,attachments:[...found.values()]},options.config,job.artifactWorkspace.directory);
+  return {...value,localTaskInputs:inputs,note:'已授权原始文件已加载至当前任务工作目录；直接读取 localTaskInputs.path，继续本会话制作与核验，不等待用户重传或重新开任务。'};
+}
+
 export async function runNativeInvestigation(options,adapters={}) {
   const {job,config,workspace,attachmentPaths=[],emit}=options;
   const runtime=await (adapters.runtime??loadCodexRuntimeSettings)();
@@ -63,7 +79,8 @@ export async function runNativeInvestigation(options,adapters={}) {
       if(!active)throw failure('NATIVE_TURN_ENDED');
       toolCalls++;
       try {
-        const result=params.tool==='agentos_read_result'?(String(params.arguments.resultRef??'').startsWith('source-metadata/')?await direct.readSourceMetadata(params.arguments):await store.read(params.arguments)):await direct.call(params.tool,params.arguments);
+        let result=params.tool==='agentos_read_result'?(String(params.arguments.resultRef??'').startsWith('source-metadata/')?await direct.readSourceMetadata(params.arguments):await store.read(params.arguments)):await direct.call(params.tool,params.arguments);
+        result=await materializeNativeInputs(result,{...options,job:direct.job??job},adapters.downloadInputs);
         const presented=await presentNativeToolResult(store,params.tool,result);
         return {contentItems:[{type:'inputText',text:JSON.stringify(presented)}],success:true};
       } catch(error) {
@@ -108,7 +125,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     // waiting indefinitely during teardown.
     if(!direct.channel){
       if(continuation)observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));
-      else if(!result.documentRequests?.length&&continuousReviewDecision(direct.job,result).continue){
+      else if(!result.documentRequests?.length&&continuousReviewDecision(direct.job,result.outcome==='needs_clarification'&&result.investigation?.status==='continue'&&!result.investigation?.blocker&&!result.browserLoginRequired&&result.investigation?.nextStep?.trim()?{...result,outcome:'partial'}:result).continue){
         // A normal work-in-progress result belongs to this live thread. Sending
         // it back through the runner reopens the app and reloads source/skills.
         // Persist the intermediate evidence, but never publish it as delivery.

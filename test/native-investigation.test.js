@@ -200,3 +200,23 @@ for(const boundary of ['blocker','waiting','source'])test('native self continuat
 test('pending trusted document rendering leaves the native loop for actual host generation',async t=>{
  const directory=await temp(t),app=new EventEmitter();let turns=0;app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.close=async()=>{};app.request=async()=>({thread:{id:'render'}});app.turn=async()=>{turns++;return{text:JSON.stringify({outcome:'partial',finalMessage:'Render the actual requested file before inspection',investigation:{status:'continue'},documentRequests:[{format:'html',title:'Evidence',purpose:'original output',content:'<h1>Verified source</h1>'}]})};};const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct:{job,sourceReceipts:[],close:async()=>{}},runtime:async()=>({}),bindToolCall:()=>{}});assert.equal(turns,1);assert.equal(result.documentRequests.length,1);assert.equal(result.nativeTiming.hostContinuations,0);
 });
+
+test('new authorized cloud files materialize in the same native session and exclude foreign bindings',async()=>{
+ const {materializeNativeInputs}=await import('../src/runner/native-investigation.js');
+ const a={id:'ATT-cloud-'+'a'.repeat(64),type:'file',contentType:'application/test',source:{jobId:job.id,projectId:job.projectId,originProfile:job.originProfile,kind:'authorized-native-cloud-file',sha256:'b'.repeat(64)}};
+ const options={job:{...job,artifactWorkspace:{directory:'/task/working'}},config:{}};let calls=0;
+ const download=async(j,c,dir)=>{calls++;assert.deepEqual(j.attachments,[a]);assert.equal(dir,'/task/working');return[{id:a.id,path:'/task/working/input.pptx'}];};
+ const out=await materializeNativeInputs({input:{results:[{result:{inputAttachment:a}},{result:{inputAttachment:a}},{result:{inputAttachment:{...a,id:'ATT-cloud-'+'c'.repeat(64),source:{...a.source,jobId:'foreign'}}}}]}},options,download);
+ assert.equal(calls,1);assert.equal(out.localTaskInputs[0].path,'/task/working/input.pptx');
+ for(const source of [{...a.source,originProfile:'other'},{...a.source,projectId:'other'},{...a.source,kind:'arbitrary-path'},{...a.source,sha256:'bad'}]){
+  const v={inputAttachment:{...a,source}};assert.equal(await materializeNativeInputs(v,options,download),v);
+ }
+ assert.equal(calls,1);
+ await assert.rejects(materializeNativeInputs({inputAttachment:a},options,async()=>{throw Error('digest mismatch');}),/digest mismatch/);
+});
+test('mislabelled clarification with explicit executable next step keeps same native session',async t=>{
+ const directory=await temp(t),app=new EventEmitter();let turns=0;app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.close=async()=>{};app.request=async()=>({thread:{id:'same-file-session'}});
+ app.turn=async()=>({text:JSON.stringify(++turns===1?{outcome:'needs_clarification',finalMessage:'Template downloaded; load and render next',investigation:{status:'continue',blocker:null,nextStep:'Read the already authorized local file and render'}}:{outcome:'ready',finalMessage:'Original file delivered'})});
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct:{job,sourceReceipts:[],close:async()=>{}},runtime:async()=>({})});
+ assert.equal(turns,2);assert.equal(result.nativeTiming.modelSessions,1);assert.equal(result.outcome,'ready');
+});
