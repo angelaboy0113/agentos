@@ -2039,3 +2039,8 @@ Preserve Runner-produced commit metadata receipts across model continuation, fin
 ## 1.130.0 — 批量分支提交元数据调查
 
 新增 branch_commits 同会话操作，最多四仓并行、固定首次分支 SHA、完整分页与祖先图校验，结果保存为独立摘要收据及完整任务 artifact。分支清单无需逐仓下载/补齐整套 Git 历史；保留旧文件与 diff 的原历史能力。恢复复用完整仓库、失败不当空结果、不覆写旧证据。未新增整任务时长/次数/轮次限制或平台权限。包含待发布1.129称呼及SSO配置兼容，不将离线测试等同新卡验收。
+
+
+## 1.130.1 — Reviewed guidance continuity
+
+The batch source metadata guidance changed the harness fingerprint. Pin reviewed prior fingerprints to the exact current content hash so saved investigations can resume; future role edits remain fail-closed. No task authority, environment scope or business-write permission changes. Regression covers both old saved and 1.130 in-flight harness metadata plus an unreviewed future edit.

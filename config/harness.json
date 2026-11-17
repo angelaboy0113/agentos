@@ -9,21 +9,33 @@
   "reviewedGuidanceTransitions": [
     {
       "fromFingerprint": "269c90e9687c80627a61901e7625c9506682ce6a58c0ed018039cde191e1da9b",
-      "toContentHash": "97e1be99119c01e0fe586a4ab4b5bc2d61ba945a11089856b2b85088b745c76e",
+      "toContentHash": "4517c52afd0e62aa7f398930de2f0ec1baf74df28c9bc28cc19f49f069fd7282",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change."
     },
     {
       "fromFingerprint": "4ae6ef04cf64572c25dc602a7fddfe8665578fd007179e28d444fbad7f232cd7",
-      "toContentHash": "97e1be99119c01e0fe586a4ab4b5bc2d61ba945a11089856b2b85088b745c76e",
+      "toContentHash": "4517c52afd0e62aa7f398930de2f0ec1baf74df28c9bc28cc19f49f069fd7282",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change."
     },
     {
       "fromFingerprint": "70e1f17a30cd650ed289d68d3b933b535eb91492b914aa3e7eaca51d4a8036b4",
-      "toContentHash": "97e1be99119c01e0fe586a4ab4b5bc2d61ba945a11089856b2b85088b745c76e",
+      "toContentHash": "4517c52afd0e62aa7f398930de2f0ec1baf74df28c9bc28cc19f49f069fd7282",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change."
+    },
+    {
+      "fromFingerprint": "f1805ef63e5b4708ea80ba561d845f704725c12dafc4dbd6ca3b4ef5755a6fd1",
+      "toContentHash": "4517c52afd0e62aa7f398930de2f0ec1baf74df28c9bc28cc19f49f069fd7282",
+      "scope": "guidance-only",
+      "review": "Reviewed exact 1.128/1.130 common-role diff: only prefer scoped batch branch commit metadata for commit lists. Same standard and roles, no authority, environment, credential or business-write change. Unknown future content still requires review."
+    },
+    {
+      "fromFingerprint": "b198607138d3024b77424c518979dcb0898313d00bc1b5f8e8d5eaa7395b9ac7",
+      "toContentHash": "4517c52afd0e62aa7f398930de2f0ec1baf74df28c9bc28cc19f49f069fd7282",
+      "scope": "guidance-only",
+      "review": "Reviewed exact 1.128/1.130 common-role diff: only prefer scoped batch branch commit metadata for commit lists. Same standard and roles, no authority, environment, credential or business-write change. Unknown future content still requires review."
     }
   ]
 }

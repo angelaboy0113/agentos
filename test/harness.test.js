@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, cp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { loadHarness, handoffContext, validateHandoff, enforceHandoff } from '../src/runner/harness.js';
@@ -120,4 +120,16 @@ test('working evidence rejects symbolic links and shared inodes, retains failed 
  assert.ok((await validateHandoff(task,r,root,{dataDir})).issues.length);await rm(path.join(a.directory,'escape.json'));
  const{link}=await import('node:fs/promises');await link(path.join(root,'spec.md'),path.join(a.directory,'shared.json'));
  assert.ok((await validateHandoff(task,r,root,{dataDir})).issues.length);
+});
+
+test('reviewed source-metadata guidance resumes exact prior harnesses but rejects future role edits', async (t) => {
+  const prior = ['f1805ef63e5b4708ea80ba561d845f704725c12dafc4dbd6ca3b4ef5755a6fd1','b198607138d3024b77424c518979dcb0898313d00bc1b5f8e8d5eaa7395b9ac7'];
+  for (const fingerprint of prior) {
+    const h = await loadHarness({...job,context:[{result:{harness:{fingerprint}}}]});
+    assert.deepEqual(h.metadata.reviewedPreviousFingerprints,[fingerprint]);
+    assert.equal(h.metadata.contentFingerprint,'4517c52afd0e62aa7f398930de2f0ec1baf74df28c9bc28cc19f49f069fd7282');
+  }
+  const directory=await fixture(t);await cp(new URL('../config/',import.meta.url),directory,{recursive:true});
+  await writeFile(path.join(directory,'roles','common.md'),'Unreviewed future authority or guidance change');
+  await assert.rejects(loadHarness({...job,context:[{result:{harness:{fingerprint:prior[0]}}}]},directory),/版本/);
 });
