@@ -1,7 +1,8 @@
 import {receptionSensitive} from '../shared/reception-policy.js';
 import { EditedMentionWatcher } from './edited-mentions.js';
-import { copyFile, mkdir, readdir, stat, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, stat, readFile, writeFile, rename, unlink, lstat, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import {createReadStream} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { sanitizeSegment } from '../shared/protocol.js';
@@ -15,6 +16,7 @@ export class LarkEventSource {
     this.pendingEvents = Promise.resolve();
     this.retryDelayMs = 3000;
     this.callbackRetries = new Map();
+    this.topicDownloads = new Map();
   }
 
   async start() {
@@ -128,7 +130,9 @@ export class LarkEventSource {
       await writeFile(file+'.tmp',JSON.stringify(event),{mode:0o600});await rename(file+'.tmp',file);
       return this.deliverCallback(file);
     }
-    event.attachments = await this.downloadAttachments(event);
+    const ownAttachments = await this.downloadAttachments(event);
+    const relatedAttachments = await this.downloadTopicAttachments(event);
+    event.attachments = [...new Map([...ownAttachments,...relatedAttachments].map(x=>[x.id,x])).values()];
     if (event.attachments.length > 0 && isAttachmentPlaceholder(event.content, event.message_type)) {
       event.content = '';
     }
@@ -177,7 +181,7 @@ export class LarkEventSource {
     if (!['image', 'file', 'audio', 'media', 'post'].includes(event.message_type)) return [];
     const messageId = event.message_id ?? event.id;
     if (!messageId) return [];
-    const directory = path.join(this.config.cwd, 'messages', sanitizeSegment(messageId));
+    const directory = path.join(this.config.cwd, 'messages', sanitizeSegment(messageId), ...(event.resourceVersion ? [sanitizeSegment(event.resourceVersion)] : []));
     await mkdir(directory, { recursive: true });
     await runLarkCli([
       'im', '+messages-mget', '--as', 'bot', '--message-ids', messageId,
@@ -190,13 +194,59 @@ export class LarkEventSource {
     });
     const files = await listFiles(directory);
     return Promise.all(files.map(async (file, index) => ({
-      id: `${sanitizeSegment(messageId)}-${index + 1}`,
+      id: `${sanitizeSegment(messageId)}-${event.resourceVersion ? sanitizeSegment(event.resourceVersion).slice(0,16)+'-' : ''}${index + 1}`,
       path: file,
       contentType: contentType(file),
       type: /\.(png|jpe?g|gif|webp|bmp)$/i.test(file) ? 'image' : 'file',
     })));
   }
+
+  async readMessage(messageId) {
+    const result=await runLarkCli(['api','GET','/open-apis/im/v1/messages/'+encodeURIComponent(messageId),'--as','bot','--json'],{
+      cliEntry:this.config.cliEntry,cwd:this.config.cwd,profile:this.config.profile,configDir:this.config.configDir,
+    });
+    return result.data?.items?.find(x=>x.message_id===messageId)??null;
+  }
+
+  async downloadTopicAttachments(event) {
+    const key=event.root_id;
+    if(!key)return [];
+    const previous=this.topicDownloads.get(key)??Promise.resolve();
+    const next=previous.catch(()=>{}).then(()=>this.downloadTopicAttachmentsNow(event));
+    this.topicDownloads.set(key,next);
+    try{return await next;}finally{if(this.topicDownloads.get(key)===next)this.topicDownloads.delete(key);}
+  }
+
+  async downloadTopicAttachmentsNow(event) {
+    // Only an accepted @-mention in the bound public group reaches this point.
+    // A file can be the topic root even if no bot was mentioned on that file.
+    const id=event.root_id;
+    if(event.chat_type!=='group'||!/^om_[A-Za-z0-9]+$/.test(id??'')||id===(event.message_id??event.id)||!this.config.profile)return [];
+    const root=await this.readMessage(id);
+    if(!root||root.deleted||root.message_id!==id||root.chat_id!==event.chat_id
+      ||root.root_id&&root.root_id!==id||!['file','image','audio','media','post'].includes(root.msg_type))return [];
+    if(root.msg_type==='post'&&!/"(?:image_key|file_key)"\s*:/.test(root.body?.content??''))return [];
+    const digest=createHash('sha256').update(JSON.stringify({profile:this.config.profile,chatId:root.chat_id,type:root.msg_type,body:root.body,updatedAt:root.update_time})).digest('hex');
+    const index=path.join(this.config.cwd,'related-input-index');await mkdir(index,{recursive:true,mode:0o700});
+    const manifest=path.join(index,sanitizeSegment(id)+'.json');
+    const verify=async files=>{
+      if(!Array.isArray(files)||!files.length)return false;
+      const base=await realpath(path.join(this.config.cwd,'messages',sanitizeSegment(id)));
+      for(const x of files){const st=await lstat(x.path);const relative=path.relative(base,await realpath(x.path));
+        if(!st.isFile()||st.isSymbolicLink()||relative.startsWith('..')||path.isAbsolute(relative)||!x.sha256||await inputHash(x.path)!==x.sha256)return false;}
+      return true;
+    };
+    try {const saved=JSON.parse(await readFile(manifest));if(saved.digest===digest&&await verify(saved.files))return saved.files.map(({sha256,...x})=>x);}catch(error){if(!['ENOENT','ENOTDIR'].includes(error.code)&&!(error instanceof SyntaxError))throw error;}
+    const files=await this.downloadAttachments({message_id:id,message_type:root.msg_type,resourceVersion:digest});
+    if(!files.length)return [];
+    const checked=await Promise.all(files.map(async x=>({...x,sha256:await inputHash(x.path)})));
+    if(!await verify(checked))throw Error('Related topic input path or hash verification failed');
+    await writeFile(manifest+'.tmp',JSON.stringify({digest,files:checked}),{mode:0o600});await rename(manifest+'.tmp',manifest);
+    return files;
+  }
 }
+
+async function inputHash(file){const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);return hash.digest('hex');}
 
 export async function startLarkEventSource(config) {
   const cwd = path.resolve(config.dataDir ?? './data', 'lark-cli-events', sanitizeSegment(config.profile ?? 'default'));

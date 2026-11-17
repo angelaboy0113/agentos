@@ -3,6 +3,7 @@ import {continuationSourceResult} from './environment-continuation.js';
 import {nativeGrantedEntry} from './investigation-entry.js';
 import {failureDetails,failureDiagnostic} from '../shared/failure-diagnostic.js';
 import {controlPost} from './control-client.js';
+import {ProgressPublisher} from './progress-publisher.js';
 import {recordReportFiles,recordReportReview} from '../shared/report-acceptance.js';
 import {interruptedInvestigation} from '../shared/investigation-budget.js';
 import { fileURLToPath } from 'node:url';
@@ -54,7 +55,8 @@ export class AgentRunner {
 
   async run(job) {
     const identity = { runnerId: this.config.runnerId, leaseId: job.lease.id };
-    const emit = async(event) => {try{return await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/events`, { ...event, ...identity });}catch(error){if(['progress','heartbeat'].includes(event.type)&&error.code==='LOCAL_CONTROL_TIMEOUT'){console.warn('[runner] 进度回执暂缓，业务执行继续');return {};}throw error;}};
+    const publisher = new ProgressPublisher(async(event) => {try{return await this.post(`/api/v1/jobs/${encodeURIComponent(job.id)}/events`, { ...event, ...identity });}catch(error){if(event.type==='heartbeat'&&error.code==='LOCAL_CONTROL_TIMEOUT'){console.warn('[runner] 进度回执暂缓，业务执行继续');return {};}throw error;}}, {onDisplayError: () => console.warn('[runner] 展示进度暂缓，证据与最终结果仍单独保存')});
+    const emit = event => publisher.emit(event);
     const controller = new AbortController();
     let checking = false;
     let lostLease = false;
@@ -109,6 +111,7 @@ export class AgentRunner {
     } finally {
       clearInterval(controlTimer);
       clearInterval(heartbeatTimer);
+      await publisher.close();
     }
   }
 

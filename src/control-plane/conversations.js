@@ -5,7 +5,7 @@ import {publicStickerPolicy} from './success-stickers.js';
 import {deliveredReportInputs,boundReportInput} from '../shared/report-followup.js';
 import {addressCard,addressText} from './reply-addressing.js';
 import {readBusinessDefinitions,recordBusinessDefinitions} from '../shared/business-definitions.js';
-import {sourceEnvironmentForTier} from '../shared/source-environments.js';
+import {sourceEnvironmentForTier,explicitSourceEnvironment} from '../shared/source-environments.js';
 import { resolveProjectId, routeAgent, assistantInstructions } from '../shared/project-scope.js';
 import {stateView,questionStateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
@@ -569,7 +569,7 @@ export class ConversationService {
         // tier through this project's explicit/standard mapping, never as a branch ID.
         try { sourceEnvironment = environmentAccess
           ? sourceEnvironmentForTier(projects.projects[projectId],environmentAccess.tier,decision.sourceEnvironment)
-          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment || (await stateView(store,s=>questionSourceContext(s,{...turn,projectId},projects.projects[projectId])))?.id);  }
+          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment || explicitSourceEnvironment(projects.projects[projectId],turn.content) || (await stateView(store,s=>questionSourceContext(s,{...turn,projectId},projects.projects[projectId])))?.id);  }
         catch (error) { return { notice: error.message }; }
       }
       // Every newly created analysis uses the same persistent developer job,

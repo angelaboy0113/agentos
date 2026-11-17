@@ -127,7 +127,7 @@ test('reviewed source-metadata guidance resumes exact prior harnesses but reject
   for (const fingerprint of prior) {
     const h = await loadHarness({...job,context:[{result:{harness:{fingerprint}}}]});
     assert.deepEqual(h.metadata.reviewedPreviousFingerprints,[fingerprint]);
-    assert.equal(h.metadata.contentFingerprint,'4517c52afd0e62aa7f398930de2f0ec1baf74df28c9bc28cc19f49f069fd7282');
+    assert.equal(h.metadata.contentFingerprint,'2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75');
   }
   const directory=await fixture(t);await cp(new URL('../config/',import.meta.url),directory,{recursive:true});
   await writeFile(path.join(directory,'roles','common.md'),'Unreviewed future authority or guidance change');
