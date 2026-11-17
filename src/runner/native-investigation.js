@@ -100,10 +100,15 @@ export async function runNativeInvestigation(options,adapters={}) {
     // Consume legacy-shaped read continuations inside this same thread. Older
     // prompt/schema habits must not silently re-enter the nested model pipeline.
     const continuation=result.environmentQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.environmentQuery),website:false}}:result.websiteQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.websiteQuery),website:true}}:result.sourceHistoryQuery?{name:'agentos_source_history',args:{query:JSON.stringify(result.sourceHistoryQuery)}}:null;
-    if(!continuation||direct.waiting||result.sourceEnvironmentQuery)break;
-    if(direct.channel)await journal.call('host-close-'+turnId,{complete:false},()=>direct.call('agentos_environment_close',{summary:'保存本来源既有证据；继续同一调查会话核验下一来源。',complete:false}));
+    if(direct.waiting||result.sourceEnvironmentQuery)break;
+    let observation;
+    if(direct.channel)observation=await journal.call('host-close-'+turnId,{complete:false},()=>direct.call('agentos_environment_close',{summary:'保存本来源既有证据；继续同一调查会话核验下一来源。',complete:false}));
     if(direct.waiting)break;
-    const observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));hostContinuations++;
+    // A premature finish is corrective feedback, not a closed channel. Return
+    // that observation to the same model instead of opening a second source or
+    // waiting indefinitely during teardown.
+    if(!direct.channel){if(!continuation)break;observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));}
+    hostContinuations++;
     if(observation.state==='source_transition_required'){result={...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:observation.sourceEnvironmentQuery};break;}
     if(direct.waiting)break;
     const presented=await store.present('host_continuation',observation,24000,{persist:true});

@@ -120,3 +120,13 @@ test('native explicit original goal passes the real continuation validator witho
  const rejected=await direct.call('agentos_environment_open',{request:JSON.stringify({environmentId:'authorized',goalIds:['invented-goal']}),website:false});assert.equal(rejected.state,'not_opened');assert.equal(opened,0);
  const result=await direct.call('agentos_environment_open',{request:JSON.stringify({environmentId:'authorized',goalIds:['original-question']}),website:false});assert.equal(result.state,'waiting');assert.equal(opened,1);await direct.close();
 });
+
+test('closing a channel rejects a waiting or future planner choice rather than looping premature finish',async()=>{
+ const c=new InvestigationToolChannel(),p=c.planner();const pending=p.next({tools:[{tool:'select'}],results:[]});const rejected=assert.rejects(pending,e=>e.code==='NATIVE_CHANNEL_CLOSED');await c.stop();await rejected;await assert.rejects(p.next({}),e=>e.code==='NATIVE_CHANNEL_CLOSED');await c.stop();
+});
+test('rejected premature close resumes current native source in the same model thread',async t=>{
+ const directory=await temp(t),app=new EventEmitter();let turns=0,opens=0;app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.close=async()=>{};app.request=async()=>({thread:{id:'same'}});
+ const direct={job,sourceReceipts:[],channel:{},call:async name=>{if(name==='agentos_environment_open'){opens++;throw Error('Must not reopen while source remains active');}return{state:'tools',input:{tools:[{tool:'select'}],results:[{tool:'finish',error:{code:'PREMATURE_FINISH'}}]}};},close:async()=>{}};
+ app.turn=async params=>{turns++;app.emit('notification',{method:'turn/started',params:{threadId:'same',turn:{id:'t'+turns}}});if(turns===1)return{text:JSON.stringify({outcome:'needs_clarification',finalMessage:'Need to finish source',environmentQuery:{environmentId:'same-source'}})};assert.match(params.input[0].text,/PREMATURE_FINISH/);direct.channel=null;return{text:JSON.stringify({outcome:'ready',finalMessage:'Actual original goal verified'})};};
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({}),bindToolCall:()=>{}});assert.equal(turns,2);assert.equal(opens,0);assert.equal(result.outcome,'ready');
+});
