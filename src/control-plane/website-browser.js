@@ -1,3 +1,4 @@
+import {loginPageAllowed} from '../shared/website-sso.js';
 import {websiteFrames,websiteDOM,assertWebsiteFrame} from './website-frames.js';
 import {advanceWebsiteDocumentDiagnostics}from'../shared/website-document-diagnostics.js';
 import {readWebsiteAsset} from './website-assets.js';
@@ -33,7 +34,7 @@ export class WebsiteBrowser {
     const r=route.request();let page;try{page=r.frame().page();}catch{}
     const state=[...this.pages.values()].find(s=>s.page===page),target=state?.environment??e;
     const request={url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},resources=target.queries?.[state?.job?.environmentAccess?.queryId]?.staticResources??[];
-    if(state&&websiteStaticResourceAllowed(target.baseUrl,request,resources,target.queries?.[state?.job?.environmentAccess?.queryId]?.staticResourceRoots??[])){
+    if(state&&websiteStaticResourceAllowed(target.baseUrl,request,resources,target.queries?.[state?.job?.environmentAccess?.queryId]?.staticResourceRoots??[],{identityPage:loginPageAllowed(state.page.url(),target.loginNavigation)})){
      // Public GET via an independent client: no browser cookies, tokens, referer,
      // post body, authentication, redirects or response Set-Cookie cross the boundary.
      let permitted=false;try{permitted=await this.authorize(state.job,state.waiting,r);}catch{}
@@ -42,11 +43,11 @@ export class WebsiteBrowser {
     }
     let allow=false,boundary;try{boundary=websiteRequestBoundary(target.baseUrl,request,state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);allow=boundary.allowed;}catch{}
     const loginReads=target.queries?.[state?.job?.environmentAccess?.queryId]?.loginReads??[];
-    if(state&&websiteLoginReadAllowed(request,true,loginReads,target.baseUrl)){
+    if(state&&websiteLoginReadAllowed(request,true,loginReads,target.baseUrl,target.loginNavigation)){
      // The first QR iframe request can precede the next investigator snapshot.
      // Verify an actual visible login/challenge in this same task's parent DOM.
      if(!state.waiting)try{state.waiting=(await state.page.evaluate(browserLoginState)).loginRequired===true;}catch{}
-     if(websiteLoginReadAllowed(request,state.waiting,loginReads,target.baseUrl))allow=true;
+     if(websiteLoginReadAllowed(request,state.waiting,loginReads,target.baseUrl,target.loginNavigation))allow=true;
     }
     if(state&&websiteLoginPreferenceAllowed(target,request,state.session.credentialPrincipal))allow=true;
     else if(state&&request.method==='POST'&&target.loginPreferences?.paths.includes(new URL(request.url).pathname))state.preferenceNeedsIdentity=true;
@@ -116,11 +117,12 @@ export class WebsiteBrowser {
   delete s.pendingPrincipal;
  }
  async readAcrossNavigation(s,read){
-  try{return await read();}catch(error){
-   if(!/Execution context was destroyed|Cannot find context with specified id|Frame was detached/i.test(error.message??''))throw error;
-   await s.page.waitForLoadState('domcontentloaded',{timeout:30000});
+  const deadline=Date.now()+30000;
+  for(;;)try{return await read();}catch(error){
+   if(!/Execution context was destroyed|Cannot find context with specified id|Frame was detached/i.test(error.message??'')||Date.now()>=deadline)throw error;
+   await s.page.waitForLoadState('domcontentloaded',{timeout:Math.max(1,deadline-Date.now())});
    if(!await this.authorize(s.job,s.waiting,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('页面跳转后原读取范围已失效');
-   return read(); // Retry this idempotent DOM read only, never clicks/login/queries.
+   // Retry only this idempotent DOM read across a redirect chain, never an action.
   }
  }
  async loginStatus(s){
@@ -131,6 +133,8 @@ export class WebsiteBrowser {
   }
   await assertWebsiteFrame(s);
   const state=await this.readAcrossNavigation(s,()=>websiteDOM(s).evaluate(browserLoginState));
+  // An identity-provider success page is not a successful application login.
+  if(new URL(s.page.url()).origin!==new URL(s.environment.baseUrl).origin){state.pageReady=false;state.loginRequired=true;if(!state.verificationRequired&&!state.passwordChangeRequired&&!state.credentialRejected){state.loginState=loginPageAllowed(s.page.url(),s.environment.loginNavigation)?'login_required':'request_error';if(state.loginState==='request_error')state.requestFailed=true;}}
   if(state.verificationRequired&&state.verificationFramePresent){
    for(const frame of s.page.frames())if(frame!==s.page.mainFrame()){
     const expired=await frame.evaluate(()=>/二维码.{0,8}(?:失效|过期)|QR code.{0,15}expired/i.test(document.body?.innerText??'')).catch(()=>false);
@@ -150,7 +154,8 @@ export class WebsiteBrowser {
   const s=await this.state(job,e);s.waiting=true;
   const before=await this.loginStatus(s);if(before.verificationRequired)return before;
   s.waiting=true;
-  await waitForCaptureReady(s);
+  await this.readAcrossNavigation(s,()=>waitForCaptureReady(s));
+  if(loginPageAllowed(s.page.url(),navigation))return this.loginStatus(s);
   for(const step of navigation.steps){const r=await s.page.evaluate(loginNavigationPage,{...navigation,baseUrl:e.baseUrl,step});if(r.error)throw Error(r.error);if(r.ready)break;}
   return this.loginStatus(s);
  }
@@ -179,6 +184,13 @@ export class WebsiteBrowser {
   for(const frame of s.page.frames())for(const img of await frame.locator('img').all()){
    const src=await img.getAttribute('src');if(!/(?:qrcode|\/qr\/|data:image)/i.test(src??''))continue;
    const box=await img.boundingBox();if(box&&box.width>=100&&box.height>=100&&await img.isVisible())candidates.push(img);
+  }
+  // Some identity providers draw the challenge on a canvas instead of an img.
+  // Only an explicitly reviewed identity page can contribute a canvas candidate.
+  if(loginPageAllowed(s.page.url(),e.loginNavigation))for(const frame of s.page.frames())for(const canvas of await frame.locator('canvas').all()){
+   const box=await canvas.boundingBox();if(!box||box.width<100||box.height<100||Math.abs(box.width-box.height)>2||!await canvas.isVisible())continue;
+   const drawn=await canvas.evaluate(c=>{try{const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let dark=0,light=0;for(let i=0;i<d.length;i+=4){if(d[i+3]<200)continue;if(d[i]<60&&d[i+1]<60&&d[i+2]<60)dark++;if(d[i]>195&&d[i+1]>195&&d[i+2]>195)light++;}return dark>c.width*c.height*.1&&light>c.width*c.height*.1;}catch{return false;}});
+   if(drawn)candidates.push(canvas);
   }
   if(candidates.length!==1)return null; // An ambiguous page must never expose an arbitrary image.
   const buffer=await candidates[0].screenshot({type:'png',timeout:10000});

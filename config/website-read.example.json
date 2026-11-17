@@ -79,6 +79,15 @@
               "types": [
                 "image"
               ]
+            },
+            {
+              "origin": "https://identity.example.invalid",
+              "path": "/accounts/qrlogin/polling",
+              "method": "POST",
+              "reviewed": true,
+              "types": [
+                "xhr"
+              ]
             }
           ]
         }
@@ -86,7 +95,10 @@
       "loginNavigation": {
         "interactive": true,
         "steps": [
-          "\u626b\u7801\u767b\u5f55"
+          "扫码登录"
+        ],
+        "pages": [
+          "https://identity.example.invalid/accounts/page/login"
         ]
       }
     }

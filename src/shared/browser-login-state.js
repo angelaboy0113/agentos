@@ -14,7 +14,8 @@ export function browserLoginState(targetDocument){
  const denied=/页面不存在.{0,20}(?:访问权限|无权限)|请先登录|登录后.{0,12}(?:查看|访问)|sign in to (?:view|access)/i.test(text);
  const loginControl=[...document.querySelectorAll('a,button,[role=button],span')].filter(visible).some(e=>/^(?:微信登录|扫码登录|登\s*录|sign in|log in)$/i.test((e.innerText||e.getAttribute('aria-label')||'').trim()));
  const interactivePrompt=loginControl&&/欢迎登录|扫码登录|请使用.{0,20}微信.{0,20}扫码验证/.test(text);
- const verification=challenge||interactivePrompt&&/扫码/.test(text);
+ const qrInstructions=/扫码登录|请使用.{0,30}扫码|scan.{0,20}(?:QR|code)/i.test(text);
+ const verification=challenge||!passwords.length&&(interactivePrompt&&/扫码/.test(text)||authPath&&qrInstructions);
  const loginRequired=!!(passwords.length||authPath||passwordChange||verification||denied&&loginControl||interactivePrompt);
  const loginState=passwordChange?'password_change_required':verification?'verification_required':loginRequired?(error?'rejected':'login_required'):loading?'loading':'ready';
  const verificationImageReady=verification&&[...document.querySelectorAll('img')].filter(visible).some(e=>e.complete&&e.naturalWidth>0&&/qrcode|qrconnect|^data:image\//i.test(e.getAttribute('src')??''));

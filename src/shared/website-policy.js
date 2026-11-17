@@ -1,3 +1,4 @@
+import {loginPageAllowed} from './website-sso.js';
 import {parseExactJson} from './exact-json.js';
 import { createHash } from 'node:crypto';
 export const writeAction = /新增|创建|保存|修改|编辑|删除|启动|停止|执行一次|立即执行|触发|重跑|重发|重新发送|重放|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|resend|replay)\b/i;
@@ -134,16 +135,19 @@ export function validateWebsiteStaticRoots(value){
  return value;
 }
 export function validateWebsiteLoginReads(value){
- if(!Array.isArray(value)||value.some(e=>!e||Object.keys(e).some(k=>!['origin','path','types'].includes(k))||(()=>{try{const u=new URL(websiteUrl(e.origin));return u.protocol!=='https:'||u.origin!==e.origin;}catch{return true;}})()||typeof e.path!=='string'||!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\/?$/.test(e.path)||!Array.isArray(e.types)||!e.types.length||e.types.some(t=>!['document','image','script','xhr','fetch'].includes(t))))throw Error('认证读取仅允许审核后的HTTPS来源、明确路径与资源类型，不支持任意来源或写请求');
+ if(!Array.isArray(value)||value.some(e=>!e||Object.keys(e).some(k=>!['origin','path','types','method','reviewed'].includes(k))||(()=>{try{const u=new URL(websiteUrl(e.origin));return u.protocol!=='https:'||u.origin!==e.origin;}catch{return true;}})()||(e.method!==undefined&&!['GET','POST'].includes(e.method))||e.method==='POST'&&(e.reviewed!==true||writeAction.test((e.path??'').replace(/[\/_-]/g,' '))||/register|grant|consent|revoke/i.test(e.path??'')||e.path?.endsWith('/'))||typeof e.path!=='string'||!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\/?$/.test(e.path)||!Array.isArray(e.types)||!e.types.length||e.types.some(t=>!['document','image','script','xhr','fetch'].includes(t))))throw Error('认证读取仅允许审核后的HTTPS来源、明确路径与资源类型，POST仅允许人工审核的精确认证路径，不支持业务写入');
  return value;
 }
-export function websiteLoginReadAllowed(request,waiting,reads=[],base){
- if(!waiting||request.method!=='GET')return false;
- try{validateWebsiteLoginReads(reads);const u=new URL(request.url);if(u.username||u.password||/%|\\/.test(u.pathname))return false;for(const[key,value]of u.searchParams)if(/^(?:redirect_?uri|redirect_?url|callback_?url|return_?url)$/i.test(key)&&(!base||new URL(value,base).origin!==new URL(base).origin))return false;return reads.some(e=>u.origin===e.origin&&e.types.includes(request.resourceType)&&(u.pathname===e.path||e.path.endsWith('/')&&u.pathname.startsWith(e.path)));}catch{return false;}
+function loginRedirectAllowed(value,base,navigation,depth=0){
+ if(depth>4)return false;try{const u=new URL(value,base);if(u.username||u.password)return false;if(u.origin===new URL(base).origin)return true;if(!loginPageAllowed(u.href,navigation))return false;if(/\/callback\/?$/.test(u.pathname))return true;const nested=[...u.searchParams].filter(([k])=>/^(?:redirect_?uri|redirect_?url|callback_?url|return_?url)$/i.test(k));return nested.length===1&&loginRedirectAllowed(nested[0][1],base,navigation,depth+1);}catch{return false;}
 }
-export function websiteStaticResourceAllowed(base,request,resources=[],roots=[]){
+export function websiteLoginReadAllowed(request,waiting,reads=[],base,navigation){
+ if(!waiting||!['GET','POST'].includes(request.method))return false;
+ try{validateWebsiteLoginReads(reads);const u=new URL(request.url);if(u.username||u.password||/%|\\/.test(u.pathname))return false;for(const[key,value]of u.searchParams)if(/^(?:redirect_?uri|redirect_?url|callback_?url|return_?url)$/i.test(key)&&(!base||!loginRedirectAllowed(value,base,navigation)))return false;return reads.some(e=>(e.method??'GET')===request.method&&u.origin===e.origin&&e.types.includes(request.resourceType)&&(u.pathname===e.path||request.method==='GET'&&e.path.endsWith('/')&&u.pathname.startsWith(e.path)));}catch{return false;}
+}
+export function websiteStaticResourceAllowed(base,request,resources=[],roots=[],{identityPage=false}={}){
  if(!Array.isArray(resources)||request.method!=='GET')return false;
  let rooted=false;try{validateWebsiteStaticRoots(roots);const u=new URL(request.url);const decoded=decodeURIComponent(u.pathname);const safe=!/%(?:2e|2f|5c|25)/i.test(u.pathname)&&!/[\\%\x00-\x1f]/.test(decoded)&&!decoded.split('/').includes('..');rooted=!u.search&&!u.hash&&safe&&roots.some(root=>{const b=new URL(root);if(b.origin!==u.origin)return false;const prefix=decodeURIComponent(b.pathname).split('/').filter(Boolean),parts=decoded.split('/').filter(Boolean);return parts.length>prefix.length&&prefix.every((segment,i)=>segment==='{hex}'?/^[a-f0-9]{8,64}$/i.test(parts[i]):parts[i]===segment);});}catch{return false;}
  if(!resources.includes(request.url)&&!rooted)return false;
- try{const u=new URL(request.url);validateWebsiteStaticResources([request.url],base);const types={script:/\.js$/i,other:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|webp|gif|svg|ico)$/i,xhr:/\.json$/i,fetch:/\.json$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
+ try{const u=new URL(request.url);validateWebsiteStaticResources([request.url],base);const types={script:/\.js$/i,other:/\.js$/i,stylesheet:/\.css$/i,font:/\.(?:woff2?|ttf)$/i,image:/\.(?:png|jpe?g|webp|gif|svg|ico)$/i,xhr:identityPage?/\.(?:json|js)$/i:/\.json$/i,fetch:/\.json$/i};return Boolean(types[request.resourceType]?.test(u.pathname));}catch{return false;}
 }

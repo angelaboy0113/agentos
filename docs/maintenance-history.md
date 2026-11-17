@@ -2026,3 +2026,7 @@ Preserve Runner-produced commit metadata receipts across model continuation, fin
 
 
 1.126.0: reviewed interactive website login can deliver a task-bound QR privately to the original robot administrator and resume the original job after validation. See [remote login verification](remote-login-qr.md). API credentials and browser login remain separate; no authentication state or data scope is shared across systems.
+
+
+### 1.128.0 — 多跳身份登录恢复
+支持维护者审核的精确身份页和仅等待登录时的扫码初始化/轮询 POST，身份 SDK 公共资源读取、二维码提示识别以及跨跳转幂等 DOM 读取恢复。身份方成功不再当作应用已登录；不扩大业务写入或跨项目会话。包含 1.127.0 源码复用改造。实测与部署状态以部署审计为准。
