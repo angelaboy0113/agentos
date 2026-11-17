@@ -1,0 +1,48 @@
+import {createHash} from 'node:crypto';
+import {cleanWebsiteText} from '../shared/website-policy.js';
+const fail=(code,message)=>Object.assign(new Error(message),{code});
+const sha=/^[a-f0-9]{40,64}$/;
+const decimal=v=>typeof v==='string'&&/^(0|[1-9][0-9]*)$/.test(v)&&BigInt(v)<=BigInt(Number.MAX_SAFE_INTEGER)?Number(v):null;
+export function createCnbPullRequestTools(e,q,cred,adapters={}){
+ let active=true;const fetcher=adapters.cnbFetch??fetch,pause=adapters.pause??(ms=>new Promise(r=>setTimeout(r,ms)));
+ const check=async()=>{if(!active)throw fail('CNB_CLOSED','合并请求只读工具已关闭');await adapters.authorize?.();};
+ const scope=repo=>{if(!q.repositories.includes(repo))throw fail('CNB_SCOPE','仓库不属于本次系统及环境的合并请求只读范围');return repo;};
+ const clean=v=>cleanWebsiteText(String(v??'').split(cred.password).join('[已隐藏]'),2000);
+ const person=p=>p?{username:clean(p.username),nickname:clean(p.nickname)}:null;
+ const number=v=>{const n=typeof v==='number'?v:decimal(v);if(!Number.isSafeInteger(n)||n<1)throw fail('CNB_PR_IDENTITY','合并请求编号无效');return n;};
+ function project(row,repo){
+  const n=number(row?.number);if(!['open','closed'].includes(row.state)||typeof row.is_merged!=='boolean'||row.base?.repo?.path!==repo||!sha.test(row.base?.sha??'')||!sha.test(row.head?.sha??'')||typeof row.base?.ref!=='string'||typeof row.head?.ref!=='string'||row.closed_at!=null&&(!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(row.closed_at)||!Number.isFinite(Date.parse(row.closed_at))))throw fail('CNB_PR_IDENTITY','合并请求来源、提交或时间结构不一致');
+  return{repository:repo,number:n,state:row.state,isMerged:row.is_merged,title:clean(row.title),author:person(row.author),mergedBy:row.is_merged?person(row.merged_by):null,closedAt:row.closed_at??null,mergeTime:null,timeEvidence:'平台closed_at关闭时间；本接口未提供独立merged_at，不等同已核实的精确合并时间',base:{ref:clean(row.base.ref),sha:row.base.sha},head:{ref:clean(row.head.ref),sha:row.head.sha,repository:clean(row.head.repo?.path)},requirementOwnershipVerified:false,deploymentVerified:false};
+ }
+ async function get(repo,suffix){
+  scope(repo);if(typeof cred.password!=='string'||!cred.password||/[\r\n]/.test(cred.password))throw fail('CNB_AUTH_EXPIRED','未找到有效合并请求读取凭据');
+  for(let attempt=0;attempt<3;attempt++){
+   await check();
+   try{
+    const response=await fetcher(e.cnb.apiOrigin+'/'+repo.split('/').map(encodeURIComponent).join('/')+'/-/pulls'+suffix,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(q.timeoutMs),headers:{Authorization:'Bearer '+cred.password,Accept:'application/vnd.cnb.api+json'}});
+    if(response.status!==200){await response.body?.cancel();if([429,502,503,504].includes(response.status)&&attempt<2){await pause(1000*(attempt+1));continue;}throw fail(response.status===401?'CNB_AUTH_EXPIRED':response.status===403?'CNB_PERMISSION':'CNB_HTTP','合并请求只读查询未成功（HTTP '+response.status+'）；需要repo-pr:r及原仓库范围，不执行合并或构建');}
+    const chunks=[];let length=0;const reader=response.body.getReader();try{for(;;){const{done,value}=await reader.read();if(done)break;length+=value.length;if(length>8*1024*1024)throw fail('CNB_RESPONSE','单页响应过大，请减小limit后继续');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+    let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw fail('CNB_RESPONSE','合并请求响应不是可核验JSON');}
+    return{body,headers:response.headers};
+   }catch(error){if(error.code?.startsWith('CNB_'))throw error;if(attempt===2)throw fail('CNB_NETWORK','合并请求幂等读取临时连接或响应中断；保留已有证据');await pause(1000*(attempt+1));}
+  }
+ }
+ async function page(args){
+  const repo=scope(args.repository),p=args.page??1,limit=args.limit??q.maxRows,state=args.state??'closed';
+  if(!Number.isSafeInteger(p)||p<1||!Number.isSafeInteger(limit)||limit<1||limit>q.maxRows||!Number.isSafeInteger((p-1)*limit)||!['open','closed','all'].includes(state))throw fail('REPORT_INPUT','合并请求分页或状态无效');
+  const params=new URLSearchParams({state,page:String(p),page_size:String(limit)}),{body,headers}=await get(repo,'?'+params),total=decimal(headers.get('x-cnb-total'));
+  if(!Array.isArray(body)||body.length>limit||total===null||decimal(headers.get('x-cnb-page'))!==p||decimal(headers.get('x-cnb-page-size'))!==limit||body.length&&((p-1)*limit+body.length>total)||body.length<limit&&((p-1)*limit+body.length<total))throw fail('CNB_PAGINATION','合并请求分页缺失或总数不一致，不将失败当成无记录');
+  const rows=body.map(row=>project(row,repo));if(new Set(rows.map(x=>x.number)).size!==rows.length||state!=='all'&&rows.some(r=>r.state!==state))throw fail('CNB_PAGINATION','合并请求出现重复编号或状态不一致');
+  return{repository:repo,rows,page:p,pageSize:limit,total,nextPage:rows.length? p+1:null,complete:!rows.length,fetchedAt:new Date().toISOString(),snapshot:'平台逐次读取，非事务快照；完整范围需空终页核验',evidenceType:'pull-requests',resultHash:createHash('sha256').update(JSON.stringify(rows)).digest('hex')};
+ }
+ async function index(args){
+  const repos=args.repositories??q.repositories;if(!Array.isArray(repos)||!repos.length||new Set(repos).size!==repos.length)throw fail('REPORT_INPUT','仓库集合无效');repos.forEach(scope);
+  const state=args.state??'closed';if(!['open','closed','all'].includes(state))throw fail('REPORT_INPUT','合并请求状态无效');
+  const target=args.targetBranch;if(target!==undefined&&(typeof target!=='string'||!target||target.length>500||/[\x00-\x20\x7f]/.test(target)))throw fail('REPORT_INPUT','目标分支无效');
+  const rows=new Array(repos.length);let cursor=0;
+  await Promise.all(Array.from({length:Math.min(4,repos.length)},async()=>{for(;;){const i=cursor++;if(i>=repos.length)return;const r={repository:repos[i],rows:[],pages:0,complete:false,readStartedAt:new Date().toISOString()};rows[i]=r;const seen=new Set();let total=null;try{for(let p=1;;p++){const x=await page({repository:repos[i],page:p,limit:q.maxRows,state});if(x.complete){if(total!==null&&x.total!==total&&x.total!==0||seen.size!==(total??x.total))throw fail('CNB_PAGINATION','空终页未覆盖先前声明的完整数量');r.pages=p;r.complete=true;break;}if(total!==null&&x.total!==total)throw fail('CNB_PAGINATION','读取期间合并请求总数变化，已读记录保留但完整性未确认');total=x.total;for(const row of x.rows){if(seen.has(row.number))throw fail('CNB_PAGINATION','跨页重复合并请求，完整性未确认');seen.add(row.number);r.rows.push(row);}r.pages=p;if(x.complete){if(seen.size!==total)throw fail('CNB_PAGINATION','合并请求实际数量与总数不同');r.complete=true;break;}}}catch(error){r.code=error.code??'CNB_NETWORK';r.error=clean(error.message);}r.allStatesMatchedCount=r.rows.length;if(target!==undefined)r.rows=r.rows.filter(x=>x.base.ref===(target.startsWith('refs/heads/')?target:'refs/heads/'+target));r.readEndedAt=new Date().toISOString();}}));
+  return{rows,complete:rows.every(r=>r.complete),targetBranch:target??null,evidenceType:'pull-request-index',snapshot:'按仓库逐页读取，非同一事务快照',note:'平台合并请求目录不单独证明当前固定分支包含这些提交；请与固定SHA的Git祖先证据关联。closed_at不是独立merged_at；标题或作者不证明正式需求归属。',resultHash:createHash('sha256').update(JSON.stringify(rows)).digest('hex')};
+ }
+ const spec=[{tool:'connection',args:{repository:'optional exact configured repository'},description:'Verify repo-pr:r by reading one actual PR record; no browser login or mutation.'},{tool:'pull_requests',args:{repository:'exact configured repository',page:'positive page or nextPage',limit:'up to configured page size',state:'open, closed or all; default closed'},description:'Read one PR page with platform merge actor, closed_at and source/target refs. Follow nextPage until empty terminal page. Closed time is not independent merged_at.'},{tool:'pull_request',args:{repository:'exact configured repository',number:'exact positive PR number'},description:'Read one actual PR. mergedBy is platform merge operator only when isMerged. No comments, raw bodies, writes, builds or deployment.'},{tool:'pull_request_index',args:{repositories:'optional subset of configured repository paths; default all',targetBranch:'optional exact target branch',state:'open, closed or all; default closed'},description:'Batch complete PR inventories with four repository I/O workers; one call, full pagination, no total task/page cutoff. Each failure preserves its valid rows and precise error. Use this for multi-repository merge investigations instead of per-PR browser loops.'}];
+ return{spec,async run(tool,args={}){await check();const contract=spec.find(s=>s.tool===tool);if(!contract||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(contract.args,k)))throw fail('REPORT_INPUT','未知合并请求工具或参数');if(tool==='connection'){const r=await page({repository:args.repository??q.repositories[0],page:1,limit:1});return{connected:true,repository:r.repository,scopeVerified:true,kind:'cnb',readOnlyBy:'fixed-GET-pull-requests',accountReadOnlyVerified:false};}if(tool==='pull_requests')return page(args);if(tool==='pull_request'){const n=number(args.number),repo=scope(args.repository),{body}=await get(repo,'/'+n),row=project(body,repo);if(row.number!==n)throw fail('CNB_PR_IDENTITY','合并请求编号不一致');return{row,rows:[row],resultHash:createHash('sha256').update(JSON.stringify([row])).digest('hex'),fetchedAt:new Date().toISOString(),evidenceType:'pull-request'};}return index(args);},async close(){active=false;}};
+}

@@ -1,3 +1,4 @@
+import {createCnbPullRequestTools} from './cnb-pull-requests.js';
 import {createHash} from 'node:crypto';
 import {validateCnb,validateCnbQuery} from '../shared/cnb-policy.js';
 import {cleanWebsiteText} from '../shared/website-policy.js';
@@ -5,7 +6,7 @@ const fail=(code,message)=>Object.assign(new Error(message),{code});
 const keys=['sn','slug','title','sha','sourceRef','targetRef','sourceSlug','event','status','createTime','duration','pipelineTotalCount','pipelineSuccessCount','pipelineFailCount'];
 const filters=['createTime','endTime','event','sha','sn','sourceRef','targetRef','status','title'];
 export async function createCnbTools(e,q,cred,adapters={}){
- validateCnb(e);validateCnbQuery(q);let active=true;
+ validateCnb(e);validateCnbQuery(q);if(e.cnb.resources?.length===1&&e.cnb.resources[0]==='pull-requests')return createCnbPullRequestTools(e,q,cred,adapters);if(e.cnb.resources?.includes('pull-requests'))throw Error('Use separate credentials for CNB read resources');let active=true;
  const fetcher=adapters.cnbFetch??fetch;
  const check=async()=>{if(!active)throw fail('CNB_CLOSED','流水线只读工具已关闭');await adapters.authorize?.();};
  const repository=repo=>{if(!q.repositories.includes(repo))throw fail('CNB_SCOPE','仓库不在本次系统及环境的流水线只读范围');return repo;};

@@ -30,6 +30,42 @@
           "timeoutMs": 5000
         }
       }
+    },
+    "example_pr_reads": {
+      "kind": "cnb",
+      "projectId": "your-project",
+      "tier": "uat",
+      "credentialRef": "your-pr-read",
+      "membersRead": true,
+      "ownerOpenIdsByProfile": {
+        "your-bot": [
+          "ou_your_admin"
+        ]
+      },
+      "cnb": {
+        "apiOrigin": "https://api.cnb.cool",
+        "resources": [
+          "pull-requests"
+        ]
+      },
+      "queries": {
+        "investigate": {
+          "mode": "investigate",
+          "reviewed": true,
+          "description": "Read platform PR operators and close times; not deployment evidence",
+          "parameters": [
+            {
+              "name": "purpose",
+              "type": "string"
+            }
+          ],
+          "repositories": [
+            "your-org/your-project/your-repository"
+          ],
+          "maxRows": 100,
+          "timeoutMs": 600000
+        }
+      }
     }
   },
   "executionPolicy": {
