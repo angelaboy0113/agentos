@@ -58,7 +58,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if (job.taskIntent === 'analysis') {
     const reusingSnapshot = (job.context ?? []).some(entry => entry.result?.sourceSync);
     await emit({ type: 'progress', message: job.stage === 'owner_report' || reusingSnapshot ? '正在核对并复用本问题已同步的源码快照' : '正在同步配置仓库的 origin 分支，成功后进入只读分析' });
-    try { sourceSync = await prepareAnalysisSources(job, project, {onProgress: message => emit({type:'progress',message})});await emit({type:'progress',message:'已核验并固定本问题源码提交',sourceSnapshot:sourceSync}); }
+    try { sourceSync = await prepareAnalysisSources(job, project, {onProgress: message => emit({type:'progress',message})});await emit({type:'progress',message:'已核验并固定本问题源码提交',sourceSnapshot:sourceSync,...(sourceSync.preparationMetrics?{sourcePreparation:sourceSync.preparationMetrics}:{})}); }
     catch (error) { return sourceBlocked(error); }
   }
   const workspace = sourceSync?.workspace ?? await prepareWorkspace(job, project, config.worktreeRoot);

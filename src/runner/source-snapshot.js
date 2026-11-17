@@ -1,3 +1,4 @@
+import {reuseSnapshotRepository} from './source-repository-reuse.js';
 import {parallelRead,prepareRepositoryLayers} from '../shared/parallel-read.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {verifyIndependentGit} from '../shared/git-metadata.js';
@@ -92,10 +93,28 @@ export async function fetchSnapshotCommit(cwd, repo, shallow, options = {}, run 
  if (await run(cwd, ['rev-parse', 'FETCH_HEAD']) !== repo.commit) throw sourceGitError({code:'SOURCE_BRANCH_MOVED',operation:'fetch',retryable:false,attempts:1,exitCode:null});
 }
 export async function syncSnapshot(project, environment, {onProgress} = {}) {
- const prepared=await settings(project,environment);
+ const preparationStarted=Date.now(),prepared=await settings(project,environment);
+ const waitingForLock=Date.now();
  return withSnapshotLock(prepared.snapshotRoot,async(checkLock)=>{
+  const lockWaitMs=Date.now()-waitingForLock,remoteStarted=Date.now();
   const {id,sourceRoot,snapshotRoot,repos}=prepared;
-  const remote=await parallelRead(repos,async(repo)=>{
+  let coalesced=null;
+  // Share only an actual branch check completed AFTER this request began.
+  // Never extend its timestamp: this is overlapping-work coalescing, not a TTL.
+  try{
+   const pointer=path.join(snapshotRoot,'latest-'+createHash('sha256').update(id).digest('hex').slice(0,32)+'.json');
+   if((await lstat(pointer)).isSymbolicLink())throw Error('Unsafe pointer');
+   const p=JSON.parse(await readFile(pointer,'utf8')),checked=Date.parse(p.remoteCheckedAt);
+   if(p.environment===id&&checked>preparationStarted&&checked<=Date.now()&&/^analysis-[a-f0-9]{64}$/.test(p.container)){
+    const folder=path.join(snapshotRoot,p.container),file=path.join(folder,'source-manifest.json');
+    if((await lstat(folder)).isSymbolicLink()||(await lstat(file)).isSymbolicLink())throw Error('Unsafe shared observation');
+    const m=JSON.parse(await readFile(file,'utf8'));
+    if(m.policy!==policy||m.environment!==id||m.sourceRoot!==sourceRoot||m.workspace!==path.join(folder,'workspace')||m.repositories?.length!==repos.length)throw Error('Shared observation identity changed');
+    const rows=await parallelRead(repos,async repo=>{const origin=await git(repo.cwd,['remote','get-url','origin']),proof=m.repositories.find(r=>r.path===repo.path&&r.branch===repo.branch);if(!proof||!/^[a-f0-9]{40,64}$/.test(proof.commit)||!m.repositorySources?.some(r=>r.path===repo.path&&r.originHash===createHash('sha256').update(origin).digest('hex')))throw Error('Shared observation origin changed');return {...repo,origin,commit:proof.commit};});
+    coalesced={rows,checkedAt:p.remoteCheckedAt};
+   }
+  }catch{/* Missing/old/ambiguous observations require a real remote read. */}
+  const remote=coalesced?.rows??await parallelRead(repos,async(repo)=>{
    let stage='读取来源配置';
    try{
     const origin=await git(repo.cwd,['remote','get-url','origin']);
@@ -106,16 +125,25 @@ export async function syncSnapshot(project, environment, {onProgress} = {}) {
     return {...repo,origin,commit};
    }catch(error){throw snapshotFailure(repo,stage,error);}
   });
+  const remoteCheckMs=Date.now()-remoteStarted;
   const cacheKey=createHash('sha256').update(JSON.stringify([sourceRoot,id,remote.map(({path,branch,origin,commit})=>({path,branch,origin,commit}))])).digest('hex');
-  const container=path.join(snapshotRoot,'analysis-'+cacheKey),remoteCheckedAt=new Date().toISOString();
+  const container=path.join(snapshotRoot,'analysis-'+cacheKey),remoteCheckedAt=coalesced?.checkedAt??new Date().toISOString();
   const existing=await lstat(container).catch(e=>{if(e.code!=='ENOENT')throw e;return null;});
-  let report;
+  let report,verifyMs=0;
   if(existing){
    if(!existing.isDirectory()||existing.isSymbolicLink())throw new Error('快照缓存路径异常，未复用');
    report=JSON.parse(await readFile(path.join(container,'source-manifest.json'),'utf8'));
-   if(report.cacheKey!==cacheKey||report.environment!==id||report.sourceRoot!==sourceRoot||report.workspace!==path.join(container,'workspace')||JSON.stringify(report.repositories)!==JSON.stringify(remote.map(({path,branch,commit})=>({path,branch,commit}))))throw new Error('快照缓存身份不一致');
-   await verifySnapshotUnlocked(project,report);
+   if(report.cacheKey!==cacheKey||report.environment!==id||report.sourceRoot!==sourceRoot||report.workspace!==path.join(container,'workspace')||JSON.stringify(report.repositories.map(({path,branch,commit})=>({path,branch,commit})))!==JSON.stringify(remote.map(({path,branch,commit})=>({path,branch,commit}))))throw new Error('快照缓存身份不一致');
+   const verifying=Date.now();await verifySnapshotUnlocked(project,report);verifyMs+=Date.now()-verifying;
   }else{
+   const reuseCandidates=[];
+   for(const name of await readdir(snapshotRoot))if(/^analysis-[a-f0-9]+$/.test(name)){
+    const folder=path.join(snapshotRoot,name);
+    try{if((await lstat(folder)).isSymbolicLink()||(await lstat(path.join(folder,'source-manifest.json'))).isSymbolicLink())continue;
+     const m=JSON.parse(await readFile(path.join(folder,'source-manifest.json'),'utf8'));
+     if(m.policy===policy&&m.sourceRoot===sourceRoot&&m.environment===id&&m.workspace===path.join(folder,'workspace')&&Array.isArray(m.repositories))reuseCandidates.push(m);
+    }catch{/* Unknown manifests are neither copied nor removed. */}
+   }
    const temporary=await mkdtemp(path.join(snapshotRoot,'building-'));
    const workspace=path.join(temporary,'workspace');await mkdir(workspace,{mode:0o700});
    report={policy,cacheKey,projectId:project.id??null,repositorySources:remote.map(r=>({path:r.path,originHash:createHash('sha256').update(r.origin).digest('hex')})),environment:id,sourceRoot,workspace:path.join(container,'workspace'),checkedAt:remoteCheckedAt,repositories:[]};
@@ -132,6 +160,19 @@ export async function syncSnapshot(project, environment, {onProgress} = {}) {
      }
      await mkdir(target,{recursive:true});
      if((target!==workspace&&!within(workspace,await realpath(target)))||(await readdir(target)).length)throw new Error(`快照路径冲突：${repo.path}`);
+     const previous=reuseCandidates.find(m=>m.repositories.some(r=>r.path===repo.path&&r.branch===repo.branch&&r.commit===repo.commit)&&m.repositorySources?.some(r=>r.path===repo.path&&r.originHash===createHash('sha256').update(repo.origin).digest('hex')));
+     if(previous){
+      const seed=path.resolve(previous.workspace,repo.path),children=previous.repositories.map(r=>path.resolve(previous.workspace,r.path)).filter(p=>within(seed,p)).map(p=>path.relative(seed,p));
+      try{
+       const reuse=await reuseSnapshotRepository({root:snapshotRoot,seed,target,commit:repo.commit,origin:repo.origin,children},git);
+       await onProgress?.(`${repo.path}：远端提交未变，复用独立源码文件与对象，无下载/检出/重打包`);
+       report.preparation??={reusedRepositories:0,cowFiles:0,copiedFiles:0};report.preparation.reusedRepositories++;report.preparation.cowFiles+=reuse.cowFiles;report.preparation.copiedFiles+=reuse.copiedFiles;
+       return {path:repo.path,branch:repo.branch,commit:repo.commit};
+      }catch{
+       if((await readdir(target)).length)throw Error('复用路径未清理，未覆盖');
+       await onProgress?.(`${repo.path}：旧副本未通过独立性核验，按原流程准备新缓存`);
+      }
+     }
      stage='选择对象种子';
       // Independently copy local objects (including a shallow boundary), then
       // let the real origin supply and select the requested environment tip.
@@ -163,11 +204,11 @@ export async function syncSnapshot(project, environment, {onProgress} = {}) {
     await writeFile(path.join(temporary,'source-manifest.json'),JSON.stringify(report),{mode:0o600,flag:'wx'});
     checkLock();await rename(temporary,container);
    }catch(error){await rm(temporary,{recursive:true,force:true});throw error;}
-   await verifySnapshotUnlocked(project,report);
+   const verifying=Date.now();await verifySnapshotUnlocked(project,report);verifyMs+=Date.now()-verifying;
   }
   const pointer=path.join(snapshotRoot,'latest-'+createHash('sha256').update(id).digest('hex').slice(0,32)+'.json');
   const tmp=pointer+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify({environment:id,container:path.basename(container),remoteCheckedAt}),{mode:0o600,flag:'wx'});checkLock();await rename(tmp,pointer);
-  return {...report,remoteCheckedAt};
+  return Object.defineProperty({...report,remoteCheckedAt},'preparationMetrics',{value:{cacheReused:Boolean(existing),remoteCheckCoalesced:Boolean(coalesced),lockWaitMs,remoteCheckMs,verifyMs,totalMs:Date.now()-preparationStarted,reusedRepositories:existing?repos.length:report.preparation?.reusedRepositories??0,fetchRepositories:existing?0:repos.length-(report.preparation?.reusedRepositories??0)},enumerable:false});
  });
 }
 async function verifySnapshotUnlocked(project, report) {
@@ -178,7 +219,7 @@ async function verifySnapshotUnlocked(project, report) {
   if (!within(snapshotRoot, container) || path.dirname(container) !== snapshotRoot || path.basename(workspace) !== 'workspace' || report.sourceRoot !== sourceRoot || report.environment !== id) throw new Error('快照证据路径或环境不匹配');
   if((await lstat(container)).isSymbolicLink()||(await lstat(path.join(container,'source-manifest.json'))).isSymbolicLink())throw new Error('源码缓存清单路径异常');
   const manifest = JSON.parse(await readFile(path.join(container, 'source-manifest.json'), 'utf8'));
-  const {remoteCheckedAt,...immutable}=report;
+  const {remoteCheckedAt,preparationMetrics,...immutable}=report;
   if (JSON.stringify(manifest) !== JSON.stringify(immutable) || report.repositories.length !== repos.length) throw new Error('源码快照清单与任务证据不匹配');
   for (const repo of repos) {
     const cwd = await realpath(path.resolve(workspace, repo.path));
@@ -255,7 +296,7 @@ export async function restoreSnapshot(project,report){
   if(await lstat(container).catch(e=>{if(e.code!=='ENOENT')throw e;return null;}))return verifySnapshotUnlocked(project,report);
   let audit;
   try{const dir=path.join(snapshotRoot,'.snapshot-audit');if((await lstat(dir)).isSymbolicLink())throw new Error();const file=path.join(dir,path.basename(container)+'.json');if((await lstat(file)).isSymbolicLink())throw new Error();audit=JSON.parse(await readFile(file,'utf8'));}catch{throw new Error('历史源码缓存已不可用且没有可信提交清单；请恢复原快照，或明确新建问题核对最新版本。未切换提交。');}
-  const {remoteCheckedAt,...immutable}=report;
+  const {remoteCheckedAt,preparationMetrics,...immutable}=report;
   if(audit.policy!=='source-cache-reclamation-v1'||JSON.stringify(audit.manifest)!==JSON.stringify(immutable))throw new Error('历史源码清理清单与原任务不匹配；未切换提交');
   const tmp=await mkdtemp(path.join(snapshotRoot,'building-'));
   try{

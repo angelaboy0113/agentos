@@ -19,6 +19,20 @@ async function fixture(t,id='system-a',environment='qa-custom'){
  const project={id,repoPath:source,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(base,'cache'),analysisEnvironments:{[environment]:{repositories:[{path:'service',branch:'business'}]}}};
  return {base,origin,writer,source,repo,project,environment,commit};
 }
+test('a changed bundle reuses unchanged repositories independently while remote rollback/update remains authoritative',async t=>{
+ const f=await fixture(t);await git(f.writer,'branch','stable');await git(f.writer,'push','origin','stable');
+ await git(f.base,'clone','--no-local','--depth=1','--branch','stable',f.origin,path.join(f.source,'stable'));
+ f.project.analysisEnvironments[f.environment].repositories.push({path:'stable',branch:'stable'});
+ const first=await syncSnapshot(f.project,f.environment);await f.commit('new business rule');
+ const second=await syncSnapshot(f.project,f.environment);assert.notEqual(first.cacheKey,second.cacheKey);assert.equal(second.preparation.reusedRepositories,1);
+ assert.equal(await readFile(path.join(second.workspace,'stable/rule.txt'),'utf8'),'second');assert.equal(await readFile(path.join(first.workspace,'service/rule.txt'),'utf8'),'second');
+ const third=await syncSnapshot(f.project,f.environment);assert.equal(third.cacheKey,second.cacheKey);assert.equal(third.workspace,second.workspace);await verifySnapshot(f.project,second);
+});
+test('overlapping new questions coalesce one fresh remote observation without extending freshness into later questions',async t=>{
+ const f=await fixture(t);const values=await Promise.all([syncSnapshot(f.project,f.environment),syncSnapshot(f.project,f.environment),syncSnapshot(f.project,f.environment)]);
+ assert.ok(values.some(r=>r.preparationMetrics.remoteCheckCoalesced));for(const value of values){assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(value)),'preparationMetrics'),false);await verifySnapshot(f.project,JSON.parse(JSON.stringify(value)));}assert.equal(new Set(values.map(r=>r.remoteCheckedAt)).size,1);assert.equal(new Set(values.map(r=>r.workspace)).size,1);
+ await new Promise(r=>setTimeout(r,3));await f.commit('later question needs new commit');const next=await syncSnapshot(f.project,f.environment);assert.equal(next.preparationMetrics.remoteCheckCoalesced,false);assert.notEqual(next.cacheKey,values[0].cacheKey);
+});
 test('fetch errors after publishing complete ancestry retain diagnostics but independently validate the fixed cache',async t=>{
  const f=await fixture(t),report=await syncSnapshot(f.project,f.environment),cwd=path.join(report.workspace,'service');
  const result=await prepareSnapshotHistory(f.project,report,{fetchHistory:async(dir,args)=>{await git(dir,...args);throw Object.assign(Error('synthetic post-fetch process failure'),{code:'SOURCE_GIT_UNAVAILABLE'});}});
@@ -52,7 +66,7 @@ test('Git metadata links, alternate stores, commondir and worktree redirection a
  assert.equal(await readFile(outside,'utf8'),'keep');await verifySnapshot(f.project,report);
 });
 test('old metadata-free provenance remains readable, and reclaimed caches restore the exact old commit',async t=>{
- const f=await fixture(t),a=await syncSnapshot(f.project,f.environment);delete a.projectId;delete a.repositorySources;const {remoteCheckedAt,...manifest}=a;await writeFile(path.join(path.dirname(a.workspace),'source-manifest.json'),JSON.stringify(manifest));await verifySnapshot(f.project,a);
+ const f=await fixture(t),a=await syncSnapshot(f.project,f.environment);delete a.projectId;delete a.repositorySources;const {remoteCheckedAt,preparationMetrics,...manifest}=a;await writeFile(path.join(path.dirname(a.workspace),'source-manifest.json'),JSON.stringify(manifest));await verifySnapshot(f.project,a);
  await f.commit('third');const b=await syncSnapshot(f.project,f.environment);let state={jobs:[]};let projected=0;const gc=()=>pruneSourceSnapshots(f.project,{getState:async()=>{throw Error('Full history copy forbidden');},readReferences:async(p,root,ids)=>{projected++;return structuredClone(snapshotReferences(state,p,root,ids));},withState:fn=>fn(state),apply:true});
  const removed=await gc();assert.ok(projected>=2);assert.equal(removed.removed.length,1);await assert.rejects(access(a.workspace));const audit=JSON.parse(await readFile(path.join(f.project.analysisSnapshotRoot,'.snapshot-audit',path.basename(path.dirname(a.workspace))+'.json')));assert.equal(audit.status,'deleted');assert.deepEqual(audit.manifest,manifest);
  const restored=await restoreSnapshot(f.project,a);assert.equal(restored.workspace,a.workspace);assert.equal(await readFile(path.join(a.workspace,'service/rule.txt'),'utf8'),'second');await verifySnapshot(f.project,a);await access(b.workspace);

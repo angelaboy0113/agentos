@@ -239,3 +239,5 @@ Memory headroom and durable overload waiting: see [memory-admission.md](memory-a
 
 
 1.126.0: reviewed interactive website login can deliver a task-bound QR privately to the original robot administrator and resume the original job after validation. See [remote login verification](remote-login-qr.md). API credentials and browser login remain separate; no authentication state or data scope is shared across systems.
+
+1.127.0: unchanged repositories in a new environment bundle reuse independent copy-on-write files after exact SHA/origin/cleanliness checks; overlapping questions can share a remote branch observation completed after both requests began. Later requests still read the remote. Preparation metrics are runtime observations, separate from the immutable source manifest. See [source efficiency](source-efficiency.md).
