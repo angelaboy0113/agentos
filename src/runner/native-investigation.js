@@ -108,7 +108,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     // waiting indefinitely during teardown.
     if(!direct.channel){
       if(continuation)observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));
-      else if(continuousReviewDecision(direct.job,result).continue){
+      else if(!result.documentRequests?.length&&continuousReviewDecision(direct.job,result).continue){
         // A normal work-in-progress result belongs to this live thread. Sending
         // it back through the runner reopens the app and reloads source/skills.
         // Persist the intermediate evidence, but never publish it as delivery.

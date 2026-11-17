@@ -36,7 +36,10 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  const radioGroup=el.closest('[role="radiogroup"],[role="tablist"],.ant-radio-group,.el-radio-group,.t-radio-group');
  const radio=tag==='label'&&el.querySelectorAll('input[type="radio"]').length===1?el.querySelector('input[type="radio"]'):tag==='input'&&el.type==='radio'?el:null;
  const countedChoices=radioGroup&&[...radioGroup.querySelectorAll('label')].filter(n=>n.getClientRects().length);
- const queryRadio=radioGroup&&(radioGroup.closest('[role=search]')||countedChoices.length>=2&&countedChoices.every(n=>/[（(]\s*\d+\s*[）)]\s*$/.test(n.innerText.trim())));
+ const radioForm=radioGroup?.closest('form,.ant-form,.el-form');
+ const formButtons=radioForm?[...radioForm.querySelectorAll('button,[role=button]')].filter(n=>n.getClientRects().length).map(n=>n.innerText.trim()):[];
+ const searchRadioForm=formButtons.some(t=>/^(?:查询|搜索|检索|search|query)$/i.test(t))&&!formButtons.some(t=>/保存|提交|审批|支付|删除|修改|创建|发布|save|submit|approve|delete|create|publish/i.test(t));
+ const queryRadio=radioGroup&&(radioGroup.closest('[role=search]')||searchRadioForm||countedChoices.length>=2&&countedChoices.every(n=>/[（(]\s*\d+\s*[）)]\s*$/.test(n.innerText.trim())));
  if(radioGroup&&radio){
   if(!queryRadio)return {visible:true,label,type:null};
   const owner=radio.closest('label'),text=(owner?.innerText||radio.getAttribute('aria-label')||'').trim();
