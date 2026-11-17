@@ -131,6 +131,12 @@ export class WebsiteBrowser {
   }
   await assertWebsiteFrame(s);
   const state=await this.readAcrossNavigation(s,()=>websiteDOM(s).evaluate(browserLoginState));
+  if(state.verificationRequired&&state.verificationFramePresent){
+   for(const frame of s.page.frames())if(frame!==s.page.mainFrame()){
+    const expired=await frame.evaluate(()=>/二维码.{0,8}(?:失效|过期)|QR code.{0,15}expired/i.test(document.body?.innerText??'')).catch(()=>false);
+    if(expired)state.verificationExpired=true;
+   }
+  }
   if(state.loginRequired&&s.authResult&&!state.verificationRequired&&!state.passwordChangeRequired)Object.assign(state,s.authResult);
   if(state.loginRequired){s.waiting=true;s.sawLogin=true;if(s.bootstrapFailure&&!state.credentialRejected&&!state.verificationRequired&&!state.passwordChangeRequired){const code=s.bootstrapFailure.status;Object.assign(state,code===429?{loginState:'rate_limited',rateLimited:true}:code>=500?{loginState:'service_error',serviceUnavailable:true}:{loginState:'request_error',requestFailed:true});}}
   else if(state.pageReady){if(s.waiting&&s.sawLogin)s.reloadAfterLogin=s.restoreTarget===true&&s.page.url()!==s.initialTarget;s.waiting=false;s.credentialAttempted=false;s.authResult=null;s.bootstrapFailure=null;}
@@ -162,6 +168,30 @@ export class WebsiteBrowser {
    status=await this.loginStatus(s);
   }
   return status;
+ }
+ // Authentication challenge only: never use the business screenshot delivery path.
+ async captureLoginQr(job,e){
+  if(e.loginNavigation?.remoteQr!==true||e.loginNavigation.interactive!==true)throw Error('Remote QR not configured');
+  if(!await this.authorize(job,true,{url:()=>e.baseUrl,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('Login scope expired');
+  const s=await this.state(job,e),status=await this.loginStatus(s);
+  if(!status.loginRequired||!status.verificationRequired||status.verificationExpired)return null;
+  const candidates=[];
+  for(const frame of s.page.frames())for(const img of await frame.locator('img').all()){
+   const src=await img.getAttribute('src');if(!/(?:qrcode|\/qr\/|data:image)/i.test(src??''))continue;
+   const box=await img.boundingBox();if(box&&box.width>=100&&box.height>=100&&await img.isVisible())candidates.push(img);
+  }
+  if(candidates.length!==1)return null; // An ambiguous page must never expose an arbitrary image.
+  const buffer=await candidates[0].screenshot({type:'png',timeout:10000});
+  if(buffer.length>2*1024*1024||buffer.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Error('Invalid QR image');
+  const after=await this.loginStatus(s);if(!after.loginRequired||after.verificationExpired)return null;
+  return {buffer,sha256:createHash('sha256').update(buffer).digest('hex')};
+ }
+ async refreshLoginQr(job,e){
+  if(e.loginNavigation?.remoteQr!==true)throw Error('Remote QR not configured');
+  const s=await this.state(job,e);if(!(await this.loginStatus(s)).loginRequired)return;
+  if(!await this.authorize(job,true,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('Login scope expired');
+  await s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});
+  return this.beginInteractiveLogin(job,e); // Explicit administrator request, no business operation replay.
  }
  async loginReady(job,e){const s=await this.state(job,e);return (await this.loginStatus(s)).pageReady===true;}
  async submitCredentials(job,e,cred,{force=false}={}){

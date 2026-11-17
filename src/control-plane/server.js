@@ -1,3 +1,4 @@
+import {RemoteLoginQr} from './remote-login-qr.js';
 import{DeliveryMaintenance}from'./delivery-maintenance.js';
 import{deliveryAttention,resumeDelivery}from'../shared/delivery-retry.js';
 import {WithdrawalWatcher} from './withdrawals.js';
@@ -89,6 +90,7 @@ export async function createControlPlane(overrides = {}) {
   context.contacts = overrides.contactService ?? new ContactDirectory(context, { file: config.contactsFile });
   context.knowledge = overrides.knowledgeService ?? new TeamKnowledgeService(context, { file: config.knowledgeFile });
   context.enrollmentCredentials = overrides.enrollmentCredentials ?? new EnrollmentCredentialService(context);
+  context.remoteLoginQr = overrides.remoteLoginQr ?? new RemoteLoginQr(context);
   context.websiteCredentials = overrides.websiteCredentials ?? new WebsiteCredentialService(context);
   context.contactChannels=overrides.contactChannels??new ContactChannels(context,{file:config.contactChannelsFile});
   const cards = new LiveCards(store, feishu, {authorizeDestination:(d,e)=>context.contactChannels.verifyDestination(d,e)});
@@ -142,7 +144,7 @@ export async function createControlPlane(overrides = {}) {
   server.once('close', () => {
     context.memoryAdmission.stop?.();
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.remoteLoginQr.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
 }
@@ -267,7 +269,7 @@ async function route(context) {
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {enabled:context.backupMaintenance.enabled??false,lastRun:context.backupMaintenance.lastRun},
-      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'lazy-json-transaction-v2', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,memoryAdmission:context.memoryAdmission.check(),processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal,heapLimitBytes:getHeapStatistics().heap_size_limit,externalBytes:process.memoryUsage().external,arrayBuffersBytes:process.memoryUsage().arrayBuffers}, pendingControlRequests:context.controlReceipts.pending.size, stateTransaction:store.lastTransaction??null,
+      controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'lazy-json-transaction-v2', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,memoryAdmission:context.memoryAdmission.check(),processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal,heapLimitBytes:getHeapStatistics().heap_size_limit,externalBytes:process.memoryUsage().external,arrayBuffersBytes:process.memoryUsage().arrayBuffers}, pendingControlRequests:context.controlReceipts.pending.size+(context.remoteLoginQr?.workers?.size??0), stateTransaction:store.lastTransaction??null,
       memoryPolicy: 'question-native-or-sender-extractive-v2', memoryStatus: context.conversations.memory.status,
       conversationTransport: 'app-server-stdio', conversationConcurrency: context.conversations.concurrency,
       messagePresentation: context.cards?.enabled ? 'live-cards-v1' : 'text', cardActions: 'v1-lease-fenced',
@@ -631,6 +633,7 @@ export async function handleLarkCliEvent(context, event) {
   }
   const enrollmentCredentialResult = await context.enrollmentCredentials?.handle(event);
   if (enrollmentCredentialResult) return enrollmentCredentialResult;
+  const qrResult=await context.remoteLoginQr?.handle(event);if(qrResult)return qrResult;
   const credentialResult = await context.websiteCredentials?.handle(event);
   if (credentialResult) return credentialResult;
   if (event.agent_role && context.agents.agents?.[role]?.profile

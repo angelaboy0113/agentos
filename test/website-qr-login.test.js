@@ -1,4 +1,15 @@
 import test from 'node:test';import assert from 'node:assert/strict';import http from 'node:http';import os from 'node:os';import path from 'node:path';import{mkdtemp,rm}from'node:fs/promises';import{chromium}from'playwright';import{WebsiteBrowser}from'../src/control-plane/website-browser.js';
+test('remote challenge capture uses the existing authorized task tab and rejects ambiguous or expired images',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'capture-login-qr-'));
+ const png='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" fill="black"/></svg>');
+ const server=http.createServer((req,res)=>{res.setHeader('content-type','text/html;charset=utf-8');res.end('<div role="dialog">扫码登录<img width="160" height="160" src="'+png+'"></div>');});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const driver={launchPersistentContext:(p,o)=>chromium.launchPersistentContext(p,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP qr.fixture.test 127.0.0.1']})},b=new WebsiteBrowser(dir,driver),e={projectId:'one',tier:'uat',baseUrl:`http://qr.fixture.test:${server.address().port}/`,loginNavigation:{interactive:true,steps:['扫码登录'],remoteQr:true}},job={id:'qr'};
+ t.after(async()=>{await b.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
+ await b.run(job,e,'connection');const p=b.pages.get('qr').page;await p.locator('img').waitFor();const qr=await b.captureLoginQr(job,e);assert.equal(qr.buffer.subarray(0,8).toString('hex'),'89504e470d0a1a0a');assert.equal(b.pages.get('qr').page,p);assert.equal(p.context().pages().length,1);
+ await p.evaluate(()=>document.body.appendChild(document.querySelector('img').cloneNode()));assert.equal(await b.captureLoginQr(job,e),null);
+ await p.evaluate(()=>document.body.innerHTML='<div role="dialog">扫码登录 二维码已过期</div>');assert.equal(await b.captureLoginQr(job,e),null);
+ await assert.rejects(b.captureLoginQr(job,{...e,loginNavigation:{interactive:true,steps:['扫码登录']}}));
+});
 test('reviewed target-blank detail links reuse the same scoped tab instead of closing the requested evidence',async t=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'blank-link-browser-')),visited=[];
  const driver={launchPersistentContext:async(d,o)=>{const c=await chromium.launchPersistentContext(d,{...o,headless:true});const newPage=c.newPage.bind(c);c.newPage=async()=>{const p=await newPage();await p.route('**/*',r=>{visited.push(r.request().url());return r.fulfill({contentType:'text/html',body:r.request().url().endsWith('/details')?'<h1>Deployment detail</h1>':'<a target=_blank href=/app/details>Read detail</a><a target=_blank href=https://foreign.fixture.test/private>Foreign detail</a>'});});return p;};return c;}};

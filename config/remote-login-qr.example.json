@@ -1,0 +1,15 @@
+{
+  "loginNavigation": {
+    "interactive": true,
+    "steps": [
+      "微信登录"
+    ],
+    "remoteQr": true
+  },
+  "requiredDeploymentBindings": [
+    "projects.humanIdentities.groupOwner[profile]",
+    "projects.ownerOpenIdsByProfile[profile]",
+    "environment.ownerOpenIdsByProfile[profile]"
+  ],
+  "note": "Apply loginNavigation only to an already reviewed website entry. Retain its auth/read/static-resource policy. No cookies, QR image bytes or tokens in configuration."
+}

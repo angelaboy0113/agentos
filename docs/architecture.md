@@ -236,3 +236,6 @@ Memory headroom and durable overload waiting: see [memory-admission.md](memory-a
 
 
 已接入数据库长期只读策略与独立查询模板见[只读范围准备](connected-read-scope.md)。部署授权与模型参数分离，逐集合授权不是必需产品步骤。
+
+
+1.126.0: reviewed interactive website login can deliver a task-bound QR privately to the original robot administrator and resume the original job after validation. See [remote login verification](remote-login-qr.md). API credentials and browser login remain separate; no authentication state or data scope is shared across systems.

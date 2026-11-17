@@ -2019,3 +2019,6 @@ Preserve Runner-produced commit metadata receipts across model continuation, fin
 
 
 1.125.1补修：多助手同一公开消息的初始与接续提示统一采用控制面确定的本系统贡献验收，避免同时要求每位助手回答全系统而重复调查。单助手仍覆盖完整原问题，因果/金额/文件校验及权限不变，不自动提升结果颜色。原题真人验收另记实例记录。
+
+
+1.126.0: reviewed interactive website login can deliver a task-bound QR privately to the original robot administrator and resume the original job after validation. See [remote login verification](remote-login-qr.md). API credentials and browser login remain separate; no authentication state or data scope is shared across systems.
