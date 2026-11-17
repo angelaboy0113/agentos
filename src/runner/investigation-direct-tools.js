@@ -46,7 +46,12 @@ export class InvestigationDirectTools {
         const other=requestedSourceEnvironments(this.job,this.options.project).find(env=>env!==this.job.sourceEnvironment&&sourceRuntimeTier(this.options.project,env)===tier);
         if(other)return {state:'source_transition_required',sourceEnvironmentQuery:{environmentId:other,reason:'先核对目标环境独立固定源码，再读取对应环境'},instruction:'先按原schema提交已核验源码交接及此sourceEnvironmentQuery。不能用当前环境源码替代另一环境；不在工具内静默切换。'};
       }
-      const sourceResult={outcome:'needs_clarification',summary:'同一会话申请已授权只读取证',finalMessage:'调查仍在进行；下一步目的：'+String(query.reason??query.purpose??query.parameters?.[0]??''),sourceSync:this.options.sourceSync,workspace:this.options.workspace,threadId:this.threadId,sourceQuestionId:this.job.questionId,[args.website?'websiteQuery':'environmentQuery']:query};
+      // Native tools do not submit an intermediate model result. Retain a host-owned
+      // open original goal so explicit goalIds can pass the same continuation
+      // validation as legacy results. Do not invent arbitrary goal IDs supplied by
+      // a caller or mark a goal verified merely because a source was opened.
+      const investigation={status:'continue',goals:[{id:'original-question',required:true,status:'open',evidence:String(this.job.originalQuestion??this.job.instruction??'当前原问题仍在取证')} ]};
+      const sourceResult={outcome:'needs_clarification',investigation,summary:'同一会话申请已授权只读取证',finalMessage:'调查仍在进行；下一步目的：'+String(query.reason??query.purpose??query.parameters?.[0]??''),sourceSync:this.options.sourceSync,workspace:this.options.workspace,threadId:this.threadId,sourceQuestionId:this.job.questionId,[args.website?'websiteQuery':'environmentQuery']:query};
       const prepared=await this.post(this.route('continuous-environment'),{...this.identity(),result:sourceResult});
       if(prepared.job)this.job=prepared.job;
       if(!prepared.planned)return {state:'not_opened',diagnostic:prepared.diagnostic,sourcePreparedNext:prepared.sourcePreparedNext===true,terminalResult:prepared.terminalResult};

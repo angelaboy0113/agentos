@@ -2065,3 +2065,8 @@ The full-scope human test additionally exposed a response-body disconnect after 
 A planner can guess a tool name such as read even though the current database exposes select. Previously this was classified as SCOPE_LIMIT and ended the investigation. An unavailable name now returns an unexecuted argument-correction observation and preserves the actual tool catalog, original scope and collected evidence. It never aliases an unknown tool or enables writes; authorization is checked again before any corrected call. Unresolved selections prevent complete results. Native and legacy investigators share this behavior. Regression covers corrected reads, guessed write names not executed, and scope revocation during correction.
 
 Native compatibility also consumes legacy-shaped environment/website/history continuations in the existing App Server thread, with durable host receipts. Scope/login waiting and independent source transitions remain explicit. Identical unexecuted tool-selection repetition has a precise no-progress diagnostic; it is not a total task/call limit. New human-card acceptance remains required after deployment.
+
+### 1.132.3
+- Real human-card testing exposed missing native goal metadata: explicit original-question continuation was rejected despite a valid read scope. Native opens now carry a host-owned open original goal; invented goal IDs remain rejected.
+- PR GET temporary throttling respects Retry-After and revalidates authorization during waits. Persistent 429 is reported as CNB_RATE_LIMIT, not missing repo permissions. No business writes or broader credentials.
+- Regression covers the real continuation validator, identical GET recovery and revocation; human same-question acceptance is tracked separately from unit tests.

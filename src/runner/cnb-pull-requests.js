@@ -5,7 +5,7 @@ const sha=/^[a-f0-9]{40,64}$/;
 const decimal=v=>typeof v==='string'&&/^(0|[1-9][0-9]*)$/.test(v)&&BigInt(v)<=BigInt(Number.MAX_SAFE_INTEGER)?Number(v):null;
 export function createCnbPullRequestTools(e,q,cred,adapters={}){
  let active=true;const fetcher=adapters.cnbFetch??fetch,pause=adapters.pause??(ms=>new Promise(r=>setTimeout(r,ms)));
- const check=async()=>{if(!active)throw fail('CNB_CLOSED','合并请求只读工具已关闭');await adapters.authorize?.();};
+ const check=async()=>{if(!active)throw fail('CNB_CLOSED','合并请求只读工具已关闭');try{await adapters.authorize?.();}catch(error){throw Object.assign(error,{cnbAuthorizationFailure:true});}};
  const scope=repo=>{if(!q.repositories.includes(repo))throw fail('CNB_SCOPE','仓库不属于本次系统及环境的合并请求只读范围');return repo;};
  const clean=v=>cleanWebsiteText(String(v??'').split(cred.password).join('[已隐藏]'),2000);
  const person=p=>p?{username:clean(p.username),nickname:clean(p.nickname)}:null;
@@ -20,11 +20,11 @@ export function createCnbPullRequestTools(e,q,cred,adapters={}){
    await check();
    try{
     const response=await fetcher(e.cnb.apiOrigin+'/'+repo.split('/').map(encodeURIComponent).join('/')+'/-/pulls'+suffix,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(q.timeoutMs),headers:{Authorization:'Bearer '+cred.password,Accept:'application/vnd.cnb.api+json'}});
-    if(response.status!==200){await response.body?.cancel();if([429,502,503,504].includes(response.status)&&attempt<2){await pause(1000*(attempt+1));continue;}throw fail(response.status===401?'CNB_AUTH_EXPIRED':response.status===403?'CNB_PERMISSION':'CNB_HTTP','合并请求只读查询未成功（HTTP '+response.status+'）；需要repo-pr:r及原仓库范围，不执行合并或构建');}
+    if(response.status!==200){const status=response.status,header=response.headers.get('retry-after'),seconds=header!=null&&/^\d+(?:\.\d+)?$/.test(header)?Number(header):null,date=header==null?NaN:Date.parse(header);const retryAfterMs=seconds!==null?seconds*1000:Number.isFinite(date)?Math.max(0,date-Date.now()):status===429?30000:1000*(attempt+1);await response.body?.cancel();if([429,502,503,504].includes(status)&&attempt<2){let remaining=retryAfterMs;while(remaining>0){await check();const part=Math.min(remaining,1000);await pause(part);remaining-=part;}continue;}throw Object.assign(fail(status===401?'CNB_AUTH_EXPIRED':status===403?'CNB_PERMISSION':status===429?'CNB_RATE_LIMIT':'CNB_HTTP',status===429?'CNB合并请求读取临时限流（HTTP 429）；保留已读页，按Retry-After等待后仅续查失败仓库；不是令牌缺权限或仓库不存在':'合并请求只读查询未成功（HTTP '+status+'）；核对原仓库范围，不执行合并或构建'),status===429?{retryAfterMs}:{});}
     const chunks=[];let length=0;const reader=response.body.getReader();try{for(;;){const{done,value}=await reader.read();if(done)break;length+=value.length;if(length>8*1024*1024)throw fail('CNB_RESPONSE','单页响应过大，请减小limit后继续');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
     let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw fail('CNB_RESPONSE','合并请求响应不是可核验JSON');}
     return{body,headers:response.headers};
-   }catch(error){if(error.code?.startsWith('CNB_'))throw error;if(attempt===2)throw fail('CNB_NETWORK','合并请求幂等读取临时连接或响应中断；保留已有证据');await pause(1000*(attempt+1));}
+   }catch(error){if(error.cnbAuthorizationFailure||error.code?.startsWith('CNB_'))throw error;if(attempt===2)throw fail('CNB_NETWORK','合并请求幂等读取临时连接或响应中断；保留已有证据');await pause(1000*(attempt+1));}
   }
  }
  async function page(args){

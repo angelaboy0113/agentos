@@ -113,3 +113,10 @@ for(const mode of ['continue','waiting','source-transition'])test(`legacy-shaped
  const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({model:'fixture'}),bindToolCall:h=>handler=h});
  assert.equal(requests.length,1);assert.equal(result.nativeTiming.modelSessions,1);assert.equal(result.nativeTiming.environmentModelSessions,0);assert.equal(calls[0],'agentos_environment_open');if(mode==='continue'){assert.equal(turns,2);assert.equal(result.outcome,'ready');assert.equal(result.nativeTiming.hostContinuations,1);}else{assert.equal(turns,1);if(mode==='waiting')assert.equal(result.browserLoginRequired,true);else assert.equal(result.sourceEnvironmentQuery.environmentId,'sit');}
 });
+
+test('native explicit original goal passes the real continuation validator without broadening scope',async()=>{
+ const {environmentContinuation}=await import('../src/shared/investigation-review.js');let opened=0;
+ const direct=new InvestigationDirectTools({job:{...job,originalQuestion:'Read the original full report'},config:{},emit:async()=>{}},{post:async(route,body)=>{const query=body.result.environmentQuery;const decision=environmentContinuation({jobs:[]},job,query,body.result);assert.equal(body.result.investigation.goals[0].status,'open');if(!decision.continue)return{planned:false,job,diagnostic:{code:'REPEATED_TARGET',reason:decision.reason}};return{planned:true,job};},execute:async()=>{opened++;return{outcome:'needs_clarification',browserLoginRequired:true};}});
+ const rejected=await direct.call('agentos_environment_open',{request:JSON.stringify({environmentId:'authorized',goalIds:['invented-goal']}),website:false});assert.equal(rejected.state,'not_opened');assert.equal(opened,0);
+ const result=await direct.call('agentos_environment_open',{request:JSON.stringify({environmentId:'authorized',goalIds:['original-question']}),website:false});assert.equal(result.state,'waiting');assert.equal(opened,1);await direct.close();
+});
