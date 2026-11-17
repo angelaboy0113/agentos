@@ -5,12 +5,12 @@ import path from 'node:path';
 const helper=`import os,sys,fcntl,stat
 f=os.open(sys.argv[1],os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
 assert stat.S_ISREG(os.fstat(f).st_mode) and os.fstat(f).st_nlink==1
-fcntl.flock(f,fcntl.LOCK_EX)
+fcntl.flock(f,fcntl.LOCK_SH if sys.argv[2]=="shared" else fcntl.LOCK_EX)
 print('locked',flush=True)
 sys.stdin.buffer.read()
 `;
-export async function withSnapshotLock(root,run){
- const child=spawn('python3',['-c',helper,path.join(root,'.snapshot.lock')],{stdio:['pipe','pipe','pipe']});
+export async function withSnapshotLock(root,run,{shared=false}={}){
+ const child=spawn('python3',['-c',helper,path.join(root,'.snapshot.lock'),shared?'shared':'exclusive'],{stdio:['pipe','pipe','pipe']});
  child.stderr.resume();child.stdin.on('error',()=>{});
  let acquired=false;
  const exited=new Promise(resolve=>child.once('close',resolve));

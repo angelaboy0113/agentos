@@ -112,3 +112,15 @@ test('history requests resume the same thread once ready, never replay business 
 
 test('different production revision targets never trigger irrelevant pinned-ancestor downloads',async()=>{let calls=0;const pin='a'.repeat(40),target='b'.repeat(40),options={job:{taskIntent:'analysis',questionId:'q',stage:'developer'},project:{},sourceSync:{policy:'isolated-environment-source-v1',environment:'prd',repositories:[{path:'service',commit:pin}]},emit:async()=>{}};const result=await runWithSourceHistory(options,{history:async()=>assert.fail('must not download unrelated ancestry'),run:async o=>{calls++;if(calls===1)return{threadId:'same',sourceHistoryQuery:{repositories:['service'],targets:[{repository:'service',commit:target}],reason:'compare deployed version'},finalMessage:'current source retained'};assert.match(o.prompt,/SOURCE_HISTORY_TARGET_MISMATCH/);return{outcome:'partial',sourceHistoryQuery:null,finalMessage:'precise version scope remains missing'};}});assert.equal(result.outcome,'partial');assert.equal(result.sourceHistory.repositories[0].requestedCommit,target);assert.equal(calls,2);});
 test('legacy free-text deployed SHA is preflighted instead of triggering unrelated ancestry fetch',async()=>{let n=0;const options={job:{taskIntent:'analysis',questionId:'q',stage:'developer'},project:{},sourceSync:{policy:'isolated-environment-source-v1',environment:'prd',repositories:[{path:'service',commit:'a'.repeat(40)}]},emit:async()=>{}};const result=await runWithSourceHistory(options,{history:async()=>assert.fail('legacy target is ambiguous'),run:async o=>++n===1?{threadId:'same',sourceHistoryQuery:{repositories:['service'],reason:'production prd-other@'+'b'.repeat(40)},finalMessage:'keep evidence'}:{outcome:'partial',sourceHistoryQuery:null,finalMessage:'explicit missing version'}});assert.equal(result.sourceHistory.repositories[0].code,'SOURCE_HISTORY_TARGET_UNSPECIFIED');assert.equal(n,2);});
+
+test('slow history fetch permits final snapshot reads while protecting lifecycle and same-repository writes',async t=>{
+ const {withSnapshotLock}=await import('../src/shared/snapshot-lock.js');
+ const f=await fixture(t),report=await syncSnapshot(f.project,f.environment);let release,entered,fetches=0;
+ const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+ const history=prepareSnapshotHistory(f.project,report,{fetchHistory:async(dir,args)=>{fetches++;entered();await gate;await git(dir,...args);}});
+ await started;let lifecycle=false;const writer=withSnapshotLock(f.project.analysisSnapshotRoot,async()=>{lifecycle=true;});
+ let readDone=false;
+ try{await Promise.race([verifySnapshot(f.project,report).then(()=>readDone=true),new Promise((_,reject)=>setTimeout(()=>reject(Error('Final read blocked behind remote history')),3000))]);assert.equal(readDone,true);assert.equal(lifecycle,false);}
+ finally{release();await history;await writer;}
+ assert.equal(fetches,1);assert.equal(lifecycle,true);await verifySnapshot(f.project,report);
+});

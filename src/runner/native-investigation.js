@@ -73,10 +73,10 @@ export async function runNativeInvestigation(options,adapters={}) {
   // Host receipts live outside the model-writable artifact working directory.
   const journalDirectory=await store.root();
   let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer,modelTurns=0,hostContinuations=0;const began=Date.now();
+  const pendingTools=new Set(),deferredTools=new Set(),deferredResults=[];
   const onToolCall=async params=>{
     if(!active||params.threadId!==threadId||!turnId||params.turnId!==turnId||params.namespace!==null||!investigationDynamicTools.some(x=>x.name===params.tool)&&params.tool!=='agentos_read_result')throw failure('NATIVE_TOOL_SCOPE');
     const run=()=>journal.call(params.callId,{tool:params.tool,arguments:params.arguments},async()=>{
-      if(!active)throw failure('NATIVE_TURN_ENDED');
       toolCalls++;
       try {
         let result=params.tool==='agentos_read_result'?(String(params.arguments.resultRef??'').startsWith('source-metadata/')?await direct.readSourceMetadata(params.arguments):await store.read(params.arguments)):await direct.call(params.tool,params.arguments);
@@ -87,7 +87,9 @@ export async function runNativeInvestigation(options,adapters={}) {
         return {contentItems:[{type:'inputText',text:JSON.stringify({error:failureDiagnostic(error),executed:'unknown',guidance:'保留既有证据；根据具体原因修正参数或等待授权，不能假设失败工具已完成。'})}],success:false};
       }
     });
-    const pending=toolQueue.then(run);toolQueue=pending.catch(()=>{});return pending;
+    pendingTools.add(params.callId);
+    const pending=toolQueue.then(run).then(response=>{if(deferredTools.has(params.callId))deferredResults.push({tool:params.tool,callId:params.callId,response});return response;},error=>{if(deferredTools.has(params.callId))deferredResults.push({tool:params.tool,callId:params.callId,error:failureDiagnostic(error)});throw error;}).finally(()=>pendingTools.delete(params.callId));
+    toolQueue=pending.catch(()=>{});return pending;
   };
   const app=adapters.app??new CodexAppServer({cwd:workspace,codexBin:await resolveCodexBinary(config.codexBin),env:await codexEnvironment(),args:[...conversationServerArgs(),...artifactPermissionArgs(job.artifactWorkspace),'-c','features.shell_tool=true'],onToolCall});
   adapters.bindToolCall?.(onToolCall);
@@ -113,6 +115,19 @@ export async function runNativeInvestigation(options,adapters={}) {
     active=false;
     result=JSON.parse(answer.text);
     if(!['ready','partial','needs_clarification','blocked'].includes(result.outcome)||!result.finalMessage?.trim())throw failure('CODEX_RESULT_INVALID');
+    // A code-mode cell may yield and the model can finish while a host tool
+    // is still in flight. Drain accepted calls without replay; then return their
+    // durable receipts to this same model, not a false external-wait card.
+    if(pendingTools.size){
+      for(const id of pendingTools)deferredTools.add(id);
+      await emit({type:'progress',phase:'native_pending_tools',message:'只读工具仍在执行，等待真实结果后在同一会话继续核验'});
+      await toolQueue;
+      const completed=deferredResults.splice(0);deferredTools.clear();
+      if(direct.waiting){result={...result,...direct.waiting};break;}
+      hostContinuations++;
+      input=[{type:'text',text:'刚才结束时仍有已接受的工具调用正在执行；现在已完成并持久化，结果如下。不要重复执行，也不要把本机工具运行中说成需要用户配合。保留原需求与范围，继续本会话审阅真实结果、制作和交付；有真实外部缺口才等待。\n'+JSON.stringify(completed)}];
+      active=true;continue;
+    }
     // Consume legacy-shaped read continuations inside this same thread. Older
     // prompt/schema habits must not silently re-enter the nested model pipeline.
     const continuation=result.environmentQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.environmentQuery),website:false}}:result.websiteQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.websiteQuery),website:true}}:result.sourceHistoryQuery?{name:'agentos_source_history',args:{query:JSON.stringify(result.sourceHistoryQuery)}}:null;

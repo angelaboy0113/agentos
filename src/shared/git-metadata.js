@@ -8,7 +8,7 @@ export function independentGitEnvironment(){
 
 // Check before any Git operation that can write. A .git file, commondir,
 // alternate object store, or link can redirect writes outside the cache.
-export async function verifyIndependentGit(cwd) {
+async function inspectIndependentGit(cwd) {
  const root=path.join(cwd,'.git');
  for(const dir of [cwd,root]){
   const info=await lstat(dir);
@@ -25,5 +25,14 @@ export async function verifyIndependentGit(cwd) {
    if(info.isSymbolicLink()||(!info.isDirectory()&&!info.isFile())||info.isFile()&&info.nlink>1)throw new Error('Git元数据包含符号链接、硬链接或特殊文件，未写入');
    if(info.isDirectory())pending.push(file);
   }
+ }
+}
+
+// A concurrent trusted fetch atomically publishes/removes temporary pack files.
+// Retry only vanished metadata, never a boundary/permission violation.
+export async function verifyIndependentGit(cwd){
+ for(let attempt=0;;attempt++)try{return await inspectIndependentGit(cwd);}catch(error){
+  const root=path.join(cwd,'.git')+path.sep;
+  if(attempt>=2||error.code!=='ENOENT'||typeof error.path!=='string'||!error.path.startsWith(root))throw error;
  }
 }

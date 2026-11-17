@@ -2132,3 +2132,9 @@ Identical card publications preserve revision, payload and notification receipts
 
 ## 1.133.9：同会话读取新登记文件
 原生受控工具新登记的云文件，经任务、项目、机器人和SHA绑定核对后，复用原附件下载及摘要缓存机制加载到本任务产物工作区，当前模型直接读取其本机路径，不重启调查或要求重传。工具读取错误保留原分类，不绕过文档权限。结果自称需要补充、但明确标记继续且无外部阻碍并给出可执行下一步时，在原会话继续；真实登录/审批/用户信息等待仍交回等待。适用于模板、表格、文档等原生输入，不为单个模板写分支。真实同模板真人验收另行记录。
+
+
+## 1.133.10：历史补取与最终校验并发
+历史补取保持系统级共享生命周期锁，另对被写入的独立Git目录加排他锁；最终源码校验使用共享生命周期锁，不再等待其它仓库远端历史下载。创建、恢复与回收仍要求系统排他锁，不能在读取或补历史时删除缓存。固定HEAD、工作树、来源、独立对象库、符号/硬链接与worktree边界校验保持；只对可信fetch期间消失的Git临时元数据重试完整扫描，不忽略越界。最终校验单列sourceVerificationMs与进度，不与模型分析混为一谈。离线并发试验验证网络读取挂起时最终核对完成、生命周期写入仍被阻止；真实同题耗时另计。包含1.133.9新文件同会话接续。
+
+The same release also drains accepted in-flight native host calls before finalization and continues the original model with durable receipts, preventing a yielded code cell from producing a false external-wait result. Regression verifies one execution across two turns and preserved scope boundaries.

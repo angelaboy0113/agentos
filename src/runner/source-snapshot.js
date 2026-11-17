@@ -237,7 +237,7 @@ async function verifySnapshotUnlocked(project, report) {
 
 export async function verifySnapshot(project,report){
  const prepared=await settings(project,report.environment,{sourceOptional:true});
- return withSnapshotLock(prepared.snapshotRoot,async check=>{check();const result=await verifySnapshotUnlocked(project,report);check();return result;});
+ return withSnapshotLock(prepared.snapshotRoot,async check=>{check();const result=await verifySnapshotUnlocked(project,report);check();return result;},{shared:true});
 }
 
 // Explicit repository selection avoids downloading every system's ancestry for
@@ -249,6 +249,10 @@ export async function prepareSnapshotHistory(project,report,{repositories:reques
   await verifySnapshotUnlocked(project,report);const results=[];
   for(const proof of report.repositories.filter(r=>requested.includes(r.path))){
    const cwd=path.resolve(report.workspace,proof.path);
+   // Lifecycle stays read-held: pruning/replacement cannot run. Only this
+   // repository's append-only Git history is exclusive during the network read.
+   await verifyIndependentGit(cwd);
+   await withSnapshotLock(path.join(cwd,'.git'),async()=>{
    try{
     await verifyIndependentGit(cwd);check();
     const actual=await git(cwd,['remote','get-url','origin']);
@@ -275,10 +279,11 @@ export async function prepareSnapshotHistory(project,report,{repositories:reques
     const commits=Number(await git(cwd,['rev-list','--count',proof.commit]));
     results.push({...proof,status:'complete',scope:'fixed-commit-ancestors',commits,reused:!wasShallow,checkedAt:new Date().toISOString(),...(fetchDiagnostic?{fetchDiagnostic}:{})});
    }catch(error){results.push({...proof,status:'unavailable',code:error.code??'SOURCE_HISTORY_UNAVAILABLE',reason:error.message,recovery:'恢复原来源/认证后重试同一固定提交；当前源码证据仍保留，不切换版本。'});}
+   });
   }
   check();await verifySnapshotUnlocked(project,report);
   return {policy:'pinned-source-ancestry-v1',environment:report.environment,repositories:results,deploymentVerified:false};
- });
+ },{shared:true});
 }
 
 export async function restorePinnedCommit(cwd,commit,shallow,run=git){

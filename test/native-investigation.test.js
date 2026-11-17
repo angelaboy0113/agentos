@@ -220,3 +220,15 @@ test('mislabelled clarification with explicit executable next step keeps same na
  const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct:{job,sourceReceipts:[],close:async()=>{}},runtime:async()=>({})});
  assert.equal(turns,2);assert.equal(result.nativeTiming.modelSessions,1);assert.equal(result.outcome,'ready');
 });
+
+test('yielded host calls finish once and their durable result returns before accepting a final answer',async t=>{
+ const directory=await temp(t),app=new EventEmitter();let turns=0,call,executed=0,toolPromise;
+ app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.close=async()=>{};app.request=async()=>({thread:{id:'yielded'}});
+ const direct={job,sourceReceipts:[],close:async()=>{},call:async()=>{executed++;await new Promise(r=>setTimeout(r,40));return {state:'saved',actualEvidence:'fixed-original-source'};}};
+ app.turn=async params=>{turns++;app.emit('notification',{method:'turn/started',params:{threadId:'yielded',turn:{id:'turn-'+turns}}});
+  if(turns===1){toolPromise=call({threadId:'yielded',turnId:'turn-1',namespace:null,callId:'original-call',tool:'agentos_source_history',arguments:{query:'{}'}});return{text:JSON.stringify({outcome:'partial',finalMessage:'Tool still running',investigation:{status:'wait',blocker:{kind:'unavailable',needed:'wait for tool'}}})};}
+  assert.match(params.input[0].text,/fixed-original-source/);assert.equal(executed,1);return{text:JSON.stringify({outcome:'ready',finalMessage:'Reviewed actual completed tool evidence'})};
+ };
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({}),bindToolCall:c=>call=c});
+ await toolPromise;assert.equal(executed,1);assert.equal(turns,2);assert.equal(result.nativeTiming.hostContinuations,1);assert.equal(result.outcome,'ready');
+});

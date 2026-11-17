@@ -108,9 +108,14 @@ export async function executeJob(job, config, emit, adapters = {}) {
   // environment records; otherwise blocked model output drops earlier evidence.
   const scopedResult = preserveEnvironmentEvidence(job, assessInvestigation(job, generated));
   const rawResult = normalizeSelfContinuation(job,requireComparisonContinuation(job,project,assessInvestigation(job, preserveAnalysisGaps(job, scopedResult))));
+  let sourceVerificationMs=0;
   if (sourceSync) {
+    const sourceVerificationStarted=Date.now();
+    await emit({type:'progress',phase:'source_verification',message:'核对固定源码与证据清单，不重新下载源码'});
     try { await verifyAnalysisSources(project, sourceSync); }
-    catch (error) { return { ...sourceBlocked(error), sourceSync }; }
+    catch (error) { return { ...sourceBlocked(error), sourceSync,sourceVerificationMs:Date.now()-sourceVerificationStarted }; }
+    sourceVerificationMs=Date.now()-sourceVerificationStarted;
+    await emit({type:'progress',phase:'source_verification_completed',sourceVerificationMs});
   }
   const documentHandoff=await prepareDocumentHandoff(job,rawResult,workspace,{dataDir:config.dataDir??path.dirname(config.worktreeRoot),emit});
   job=documentHandoff.job;
@@ -135,7 +140,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
     reportInspections:[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])].filter(e=>e?.status==='verified').map(e=>({status:e.status,binding:e.binding,calculationAudit:e.calculationAudit,populationAudit:e.populationAudit,...(e.contentAudit?{contentAudit:e.contentAudit}:{})})),
     reportInspection:job.reportEvidence?.status==='verified'?{binding:job.reportEvidence.binding,calculationAudit:job.reportEvidence.calculationAudit}:null,evidenceAppendix: codexResult.evidenceAppendix ?? null,reportAssessment:codexResult.reportAssessment??null,
     sourceEnvironmentQuery:codexResult.sourceEnvironmentQuery??null,environmentSetup: codexResult.environmentSetup ?? null, investigation: codexResult.investigation ?? null, websiteQuery: codexResult.websiteQuery ?? null, environmentQuery: codexResult.environmentQuery ?? null, harness: harness.metadata, handoff: codexResult.handoff, verifiedArtifacts: codexResult.verifiedArtifacts, handoffGate: codexResult.handoffGate, protocolRepair:codexResult.protocolRepair??null,
-    timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };
+    timing: { prepareMs: prepared - began, codexMs: aiCompleted - prepared, sourceVerificationMs, verifyMs: Date.now() - aiCompleted, totalMs: Date.now() - began } };
 }
 
 function sourceBlocked(error) {
