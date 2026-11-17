@@ -6,6 +6,9 @@ import {loadEnvironments} from '../shared/environment-access.js';
 import {requestedSourceEnvironments} from '../shared/source-comparison.js';
 import {sourceRuntimeTier} from '../shared/source-environments.js';
 import {environmentPlannerInstructions} from './environment-planner-instructions.js';
+import {sourceCommitMetadataArtifact} from './source-commit-metadata.js';
+import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 
 const objectSchema=properties=>({type:'object',additionalProperties:false,properties,required:Object.keys(properties)});
 const str={type:'string'};
@@ -26,6 +29,15 @@ export class InvestigationDirectTools {
   }
   identity() {return {runnerId:this.job.lease.runnerId,leaseId:this.job.lease.id};}
   route(suffix) {return `/api/v1/jobs/${encodeURIComponent(this.job.id)}/${suffix}`;}
+  async readSourceMetadata({resultRef,offset=0,limit=24000}) {
+    if(this.closed)throw new Error('Investigation tools closed');
+    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>24000)throw Object.assign(new Error('源码证据分页参数无效；offset非负，limit为1至24000字符'),{code:'REPORT_INPUT'});
+    const job={...this.job,sourceReferenceScope:this.options.sourceSync,sourceEvidenceReceipts:[...(this.job.sourceEvidenceReceipts??[]),...this.sourceReceipts]};
+    const proof=await sourceCommitMetadataArtifact(this.options.config.dataDir,job,resultRef),bytes=await readFile(proof.file);
+    if(createHash('sha256').update(bytes).digest('hex')!==proof.sha256)throw Object.assign(new Error('SOURCE_METADATA_ARTIFACT_CHANGED'),{code:'SOURCE_METADATA_ARTIFACT_CHANGED'});
+    const text=bytes.toString('utf8'),end=Math.min(text.length,offset+limit);
+    return {resultRef,offset,text:text.slice(offset,end),nextOffset:end<text.length?end:null,totalCharacters:text.length,sha256:proof.sha256,binding:proof.binding,deploymentVerified:false,note:'仅分页读取本题已核验源码元数据，不重新取数；Git身份与时间不等于平台合并或部署证据。'};
+  }
   async call(name,args) {
     if(this.closed)throw new Error('Investigation tools closed');
     if(name==='agentos_source_history') {

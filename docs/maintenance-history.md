@@ -2072,3 +2072,5 @@ Native compatibility also consumes legacy-shaped environment/website/history con
 - Regression covers the real continuation validator, identical GET recovery and revocation; human same-question acceptance is tracked separately from unit tests.
 - Same-question full-year export also exposed a coroutine teardown deadlock after PREMATURE_FINISH. Rejected close observations now resume the current model with the current source; channel shutdown rejects pending/future planner choices so the investigator saves evidence and exits instead of repeatedly submitting finish. No execution deadline was added.
 - Fixed large native result wrappers naming the legacy reader from a different store. Native receipts now identify agentos_read_result with exact arguments; native presentation pages increase from4000 to24000 characters without changing saved data, job/scope validation or legacy defaults.
+
+- 1.132.4：原生主会话可按可信源码元数据收据分页读取完整历史明细；同阶段核验CSV可直接关联补列，不必先交付中间文件。修复由真人原题复测发现，身份/固定源码/金额及实际文件核验边界保持。源码原件哈希复读与来源绑定、多系统及恢复、日期补列原单元格保持、跨任务拒绝纳入回归；正式版本及真人最终结果以本机部署审计为准。

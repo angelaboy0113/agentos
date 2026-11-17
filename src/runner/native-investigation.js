@@ -66,7 +66,7 @@ export async function runNativeInvestigation(options,adapters={}) {
       if(!active)throw failure('NATIVE_TURN_ENDED');
       toolCalls++;
       try {
-        const result=params.tool==='agentos_read_result'?await store.read(params.arguments):await direct.call(params.tool,params.arguments);
+        const result=params.tool==='agentos_read_result'?(String(params.arguments.resultRef??'').startsWith('source-metadata/')?await direct.readSourceMetadata(params.arguments):await store.read(params.arguments)):await direct.call(params.tool,params.arguments);
         const presented=await store.present(params.tool,result,24000,{persist:true,reader:'agentos_read_result'});
         return {contentItems:[{type:'inputText',text:JSON.stringify(presented)}],success:true};
       } catch(error) {
@@ -85,7 +85,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     const checkpoint=job.analysisContinuation;
     const resume=checkpoint?.executionEngine===nativeInvestigationEngine&&checkpoint.questionId===job.questionId&&checkpoint.workspace===workspace;
     const params={cwd:workspace,approvalPolicy:'never',permissions:job.artifactWorkspace.profile,...(runtime.model?{model:runtime.model}:{})};
-    const thread=await app.request(resume?'thread/resume':'thread/start',resume?{...params,threadId:checkpoint.threadId,excludeTurns:true}:{...params,ephemeral:false,dynamicTools:[...investigationDynamicTools,{type:'function',name:'agentos_read_result',description:'分页读取本题已持久化的大工具结果，不重新执行查询。',inputSchema:{type:'object',additionalProperties:false,required:['resultRef','offset','limit'],properties:{resultRef:{type:'string'},offset:{type:'integer'},limit:{type:'integer',minimum:1,maximum:24000}}}}]});
+    const thread=await app.request(resume?'thread/resume':'thread/start',resume?{...params,threadId:checkpoint.threadId,excludeTurns:true}:{...params,ephemeral:false,dynamicTools:[...investigationDynamicTools,{type:'function',name:'agentos_read_result',description:'分页读取本题已持久化的大工具结果或sourceHistory.artifact返回的source-metadata/证据路径；offset从0开始，limit最多24000字符，不重新查询。',inputSchema:{type:'object',additionalProperties:false,required:['resultRef','offset','limit'],properties:{resultRef:{type:'string'},offset:{type:'integer'},limit:{type:'integer',minimum:1,maximum:24000}}}}]});
     threadId=thread.thread.id;direct.threadId=threadId;
     journal=new InvestigationCallJournal({directory:journalDirectory,binding:hash(JSON.stringify([job.id,job.questionId,workspace,job.originProfile??job.agentProfile,job.senderId,threadId]))});
     await emit({type:'progress',phase:'native_investigation_started',sourceContinuation:{questionId:job.questionId,workspace,threadId,artifactPolicy,executionEngine:nativeInvestigationEngine},message:'同一调查会话已接通授权工具，直接取证并继续分析'});

@@ -70,3 +70,18 @@ test('only an accepted verified delivery can render a user-requested closed card
  assert.equal(jobCard(job).header.template,'grey');
  for(const altered of [{...job,status:'blocked'},{...job,reportReviews:{}},{...job,result:{...job.result,deliveryClosure:{...job.result.deliveryClosure,messageId:''}}}])assert.notEqual(jobCard(altered).header.template,'grey');
 });
+
+test('same-phase verified CSV can append civil dates before delivery without losing original cells',async t=>{
+ const f=await fixture(t),e={kind:'mysql',projectId:'A',tier:'prd',database:'synthetic'},scope=hash(JSON.stringify(e)),directory=path.join(f.root,'exports',f.job.id),d=new ReportDatasets({maxRows:'all',directory,scope});
+ const job={...f.job,attachments:[]},tools=await createEnvironmentTools(e,{mode:'investigate',tables:['orders'],exportMaxRows:'all',maxRows:20,timeoutMs:1000},{},{dataDir:f.root,exportDirectory:directory,reportJob:job,connect:()=>{throw Error('No new database query');}});t.after(()=>tools.close());
+ assert.ok(tools.spec.some(x=>x.tool==='append_report_columns'));
+ const source=await d.collect({sql:'SELECT preserved',params:[],columns:['id','note']},async()=>[[{id:'00001',note:'9007199254740993.01'},{id:'00002',note:'original'}]]);
+ const draft=await d.compose({sources:[{name:'s1',datasetRef:source.datasetRef,keyColumn:'id'}],columns:[{label:'编号',value:{op:'key'}},{label:'原文',value:{op:'field',source:'s1',column:'note'}}]});
+ const base=await tools.run('finalize_report',{datasetRef:draft.datasetRef,requirement:'保留原文',scopeEvidence:'完整合成范围',expectedColumns:draft.columns,populationRef:source.datasetRef,populationKey:'id',columnRules:draft.columns.map(label=>({label,definition:'直接保留原文完整字符串',evidence:'完整合成数据来源与固定对象范围'})),checks:[]});
+ const supplement=await d.collect({sql:'SELECT dates',params:[],columns:['id','date']},async()=>[[{id:'00002',date:null},{id:'00001',date:'2024-02-29 12:30:00'}]]);
+ const args={...recipe,attachmentId:base.exportFile.id,datasetRef:supplement.datasetRef,columns:[{column:'date',label:'交货日期',format:{kind:'day_compact',inputType:'civil_datetime'}}]};
+ const out=await tools.run('append_report_columns',args);assert.equal(out.audit.originalCellsPreserved,4);assert.equal(out.audit.nullSourceCells,1);
+ const view=await tools.run('inspect_report',{fileId:out.exportFile.id,section:'rows',limit:20});assert.equal(view.calculationAudit.status,'passed');assert.deepEqual(view.items.map(x=>x.values),[['00001','9007199254740993.01','20240229'],['00002','original','']]);
+ await assert.rejects(tools.run('append_report_columns',{...args,attachmentId:f.attachment.source.report.id}),/不属于/);
+ const bad={...job,id:'different-job'},other=await createEnvironmentTools(e,{mode:'investigate',tables:['orders'],exportMaxRows:'all',maxRows:20,timeoutMs:1000},{},{dataDir:f.root,exportDirectory:path.join(f.root,'exports',bad.id),reportJob:bad,connect:()=>{throw Error('No query');}});t.after(()=>other.close());await assert.rejects(other.run('append_report_columns',args),/不属于/);
+});

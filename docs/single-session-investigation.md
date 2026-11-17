@@ -53,3 +53,11 @@ An unknown tool name is not a database permission refusal. The investigator exec
 Native environment opens carry the host-owned, still-open `original-question` goal into the existing continuation validator. A request cannot introduce arbitrary goals or bypass scope, approval or source/environment checks. Opening or closing a source does not mark the question verified. CNB PR GET retries respect server Retry-After (seconds or HTTP date), check the current grant while waiting, and distinguish rate limiting from missing permissions. Exhausted temporary retries preserve partial pages; callers should request only failed repositories instead of repeating successful inventories. These retries do not add a whole-task deadline.
 A rejected premature close leaves the source open and its corrective observation returns to the same model turn chain. It must not be followed by opening another source. Actual cancellation/shutdown rejects the channel wait; the existing investigator persists evidence and releases its tools rather than synthesizing repeated finish choices.
 Native large observations identify `agentos_read_result` and include exact reader arguments. They must not instruct the model to use the inner environment's `read_tool_result` store. Native presentation pages accept up to 24000 characters, while legacy environment readers retain their 4000-character default; opaque reference and job/scope validation remain unchanged. Paging size is presentation only and does not truncate saved data.
+
+### 1.132.4：同会话已登记证据与文件补列
+
+`agentos_read_result` 接受 `sourceHistory.artifact` 的 `source-metadata/<uuid>.json` 引用。主进程沿用原任务、问题、机器人、系统、环境、固定仓库提交和证据哈希校验，最多每页24000字符；只读原持久文件，不重新请求源码，不接受任意路径或其它任务文件。恢复后的可信上下文收据可复用。
+
+数据库环境的 `append_report_columns` 同时接受原已交付CSV附件ID与本任务 `finalize_report` 刚登记的核验CSV fileId（参数仍为attachmentId）。不要求先把中间文件发给用户。补充数据仍须完整持久化、显式唯一关联键、日期解释和未匹配/null/范围外规则；派生文件保留全部原单元格，独立重放核验后才走正式投递。未登记文件、其它任务文件及任意模型临时CSV不能用此入口绕过金额/范围核验。
+
+真人同题基准不能仅以终态颜色比较：完整结果、真实澄清、外部平台未提供字段和程序阻断分别记录。旧题等待恢复时间不等同实际执行耗时。

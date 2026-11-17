@@ -66,7 +66,7 @@ export async function replayReportAppend(dataDir,revision,input){
 
 export async function appendReportFile(dataDir,job,attachment,args,saved){
  const s=attachment?.source;
- if(!/^[A-Za-z0-9_-]{1,100}$/.test(job.id??'')||s?.kind!=='delivered-report'||s.projectId!==job.projectId||s.originProfile!==job.originProfile||s.chatId!==job.chatId||s.sourceEnvironment&&s.sourceEnvironment!==job.sourceEnvironment||args.attachmentId!==attachment.id||args.datasetRef!==saved.id)fail('原文件/补充数据与当前任务或环境不一致');
+ if(!/^[A-Za-z0-9_-]{1,100}$/.test(job.id??'')||!['delivered-report','verified-task-report'].includes(s?.kind)||s.projectId!==job.projectId||s.originProfile!==job.originProfile||s.chatId!==job.chatId||s.sourceEnvironment&&s.sourceEnvironment!==job.sourceEnvironment||args.attachmentId!==attachment.id||args.datasetRef!==saved.id)fail('原文件/补充数据与当前任务或环境不一致');
  const original={...s.report,sourceJobId:s.sourceJobId};await inspectReport(dataDir,{id:job.id,reportFiles:[original]},{fileId:original.id});
  const source=await reportFile(dataDir,s.sourceJobId,s.report),input=reportCsv(source.content),output=appendReportColumns(input,saved.data,args);
  if(input.rows.length!==s.report.rowCount)fail('原文件实际范围不一致');
