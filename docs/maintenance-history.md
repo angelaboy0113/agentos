@@ -2138,3 +2138,6 @@ Identical card publications preserve revision, payload and notification receipts
 历史补取保持系统级共享生命周期锁，另对被写入的独立Git目录加排他锁；最终源码校验使用共享生命周期锁，不再等待其它仓库远端历史下载。创建、恢复与回收仍要求系统排他锁，不能在读取或补历史时删除缓存。固定HEAD、工作树、来源、独立对象库、符号/硬链接与worktree边界校验保持；只对可信fetch期间消失的Git临时元数据重试完整扫描，不忽略越界。最终校验单列sourceVerificationMs与进度，不与模型分析混为一谈。离线并发试验验证网络读取挂起时最终核对完成、生命周期写入仍被阻止；真实同题耗时另计。包含1.133.9新文件同会话接续。
 
 The same release also drains accepted in-flight native host calls before finalization and continues the original model with durable receipts, preventing a yielded code cell from producing a false external-wait result. Regression verifies one execution across two turns and preserved scope boundaries.
+
+## 1.133.11
+Explicit environment fallback recognizes a bracketed topic prefix immediately followed by the environment subject. Code/URL snippets, negation, mixed environments and nonunique project mappings remain ambiguous. This fixes task intake without changing environment authorization or selecting a default production source.

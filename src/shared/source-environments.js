@@ -4,7 +4,7 @@ const aliases={sit:'uat',uat:'uat',test:'uat',testing:'uat',prd:'prd',prod:'prd'
 // subject. URLs, snippets and competing/negative subjects are not a selection.
 export function explicitSourceEnvironment(project, content) {
  const text=String(content??'').replace(/https?:\/\/[^\s<>]+|```[\s\S]*?```|`[^`]*`/g,' ');
- const pattern=/(?:^|[\s，。！？:：]|在|查看|看看|查询|核对|梳理|检查|和|与|及|对比)(prd|prod(?:uction)?|sit|uat|生产|测试)(?=\s*(?:环境|机|库|最近|近\d|中|下|里|的|[，。,:：\s]))/gi;
+ const pattern=/(?:^|[\s，。！？:：\]】)）]|在|查看|看看|查询|核对|梳理|检查|和|与|及|对比)(prd|prod(?:uction)?|sit|uat|生产|测试)(?=\s*(?:环境|机|库|最近|近\d|中|下|里|的|[，。,:：\s]))/gi;
  const tiers=new Set([...text.matchAll(pattern)].map(m=>/^(?:prd|prod|production|生产)$/i.test(m[1])?'prd':'uat'));
  if(/\b(?:sit|uat|test|testing)\b|测试(?:环境|机|库)/i.test(text)&&/\b(?:prd|prod|production)\b|生产(?:环境|机|库)/i.test(text))return undefined;
  if(tiers.size!==1||/(?:不要|不查|排除|仅|只|不是|示例|名称|叫做)\s*(?:看|查|读)?\s*(?:prd|prod|sit|uat|生产|测试)/i.test(text))return undefined;

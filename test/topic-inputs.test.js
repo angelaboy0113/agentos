@@ -31,3 +31,9 @@ test('plain rich text roots do not download resources, and a cached symlink neve
  f.raw.msg_type='file';const [input]=await f.source.downloadTopicAttachments(f.event);await fs.unlink(input.path);const external=path.join(f.cwd,'not-an-input');await fs.writeFile(external,'private');await fs.symlink(external,input.path);
  f.source.downloadAttachments=async()=>{throw Error('Refresh required; cannot reuse symlink');};await assert.rejects(f.source.downloadTopicAttachments(f.event),/Refresh required/);assert.equal(await fs.readFile(external,'utf8'),'private');
 });
+
+ test('explicit environment after a bracketed topic prefix stays in this project',()=>{
+ const project={analysisSourceMode:'isolated',analysisEnvironments:{release:{runtimeTier:'prd'},sandbox:{runtimeTier:'uat'}}};
+ for(const text of ['【文件重制】PRD环境，按模板做PPT','[review]SIT环境，核对订单','（补充）生产环境查询','(followup)PRD环境，继续'])assert.equal(explicitSourceEnvironment(project,text),/SIT/.test(text)?'sandbox':'release');
+ for(const text of ['【示例PRD环境】制作说明','[example]PRD环境和SIT环境对比','【文件】不是PRD环境'])assert.equal(explicitSourceEnvironment(project,text),undefined);
+ });
