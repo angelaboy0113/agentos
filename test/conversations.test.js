@@ -366,3 +366,5 @@ test('continuous source snapshot answers remain historical context only for the 
  const a=sourceEvidence(job,'/project-one');assert.equal(a.applicability,'historical_snapshot_not_current_check');assert.equal(a.requiresRecheckForCurrentSource,true);
  assert.equal(sourceEvidence(job,'/project-two').applicability,'not_evidence_for_current_source_directory');job.taskIntent='implementation';assert.equal(sourceEvidence(job,'/project-one').applicability,'not_evidence_for_current_source_directory');
 });
+
+test('engine close joins in-flight prewarm and closes a client assigned after shutdown',async()=>{const {CodexConversationEngine}=await import('../src/control-plane/codex-conversation.js');let release,closed=0;const gate=new Promise(r=>release=r),engine=new CodexConversationEngine({dataDir:'/synthetic-unused'});engine.initialize=async()=>{await gate;engine.app={close:async()=>{closed++;}};return engine.app;};const started=engine.start();const stopped=engine.close();release();await Promise.all([started,stopped]);assert.equal(closed,1);assert.equal(engine.closed,true);await assert.rejects(engine.start(),/stopped/);await engine.close();assert.equal(closed,1);});

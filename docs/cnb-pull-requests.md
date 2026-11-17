@@ -38,3 +38,17 @@
 ## 验收与恢复
 
 测试 `test/cnb-pull-requests.test.js` 覆盖旧构建兼容、身份/环境精确范围、分页、去重、动态总数、权限/流中断、四路I/O、只读边界、时间含义和关闭后拒绝调用。真实实例还需用本部署凭据做原生API读取、同题真人新卡及文件/完成提醒验收；单元测试不代表整题性能。回退前自然空闲并停用整个新PR入口，保留运行数据及凭据；旧版本不认识resources，不能只删resources将PR入口伪装成构建入口。不倒灌旧agentos.json。
+
+
+## 已有浏览器身份的只读后备
+
+有浏览器授权但没有PR只读令牌时，状态单选控件可切换页面筛选；接口请求仍须独立审核。页面GET成功不等于同路径的XHR也已登记。对本项目已授权的每一个精确仓库，可在对应网站查询的`readEndpoints`登记如下固定GET（替换为自己的仓库，不扩大原应用/组织边界）：
+
+```json
+[
+ {"method":"GET","path":"/your-org/your-project/your-repository/-/pulls","reviewed":true},
+ {"method":"GET","path":"/your-org/your-project/your-repository/-/pulls/{integerId}","reviewed":true}
+]
+```
+
+索引查询参数只作筛选，POST、创建、关闭、合并、审查提交等写操作不包含在此路径登记。读取后仍核对当前分支祖先、分页完整性、平台人员与时间语义；不能把网页空白、未读已关闭列表或没有正式需求编号当作无合并记录。优先使用已具备权限的原生批量API，浏览器后备不代替凭据资源权限。

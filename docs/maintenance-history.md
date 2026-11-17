@@ -2109,3 +2109,6 @@ Optional accepted-backup dependency compaction preserves the newest three full c
 ## 1.133.2
 
 Identical card publications preserve revision, payload and notification receipts rather than enqueueing another patch at startup. Changed details, scope, generation or notifications still publish and pending transport failures still retry; no delivery success is fabricated. This removes redundant old-card transport and disk/state churn observed during the full-week replay.
+
+
+1.133.6：周度原题真人批次暴露的修复：TSF缺少应用/组标识作为可纠正输入并返回审核目录；会话预热关闭等待初始化并回收晚建客户端，关闭幂等；只读卡片内pointer span详情入口在双浏览器支持。CNB网页后备需要独立登记当前项目精确仓库GET合并索引/详情，禁止以控件可点冒充请求已通。实际发布、原题验收与外部历史缺口由部署记录分别记录。

@@ -29,8 +29,13 @@ export async function createTsfTools(e,q,cred,adapters={}){
   return{applicationId:a.applicationId,groupId:g.GroupId,namespaceId:g.NamespaceId,rows,complete:rows.length>0&&rows.every(r=>!r.unresolved&&r.databaseTargets.length>0),databaseConnectionVerified:false,note:'Only current released configuration targets; credentials/raw content withheld. No database connection or new data grant. Empty targets do not prove this service has no database; shared/injected configuration may be missing.',...evidence()};
  }
  const logs=createTsfLogTools({q,cred,cloud,app,group,page,paged,date,evidence});spec.push(...logs.spec);
- return{spec,async run(tool,args={}){await cloud.check();const contract=spec.find(x=>x.tool===tool);if(!contract||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(contract.args,k)))throw fail('REPORT_INPUT','Unknown TSF read tool or arguments');
-  if(tool==='connection'){await cloud.connect();return{connected:true,kind:'tsf',...evidence()};}
+ const configuredScope=()=>({applications:q.applications.map(a=>({applicationId:a.applicationId,applicationName:a.applicationName,groups:a.groups.map(g=>({...g}))})),logApplicationIds:[...(q.logApplications??[])],containerLogApplicationIds:[...(q.containerLogApplications??[])],configurationApplicationIds:[...(q.configurationApplications??[])],...(q.logReadWindow?{logReadWindow:{...q.logReadWindow}}:{}),metadataVerified:false,source:'reviewed-configuration'});
+ return{spec,async run(tool,args={}){const contract=spec.find(x=>x.tool===tool);if(!contract||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(contract.args,k)))throw fail('REPORT_INPUT','Unknown TSF read tool or arguments');
+  // Missing identifiers are correctable input, not evidence of revoked access.
+  // Never guess a sole scope: callers still select explicit configured IDs.
+  for(const key of ['applicationId','groupId'])if(Object.hasOwn(contract.args,key)&&(typeof args[key]!=='string'||!args[key].trim()))throw fail('REPORT_INPUT',`TSF ${tool} requires explicit ${key}; use configuredScope from connection or applications before retrying. No platform records fetched.`);
+  await cloud.check();
+  if(tool==='connection'){await cloud.connect();return{connected:true,kind:'tsf',configuredScope:configuredScope(),...evidence()};}
   if(tool==='applications')return{rows:q.applications.map(a=>({...a,groups:a.groups.map(g=>({...g}))})),metadataVerified:false,source:'reviewed-configuration',complete:true};
   if(tool==='current_inventory'){
    const rows=await parallelRead(q.applications,async a=>{

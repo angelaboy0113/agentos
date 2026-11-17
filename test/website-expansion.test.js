@@ -70,3 +70,16 @@ for(const backend of ['isolated','shared'])test(`${backend}: grouped radio statu
  let snap=await b.run(job,e,'connection');const closed=snap.controls.find(c=>c.label==='Closed (7)');assert.ok(closed);assert.equal(closed.type,'read-action');assert.ok(snap.controls.some(c=>c.label==='Archived (7)'));assert.equal(snap.controls.some(c=>/^(Disabled|Secret|Delete|Approve|Reject)$/.test(c.label)),false);
  snap=await b.run(job,e,'browser_click',{ref:closed.ref});assert.match(snap.pageText,/Closed seven records/);await assert.rejects(b.run(job,e,'browser_click',{ref:closed.ref}));
 });
+
+for(const backend of ['isolated','shared'])test(`${backend}: pointer-labelled read spans preserve card bubbling without granting plain text or mutation actions`,async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'status-filter-'));
+ const markup='<h1>History</h1><div style="cursor:pointer" onclick="document.getElementById(\'result\').textContent=\'Verified historical detail\'"><div>Archived node</div><span id="view">查看</span></div><span>查看</span><div style="cursor:pointer"><span>审核</span><span>删除</span><span>查看并保存</span></div><div id="result">No details yet</div>';
+ const server=http.createServer((req,res)=>{res.setHeader('content-type','text/html;charset=utf-8');res.end(markup);});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP status.test 127.0.0.1']})},e={projectId:'requests',tier:'uat',baseUrl:`http://status.test:${server.address().port}/`},job={id:'status-a'};let context,page;
+ const b=backend==='isolated'?new WebsiteBrowser(dir,driver):new SharedChromeBrowser(async()=>true,async q=>{if(q.operation==='find')return {tabId:'1',windowId:'1'};return JSON.parse(await page.evaluate(q.script));},async()=>{});
+ if(backend==='shared'){context=await driver.launchPersistentContext(dir,{args:[]});page=await context.newPage();await page.goto(e.baseUrl);}
+ t.after(async()=>{await b.close();await context?.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
+ let snap=await b.run(job,e,'connection');const view=snap.controls.filter(c=>c.label==='查看');assert.equal(view.length,1);assert.equal(view[0].type,'read-action');assert.equal(snap.controls.some(c=>/^(审核|删除|查看并保存)$/.test(c.label)),false);
+ snap=await b.run(job,e,'browser_click',{ref:view[0].ref});assert.match(snap.pageText,/Verified historical detail/);await assert.rejects(b.run(job,e,'browser_click',{ref:view[0].ref}));
+ if(backend==='isolated')page=b.pages.get(job.id).page;const fresh=snap.controls.find(c=>c.label==='查看');await page.locator('#view').evaluate(el=>el.textContent='删除');await assert.rejects(b.run(job,e,'browser_click',{ref:fresh.ref}));
+});

@@ -22,6 +22,7 @@ export class CodexConversationEngine {
   }
 
   async start() {
+    if(this.closed)throw new Error('Conversation engine stopped');
     if (!this.starting) this.starting = this.initialize().catch(async (error) => { await this.app?.close(); this.starting = null; throw error; });
     return this.starting;
   }
@@ -34,13 +35,17 @@ export class CodexConversationEngine {
     await mkdir(this.cwd, { recursive: true });
     const env = await codexEnvironment(this.options);
     if (this.closed) throw new Error('Conversation engine stopped');
-    this.app = new CodexAppServer({ cwd: this.cwd, codexBin: await resolveCodexBinary(this.options.codexBin), env, args: conversationServerArgs() });
+    const codexBin=await resolveCodexBinary(this.options.codexBin);
+    if(this.closed)throw new Error('Conversation engine stopped');
+    this.app = new CodexAppServer({ cwd: this.cwd, codexBin, env, args: conversationServerArgs() });
     await this.app.start();
+    if(this.closed)throw new Error('Conversation engine stopped');
     const account = await this.app.readAccount({onRetry:({attempt})=>{this.loginRecovery={stage:'account/read',attempt,code:'CODEX_RPC_TIMEOUT'};this.options.onProgress?.(this.loginRecovery);}});
     if (account.account?.type !== 'chatgpt') {
       await this.app.close();
       throw new Error('AgentOS 需要本机 Codex 的 ChatGPT 订阅登录态，请先 codex login');
     }
+    if(this.closed)throw new Error('Conversation engine stopped');
     this.authType = account.account.type;
     this.schema = JSON.parse(await readFile(schemaFile, 'utf8'));
     this.rules = await readFile(instructionsFile, 'utf8');
@@ -156,9 +161,14 @@ export class CodexConversationEngine {
     for(const [key,session] of this.sessions)if(!session.active&&!keep.has(key)&&session.touched<cutoff)this.releaseSession(key,session);
   }
   async close() {
+    if(this.closing)return this.closing;
     this.closed = true;
     this.sessions.clear();
-    await this.app?.close();
+    const initial=this.app;
+    // Prewarm can still be resolving its executable when shutdown starts.
+    // Join it and close a late-assigned client rather than leaking a child.
+    this.closing=(async()=>{await initial?.close();await this.starting?.catch(()=>{});if(this.app!==initial)await this.app?.close();})();
+    return this.closing;
   }
 }
 

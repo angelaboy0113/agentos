@@ -168,7 +168,7 @@ test('card shows real blocker on first screen with sanitized content and visible
 
 test('ready environment substep returns to original investigation through HTTP and drops query grant',async t=>{
  const dir=await fixture(t);
- const app=await createControlPlane({dataDir:dir,storeFile:path.join(dir,'store.json'),conversationFile:path.join(dir,'conversation.json'),memoryFile:path.join(dir,'memory.json'),runnerToken:'test',projects:{projects:{demo:{repoPath:dir,analysisRepositories:[{path:'.'}]}},ownerOpenIdsByProfile:{owner:['ou_admin']}},agents:{agents:{developer:{profile:'dev'},owner_report:{profile:'owner'}}},feishuClient:{enabled:false},conversationOptions:{enabled:false}});
+ const app=await createControlPlane({dataDir:dir,storeFile:path.join(dir,'store.json'),conversationFile:path.join(dir,'conversation.json'),memoryFile:path.join(dir,'memory.json'),runnerToken:'test',projects:{projects:{demo:{repoPath:dir,analysisRepositories:[{path:'.'}]}},ownerOpenIdsByProfile:{owner:['ou_admin']}},agents:{agents:{developer:{profile:'dev'},owner_report:{profile:'owner'}}},feishuClient:{enabled:false},conversationResponder:async()=>({kind:'reply',text:'synthetic'}),conversationOptions:{enabled:false}});
  await new Promise(r=>app.server.listen(0,'127.0.0.1',r));t.after(async()=>{app.server.closeAllConnections();await new Promise(r=>app.server.close(r));});
  const {job}=await app.store.createJob({...input,workflow:'single_developer',questionId:'q',senderId:'ou_member',instruction:'核对实际单据',originalQuestion:'核对实际单据'});
  await app.store.transact(s=>{s.jobs[0].environmentAccess={tier:'uat',environmentId:'nacos',scopeHash:'scope',approvedBy:'ou_admin',startedAt:new Date().toISOString()};});

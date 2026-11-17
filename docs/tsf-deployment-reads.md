@@ -78,3 +78,6 @@ Retry-After 超过现有单次读取窗口或仍持续限流时，返回独立 T
 历史检索为空只说明该来源/条件没有索引命中，不证明请求不存在、采集健康或问题恢复。应核对配置及其他已授权来源，必要时读取容器日志，保留采集/保留期缺口。有日志工具时不再以“TSF只有部署查询”为由结束；日志不足以关联当次失败时仍如实部分完成，不强绿。
 
 验证：`node scripts/test.js test/tsf-logs.test.js test/tsf-tools.test.js`。覆盖项目/环境并发、共享配置隔离、撤权、分页、跨年时区、敏感内容、多副本尾部和空结果语义。真实平台、原卡结果、真人新题及跨机验收分别记录。迁移含新增模块/配置示例、任务tool-results及凭据库；回退旧版本前撤去新logApplications/containerLogApplications，保留后续业务状态，不倒灌agentos.json。
+
+
+连接返回 `configuredScope`，仅包含当前审核应用、部署组、命名空间与日志窗口；`metadataVerified=false`，不冒充实际平台归属。调用应用级或组级工具必须显式给出相应ID。漏填、空值及错误类型返回可修正的 `REPORT_INPUT`，不会被误归为权限缺失；填写了范围外ID或实际命名空间变化仍返回 `TSF_SCOPE`。不能从唯一候选自动猜目标。

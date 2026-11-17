@@ -38,3 +38,6 @@
 
 
 Memory headroom and durable overload waiting: see [memory-admission.md](memory-admission.md). Independent launcher mainHeapMiB defaults to 6144; existing Runner/intake concurrency is unchanged. New work waits under memory pressure; active work is not terminated.
+
+
+会话模型预热与关闭并发时，关闭会先阻止新start，关闭已有客户端并等待在途初始化，再关闭可能晚创建的客户端；重复close复用同一个关闭过程。此项防止初始化/停止竞态遗留进程，不增加业务任务截止，不等于模型进程RSS必定立即归零。

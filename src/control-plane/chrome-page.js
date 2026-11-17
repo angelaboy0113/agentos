@@ -13,7 +13,7 @@ export function chromePage(request, adapters={}) {
  const write=/新增|创建|保存|修改|编辑|删除|启动|停止|执行|触发|重跑|终止|发布|启用|禁用|提交|审批|支付|注销|退出|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout)\b/i;
  const read=/查看|详情|日志|查询|搜索|下一页|上一页|刷新|展开|收起|search|query|view|detail|log|next|previous|refresh/i;
  const isRow=el=>el.matches('tr[data-row-key],[role="row"][data-row-key],.ant-table-row[data-row-key]');
- const expansionInfo=el=>{const info=adapters.metadata?.(el);return info?.type&&(['expansion-toggle','panel','query','query-toggle'].includes(info.kind)||el.tagName==='TEXTAREA'&&info.type==='search')?info:null;};
+ const expansionInfo=el=>{const info=adapters.metadata?.(el);return info?.type&&(['expansion-toggle','panel','query','query-toggle','detail-trigger'].includes(info.kind)||el.tagName==='TEXTAREA'&&info.type==='search')?info:null;};
  const label=el=>{
   const expansion=expansionInfo(el);if(expansion)return expansion.label;
   let text=(el.innerText||el.getAttribute('placeholder')||el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('name')||el.id||'').trim().slice(0,100);

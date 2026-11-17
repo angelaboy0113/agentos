@@ -89,7 +89,9 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  // Suppress duplicate text children, but preserve the element's own semantic
  // role or an operator-reviewed navigation selector. A span can itself be the
  // accessible button; closest() includes that element, not only its parent.
- if(tag==='span'&&!picker&&!calendar&&!option&&!expansion&&!panel&&!reviewedNavigation&&!(el.matches('[role="button"],[role="link"],[role="menuitem"],[role="tab"]'))&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!localExpansion&&!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
+ const plainReadTrigger=tag==='span'&&/^(?:查看|详情|view|details)$/i.test(label)&&localInteractive;
+ if(plainReadTrigger&&type==='read-action')kind='detail-trigger';
+ if(tag==='span'&&!plainReadTrigger&&!picker&&!calendar&&!option&&!expansion&&!panel&&!reviewedNavigation&&!(el.matches('[role="button"],[role="link"],[role="menuitem"],[role="tab"]'))&&(el.closest('button,a,[role="button"],[role="menuitem"],.el-select-dropdown__item')||!localExpansion&&!(/^(更多|更多筛选|高级筛选|高级搜索|展开筛选|收起筛选|返回)$/).test(label)))type=null;
  if(title||el.matches('[role="tab"]')&&[...el.querySelectorAll('button,[role="button"]')].some(child=>child.innerText?.trim()===label))type=null;
  // Fields, options and date cells change local query state; server writes remain independently blocked.
  const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion','row','query'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
