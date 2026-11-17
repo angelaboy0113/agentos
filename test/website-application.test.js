@@ -38,3 +38,19 @@ test('confirmed login readiness resets only the completed episode, enabling save
  const browser=new WebsiteBrowser('/private/tmp/unused-browser');let ready=true;const state={environment:{baseUrl:'https://application.fixture.test/'},page:{url:()=> 'https://application.fixture.test/',evaluate:async()=>({pageReady:ready,loginRequired:!ready,loginState:ready?'ready':'login_required'})},blockedLoginReads:new Set(),waiting:true,sawLogin:true,credentialAttempted:true,authResult:{loginState:'rejected'}};
  await browser.loginStatus(state);assert.equal(state.credentialAttempted,false);assert.equal(state.authResult,null);assert.equal(state.reloadAfterLogin,false);ready=false;state.credentialAttempted=true;await browser.loginStatus(state);assert.equal(state.credentialAttempted,true);
 });
+
+
+test('same-URL legacy entries route to the explicit application identity without merging privileges or old grants',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'same-url-app-')),old=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(dir,'env.json');t.after(async()=>{if(old===undefined)delete process.env.AGENTOS_ENVIRONMENTS_FILE;else process.env.AGENTOS_ENVIRONMENTS_FILE=old;await rm(dir,{recursive:true,force:true});});
+ const legacy=entry('https://logs.fixture.test/logs'),trusted=entry('https://logs.fixture.test/logs',{applicationRoot:true,credentialRef:'sso-app',loginNavigation:{interactive:true,remoteQr:true,steps:['登录']}});
+ const cfg={version:1,environments:{legacy,trusted,production:entry('https://logs.fixture.test/logs',{tier:'prd'}),other:entry('https://logs.fixture.test/logs',{projectId:'other'})}};
+ const actor={profile:'owner',senderId:'ou_admin'},oldPlan=planQuery(cfg,{environmentId:'legacy',queryId:'investigate',parameters:['read']},'demo',actor);
+ assert.equal(oldPlan.environmentId,'trusted');assert.equal(oldPlan.configHash,(await import('../src/shared/environment-access.js')).fingerprint(trusted));
+ assert.deepEqual(catalog(cfg,'demo').map(e=>e.environmentId),['trusted','production']);assert.deepEqual(catalog(cfg,'other').map(e=>e.environmentId),['other']);
+ await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(cfg));
+ for(const questionId of ['one','two'])assert.equal((await prepareWebsiteQuery({projects:{projects:{}}},{projectId:'demo',sourceEnvironment:'sit',originProfile:'owner',questionId,context:[]},{url:legacy.baseUrl,tier:'uat',purpose:'read logs'})).environmentId,'trusted');
+ const access=await import('../src/shared/environment-access.js');delete trusted.applicationRoot;const historical=planQuery(cfg,{environmentId:'legacy',queryId:'investigate',parameters:['read']},'demo',actor);trusted.applicationRoot=true;
+ assert.equal(access.verifyApprovedPlan(cfg,historical).credentialRef,'saved-app');assert.equal(historical.environmentId,'legacy');
+ assert.equal(planQuery(cfg,{environmentId:'production',queryId:'investigate',parameters:['read']},'demo',actor).environmentId,'production');
+ assert.throws(()=>planQuery(cfg,{environmentId:'trusted',queryId:'absent',parameters:['read']},'demo',actor),/未配置/);
+});
