@@ -1,5 +1,5 @@
 // Fixed DOM adapter shared by all applications; no model-supplied selectors or scripts.
-export const websiteControls='.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,textarea,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
+export const websiteControls='label:has(input[type="radio"]),.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,textarea,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
 export function controlMetadataBatch({elements,options,limit=Infinity}={elements:null}){
  function metadata(el,{readNavigationSelectors=[],hoverTooltip=null}={}){
  const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
@@ -30,6 +30,20 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  // Never turn a container/ordinary paragraph into an action because its descendants contain a label.
  if(customContainer&&!reviewedNavigation&&!(el.matches('.ant-table-row-expand-icon,.el-table__expand-icon')||panelCandidate(el)||localExpansion&&localInteractive&&el.querySelectorAll('button,a,input,select,[role=button]').length===0))return {visible:true,label,type:null};
  function panelCandidate(node){return node.matches('.el-collapse-item__header,.ant-collapse-header');}
+ // Status filters often expose their text on a label around a styled radio.
+ // Select only a visible, enabled, labelled radio in an explicit radio group;
+ // the independent request policy still denies business writes on change.
+ const radioGroup=el.closest('[role="radiogroup"],[role="tablist"],.ant-radio-group,.el-radio-group,.t-radio-group');
+ const radio=tag==='label'&&el.querySelectorAll('input[type="radio"]').length===1?el.querySelector('input[type="radio"]'):tag==='input'&&el.type==='radio'?el:null;
+ const countedChoices=radioGroup&&[...radioGroup.querySelectorAll('label')].filter(n=>n.getClientRects().length);
+ const queryRadio=radioGroup&&(radioGroup.closest('[role=search]')||countedChoices.length>=2&&countedChoices.every(n=>/[（(]\s*\d+\s*[）)]\s*$/.test(n.innerText.trim())));
+ if(radioGroup&&radio){
+  if(!queryRadio)return {visible:true,label,type:null};
+  const owner=radio.closest('label'),text=(owner?.innerText||radio.getAttribute('aria-label')||'').trim();
+  if(!text||radio.disabled||radio.getAttribute('aria-disabled')==='true'||/password|secret|token|credential|密码|令牌|密钥/i.test([text,radio.name,radio.id].join(' ')))return {visible:true,label:text.slice(0,100),type:null};
+  if(tag==='input'&&owner&&owner!==el)return {visible:true,label:text,type:null};
+  return {visible:true,label:text.slice(0,100),type:'read-action',kind:'query-toggle',blocked:false};
+ }
  const fieldGroup=el.closest('.el-form-item,.ant-form-item,[role="group"],label')??el.closest('.el-col,.ant-col');
  const singleField=fieldGroup&&[...fieldGroup.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(x=>x.getClientRects().length).length===1;
  const localLabel=singleField?fieldGroup.innerText?.trim():'';
