@@ -25,7 +25,7 @@ export function websiteNavigationTarget(input,base,readEndpoints=[]) {
 export const websiteSessionKey = (project,tier,url) => 'web-'+createHash('sha256').update(JSON.stringify([project,tier,new URL(websiteUrl(url)).origin])).digest('hex').slice(0,24);
 // Registration identifies the requested application entry; session storage remains origin-scoped.
 export const websiteKey = (project,tier,url) => 'web-entry-'+createHash('sha256').update(JSON.stringify([project,tier,websiteUrl(url)])).digest('hex').slice(0,24);
-const readPathIds={objectId:/^[a-f0-9]{24}$/i,uuid:/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i,integerId:/^[0-9]{1,20}$/};
+const readPathIds={hexId:/^[a-f0-9]{32}$/i,objectId:/^[a-f0-9]{24}$/i,uuid:/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i,integerId:/^[0-9]{1,20}$/};
 // Typed whole-segment identifiers only; no regex, glob, readable action or URL.
 export function reviewedPathMatches(pattern,pathname){
  if(typeof pattern!=='string'||typeof pathname!=='string')return false;

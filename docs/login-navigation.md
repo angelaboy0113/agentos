@@ -57,3 +57,6 @@ Reviewed GET endpoints can declare `queryParameterTypes: {start: "isoTimestamp",
 ### Grouped status filters
 
 Both browser adapters expose visible labelled radio choices as read controls when they are inside an explicit search region, or a radio group whose visible choices all carry numeric result counts. This covers Open/Closed history filters without treating ordinary approval/status-edit radio groups as navigation. Disabled or secret-labelled controls remain excluded. References are revalidated before clicking and become stale after each snapshot. This does not grant new API endpoints, merge/write access or business-operation authorization.
+
+
+Reviewed read endpoints may use `{hexId}` for a complete 32-character hexadecimal identifier segment (as with asynchronous query status). It does not match action names, nested paths or arbitrary text. Operators must separately review the exact GET list/detail routes from the actual application's query workflow; writes, cancellation, retries and other applications remain denied. Diagnose blocked dependent status requests before reporting a platform network outage.

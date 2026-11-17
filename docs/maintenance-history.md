@@ -2141,3 +2141,7 @@ The same release also drains accepted in-flight native host calls before finaliz
 
 ## 1.133.11
 Explicit environment fallback recognizes a bracketed topic prefix immediately followed by the environment subject. Code/URL snippets, negation, mixed environments and nonunique project mappings remain ambiguous. This fixes task intake without changing environment authorization or selecting a default production source.
+
+
+## 1.133.12
+Typed 32-hex identifiers support reviewed asynchronous read-job status routes, without method/origin/action widening. Original job list/detail requests are reviewed per application configuration; no automatic universal `/jobs` allowlist. Includes 1.133.11 bracketed environment intake correction.

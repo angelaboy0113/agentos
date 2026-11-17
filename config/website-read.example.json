@@ -54,6 +54,16 @@
               "method": "POST",
               "path": "/api/resources/list/v2",
               "reviewed": true
+            },
+            {
+              "method": "GET",
+              "path": "/api/jobs",
+              "reviewed": true
+            },
+            {
+              "method": "GET",
+              "path": "/api/jobs/{hexId}",
+              "reviewed": true
             }
           ],
           "readNavigationSelectors": [
