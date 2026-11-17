@@ -232,3 +232,15 @@ test('yielded host calls finish once and their durable result returns before acc
  const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({}),bindToolCall:c=>call=c});
  await toolPromise;assert.equal(executed,1);assert.equal(turns,2);assert.equal(result.nativeTiming.hostContinuations,1);assert.equal(result.outcome,'ready');
 });
+
+test('controller grant refresh preserves trusted local artifact workspace for a later cloud input',async t=>{
+ const directory=await temp(t),app=new EventEmitter();let handler,downloads=0,receipt;
+ const original={...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}};
+ const input={id:'ATT-cloud-'+'d'.repeat(64),type:'file',source:{jobId:job.id,projectId:job.projectId,originProfile:job.originProfile,kind:'authorized-native-cloud-file',sha256:'e'.repeat(64)}};
+ // The controller serializes durable job state, not this Runner's local capability.
+ const direct={job,sourceReceipts:[],call:async()=>({inputAttachment:input}),close:async()=>{}};
+ app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.request=async()=>({thread:{id:'cloud-refresh'}});app.close=async()=>{};
+ app.turn=async()=>{app.emit('notification',{method:'turn/started',params:{threadId:'cloud-refresh',turn:{id:'turn'}}});receipt=await handler({threadId:'cloud-refresh',turnId:'turn',namespace:null,callId:'new-cloud-input',tool:'agentos_environment_tool',arguments:{tool:'read_cloud_document',arguments:'{}',summary:'original requested template'}});return{text:JSON.stringify({outcome:'ready',summary:'fixture complete',finalMessage:'fixture complete'})};};
+ await runNativeInvestigation({job:original,config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({}),bindToolCall:h=>handler=h,downloadInputs:async(j,_c,dir)=>{downloads++;assert.equal(dir,directory);assert.deepEqual(j.attachments,[input]);return[{id:input.id,path:dir+'/template.pptx'}];}});
+ assert.equal(receipt.success,true);assert.equal(downloads,1);assert.match(receipt.contentItems[0].text,/localTaskInputs/);
+});

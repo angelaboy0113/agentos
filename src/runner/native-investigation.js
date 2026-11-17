@@ -80,7 +80,9 @@ export async function runNativeInvestigation(options,adapters={}) {
       toolCalls++;
       try {
         let result=params.tool==='agentos_read_result'?(String(params.arguments.resultRef??'').startsWith('source-metadata/')?await direct.readSourceMetadata(params.arguments):await store.read(params.arguments)):await direct.call(params.tool,params.arguments);
-        result=await materializeNativeInputs(result,{...options,job:direct.job??job},adapters.downloadInputs);
+        // Controller refreshes omit the Runner-local artifact capability; keep the
+        // original trusted workspace while using the refreshed job/scope identity.
+        result=await materializeNativeInputs(result,{...options,job:{...(direct.job??job),artifactWorkspace:job.artifactWorkspace}},adapters.downloadInputs);
         const presented=await presentNativeToolResult(store,params.tool,result);
         return {contentItems:[{type:'inputText',text:JSON.stringify(presented)}],success:true};
       } catch(error) {

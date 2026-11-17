@@ -37,3 +37,5 @@ APFS备份和COW版本的 `du` 合计可能重复计入共享数据块。必须�
 回归覆盖不同仓库对象、分支变化/回滚、同时请求、固定提交恢复、脏缓存、嵌套仓、链接和独立元数据。合成局部基准只证明该路径，不能等同整题提速；完整问题的对照须记录同题/变体范围、缓存状态、模型/工具/等待阶段与实际答案。
 
 回退旧代码前自然空闲停稳并备份最新运行数据，不倒灌旧state。新快照仍使用既有不可变策略，`preparation`为额外清单字段；新运行观测应随原证据保留。运行计时通过独立进度字段保存，不混入源码清单；不需要为回退删除业务证据。
+
+Authorized cloud files returned during a native session use that Runner's original artifact workspace capability. Controller job refreshes update durable authorization and task identity, but do not replace this local capability with absent JSON. The host downloads only registered task input IDs with SHA validation and returns localTaskInputs to the same model thread. A registered controller attachment is not proof that a live model has received a readable local file; both stages must be checked when diagnosing file handoffs.
