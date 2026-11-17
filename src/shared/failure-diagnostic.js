@@ -17,6 +17,7 @@ const stages = Object.freeze({
 });
 // Only fixed, reviewed text reaches cards. Never echo exception bodies, URLs or credentials.
 const rules = [
+  ['TOOL_SELECTION_REPEAT', /TOOL_SELECTION_REPEAT/, '工具选择纠正', '同一个不存在的工具名称和参数在收到真实目录后仍被重复选择；这些调用均未执行，已有证据保留。', '按当前工具目录修正名称和参数后接续，不需要扩大权限或重新取数。'],
   ['SOURCE_COMPARISON_SCOPE', /SOURCE_COMPARISON_SCOPE|源码环境不在用户原始双环境请求范围内/, '双环境源码范围', '请求的另一源码环境未在原始问题范围内，或仍指向当前环境；尚未切换环境。', '按用户原始环境描述和实际目录修正接续目标，保留当前证据，不跨环境借用授权。'],
   ['TASK_WORKER_MEMORY', /TASK_WORKER_MEMORY/, '任务执行子进程内存', '任务执行子进程报告V8堆内存耗尽，已有成果保留；并非业务记录为空。', '维护者核对状态复制和中间数据存储，按原任务已保存证据接续，不重跑已完成查询。'],
   ['CREDENTIAL_UNAVAILABLE', /CREDENTIAL_NOT_FOUND|本机加密凭据尚未迁移|本机加密凭据不可读取|本机加密凭据库不可读取/, '已保存凭据读取', '当前入口绑定的本机凭据缺项或不可读取，尚未完成认证；不是网站密码已被拒绝。', '维护者核对原系统、环境、账号角色与凭据引用，恢复已有凭据绑定，不在聊天或日志暴露秘密。'],

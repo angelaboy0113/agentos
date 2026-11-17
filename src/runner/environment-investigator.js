@@ -122,7 +122,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
   let websiteLogin=results.findLast(x=>x.result?.loginRequired)?.result??null;
   const awaitWebsiteLogin=()=>({loginRequired:true,summary:websiteLogin?.message??websiteLogin?.stage,checkpoint:{steps,results,lastAuthorizedAt,pendingInputs:[...pendingInputs]},rows:[],partial:true});
   let lastAuthorizedAt = adapters.checkpoint?.lastAuthorizedAt ?? null;
-  const authenticationRefusals=new Set();
+  const authenticationRefusals=new Set(),rejectedToolSelections=new Set();
   const seen = new Set(),pendingInputs=new Set(adapters.checkpoint?.pendingInputs??[]);
   const carriedRepair=adapters.investigationContext?.repairContinuation;
   if(carriedRepair&&!adapters.checkpoint){results.push({tool:'finalize_report',error:{code:'REPORT_INPUT',message:'原报表核验仍待修复，补齐独立证据后重新finalize_report；不能把接续当已完成',resultRef:carriedRepair.failureRef},executed:false});pendingInputs.add('finalize_report');unresolvedInput=true;}
@@ -179,7 +179,16 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
         }catch(error){results.push({tool:choice.tool,error:{code:'CONTINUATION_INPUT',message:error.message},executed:false});continue;}
       }
       lastArgumentKeys=args&&typeof args==='object'?Object.keys(args).filter(k=>['datasetRef','ref','startLine','leftRef','rightRef','leftKey','rightKey','table','columns','filters','sourceColumn','targetColumn','lookups','keyColumn','groupColumns','aggregates'].includes(k)).slice(0,12):[];
-      if (!tools.spec.some(x => x.tool === choice.tool)) throw new Error('未开放该环境工具');
+      if (!tools.spec.some(x => x.tool === choice.tool)) {
+        const selection=fingerprint([choice.tool,choice.arguments]);
+        if(rejectedToolSelections.has(selection))throw new Error('TOOL_SELECTION_REPEAT');
+        rejectedToolSelections.add(selection);
+        // A guessed tool name has not executed anything. Return the real catalog
+        // for correction; do not misclassify a selection typo as revoked access.
+        results.push({tool:'tool_selection',error:{code:'TOOL_ARGUMENTS',requestedTool:choice.tool,message:'本次未执行：工具名称不在当前环境目录中。请使用当前tools目录的准确名称和参数；这不增加权限，也不能改用直接连接。'},executed:false});
+        pendingInputs.add('tool_selection');unresolvedInput=true;continue;
+      }
+      pendingInputs.delete('tool_selection');unresolvedInput=pendingInputs.size>0;
       try { await authorizePlan(); }
       catch(error) { if (!results.length) throw error; stopReason = failureDiagnostic(error); break; }
       lastAuthorizedAt = new Date().toISOString();

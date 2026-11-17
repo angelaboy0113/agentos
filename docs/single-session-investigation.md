@@ -43,3 +43,9 @@ Runner 配置 `analysisEngine` 对应环境变量 `AGENTOS_ANALYSIS_ENGINE`，�
 定向测试覆盖旧线程兼容、并发重复调用、跨线程拒绝、未知调用恢复、两来源协程、撤权、登录等待与源码环境切换。真实模型隔离试验使用合成数据，记录 `nativeTiming.modelSessions`、`environmentModelSessions`、工具调用数和墙钟时间；这些不是完整业务卡片的速度验收。
 
 生产切换前还需同题真人新卡对照：保持模型、数据范围和验收要求一致，分别记录排队、源码准备、模型与工具、核验和投递耗时；无论成败均撤回维护测试消息。不得以减少交接次数推算整题提速比例。未验证其它操作系统及完整跨机迁移；打包需包含新模块，私有迁移保留原任务检查点、源码、数据集与工具回执。
+
+### Legacy-shaped continuation compatibility
+
+If the native model still returns environmentQuery, websiteQuery or sourceHistoryQuery, the host consumes the request through the same validated direct tools and supplies the observation to another turn on the same App Server thread. It does not hand that request back to the nested environment-model pipeline. Host-generated continuation operations use durable call receipts as well. Genuine login/approval waiting and independent source-environment transitions still leave the turn with their original state. nativeTiming distinguishes modelTurns and hostContinuations from modelSessions.
+
+An unknown tool name is not a database permission refusal. The investigator executes nothing and returns its actual catalog for correction. An identical unexecuted choice repeated after this feedback is reported as TOOL_SELECTION_REPEAT, preserving evidence. This is semantic no-progress detection, not a task duration or total-call cap. Actual grant revocation and scope errors still stop the attempted read.

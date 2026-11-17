@@ -2058,3 +2058,10 @@ The full-scope human test additionally exposed a response-body disconnect after 
 ## 1.132.1｜实例级调查引擎切换
 
 独立实例启动器从可信instance.local.json读取analysisEngine，经校验后在清理继承环境变量之后传入Runner，避免设置在启动时丢失。health和Runner心跳暴露新任务引擎，已有CLI任务保持原路径。默认legacy；正式切换需空闲备份、配置native-tools-v1、八消费者及新卡验收。实际启动器测试覆盖默认、新引擎和无效值拒绝，无新权限或任务限额。
+
+
+## 1.132.2 - Recover unexecuted tool selection errors
+
+A planner can guess a tool name such as read even though the current database exposes select. Previously this was classified as SCOPE_LIMIT and ended the investigation. An unavailable name now returns an unexecuted argument-correction observation and preserves the actual tool catalog, original scope and collected evidence. It never aliases an unknown tool or enables writes; authorization is checked again before any corrected call. Unresolved selections prevent complete results. Native and legacy investigators share this behavior. Regression covers corrected reads, guessed write names not executed, and scope revocation during correction.
+
+Native compatibility also consumes legacy-shaped environment/website/history continuations in the existing App Server thread, with durable host receipts. Scope/login waiting and independent source transitions remain explicit. Identical unexecuted tool-selection repetition has a precise no-progress diagnostic; it is not a total task/call limit. New human-card acceptance remains required after deployment.

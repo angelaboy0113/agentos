@@ -59,7 +59,7 @@ export async function runNativeInvestigation(options,adapters={}) {
   const store=new ToolResultStore({directory:path.join(config.dataDir,'exports',job.id),scope:hash(JSON.stringify([job.id,job.questionId,job.originProfile??job.agentProfile,job.senderId]))});
   // Host receipts live outside the model-writable artifact working directory.
   const journalDirectory=await store.root();
-  let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer;const began=Date.now();
+  let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer,modelTurns=0,hostContinuations=0;const began=Date.now();
   const onToolCall=async params=>{
     if(!active||params.threadId!==threadId||!turnId||params.turnId!==turnId||params.namespace!==null||!investigationDynamicTools.some(x=>x.name===params.tool)&&params.tool!=='agentos_read_result')throw failure('NATIVE_TOOL_SCOPE');
     const run=()=>journal.call(params.callId,{tool:params.tool,arguments:params.arguments},async()=>{
@@ -91,13 +91,28 @@ export async function runNativeInvestigation(options,adapters={}) {
     await emit({type:'progress',phase:'native_investigation_started',sourceContinuation:{questionId:job.questionId,workspace,threadId,artifactPolicy,executionEngine:nativeInvestigationEngine},message:'同一调查会话已接通授权工具，直接取证并继续分析'});
     active=true;
     progressTimer=setInterval(()=>emit({type:'progress',phase:'codex_working',elapsedSeconds:Math.round((Date.now()-began)/1000),executionEngine:nativeInvestigationEngine}).catch(()=>{}),10000);progressTimer.unref();
-    const answer=await app.turn({threadId,approvalPolicy:'never',effort:runtime.reasoningEffort??'low',input:[{type:'text',text:options.prompt+'\n执行方式：优先直接使用agentos_*工具，保持当前会话。environment_open只申请既有范围，返回目录后用environment_tool直接执行；close保存每个来源的核验收据，再按需打开另一来源。来源结束不等于原问题完成。无需输出中间environmentQuery/sourceHistoryQuery结束本轮；最终仍按原schema和真实证据交付。源码通过现有只读shell；业务数据库/网页/日志/历史补取必须使用受控工具。缺登录或权限保留等待；禁止自行连接数据库或绕过受控网页。'},...attachmentPaths.filter(x=>x.type==='image').map(x=>({type:'localImage',path:x.path}))],outputSchema:JSON.parse(await readFile(new URL('../../config/task-result.schema.json',import.meta.url),'utf8'))},{onEvent:method=>{if(method==='item/started')emit({type:'progress',phase:'codex_working'}).catch(()=>{});}});
+    let result;let input;
+    for(;;){
+    modelTurns++;const answer=await app.turn({threadId,approvalPolicy:'never',effort:runtime.reasoningEffort??'low',input:input??[{type:'text',text:options.prompt+'\n执行方式：优先直接使用agentos_*工具，保持当前会话。environment_open只申请既有范围，返回目录后用environment_tool直接执行；close保存每个来源的核验收据，再按需打开另一来源。来源结束不等于原问题完成。无需输出中间environmentQuery/sourceHistoryQuery结束本轮；最终仍按原schema和真实证据交付。源码通过现有只读shell；业务数据库/网页/日志/历史补取必须使用受控工具。缺登录或权限保留等待；禁止自行连接数据库或绕过受控网页。'},...attachmentPaths.filter(x=>x.type==='image').map(x=>({type:'localImage',path:x.path}))],outputSchema:JSON.parse(await readFile(new URL('../../config/task-result.schema.json',import.meta.url),'utf8'))},{onEvent:method=>{if(method==='item/started')emit({type:'progress',phase:'codex_working'}).catch(()=>{});}});
     active=false;
-    let result=JSON.parse(answer.text);
+    result=JSON.parse(answer.text);
     if(!['ready','partial','needs_clarification','blocked'].includes(result.outcome)||!result.finalMessage?.trim())throw failure('CODEX_RESULT_INVALID');
+    // Consume legacy-shaped read continuations inside this same thread. Older
+    // prompt/schema habits must not silently re-enter the nested model pipeline.
+    const continuation=result.environmentQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.environmentQuery),website:false}}:result.websiteQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.websiteQuery),website:true}}:result.sourceHistoryQuery?{name:'agentos_source_history',args:{query:JSON.stringify(result.sourceHistoryQuery)}}:null;
+    if(!continuation||direct.waiting||result.sourceEnvironmentQuery)break;
+    if(direct.channel)await journal.call('host-close-'+turnId,{complete:false},()=>direct.call('agentos_environment_close',{summary:'保存本来源既有证据；继续同一调查会话核验下一来源。',complete:false}));
+    if(direct.waiting)break;
+    const observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));hostContinuations++;
+    if(observation.state==='source_transition_required'){result={...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:observation.sourceEnvironmentQuery};break;}
+    if(direct.waiting)break;
+    const presented=await store.present('host_continuation',observation,24000,{persist:true});
+    input=[{type:'text',text:'你输出了旧式接续申请；宿主已按原身份与范围在本会话执行，结果如下。继续使用agentos_*工具完成同一原问题，不需要结束本轮交回OS或再写environmentQuery/websiteQuery/sourceHistoryQuery。只有真实等待、最终交付或独立源码环境交接才结束。关闭当前来源后可直接打开下一已授权来源。最终结果把已经执行的旧式申请字段设为null。\n'+JSON.stringify(presented)}];
+    active=true;
+    }
     if(direct.channel){await direct.call('agentos_environment_close',{summary:'外层结束前保存已有证据；本来源尚未声明完成。',complete:false});result={...result,outcome:'partial',summary:'已有取证已保存，仍需完成原问题核验'};}
     if(direct.waiting)result={...result,...direct.waiting};
-    return {...result,threadId,executionEngine:nativeInvestigationEngine,model:runtime.model,reasoningEffort:runtime.reasoningEffort,artifactPolicy,hostCurrentJob:direct.job,sourceHistory:direct.lastSourceHistory??null,sourceEvidenceReceipts:direct.sourceReceipts,nativeTiming:{totalMs:Date.now()-began,toolCalls,modelSessions:1,environmentModelSessions:0}};
+    return {...result,threadId,executionEngine:nativeInvestigationEngine,model:runtime.model,reasoningEffort:runtime.reasoningEffort,artifactPolicy,hostCurrentJob:direct.job,sourceHistory:direct.lastSourceHistory??null,sourceEvidenceReceipts:direct.sourceReceipts,nativeTiming:{totalMs:Date.now()-began,toolCalls,modelSessions:1,modelTurns,hostContinuations,environmentModelSessions:0}};
   } catch(error) {if(threadId)error.threadId=threadId;throw error;}
   finally {active=false;clearInterval(progressTimer);app.off('notification',observe);try{await direct.close();}finally{await app.close();}}
 }
