@@ -56,7 +56,7 @@ export async function runNativeInvestigation(options,adapters={}) {
   const {job,config,workspace,attachmentPaths=[],emit}=options;
   const runtime=await (adapters.runtime??loadCodexRuntimeSettings)();
   const direct=adapters.direct??new InvestigationDirectTools(options);
-  const store=new ToolResultStore({directory:path.join(config.dataDir,'exports',job.id),scope:hash(JSON.stringify([job.id,job.questionId,job.originProfile??job.agentProfile,job.senderId]))});
+  const store=new ToolResultStore({readMaxCharacters:24000,directory:path.join(config.dataDir,'exports',job.id),scope:hash(JSON.stringify([job.id,job.questionId,job.originProfile??job.agentProfile,job.senderId]))});
   // Host receipts live outside the model-writable artifact working directory.
   const journalDirectory=await store.root();
   let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer,modelTurns=0,hostContinuations=0;const began=Date.now();
@@ -67,7 +67,7 @@ export async function runNativeInvestigation(options,adapters={}) {
       toolCalls++;
       try {
         const result=params.tool==='agentos_read_result'?await store.read(params.arguments):await direct.call(params.tool,params.arguments);
-        const presented=await store.present(params.tool,result,24000,{persist:true});
+        const presented=await store.present(params.tool,result,24000,{persist:true,reader:'agentos_read_result'});
         return {contentItems:[{type:'inputText',text:JSON.stringify(presented)}],success:true};
       } catch(error) {
         return {contentItems:[{type:'inputText',text:JSON.stringify({error:failureDiagnostic(error),executed:'unknown',guidance:'保留既有证据；根据具体原因修正参数或等待授权，不能假设失败工具已完成。'})}],success:false};
@@ -85,7 +85,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     const checkpoint=job.analysisContinuation;
     const resume=checkpoint?.executionEngine===nativeInvestigationEngine&&checkpoint.questionId===job.questionId&&checkpoint.workspace===workspace;
     const params={cwd:workspace,approvalPolicy:'never',permissions:job.artifactWorkspace.profile,...(runtime.model?{model:runtime.model}:{})};
-    const thread=await app.request(resume?'thread/resume':'thread/start',resume?{...params,threadId:checkpoint.threadId,excludeTurns:true}:{...params,ephemeral:false,dynamicTools:[...investigationDynamicTools,{type:'function',name:'agentos_read_result',description:'分页读取本题已持久化的大工具结果，不重新执行查询。',inputSchema:{type:'object',additionalProperties:false,required:['resultRef','offset','limit'],properties:{resultRef:{type:'string'},offset:{type:'integer'},limit:{type:'integer'}}}}]});
+    const thread=await app.request(resume?'thread/resume':'thread/start',resume?{...params,threadId:checkpoint.threadId,excludeTurns:true}:{...params,ephemeral:false,dynamicTools:[...investigationDynamicTools,{type:'function',name:'agentos_read_result',description:'分页读取本题已持久化的大工具结果，不重新执行查询。',inputSchema:{type:'object',additionalProperties:false,required:['resultRef','offset','limit'],properties:{resultRef:{type:'string'},offset:{type:'integer'},limit:{type:'integer',minimum:1,maximum:24000}}}}]});
     threadId=thread.thread.id;direct.threadId=threadId;
     journal=new InvestigationCallJournal({directory:journalDirectory,binding:hash(JSON.stringify([job.id,job.questionId,workspace,job.originProfile??job.agentProfile,job.senderId,threadId]))});
     await emit({type:'progress',phase:'native_investigation_started',sourceContinuation:{questionId:job.questionId,workspace,threadId,artifactPolicy,executionEngine:nativeInvestigationEngine},message:'同一调查会话已接通授权工具，直接取证并继续分析'});
@@ -111,7 +111,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     hostContinuations++;
     if(observation.state==='source_transition_required'){result={...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:observation.sourceEnvironmentQuery};break;}
     if(direct.waiting)break;
-    const presented=await store.present('host_continuation',observation,24000,{persist:true});
+    const presented=await store.present('host_continuation',observation,24000,{persist:true,reader:'agentos_read_result'});
     input=[{type:'text',text:'你输出了旧式接续申请；宿主已按原身份与范围在本会话执行，结果如下。继续使用agentos_*工具完成同一原问题，不需要结束本轮交回OS或再写environmentQuery/websiteQuery/sourceHistoryQuery。只有真实等待、最终交付或独立源码环境交接才结束。关闭当前来源后可直接打开下一已授权来源。最终结果把已经执行的旧式申请字段设为null。\n'+JSON.stringify(presented)}];
     active=true;
     }

@@ -8,14 +8,15 @@ const bad=message=>{throw Object.assign(new Error(message),{code:'REPORT_INPUT'}
 // Opaque references only. The leased job fixes the directory and current environment
 // fixes the scope. Presentation pagination never changes business completeness.
 export class ToolResultStore{
- constructor({directory,scope,authorize=async()=>{},authorizePrior=null,secrets=[]}){this.directory=directory;this.scope=scope;this.authorize=authorize;this.authorizePrior=authorizePrior;this.secrets=secrets.filter(Boolean);this.memory=new Map();}
+ constructor({directory,scope,authorize=async()=>{},authorizePrior=null,secrets=[],readMaxCharacters=4000}){if(![4000,24000].includes(readMaxCharacters))bad("Invalid result presentation size");this.readMaxCharacters=readMaxCharacters;this.directory=directory;this.scope=scope;this.authorize=authorize;this.authorizePrior=authorizePrior;this.secrets=secrets.filter(Boolean);this.memory=new Map();}
  async root(){
   await mkdir(this.directory,{recursive:true,mode:0o700});
   if(!(await lstat(this.directory)).isDirectory()||(await lstat(this.directory)).isSymbolicLink())bad('工具结果目录无效');
   const root=path.join(this.directory,'tool-results');await mkdir(root,{recursive:true,mode:0o700});
   if(!(await lstat(root)).isDirectory()||(await lstat(root)).isSymbolicLink())bad('工具结果目录不能是符号链接');return realpath(root);
  }
- async present(tool,result,maxBytes=24000,{persist=false}={}){
+ async present(tool,result,maxBytes=24000,{persist=false,reader='read_tool_result'}={}){
+  if(!['read_tool_result','agentos_read_result'].includes(reader))bad('未知工具结果读取入口');
   const text=JSON.stringify(result,(_key,value)=>typeof value==='string'?this.secrets.reduce((v,s)=>v.split(s).join('[已隐藏]'),value):value);
   const small=Buffer.byteLength(text)<=maxBytes;
   if(small&&!persist)return JSON.parse(text);
@@ -23,7 +24,7 @@ export class ToolResultStore{
   if(this.directory){const root=await this.root();await writeFile(path.join(root,ref+'.json'),JSON.stringify(saved),{mode:0o600,flag:'wx'});}else this.memory.set(ref,saved);
   await this.authorize();
   if(small)return {...JSON.parse(text),resultStored:true,resultRef:ref,resultLimited:false,totalCharacters:text.length,bytes:Buffer.byteLength(text),sha256:saved.sha256};
-  const out={resultStored:true,resultRef:ref,resultLimited:true,totalCharacters:text.length,bytes:Buffer.byteLength(text),sha256:saved.sha256,omittedFields:[],note:'本次工具返回已完整保存；展示分页不改变原查询完整性，仍须遵循原始partial/complete。read_tool_result按resultRef和offset续读，不重查或重算已完成步骤。'};
+  const out={resultStored:true,resultRef:ref,resultLimited:true,totalCharacters:text.length,bytes:Buffer.byteLength(text),sha256:saved.sha256,omittedFields:[],readerTool:reader,readerArguments:{resultRef:ref,offset:0,limit:this.readMaxCharacters},note:'本次工具返回已完整保存；展示分页不改变原查询完整性，仍须遵循原始partial/complete。'+reader+'按resultRef、offset和limit续读，不使用另一执行层的结果读取入口，不重查或重算已完成步骤。'};
   for(const [key,value]of Object.entries(result)){
    if(value===undefined)continue;
    if(Buffer.byteLength(JSON.stringify(value))<=3000&&Buffer.byteLength(JSON.stringify(out))+Buffer.byteLength(JSON.stringify({[key]:value}))<16000)out[key]=JSON.parse(JSON.stringify(value,(_k,v)=>typeof v==='string'?this.secrets.reduce((x,s)=>x.split(s).join('[已隐藏]'),v):v));
@@ -54,7 +55,7 @@ export class ToolResultStore{
   if(saved.scope!==this.scope){const provenance=await this.authorizePrior?.(resultRef,saved.scope);if(!provenance)bad('工具结果来源未在本任务授权');return {...saved,provenance};}return saved;
  }
  async read({resultRef,offset=0,limit=4000}){
-  await this.authorize();if(!valid(resultRef)||!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>4000)bad('工具结果引用无效；offset须非负，limit为1至4000字符');
+  await this.authorize();if(!valid(resultRef)||!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>this.readMaxCharacters)bad('工具结果引用无效；offset须非负，limit为1至'+this.readMaxCharacters+'字符');
   const saved=await this.load(resultRef);if(offset>saved.text.length)bad('工具结果分页位置无效');
   let end=Math.min(offset+limit,saved.text.length);if(end<saved.text.length&&/[\uD800-\uDBFF]/.test(saved.text[end-1]))end--;
   if(end===offset&&offset<saved.text.length)end=Math.min(offset+2,saved.text.length);
