@@ -31,3 +31,5 @@ Current-turn metadata receipts are carried by the Runner through both document m
 
 
 固定旧快照恢复按父仓优先、独立同级最多3仓并行准备；失败先等待已启动操作结束再清理。已复制的本地固定提交及树能真实检出并核对HEAD时，不重复远端fetch；缺对象才获取同一个SHA。新问题仍核对指定远端分支，历史仍须独立补齐，不能将旧缓存冒充最新。
+
+分支合并/提交清单应优先使用[批量分支元数据](source-branch-commits.md)，在原清单内一次指定相关仓库，避免每查一个仓都先克隆再补完整历史。原独立参考用于确需读取不同分支文件或执行 diff 的情况，不作合并清单的前置步骤。

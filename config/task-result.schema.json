@@ -744,6 +744,59 @@
               "type": "string"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "repositories",
+            "branch",
+            "since",
+            "until",
+            "reason"
+          ],
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "branch_commits"
+              ]
+            },
+            "repositories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "branch": {
+              "type": "string"
+            },
+            "since": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "until": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
         }
       ]
     },
