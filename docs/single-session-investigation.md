@@ -61,3 +61,7 @@ Native large observations identify `agentos_read_result` and include exact reade
 数据库环境的 `append_report_columns` 同时接受原已交付CSV附件ID与本任务 `finalize_report` 刚登记的核验CSV fileId（参数仍为attachmentId）。不要求先把中间文件发给用户。补充数据仍须完整持久化、显式唯一关联键、日期解释和未匹配/null/范围外规则；派生文件保留全部原单元格，独立重放核验后才走正式投递。未登记文件、其它任务文件及任意模型临时CSV不能用此入口绕过金额/范围核验。
 
 真人同题基准不能仅以终态颜色比较：完整结果、真实澄清、外部平台未提供字段和程序阻断分别记录。旧题等待恢复时间不等同实际执行耗时。
+
+### 1.132.5：分页结果不再递归分页
+
+原生 `agentos_read_result` 返回的页已由可信读取器限制为最多24000字符，仍沿用原引用、offset、nextOffset及哈希。该页经过相同脱敏处理后直接交还主会话，不因中文UTF-8字节数或JSON转义开销再套一层大结果引用，也不重复写一份分页副本。其它工具的大结果仍完整持久化并分页。此调整不增加业务查询量、取消范围校验或引入整任务限制。

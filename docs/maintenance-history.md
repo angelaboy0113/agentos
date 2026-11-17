@@ -2074,3 +2074,5 @@ Native compatibility also consumes legacy-shaped environment/website/history con
 - Fixed large native result wrappers naming the legacy reader from a different store. Native receipts now identify agentos_read_result with exact arguments; native presentation pages increase from4000 to24000 characters without changing saved data, job/scope validation or legacy defaults.
 
 - 1.132.4：原生主会话可按可信源码元数据收据分页读取完整历史明细；同阶段核验CSV可直接关联补列，不必先交付中间文件。修复由真人原题复测发现，身份/固定源码/金额及实际文件核验边界保持。源码原件哈希复读与来源绑定、多系统及恢复、日期补列原单元格保持、跨任务拒绝纳入回归；正式版本及真人最终结果以本机部署审计为准。
+
+- 1.132.5：原生分页读取的返回页不再被字节展示门槛重新包装为另一个结果引用，保留原引用与分页位置、脱敏和哈希。针对中文、带转义JSON和源码元数据分页，新增跨页精确复原及无副本增长测试；真实问题的结果和耗时另行记录。

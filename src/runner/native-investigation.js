@@ -9,6 +9,9 @@ import {ToolResultStore} from './tool-result-store.js';
 import {InvestigationDirectTools,investigationDynamicTools} from './investigation-direct-tools.js';
 
 export const nativeInvestigationEngine='native-tools-v1';
+// A reader page is already bounded by its trusted host reader. Do not page the
+// JSON envelope again (Unicode and escaped JSON can exceed the byte display size).
+export const presentNativeToolResult=(store,tool,result)=>store.present(tool,result,tool==='agentos_read_result'?Number.MAX_SAFE_INTEGER:24000,{persist:tool!=='agentos_read_result',reader:'agentos_read_result'});
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const failure=code=>Object.assign(new Error(code),{code});
 
@@ -67,7 +70,7 @@ export async function runNativeInvestigation(options,adapters={}) {
       toolCalls++;
       try {
         const result=params.tool==='agentos_read_result'?(String(params.arguments.resultRef??'').startsWith('source-metadata/')?await direct.readSourceMetadata(params.arguments):await store.read(params.arguments)):await direct.call(params.tool,params.arguments);
-        const presented=await store.present(params.tool,result,24000,{persist:true,reader:'agentos_read_result'});
+        const presented=await presentNativeToolResult(store,params.tool,result);
         return {contentItems:[{type:'inputText',text:JSON.stringify(presented)}],success:true};
       } catch(error) {
         return {contentItems:[{type:'inputText',text:JSON.stringify({error:failureDiagnostic(error),executed:'unknown',guidance:'保留既有证据；根据具体原因修正参数或等待授权，不能假设失败工具已完成。'})}],success:false};

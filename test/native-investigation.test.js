@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
-import {InvestigationCallJournal,runNativeInvestigation,useNativeInvestigation,nativeInvestigationEngine} from '../src/runner/native-investigation.js';
+import {InvestigationCallJournal,runNativeInvestigation,useNativeInvestigation,nativeInvestigationEngine,presentNativeToolResult} from '../src/runner/native-investigation.js';
 import {InvestigationToolChannel} from '../src/runner/investigation-tool-channel.js';
 import {InvestigationDirectTools} from '../src/runner/investigation-direct-tools.js';
 import {investigateEnvironment} from '../src/runner/environment-investigator.js';
@@ -139,4 +139,12 @@ test('native source artifact reads validate original binding, content and path, 
  const {documentDirectory}=await import('../src/shared/document-artifacts.js');const {mkdir}=await import('node:fs/promises');const directory=await temp(t),scope={policy:'isolated-environment-source-v1',environment:'sit',cacheKey:'cache',repositories:[{path:'service',branch:'sit',commit:'a'.repeat(40)}]},binding={jobId:job.id,questionId:job.questionId,profile:job.originProfile??job.agentProfile,projectId:job.projectId,environment:'sit',originalCacheKey:'cache',repositories:[{repository:'service',branch:'sit',commit:'a'.repeat(40)}]},relative='source-metadata/11111111-1111-4111-8111-111111111111.json',text=JSON.stringify({rows:[{commits:[{message:'actual saved merge'}]}]}),proof={policy:'source-commit-metadata-v1',artifact:relative,binding,resultHash:createHash('sha256').update(text).digest('hex')};const dir=await documentDirectory(directory,job.id);await mkdir(path.join(dir,'source-metadata'),{recursive:true});const file=path.join(dir,relative);await writeFile(file,text);
  for(const restored of [false,true]){const direct=new InvestigationDirectTools({job:{...job,...(restored?{context:[{result:{sourceHistory:proof}}]}:{})},sourceSync:scope,config:{dataDir:directory}});if(!restored)direct.sourceReceipts.push(proof);assert.equal(JSON.parse((await direct.readSourceMetadata({resultRef:relative})).text).rows[0].commits[0].message,'actual saved merge');await assert.rejects(direct.readSourceMetadata({resultRef:'../outside'}));await assert.rejects(direct.readSourceMetadata({resultRef:relative,limit:24001}));}
  const foreign=new InvestigationDirectTools({job:{...job,questionId:'foreign'},sourceSync:scope,config:{dataDir:directory}});foreign.sourceReceipts.push(proof);await assert.rejects(foreign.readSourceMetadata({resultRef:relative}),e=>e.code==='SOURCE_METADATA_ARTIFACT_SCOPE');const tampered=new InvestigationDirectTools({job,sourceSync:scope,config:{dataDir:directory}});tampered.sourceReceipts.push(proof);await writeFile(file,'changed');await assert.rejects(tampered.readSourceMetadata({resultRef:relative}),e=>e.code==='SOURCE_METADATA_ARTIFACT_CHANGED');
+});
+
+test('native bounded Unicode and escaped JSON reader pages never rewrap into recursive result references',async()=>{
+ const {ToolResultStore}=await import('../src/runner/tool-result-store.js');const store=new ToolResultStore({scope:'reader-boundary',readMaxCharacters:24000,secrets:['synthetic-secret']});
+ const value={items:Array.from({length:1800},(_,i)=>({id:String(i),text:'中文源码\"证据\n与已保存结果 synthetic-secret'}))},saved=await store.present('source',value,24000,{persist:true,reader:'agentos_read_result'});let restored='',offset=0,pages=0;
+ while(offset!==null){const page=await store.read({resultRef:saved.resultRef,offset,limit:24000}),before=store.memory.size,shown=await presentNativeToolResult(store,'agentos_read_result',page);assert.equal(shown.resultRef,saved.resultRef);assert.equal(shown.text,page.text);assert.equal(shown.offset,offset);assert.equal(shown.resultLimited,undefined);assert.equal(store.memory.size,before);assert.ok(!shown.text.includes('synthetic-secret'));restored+=shown.text;offset=shown.nextOffset;pages++;}
+ assert.ok(pages>1);assert.deepEqual(JSON.parse(restored),JSON.parse(JSON.stringify(value).replaceAll('synthetic-secret','[已隐藏]')));
+ const metadataPage={resultRef:'source-metadata/a.json',offset:0,text:'证据'.repeat(12000),nextOffset:24000,sha256:'proof'};const shown=await presentNativeToolResult(store,'agentos_read_result',metadataPage);assert.deepEqual(shown,metadataPage);
 });
