@@ -13,3 +13,11 @@ test('diagnostic and hover tools are exposed with fixed arguments only',()=>{
  validateBrowserTool('browser_diagnostics',{});validateBrowserTool('browser_hover',{ref:'current'});
  assert.throws(()=>validateBrowserTool('browser_diagnostics',{url:'https://other.example'}));assert.throws(()=>validateBrowserTool('browser_hover',{selector:'body'}));
 });
+test('pending reads expose timing and scoped paths, distinguishing query action from background polls',()=>{
+ const s=state();s.pendingReadMetadata=new WeakMap();
+ const req=(url)=>({url:()=>url,method:()=> 'POST'});
+ const a=req('https://app.example/api/history?token=secret'),b=req('https://app.example/poll'),c=req('https://other.example/private');
+ for(const [r,q]of [[a,true],[b,false],[c,true]]){s.pendingReads.add(r);s.pendingReadMetadata.set(r,{startedAt:Date.now()-5000,queryInitiated:q});}
+ const d=websiteDiagnostics(s);assert.equal(d.pendingQueries,1);assert.equal(d.pendingReadDetails.length,2);assert.ok(d.pendingReadDetails[0].elapsedMs>=5000);assert.equal(d.pendingReadDetails[0].path,'/api/history');assert.doesNotMatch(JSON.stringify(d),/secret|token|other\.example/);
+ s.pendingReads.delete(a);assert.equal(websiteDiagnostics(s).pendingQueries,0);
+});

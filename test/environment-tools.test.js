@@ -480,3 +480,11 @@ test('readonly connection cleanup destroys disconnected sessions without replaci
  const tools=await createEnvironmentTools({kind:'mysql',host:'db',port:3306,database:'demo'},{tables:['orders'],maxRows:5,timeoutMs:1000},credentials,{mysql});
  await tools.run('connection');await assert.doesNotReject(tools.close());assert.equal(destroyed,1);
 });
+for(const pending of [true,false])test(`website unfinished close preserves only actual pending query: ${pending}`,async()=>{
+ const env={...environment,kind:'website',baseUrl:'https://app.example/'},cfg={version:1,environments:{env}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对当前接口记录']},'demo',{profile:'owner',senderId:'ou_member'});
+ let n=0,settled=false,closed=0;const calls=[];
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'browser_snapshot'},{tool:'browser_diagnostics'}],run:async tool=>{calls.push(tool);if(tool==='browser_diagnostics')return {pendingReads:1,pendingQueries:pending&&!settled?1:0};if(tool==='browser_snapshot'){settled=true;return {pageStatus:'ready',rows:[{id:'verified'}]};}return {};},close:async()=>{closed++;}}),
+ planner:async()=>({next:async input=>{if(++n===1)return{tool:'finish',summary:'查询在途，无需用户补充',complete:false};if(n===2){assert.equal(input.results.at(-1).error.code,'READ_QUERY_PENDING');return{tool:'browser_snapshot',arguments:'{}'};}return{tool:'finish',summary:'同一请求已返回',complete:true};},close:async()=>{}})});
+ assert.equal(closed,1);assert.equal(calls.filter(x=>x==='connection').length,1);assert.equal(n,pending?3:1);assert.equal(r.summary,pending?'同一请求已返回':'查询在途，无需用户补充');
+});

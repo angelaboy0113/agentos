@@ -157,6 +157,15 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
         results.push({tool:choice.tool,error:{code:'WEBSITE_AUTH_REQUIRED',message:'该业务页面操作需要认证，本次未执行。原入口公开部署脚本仍可browser_assets读取；可用已取得公开证据finish交回原问题审阅。只有实际需要登录态数据/页面才wait_for_website_login，不把一次工具选择错误当整个调查受阻。'},executed:false});continue;
       }
       if (choice.tool === 'finish') {
+        // An accepted asynchronous read is not a request for user information.
+        // Observe the same page, keep its channel and never replay the query.
+        if(e.kind==='website'&&choice.complete!==true&&tools.spec.some(x=>x.tool==='browser_diagnostics')){
+          const diagnostic=await tools.run('browser_diagnostics',{});
+          if(diagnostic.pendingQueries>0){
+            results.push({tool:'finish',error:{code:'READ_QUERY_PENDING',message:'已有定向只读查询仍在进行；保留当前页面与会话，使用browser_snapshot/browser_diagnostics等待同一请求。不要重新提交、导航离开或把等待改成需要用户补充；真实响应/失败返回后再判断。'},result:diagnostic,executed:false});
+            continue;
+          }
+        }
         const mysqlEvidence = results.some(item => item.result && ['collections','tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','window_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','read_tool_result','list_tool_results','compose_report','finalize_report','refresh_report','enrich_dataset','relate_dataset','extend_dimension','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
         const mysqlQueryTools = ['mysql','mongodb'].includes(e.kind) && tools.spec.some(item => ['collections','tables','schema','select','count','group_count','aggregate','collect_values','linked_aggregate','group_dataset','linked_group_dataset','window_dataset','period_dataset','transform_dataset','collect_dataset_values','summarize_dataset','explain_query','indexes','deployment_evidence','read_dataset','read_tool_result','list_tool_results','compose_report','finalize_report','refresh_report','enrich_dataset','relate_dataset','extend_dimension','inspect_report','inspect_dataset','read_source_evidence','compare_datasets'].includes(item.tool));
         if (mysqlQueryTools && !mysqlEvidence && !results.some(item=>item.error&&item.tool!=='finish')) {

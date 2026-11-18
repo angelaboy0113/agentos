@@ -83,3 +83,11 @@ for(const backend of ['isolated','shared'])test(`${backend}: pointer-labelled re
  snap=await b.run(job,e,'browser_click',{ref:view[0].ref});assert.match(snap.pageText,/Verified historical detail/);await assert.rejects(b.run(job,e,'browser_click',{ref:view[0].ref}));
  if(backend==='isolated')page=b.pages.get(job.id).page;const fresh=snap.controls.find(c=>c.label==='查看');await page.locator('#view').evaluate(el=>el.textContent='删除');await assert.rejects(b.run(job,e,'browser_click',{ref:fresh.ref}));
 });
+test('isolated browser tracks an in-flight query until response without replay or leaking query parameters',async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'pending-query-'));let response,hits=0;
+ const server=http.createServer((req,res)=>{if(req.url.startsWith('/api/query')){hits++;response=res;return;}res.setHeader('content-type','text/html;charset=utf-8');res.end('<h1>History</h1><button onclick="fetch(\'/api/query?search=fixture-secret\').then(r=>r.text()).then(t=>document.getElementById(\'r\').textContent=t)">开始查询</button><div id="r">Old rows</div>');});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP query.test 127.0.0.1']})},e={projectId:'audit',tier:'uat',baseUrl:`http://query.test:${server.address().port}/`},job={id:'pending-query'};const b=new WebsiteBrowser(dir,driver);
+ t.after(async()=>{response?.end('done');await b.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
+ let snap=await b.run(job,e,'connection');const button=snap.controls.find(c=>c.kind==='query');assert.ok(button);snap=await b.run(job,e,'browser_click',{ref:button.ref});assert.equal(hits,1);assert.equal(snap.pendingQueries,1);let d=await b.run(job,e,'browser_diagnostics');assert.equal(d.pendingQueries,1);assert.equal(d.pendingReadDetails[0].path,'/api/query');assert.doesNotMatch(JSON.stringify(d),/fixture-secret|token=/);
+ const returned=b.pages.get(job.id).page.waitForResponse(r=>r.url().includes('/api/query'));response.end('Verified rows');await returned;snap=await b.run(job,e,'browser_snapshot');assert.equal(snap.pendingQueries,0);assert.match(snap.pageText,/Verified rows/);assert.equal(hits,1);
+});
