@@ -2153,3 +2153,7 @@ A native cloud-file read could persist the original bytes correctly but fail bef
 
 ## 1.134.0 — configurable name suffixes
 Reply addressing supports a Unicode name tail and a configurable common suffix, with explicit display-name exceptions taking priority. Chinese names with trailing parenthesized aliases use the name itself; short names are retained. The shared card/reply formatter replaces obsolete leading greetings without changing author identity, evidence, permissions or historical cards. Existing teacher and display-name policies remain compatible. Configuration stays local; no deployment-specific people are included in the core or examples.
+
+
+## 1.135.0 — scoped query toggles and log investigation continuity
+Shared browser metadata recognizes start/execute query labels in genuine search forms, exposing their labelled radio modes in both browser backends while keeping mutation forms, disabled/secret fields and network writes blocked. Investigation guidance verifies archived time partitions and uses selective known identifiers before record expansion. Application-log scopes remain explicit deployment configuration; discovering deployment history alone never implies historical log completeness. Includes configurable name-tail addressing from 1.134.0.

@@ -38,7 +38,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  const countedChoices=radioGroup&&[...radioGroup.querySelectorAll('label')].filter(n=>n.getClientRects().length);
  const radioForm=radioGroup?.closest('form,.ant-form,.el-form');
  const formButtons=radioForm?[...radioForm.querySelectorAll('button,[role=button]')].filter(n=>n.getClientRects().length).map(n=>n.innerText.trim()):[];
- const searchRadioForm=formButtons.some(t=>/^(?:查询|搜索|检索|search|query)$/i.test(t))&&!formButtons.some(t=>/保存|提交|审批|支付|删除|修改|创建|发布|save|submit|approve|delete|create|publish/i.test(t));
+ const searchRadioForm=formButtons.some(t=>/^(?:(?:开始|执行)?(?:查询|搜索|检索)(?:\s*[\/／]\s*分析)?|(?:run|start|execute) (?:query|search)|search|query)$/i.test(t))&&!formButtons.some(t=>/保存|提交|审批|支付|删除|修改|创建|发布|save|submit|approve|delete|create|publish/i.test(t));
  const queryRadio=radioGroup&&(radioGroup.closest('[role=search]')||searchRadioForm||countedChoices.length>=2&&countedChoices.every(n=>/[（(]\s*\d+\s*[）)]\s*$/.test(n.innerText.trim())));
  if(radioGroup&&radio){
   if(!queryRadio)return {visible:true,label,type:null};
