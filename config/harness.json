@@ -9,39 +9,45 @@
   "reviewedGuidanceTransitions": [
     {
       "fromFingerprint": "269c90e9687c80627a61901e7625c9506682ce6a58c0ed018039cde191e1da9b",
-      "toContentHash": "2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75",
+      "toContentHash": "a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes. Reviewed 1.136.2: pointwise answer presentation only; no authority, data scope, task status or execution limits changed."
     },
     {
       "fromFingerprint": "4ae6ef04cf64572c25dc602a7fddfe8665578fd007179e28d444fbad7f232cd7",
-      "toContentHash": "2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75",
+      "toContentHash": "a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes. Reviewed 1.136.2: pointwise answer presentation only; no authority, data scope, task status or execution limits changed."
     },
     {
       "fromFingerprint": "70e1f17a30cd650ed289d68d3b933b535eb91492b914aa3e7eaca51d4a8036b4",
-      "toContentHash": "2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75",
+      "toContentHash": "a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672",
       "scope": "guidance-only",
-      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes."
+      "review": "Reviewed 114803a and 5cf0899/aa8cdad guidance diffs: investigation handoff, metric dependencies and UI label mapping only; no authority or data-access changes. Standard and all target roles pinned. Further reviewed clarification: distinguish colloquial business labels from explicit physical field selection; no authority or data-access change. Reviewed 5e34454/45718d4: common guidance adds the existing scoped branch_commits metadata preference only; no authority or business-write change. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes. Reviewed 1.136.2: pointwise answer presentation only; no authority, data scope, task status or execution limits changed."
     },
     {
       "fromFingerprint": "f1805ef63e5b4708ea80ba561d845f704725c12dafc4dbd6ca3b4ef5755a6fd1",
-      "toContentHash": "2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75",
+      "toContentHash": "a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672",
       "scope": "guidance-only",
-      "review": "Reviewed exact 1.128/1.130 common-role diff: only prefer scoped batch branch commit metadata for commit lists. Same standard and roles, no authority, environment, credential or business-write change. Unknown future content still requires review. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes."
+      "review": "Reviewed exact 1.128/1.130 common-role diff: only prefer scoped batch branch commit metadata for commit lists. Same standard and roles, no authority, environment, credential or business-write change. Unknown future content still requires review. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes. Reviewed 1.136.2: pointwise answer presentation only; no authority, data scope, task status or execution limits changed."
     },
     {
       "fromFingerprint": "b198607138d3024b77424c518979dcb0898313d00bc1b5f8e8d5eaa7395b9ac7",
-      "toContentHash": "2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75",
+      "toContentHash": "a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672",
       "scope": "guidance-only",
-      "review": "Reviewed exact 1.128/1.130 common-role diff: only prefer scoped batch branch commit metadata for commit lists. Same standard and roles, no authority, environment, credential or business-write change. Unknown future content still requires review. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes."
+      "review": "Reviewed exact 1.128/1.130 common-role diff: only prefer scoped batch branch commit metadata for commit lists. Same standard and roles, no authority, environment, credential or business-write change. Unknown future content still requires review. Further review1.133.8: user-supplied premises are not unrequested re-verification goals; only analysis guidance, no authority/data-access/write changes. Reviewed 1.136.2: pointwise answer presentation only; no authority, data scope, task status or execution limits changed."
     },
     {
       "fromFingerprint": "e3399f436ad735bdc68a3787f76c03b2866c2be1e3a8b12dac0fc5a4367ba852",
-      "toContentHash": "2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75",
+      "toContentHash": "a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672",
       "scope": "guidance-only",
-      "review": "Reviewed1.133.8: distinguish user-supplied premises from requested re-verification; only analysis guidance changed, all authority, source boundaries and evidence checks remain."
+      "review": "Reviewed1.133.8: distinguish user-supplied premises from requested re-verification; only analysis guidance changed, all authority, source boundaries and evidence checks remain. Reviewed 1.136.2: pointwise answer presentation only; no authority, data scope, task status or execution limits changed."
+    },
+    {
+      "fromFingerprint": "37984a6bd108060a56eb996542aecfcc94275fd00ec6a01506458115b711c620",
+      "toContentHash": "a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672",
+      "scope": "guidance-only",
+      "review": "Reviewed 1.136.1 to 1.136.2: only analysis reply grouping and per-question gaps; all authority and data access unchanged."
     }
   ]
 }

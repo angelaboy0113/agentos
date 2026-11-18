@@ -123,11 +123,11 @@ test('working evidence rejects symbolic links and shared inodes, retains failed 
 });
 
 test('reviewed source-metadata guidance resumes exact prior harnesses but rejects future role edits', async (t) => {
-  const prior = ['f1805ef63e5b4708ea80ba561d845f704725c12dafc4dbd6ca3b4ef5755a6fd1','b198607138d3024b77424c518979dcb0898313d00bc1b5f8e8d5eaa7395b9ac7'];
+  const prior = ['f1805ef63e5b4708ea80ba561d845f704725c12dafc4dbd6ca3b4ef5755a6fd1','b198607138d3024b77424c518979dcb0898313d00bc1b5f8e8d5eaa7395b9ac7','37984a6bd108060a56eb996542aecfcc94275fd00ec6a01506458115b711c620'];
   for (const fingerprint of prior) {
     const h = await loadHarness({...job,context:[{result:{harness:{fingerprint}}}]});
     assert.deepEqual(h.metadata.reviewedPreviousFingerprints,[fingerprint]);
-    assert.equal(h.metadata.contentFingerprint,'2de0c96c3d9ee10d77b0fc6a3a9b23f86be5143e028a7f7d8b4cc300e8db1f75');
+    assert.equal(h.metadata.contentFingerprint,'a24223832e96245e6c0f54371f91d5ed9ea57c1ef83741f723e7584540067672');
   }
   const directory=await fixture(t);await cp(new URL('../config/',import.meta.url),directory,{recursive:true});
   await writeFile(path.join(directory,'roles','common.md'),'Unreviewed future authority or guidance change');
