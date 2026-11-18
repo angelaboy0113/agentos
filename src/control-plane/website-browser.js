@@ -76,7 +76,7 @@ export class WebsiteBrowser {
    else {existing.job=job;existing.environment=e;return existing;}
   }
   const session=await this.session(e),page=await session.context.newPage();
-  const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),pendingReadMetadata:new WeakMap(),authHandled:new WeakSet(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
+  const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),pendingReadMetadata:new WeakMap(),detachedReads:new WeakSet(),authHandled:new WeakSet(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
   page.on('crash',()=>{s.crashed=true;});
   page.on('framenavigated',frame=>{if(frame===page.mainFrame())advanceWebsiteDocumentDiagnostics(s,frame.url());});
   page.on('pageerror',error=>{s.pageErrors.add(/^[A-Za-z]+Error$/.test(error.name)?error.name:'RuntimeError');pageDiagnostic(s,{name:error.name,message:error.message});});
@@ -88,7 +88,7 @@ export class WebsiteBrowser {
   const settled=request=>{if(s.pendingReads.delete(request))s.lastReadActivity=Date.now();};
   page.on('requestfinished',settled);page.on('requestfailed',settled);
   page.on('response',async response=>{
-   const req=response.request(),url=new URL(response.url());if(url.origin!==new URL(e.baseUrl).origin)return;
+   const req=response.request(),url=new URL(response.url());if(s.detachedReads.has(req)||url.origin!==new URL(e.baseUrl).origin)return;
    const tail=url.pathname.split('/').filter(Boolean).at(-1)??'';
    if(req.method()==='POST'&&/^(?:login|signin|sign-in|authenticate|auth|token)(?:\.[a-z]+)?$/i.test(tail)){
     if(!s.authHandled.has(req))await this.acceptAuthentication(s,response);return;
@@ -259,10 +259,19 @@ export class WebsiteBrowser {
   if(tool==='browser_navigate'){
    let target;try{target=websiteNavigationTarget(args.url,s.environment.baseUrl,s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readEndpoints??[]);}catch{throw new BrowserInputError('BROWSER_ARGUMENTS','目标地址未通过同应用只读校验；使用已观察到的菜单或源码地址，不能传凭据、修改动作或其它应用地址。');}
    if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务页面导航范围已失效');
+   const priorReads=new Set(s.pendingReads),priorDocument=await s.page.evaluate(()=>performance.timeOrigin);
    s.currentReadTarget=target;s.restoreTarget=true;s.dom=null;s.frameRefs=new Map();
    // Navigation only: never replay the query, login submission or business action.
    await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
-   return {...await this.snapshot(s),...await this.loginStatus(s),navigation:{requested:websitePageLocation(target),requestedRoute:websitePageRoute(target),actual:websitePageLocation(s.page.url()),actualRoute:websitePageRoute(s.page.url()),targetMatched:s.page.url()===target,readOnly:true}};
+   const documentChanged=await s.page.evaluate(()=>performance.timeOrigin)!==priorDocument;
+   if(documentChanged){
+    // Old document reads cannot supply this document's answer or keep its guard
+    // pending. Detach local observations; do not claim the backend query stopped.
+    for(const request of priorReads){s.detachedReads.add(request);s.pendingReads.delete(request);}
+    s.lastReadDetach={at:new Date().toISOString(),supersededPendingReads:priorReads.size,serverCancellationConfirmed:false};
+    s.lastReadAction=null;s.lastQueryAction=null;
+   }
+   return {...await this.snapshot(s),...await this.loginStatus(s),navigation:{requested:websitePageLocation(target),requestedRoute:websitePageRoute(target),actual:websitePageLocation(s.page.url()),actualRoute:websitePageRoute(s.page.url()),targetMatched:s.page.url()===target,readOnly:true,documentChanged,...(documentChanged?s.lastReadDetach:{})}};
   }
   const blank=s.page.url()==='about:blank';
   if(blank||tool==='browser_recover'){
@@ -343,7 +352,7 @@ export class WebsiteBrowser {
      }
     }
    }
-  }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}finally{if(s.queryAction)s.lastQueryAction.endedAt=Date.now();s.queryAction=false;s.lastReadAction.endedAt=new Date().toISOString();}
+  }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}finally{if(s.queryAction){await ref.el.evaluate(()=>undefined).catch(()=>{});s.lastQueryAction.endedAt=Date.now();}s.queryAction=false;s.lastReadAction.endedAt=new Date().toISOString();}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   const readiness=(current.kind==='navigation'||s.pendingReads.size)?await waitForCaptureReady(s):null;
   s.lastReadAction.endedAt=new Date().toISOString();

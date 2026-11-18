@@ -488,3 +488,10 @@ for(const pending of [true,false])test(`website unfinished close preserves only 
  planner:async()=>({next:async input=>{if(++n===1)return{tool:'finish',summary:'查询在途，无需用户补充',complete:false};if(n===2){assert.equal(input.results.at(-1).error.code,'READ_QUERY_PENDING');return{tool:'browser_snapshot',arguments:'{}'};}return{tool:'finish',summary:'同一请求已返回',complete:true};},close:async()=>{}})});
  assert.equal(closed,1);assert.equal(calls.filter(x=>x==='connection').length,1);assert.equal(n,pending?3:1);assert.equal(r.summary,pending?'同一请求已返回':'查询在途，无需用户补充');
 });
+test('a pending read can replan within the same authorized website channel instead of waiting on invalid conditions',async()=>{
+ const env={...environment,kind:'website',baseUrl:'https://app.example/'},cfg={version:1,environments:{env}},plan=planQuery(cfg,{environmentId:'env',queryId:'investigate',parameters:['核对接口失败记录']},'demo',{profile:'owner',senderId:'ou_member'});let n=0,pending=true;const calls=[];
+ const r=await investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>credentials,
+ tools:async()=>({spec:[{tool:'connection'},{tool:'browser_navigate'},{tool:'browser_diagnostics'},{tool:'browser_snapshot'}],run:async tool=>{calls.push(tool);if(tool==='browser_diagnostics')return {pendingQueries:pending?1:0};if(tool==='browser_navigate'){pending=false;return {pageStatus:'ready'};}return {};},close:async()=>{}}),
+ planner:async()=>({next:async input=>{if(++n===1)return{tool:'finish',complete:false,summary:'在途查询条件无效'};if(n===2){assert.equal(input.results.at(-1).error.code,'READ_QUERY_PENDING');assert.match(input.results.at(-1).error.message,/允许.*更正/);return{tool:'browser_navigate',arguments:'{"url":"https://app.example/"}'};}return{tool:'finish',complete:true,summary:'原授权内重规划完成'};},close:async()=>{}})});
+ assert.deepEqual(calls,['connection','browser_diagnostics','browser_navigate']);assert.equal(r.partial,false);assert.equal(n,3);
+});

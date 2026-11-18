@@ -162,7 +162,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
         if(e.kind==='website'&&choice.complete!==true&&tools.spec.some(x=>x.tool==='browser_diagnostics')){
           const diagnostic=await tools.run('browser_diagnostics',{});
           if(diagnostic.pendingQueries>0){
-            results.push({tool:'finish',error:{code:'READ_QUERY_PENDING',message:'已有定向只读查询仍在进行；保留当前页面与会话，使用browser_snapshot/browser_diagnostics等待同一请求。不要重新提交、导航离开或把等待改成需要用户补充；真实响应/失败返回后再判断。'},result:diagnostic,executed:false});
+            results.push({tool:'finish',error:{code:'READ_QUERY_PENDING',message:'已有只读查询仍在进行，不能将等待改为用户信息缺失。有效查询可继续观察同一请求；已有证据证明字段、模式或条件错误时，允许在原授权范围更正，或导航回已观察的同应用只读入口取消该次读取后改查。保留原证据，不重复提交相同请求、不因耗时本身终止整项任务。'},result:diagnostic,executed:false});
             continue;
           }
         }
