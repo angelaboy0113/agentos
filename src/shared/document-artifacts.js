@@ -71,9 +71,9 @@ async function resolveDocumentRequest(dataDir,job,request){
     if(!source)fail('工作表来源必须是当前任务已经登记或原话题可信附件中的核验CSV');
     const view=await inspectReport(dataDir,{...job,reportFiles:[...(job.reportFiles??[]),source]},{fileId:source.id});if(view.calculationAudit?.status!=='passed')fail('工作表来源未通过实际内容独立核验');
     const original=await reportFile(dataDir,source.sourceJobId??job.id,source),table=reportCsv(original.content);
-    saved={rows:[table.headers,...table.rows],proof:{id:source.id,sourceJobId:source.sourceJobId??job.id,sha256:source.sha256,verificationHash:source.verificationHash}};cache.set(source.id,saved);
+    saved={rows:[table.headers,...table.rows],populationAudit:view.populationAudit??null,proof:{id:source.id,sourceJobId:source.sourceJobId??job.id,sha256:source.sha256,verificationHash:source.verificationHash}};cache.set(source.id,saved);
    }
-   resolved.push({name,rows:saved.rows});bindings.push({name,role:'data',...saved.proof,rowCount:saved.rows.length-1,columnCount:saved.rows[0].length});
+   resolved.push({name,rows:saved.rows});bindings.push({name,role:'data',...saved.proof,rowCount:saved.rows.length-1,columnCount:saved.rows[0].length,populationAudit:saved.populationAudit?{selected:{datasetRef:saved.populationAudit.selected.datasetRef,keyColumn:saved.populationAudit.selected.keyColumn,rowCount:saved.populationAudit.selected.rowCount},comparisons:saved.populationAudit.comparisons.map(c=>({datasetRef:c.datasetRef,keyColumn:c.keyColumn,rowCount:c.rowCount,onlyReferenceCount:c.onlyReferenceCount,onlyFileCount:c.onlyFileCount}))}:null});
   }else{
    if(sheet.role!=='notes'||typeof sheet.evidence!=='string'||!sheet.evidence.trim()||!Array.isArray(sheet.rows)||sheet.rows.some(row=>!Array.isArray(row)||row.some(v=>v!==null&&typeof v!=='string')))fail('无CSV来源的表仅可显式声明notes、文字rows及evidence，用于字段说明等注释；不能冒充核验数据');
    resolved.push({name,rows:sheet.rows});bindings.push({name,role:'notes',evidence:sheet.evidence,rowsSha256:hash(Buffer.from(JSON.stringify(sheet.rows))),rowCount:sheet.rows.length});
