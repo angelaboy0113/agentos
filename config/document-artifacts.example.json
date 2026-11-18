@@ -26,6 +26,12 @@
         "artifactFile": "interfaces.html",
         "sourceFile": "build.mjs"
       }
+    },
+    {
+      "format": "xlsx",
+      "title": "主表及明细",
+      "purpose": "多个独立核验来源组成工作簿",
+      "content": "{\"sheets\": [{\"name\": \"主表\", \"sourceReportId\": \"report-已核验主表\"}, {\"name\": \"明细\", \"sourceReportId\": \"report-已核验明细\"}, {\"name\": \"说明\", \"role\": \"notes\", \"rows\": [[\"字段\", \"说明\"]], \"evidence\": \"已核对来源字典\"}]}"
     }
   ],
   "runtimeEnvironmentExample": {

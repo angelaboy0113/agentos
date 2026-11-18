@@ -52,22 +52,51 @@ export async function documentDirectory(dataDir,jobId){
 }
 async function resolveDocumentRequest(dataDir,job,request){
  if(!['xlsx','csv'].includes(request.format))return request;
- if(typeof request.content!=='string'){if(job.tabularDelivery)fail('业务原生表格仍需独立核验CSV来源，不能绕过金额和范围核验');return request;}
+ if(typeof request.content!=='string'){if(job.tabularDelivery)fail('业务XLSX文件引用需在JSON内容中声明sheets逐表来源；不限制工作表数量，原金额和范围仍需独立核验');return request;}
  const spec=request.format==='xlsx'?parse(request.content):null;
- const sourceId=spec?.sourceReportId;
- if(!sourceId){if(job.tabularDelivery)fail('业务报表转换需已有核验CSV的sourceReportId，不能跳过独立金额与范围核验');return request;}
- const source=job.reportFiles?.find(f=>f.id===sourceId&&f.filename.endsWith('.csv')&&f.kind!=='document');
- if(!source)fail('转换来源必须是当前任务已经登记并核验的CSV');
- const {inspectReport}=await import('./report-inspection.js'),view=await inspectReport(dataDir,job,{fileId:source.id});
- if(view.calculationAudit?.status!=='passed')fail('来源报表未通过实际内容独立核验');
- const {reportFile}=await import('./report-files.js'),{reportCsv}=await import('./report-revision.js');
- const original=await reportFile(dataDir,source.sourceJobId??job.id,source),table=reportCsv(original.content);
- return {...request,content:JSON.stringify({sheets:[{name:spec.sheetName??'核验数据',rows:[table.headers,...table.rows]}]}),sourceReport:{id:source.id,sourceJobId:source.sourceJobId??job.id,sha256:source.sha256,verificationHash:source.verificationHash}};
+ if(spec?.sourceReportId&&spec?.sheets)fail('单表sourceReportId与多表sheets不能同时指定；请逐表声明，避免丢失工作表');
+ const sheets=spec?.sourceReportId?[{name:spec.sheetName??'核验数据',sourceReportId:spec.sourceReportId}]:spec?.sheets;
+ if(!Array.isArray(sheets)||!sheets.some(x=>x?.sourceReportId)){if(job.tabularDelivery)fail('业务报表需已有核验CSV的逐表sourceReportId，不能跳过独立金额与范围核验');return request;}
+ if(!Array.isArray(sheets)||!sheets.length)fail('XLSX需要非空sheets');
+ const {inspectReport}=await import('./report-inspection.js'),{reportFile}=await import('./report-files.js'),{reportCsv}=await import('./report-revision.js');
+ const cache=new Map(),names=new Set(),resolved=[],bindings=[];
+ for(const sheet of sheets){
+  const name=text(sheet.name);if(!name||name.length>31||/[\\/?:*\[\]]/.test(name)||names.has(name.toLocaleLowerCase()))fail('工作表名称无效或重复');names.add(name.toLocaleLowerCase());
+  if(sheet.sourceReportId){
+   let saved=cache.get(sheet.sourceReportId);
+   if(!saved){let source=job.reportFiles?.find(f=>f.id===sheet.sourceReportId&&f.filename.endsWith('.csv')&&f.kind!=='document');
+    if(!source){const input=job.attachments?.find(a=>a.source?.kind==='delivered-report'&&a.source.report?.id===sheet.sourceReportId),s=input?.source;
+     if(s&&s.projectId===job.projectId&&s.chatId===job.chatId&&s.originProfile===(job.originProfile??job.agentProfile)&&(!s.sourceEnvironment||s.sourceEnvironment===job.sourceEnvironment)&&s.sha256===s.report.sha256&&s.report.filename.endsWith('.csv')&&s.report.kind!=='document')source={...s.report,sourceJobId:s.sourceJobId};
+    }
+    if(!source)fail('工作表来源必须是当前任务已经登记或原话题可信附件中的核验CSV');
+    const view=await inspectReport(dataDir,{...job,reportFiles:[...(job.reportFiles??[]),source]},{fileId:source.id});if(view.calculationAudit?.status!=='passed')fail('工作表来源未通过实际内容独立核验');
+    const original=await reportFile(dataDir,source.sourceJobId??job.id,source),table=reportCsv(original.content);
+    saved={rows:[table.headers,...table.rows],proof:{id:source.id,sourceJobId:source.sourceJobId??job.id,sha256:source.sha256,verificationHash:source.verificationHash}};cache.set(source.id,saved);
+   }
+   resolved.push({name,rows:saved.rows});bindings.push({name,role:'data',...saved.proof,rowCount:saved.rows.length-1,columnCount:saved.rows[0].length});
+  }else{
+   if(sheet.role!=='notes'||typeof sheet.evidence!=='string'||!sheet.evidence.trim()||!Array.isArray(sheet.rows)||sheet.rows.some(row=>!Array.isArray(row)||row.some(v=>v!==null&&typeof v!=='string')))fail('无CSV来源的表仅可显式声明notes、文字rows及evidence，用于字段说明等注释；不能冒充核验数据');
+   resolved.push({name,rows:sheet.rows});bindings.push({name,role:'notes',evidence:sheet.evidence,rowsSha256:hash(Buffer.from(JSON.stringify(sheet.rows))),rowCount:sheet.rows.length});
+  }
+ }
+ const sources=[...cache.values()].map(v=>v.proof);
+ if(spec.artifactFile){
+  const {readArtifactFile}=await import('./artifact-workspace.js'),artifact=await readArtifactFile(dataDir,job.id,spec.artifactFile);
+  await inspectDocumentBytes('xlsx',artifact.bytes);
+  const {default:ExcelJS}=await import('exceljs'),wb=new ExcelJS.Workbook();await wb.xlsx.load(artifact.bytes);
+  if(wb.worksheets.length!==resolved.length)fail('实际工作表数量与逐表来源声明不符');
+  for(let i=0;i<resolved.length;i++){const expected=resolved[i],ws=wb.worksheets[i];if(ws.name!==expected.name||ws.rowCount!==expected.rows.length)fail('实际工作表名称、顺序或行数与来源不符');
+   for(let r=0;r<expected.rows.length;r++){const row=ws.getRow(r+1),cells=expected.rows[r];if(row.cellCount>cells.length)fail('实际工作表含未绑定的额外列');for(let c=0;c<cells.length;c++){const value=row.getCell(c+1).value;if((value??'')!==(cells[c]??''))fail('实际工作表单元格与来源不一致；金额、编号、公式及行序不得静默变更');}}
+  }
+  return {...request,content:{artifactFile:spec.artifactFile,sourceFile:spec.sourceFile??null},sourceWorkbookSha256:artifact.sha256,sourceReports:sources,worksheetAudit:bindings};
+ }
+ return {...request,content:JSON.stringify({sheets:resolved}),sourceReport:spec.sourceReportId?sources[0]:undefined,sourceReports:sources,worksheetAudit:bindings};
 }
 async function encodeNative(dataDir,job,request){
  const {readArtifactFile}=await import('./artifact-workspace.js');
  const content=request.content;if(!content||typeof content.artifactFile!=='string'||!Object.hasOwn(content,'sourceFile')||Object.keys(content).some(k=>!['artifactFile','sourceFile'].includes(k)))fail('原生产物引用无效');
  const artifact=await readArtifactFile(dataDir,job.id,content.artifactFile);
+ if(request.sourceWorkbookSha256&&artifact.sha256!==request.sourceWorkbookSha256)fail('核验后工作簿已变化，不能投递旧核验结果');
  const source=content.sourceFile===null?null:await readArtifactFile(dataDir,job.id,content.sourceFile);
  const format=request.format;
  // Apply the same safe text encoders, including CSV formula escaping and HTML offline rendering.
@@ -81,13 +110,14 @@ export async function createDocuments(dataDir,job,requests,options={}){
  try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'&&!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;if(request.format==='png')audit.generation=image?'codex-native':'explicit-html-screenshot';
  const item={id,filename,format:request.format,kind:'document',title:request.title,contentType:documentMime[request.format],bytes:bytes.length,sha256:hash(bytes),rowCount:0,complete:true};
  const {officePreview}=await import('./office-preview.js');const preview=await officePreview(bytes,request.format,directory);if(preview)audit.preview=preview;
+ if(request.worksheetAudit)audit.worksheets=request.worksheetAudit;
  const receipt={version:2,kind:'document',status:'verified',file:item,coverage:{rowCount:0},binding:{jobId:job.id,projectId:job.projectId,profile:job.originProfile??job.agentProfile,questionId:job.questionId,sourceEnvironment:job.sourceEnvironment??null},purpose:request.purpose,contentAudit:audit,businessVerification:'结构和实际文件核验不等于业务金额核验；业务结论沿用任务独立证据与handoff门控',request};
  const body=Buffer.from(JSON.stringify(receipt));await writeFile(path.join(directory,filename),bytes,{mode:0o600,flag:'wx'});await writeFile(path.join(directory,id+'.verification.json'),body,{mode:0o600,flag:'wx'});item.verificationHash=hash(body);files.push(item);
  }return files;}catch(e){for(const f of files)for(const n of [f.filename,f.id+'.verification.json'])await rm(path.join(directory,n),{force:true});throw e;}
 }
 export async function documentInputText(dataDir,jobId,item){
  const {reportFile}=await import('./report-files.js');const {file}=await reportFile(dataDir,jobId,item,{includeContent:false});const receipt=JSON.parse(await readFile(path.join(path.dirname(file),item.id+'.verification.json'),'utf8'));
- return JSON.stringify({format:item.format,title:item.title,purpose:receipt.purpose,...(receipt.request.nativeSource?{actualFile:file,buildScript:receipt.request.nativeSource.buildScript??null,nativeSource:receipt.request.nativeSource}:{content:receipt.request.content}),...(receipt.request.imageGeneration?{actualFile:file,imageGeneration:receipt.request.imageGeneration}:{}),sourceSha256:item.sha256,note:'这是已交付实际文件的哈希绑定生成配方；修改应派生新文件，不能改原件。'});
+ return JSON.stringify({format:item.format,title:item.title,purpose:receipt.purpose,...(receipt.request.nativeSource?{actualFile:file,buildScript:receipt.request.nativeSource.buildScript??null,nativeSource:receipt.request.nativeSource}:{content:receipt.request.content}),...(receipt.request.imageGeneration?{actualFile:file,imageGeneration:receipt.request.imageGeneration}:{}),...(receipt.request.worksheetAudit?{worksheetSources:receipt.request.worksheetAudit,sourceReports:receipt.request.sourceReports}:{}),sourceSha256:item.sha256,note:'这是已交付实际文件的哈希绑定生成配方；修改应派生新文件，不能改原件。'});
 }
 export function requestedDocumentFormats(question=''){
  const rules={html:/\bhtml?\b|\bh5\b|网页文件/i,pptx:/\bpptx?\b|幻灯片|演示文稿/i,docx:/\bdocx\b|\bword\b/i,pdf:/\bpdf\b/i,png:/\bpng\b/i,xlsx:/\bxlsx\b/i,json:/\bjson文件\b|(?:生成|输出|导出).{0,8}json/i,md:/markdown|\.md\b/i,svg:/\bsvg\b/i,zip:/\bzip\b/i};
