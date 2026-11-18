@@ -798,7 +798,20 @@ export class JsonStore {
       if (job.status !== 'awaiting_clarification') {
         throw new Error(`Job ${jobId} is not awaiting clarification`);
       }
+      if(input.sourceEnvironment&&(!job.result?.environmentConflict||job.taskIntent!=='analysis'))throw Error('环境更正必须关联原任务的环境澄清');
       const now = new Date().toISOString();
+      if(input.sourceEnvironment&&input.sourceEnvironment!==job.sourceEnvironment){
+        const old=job.sourceEnvironment;
+        job.environmentClarificationHistory??=[];
+        job.environmentClarificationHistory.push({at:now,sourceEnvironment:old,context:structuredClone(job.context),result:structuredClone(job.result),reportFiles:structuredClone(job.reportFiles??[]),reportReviews:structuredClone(job.reportReviews??[])});
+        job.analysisSourceSnapshots??={};if(job.analysisSourceSnapshot)job.analysisSourceSnapshots[old]=job.analysisSourceSnapshot;
+        job.analysisContinuations??={};if(job.analysisContinuation)job.analysisContinuations[old]=job.analysisContinuation;
+        job.sourceEnvironment=input.sourceEnvironment;
+        delete job.analysisSourceSnapshot;delete job.analysisContinuation;delete job.environmentAccess;
+        job.context=[];job.reportFiles=[];job.reportReviews=[];delete job.reportPartialDeliverySet;
+        delete job.investigationProgress;delete job.continuousQueryKeys;delete job.continuousRejectedCount;
+      }
+      if(input.sourceEnvironment)job.currentQuestion=`${job.currentQuestion??job.originalQuestion??''}\n\n后续补充：${input.instruction}`;
       job.context = compactContext([...job.context, { stage: job.stage, result: job.result, kind: 'clarification_requested' }]);
       if(input.definitionStatement&&input.senderId){
         job.definitionStatements??=[];

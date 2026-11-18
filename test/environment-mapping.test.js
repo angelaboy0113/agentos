@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
-import {sourceEnvironmentConflict,sourceRuntimeTier,sourceEnvironmentForTier,assertSourceRuntimeTier,sourceEnvironmentCatalog,selectSourceEnvironment} from '../src/shared/source-environments.js';
+import {confirmedSourceEnvironment,sourceEnvironmentConflict,sourceRuntimeTier,sourceEnvironmentForTier,assertSourceRuntimeTier,sourceEnvironmentCatalog,selectSourceEnvironment} from '../src/shared/source-environments.js';
 import {prepareWebsiteQuery} from '../src/control-plane/website-query.js';
 import {queryRejection} from '../src/shared/query-repair.js';
 import {interruptedInvestigation} from '../src/shared/investigation-budget.js';
@@ -89,4 +89,15 @@ test('explicit runtime denial is clarified before source/model tools, while comp
  const job={id:'scope-conflict',projectId:'demo',taskIntent:'analysis',sourceEnvironment:'prd',currentQuestion:cases[0][1],context:[],reportFiles:[{id:'retained-report'}]};const before=JSON.stringify(job);
  const result=await executeJob(job,{executor:'codex',projects:{demo:project},worktreeRoot:'/missing-must-not-prepare'},async e=>events.push(e));
  assert.equal(result.outcome,'needs_clarification');assert.equal(result.environmentConflict.code,'SOURCE_ENVIRONMENT_CONFLICT');assert.equal(result.exportFiles,undefined);assert.deepEqual(events,[]);assert.equal(JSON.stringify(job),before);assert.match(result.finalMessage,/确认前不继续取数/);
+});
+
+
+test('confirmed environment correction isolates old source sessions and files while preserving original identity and audit',async t=>{
+ const {JsonStore}=await import('../src/shared/store.js'),dir=await mkdtemp(path.join(os.tmpdir(),'environment-confirm-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new JsonStore(path.join(dir,'state.json'));
+ const {job}=await store.createJob({projectId:'p',taskIntent:'analysis',sourceEnvironment:'prd',stage:'developer',senderId:'creator',originProfile:'bot',chatId:'g',instruction:'PRD环境（不是生产）',currentQuestion:'PRD环境（不是生产）'});
+ await store.transact(s=>{const j=s.jobs.find(x=>x.id===job.id);Object.assign(j,{status:'awaiting_clarification',result:{outcome:'needs_clarification',environmentConflict:{code:'SOURCE_ENVIRONMENT_CONFLICT'}},context:[{result:{summary:'Old PRD evidence'}}],reportFiles:[{id:'old-file'}],reportReviews:[{id:'old-review'}],analysisSourceSnapshot:{environment:'prd',cacheKey:'old'},analysisContinuation:{threadId:'old-prd'},environmentAccess:{tier:'prd'}});});
+ assert.equal(confirmedSourceEnvironment(project,'就是生产'),'prd');assert.equal(confirmedSourceEnvironment(project,'SIT测试环境'),'sit');assert.equal(confirmedSourceEnvironment(project,'继续'),undefined);
+ const fixed=await store.resumeClarification(job.id,{sourceEnvironment:confirmedSourceEnvironment(project,'SIT测试环境'),instruction:'SIT测试环境',sourceMessageId:'real-user-reply',senderId:'creator'});
+ assert.equal(fixed.sourceEnvironment,'sit');assert.equal(fixed.senderId,'creator');assert.equal(fixed.originProfile,'bot');assert.equal(fixed.chatId,'g');assert.equal(fixed.status,'queued');assert.equal(fixed.analysisContinuation,undefined);assert.equal(fixed.analysisSourceSnapshot,undefined);assert.equal(fixed.environmentAccess,undefined);assert.deepEqual(fixed.reportFiles,[]);assert.equal(fixed.environmentClarificationHistory[0].reportFiles[0].id,'old-file');assert.equal(fixed.analysisSourceSnapshots.prd.cacheKey,'old');assert.equal(fixed.analysisContinuations.prd.threadId,'old-prd');assert.equal(sourceEnvironmentConflict(project,'sit',fixed.currentQuestion),null);
+ await store.transact(s=>{const j=s.jobs.find(x=>x.id===job.id);j.status='awaiting_clarification';j.result={outcome:'needs_clarification'};});await assert.rejects(store.resumeClarification(job.id,{sourceEnvironment:'prd',instruction:'生产'}),/环境更正必须关联/);
 });

@@ -5,7 +5,7 @@ import {publicStickerPolicy} from './success-stickers.js';
 import {deliveredReportInputs,boundReportInput} from '../shared/report-followup.js';
 import {addressCard,addressText} from './reply-addressing.js';
 import {readBusinessDefinitions,recordBusinessDefinitions} from '../shared/business-definitions.js';
-import {sourceEnvironmentForTier,explicitSourceEnvironment,sourceEnvironmentConflict} from '../shared/source-environments.js';
+import {sourceEnvironmentForTier,explicitSourceEnvironment,sourceEnvironmentConflict,confirmedSourceEnvironment} from '../shared/source-environments.js';
 import { resolveProjectId, routeAgent, assistantInstructions } from '../shared/project-scope.js';
 import {stateView,questionStateView} from '../shared/state-view.js';
 import {requestsPrivateCard,cardDestination,privateRecipient,isPrivate} from './private-cards.js';
@@ -626,9 +626,14 @@ export class ConversationService {
       if (!canContinueTask(projects, job, turn)) {
         throw new Error('只有真人管理员可以补充并继续非只读任务；普通成员只能继续自己的只读源码排查。');
       }
+      let confirmedEnvironment;
+      if(job.result?.environmentConflict){
+        confirmedEnvironment=confirmedSourceEnvironment(projects.projects[projectId],turn.content);
+        if(!confirmedEnvironment||sourceEnvironmentConflict(projects.projects[projectId],confirmedEnvironment,turn.content))return {notice:'请先明确本次是 PRD生产还是 SIT/UAT测试环境；已有资料保留，暂不继续取数。'};
+      }
       const resumed = await store.resumeClarification(job.id, {
         instruction: decision.instruction, sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
-        senderId: turn.senderId, attachments,
+        senderId: turn.senderId, attachments,...(confirmedEnvironment?{sourceEnvironment:confirmedEnvironment}:{}),
       }, turn.id);
       return { jobId: job.id, notice: `${resumed.id} 已收到补充，将重新执行当前阶段。` };
     }

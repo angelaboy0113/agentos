@@ -1,5 +1,12 @@
 // Source environment IDs and runtime access tiers are separate namespaces.
 const aliases={sit:'uat',uat:'uat',test:'uat',testing:'uat',prd:'prd',prod:'prd',production:'prd'};
+export function confirmedSourceEnvironment(project,content){
+ const direct=String(content??'').trim().match(/^(?:确认(?:是)?|就是|是|查|用|使用|本次查|本次是)?\s*(prd|prod|production|sit|uat|生产|测试)(?:\s*(生产|测试))?(?:\s*环境)?[。.!！]?\s*$/i);
+ if(!direct)return explicitSourceEnvironment(project,content);
+ const tier=/^(?:prd|prod|production|生产)$/i.test(direct[1])?'prd':'uat';
+ if(direct[2]&&(direct[2]==='生产'?'prd':'uat')!==tier)return undefined;
+ return sourceEnvironmentForTier(project,tier);
+}
 // Only explicit denial of the selected runtime tier is a conflict. Technical
 // comparisons and phrases such as "不是生产故障" are not environment changes.
 export function sourceEnvironmentConflict(project,selected,content){
