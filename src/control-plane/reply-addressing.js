@@ -10,9 +10,11 @@ export function addressingSettings(value = {}) {
   const overrides=value.displayNameOverrides??{};
   if(!overrides || typeof overrides !== 'object' || Array.isArray(overrides) || Object.entries(overrides).some(([k,v])=>!clean(k)||!clean(v))) throw Error('Invalid reply addressing names');
   if(value.fallback !== undefined && value.fallback !== '' && !clean(value.fallback)) throw Error('Invalid reply addressing fallback');
-  if(value.style !== undefined && !['teacher','display-name'].includes(value.style)) throw Error('Invalid reply addressing style');
+  if(value.style !== undefined && !['teacher','display-name','name-suffix'].includes(value.style)) throw Error('Invalid reply addressing style');
+  if(value.nameTailLength !== undefined && (!Number.isInteger(value.nameTailLength) || value.nameTailLength < 1 || value.nameTailLength > 80)) throw Error('Invalid reply addressing tail length');
+  if(value.suffix !== undefined && !clean(value.suffix)) throw Error('Invalid reply addressing suffix');
   return {enabled:value.enabled===true,profiles:value.profiles??[],chatIds:value.chatIds??[],enabledSince:value.enabledSince??null,
-    style:value.style??'teacher',displayNameOverrides:overrides,fallback:value.fallback??''};
+    style:value.style??'teacher',nameTailLength:value.nameTailLength??2,suffix:value.suffix??'宝贝',displayNameOverrides:overrides,fallback:value.fallback??''};
 }
 // Display names are presentation only. No gender inference, permissions or ID mapping.
 export function salutation(name, settings) {
@@ -20,6 +22,12 @@ export function salutation(name, settings) {
   if(!name)return settings.fallback;
   if(Object.hasOwn(settings.displayNameOverrides,name))return clean(settings.displayNameOverrides[name]);
   if(settings.style==='display-name')return name;
+  if(settings.style==='name-suffix'){
+    // A trailing alias is not part of a Chinese member's name. Keep non-Chinese
+    // display names intact and slice Unicode code points rather than UTF-16 units.
+    const base=name.replace(/^([\p{Script=Han}]+)\s*\([^()]+\)$/u,'$1');
+    return [...base].slice(-settings.nameTailLength).join('')+settings.suffix;
+  }
   if(name.endsWith('老师'))return name;
   const short=/^[\u3400-\u9fff]{3}$/.test(name)&&singleSurnames.has(name[0])&&!compoundSurnames.test(name)?name.slice(1):name;
   return short+'老师';
@@ -28,7 +36,7 @@ export function addressText(text, name) {
   if(!name || typeof text !== 'string' || !text.trim())return text;
   // Replace only a leading salutation from an older presentation. Never rewrite
   // quoted text, headings, table cells, evidence or names within the answer.
-  if(!name.endsWith('老师'))text=text.replace(/^(?:\*\*)?[^，,:：\n<>*#|]{1,24}(?:老师|宝宝|哥|姐)(?:\*\*)?[，,:：][ \t]*/u,'');
+  if(!name.endsWith('老师'))text=text.replace(/^(?:\*\*)?[^，,:：\n<>*#|]{1,24}(?:老师|宝宝|宝贝|爸爸|哥|姐)(?:\*\*)?[，,:：][ \t]*/u,'');
   if(text.trimStart().startsWith(name))return text;
   return name+(/^[\s]*(?:#|```|>|\|)/.test(text)?'，\n\n':'，')+text;
 }

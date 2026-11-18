@@ -12,7 +12,8 @@
 - `profiles`、`chatIds`：明确的允许范围；范围外不读取姓名也不添加称呼。
 - `enabledSince`：ISO 时间，新消息创建时间达到它才生效；旧问题后续的新追问可以生效，不主动重写旧卡。
 - `displayNameOverrides`：显示名精确匹配后的称呼例外，不是身份映射；同名者会使用同一称呼。只放在本机私有配置，公开例子不包含部署团队姓名。
-- `style`：`display-name` 使用完整显示名，不截姓、不自动增加称谓。省略时保持旧版 `teacher` 行为，兼容已有部署；新配置示例采用 `display-name`。
+- `style`：`display-name` 使用完整显示名，不截姓、不自动增加称谓。省略时保持旧版 `teacher` 行为，兼容已有部署；新配置示例采用 `name-suffix`。
+- `nameTailLength`、`suffix`：`name-suffix` 模式按 Unicode 字符取姓名末尾 N 字并加统一后缀（示例为末两字＋宝贝）。短姓名保留全部；中文姓名末尾括号中的外文别名不参与截取。明确的 `displayNameOverrides` 优先，未取得姓名时仍用 fallback，不推断性别。既有 teacher/display-name 配置继续兼容。
 - `fallback`：取不到姓名时的通用称呼；空字符串表示不加称呼，不猜名字。
 
 使用完整姓名和指定昵称时，设置 `style: "display-name"`、`fallback: ""`，再由管理员在 `displayNameOverrides` 明确登记例外（例如 `"王小雨": "王小雨宝宝"`）。未列入的成员保持完整姓名；这是明确的称呼偏好名单，不是性别识别，不读取或推断性别。显示名相同会共享例外，存在重名时不要使用姓名例外。

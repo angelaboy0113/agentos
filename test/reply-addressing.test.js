@@ -86,4 +86,15 @@ test('same current member names can be reformatted after a local settings update
  const service=new ReplyAddressing(context({groupMembersPage:async(chat,args,o)=>{calls.push(o.profile);return{items:[{member_id:'ou_a',name:o.profile==='two'?'李小丽':'王小雨'}],has_more:false};}}),{file});
  assert.equal(await service.forTurn(turn),'王小雨宝宝');assert.equal(await service.forTurn({...turn,profile:'two'}),'李小丽');assert.equal(await service.forTurn({...turn,senderId:'ou_unknown'}),'');
  await writeFile(file,JSON.stringify({...p,displayNameOverrides:{}}));assert.equal(await service.forTurn(turn),'王小雨');assert.deepEqual(calls,['one','two']);
+ await writeFile(file,JSON.stringify({...p,style:'name-suffix',nameTailLength:2,suffix:'宝贝',displayNameOverrides:{'王小雨':'小雨爸爸'}}));
+ assert.equal(await service.forTurn(turn),'小雨爸爸');assert.equal(await service.forTurn({...turn,profile:'two'}),'小丽宝贝');assert.deepEqual(calls,['one','two']);
 });
+
+ test('name-suffix applies to everyone with Unicode tails, aliases, explicit exceptions and safe fallback',()=>{
+  const p=addressingSettings({...policy,style:'name-suffix',nameTailLength:2,suffix:'宝贝',fallback:'',displayNameOverrides:{'王小明':'小明爸爸'}});
+  for(const [name,want] of [['王小明','小明爸爸'],['李小丽','小丽宝贝'],['欧阳思颖','思颖宝贝'],['张明','张明宝贝'],['明','明宝贝'],['栾智添（Atreus）','智添宝贝'],['A😀','A😀宝贝'],['Atreus','us宝贝'],['','']])assert.equal(salutation(name,p),want);
+  for(const nameTailLength of [0,-1,1.5,'2'])assert.throws(()=>addressingSettings({...p,nameTailLength}));
+  assert.throws(()=>addressingSettings({...p,suffix:'<at>'}));
+  for(const old of ['小丽老师，','小丽宝宝，','小丽宝贝，','小明爸爸，'])assert.equal(addressText(old+'结论。','小丽宝贝'),'小丽宝贝，结论。');
+  assert.equal(addressText('小明爸爸，结论。','小明爸爸'),'小明爸爸，结论。');
+ });

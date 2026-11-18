@@ -2149,3 +2149,7 @@ Typed 32-hex identifiers support reviewed asynchronous read-job status routes, w
 ### 1.133.13 — keep the local artifact capability across controller refresh
 
 A native cloud-file read could persist the original bytes correctly but fail before returning the local input path: opening or closing an environment refreshes the durable job from the controller, whose JSON intentionally omits the Runner-local artifact workspace. Dynamic input materialization now retains the original trusted workspace capability while using refreshed task/profile/scope metadata. It does not accept a model-supplied path, restart the model, or repeat a business query. A native-session regression reproduces the failure after a controller refresh and verifies the file arrives in the same session; foreign task/profile/project/hash and filesystem-boundary checks remain. Weekly human same-template acceptance is recorded separately from unit tests.
+
+
+## 1.134.0 — configurable name suffixes
+Reply addressing supports a Unicode name tail and a configurable common suffix, with explicit display-name exceptions taking priority. Chinese names with trailing parenthesized aliases use the name itself; short names are retained. The shared card/reply formatter replaces obsolete leading greetings without changing author identity, evidence, permissions or historical cards. Existing teacher and display-name policies remain compatible. Configuration stays local; no deployment-specific people are included in the core or examples.
