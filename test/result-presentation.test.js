@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { jobCard, conversationCard } from '../src/control-plane/message-cards.js';
@@ -183,4 +183,28 @@ import {fitResultCard}from '../src/control-plane/result-presentation.js';
 test('existing delivery byte envelope pages oversized tables without changing canonical results or controls',()=>{
  const rows=Array.from({length:50},(_,i)=>`| ${i} | ${'完整条件说明'.repeat(100)} |`).join('\n'),text=`候选信息不能冒充已确认。\n\n| 序号 | 说明 |\n| --- | --- |\n${rows}`;
  const card=jobCard({id:'large-table',stage:'developer',taskIntent:'analysis',status:'completed',result:{outcome:'partial',finalMessage:text},events:[]}),before=JSON.stringify(card),fitted=fitResultCard(card);assert.ok(Buffer.byteLength(JSON.stringify(fitted))<=28000);assert.equal(JSON.stringify(card),before);assert.match(JSON.stringify(fitted),/主卡表格展示 \d+\/50 行/);assert.deepEqual(fitted.body.elements.find(x=>x.element_id==='result_details'),card.body.elements.find(x=>x.element_id==='result_details'));assert.equal(resultPages(text).join('\n').includes('49'),true);assert.match(fitted.header.title.content,/部分分析完成/);
+});
+
+
+test('multi-question replies retain question order, local gaps and inline tables without changing outcomes', async () => {
+  const text = '**问题1：这个字段是什么？**\n它表示已占用额度，不代表已核销费用。\n\n**问题2：它与页面数字相同吗？**\n当前映射已确认；历史页面取数时点尚未核实。\n\n| 对象 | 含义 |\n| --- | --- |\n| 字段 | 占用额度 |\n| 页面 | 当前占用汇总 |\n\n**问题3：两环境是否一致？**\n测试环境已核验，生产历史响应未留存，不能推定一致。\n\n**技术依据**\n来源文件 source/example.js。';
+  const before = { id: 'pointwise', stage: 'developer', taskIntent: 'analysis', status: 'completed', result: { outcome: 'partial', summary: '两项映射已确认，历史响应未核实。', finalMessage: text }, events: [] };
+  const saved = JSON.stringify(before);
+  const primary = analysisPrimaryResult(text);
+  for (const output of [primary, JSON.stringify(jobCard(before)), JSON.stringify(conversationCard({ id: 'points-chat', role: 'owner_intake', status: 'sent', response: text }))]) {
+    const positions = ['问题1：', '问题2：', '问题3：'].map(x => output.indexOf(x));
+    assert.ok(positions[0] >= 0 && positions[1] > positions[0] && positions[2] > positions[1]);
+    assert.match(output, /历史页面取数时点尚未核实/);
+    assert.match(output, /不能推定一致/);
+  }
+  assert.equal(JSON.stringify(before), saved);
+  assert.ok(jobCard(before).body.elements.some(e => e.tag === 'table'));
+  assert.match(resultPages(text).join('\n'), /来源文件/);
+  const prompt = await buildPrompt({ id: 'J', stage: 'developer', originalQuestion: '问题1：字段含义？问题2：与页面相同吗？' }, {});
+  for (const rules of [prompt, await readFile(new URL('../config/roles/analysis.md', import.meta.url), 'utf8'), await readFile(new URL('../config/conversation.md', import.meta.url), 'utf8')]) {
+    assert.match(rules, /按原提问顺序逐点作答/);
+    assert.match(rules, /单一问题保持自然简洁/);
+    assert.match(rules, /用户指定输出结构优先/);
+    assert.match(rules, /不得为分点展示重复调查/);
+  }
 });
