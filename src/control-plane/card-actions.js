@@ -1,3 +1,4 @@
+import {confirmedSourceEnvironment,sourceEnvironmentConflict} from '../shared/source-environments.js';
 import {createHash} from 'node:crypto';
 import {stateView} from '../shared/state-view.js';
 import { handleEnrollmentCard } from './enrollment-cards.js';
@@ -126,7 +127,14 @@ async function applyCardAction(context, event) {
       }
       const instruction = String(parse(event.form_value).clarification ?? '').trim();
       if (!instruction || instruction.length > 1000) throw new Error('请填写 1–1000 字的补充信息。');
-      const updated = await store.resumeClarification(job.id, { instruction, senderId:event.operator_id, definitionStatement:instruction }, effectKey, guard);
+      let sourceEnvironment;
+      if(job.result?.environmentConflict){
+        const project=projects.projects?.[job.projectId];
+        sourceEnvironment=confirmedSourceEnvironment(project,instruction);
+        if(!sourceEnvironment||sourceEnvironmentConflict(project,sourceEnvironment,instruction))throw Error('请填写本次确认的 PRD生产或 SIT/UAT测试环境；已有资料保留，暂不继续取数。');
+      }
+      const updated = await store.resumeClarification(job.id, { instruction, senderId:event.operator_id, definitionStatement:instruction,
+        ...(sourceEnvironment?{sourceEnvironment,environmentConfirmation:instruction}:{}) }, effectKey, guard);
       result = { job: updated, resubmitted: true, message: '补充已提交，当前阶段重新排队。' };
     }
     // Re-delivery retries only presentation. The business mutation above is effect-idempotent.

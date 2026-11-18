@@ -212,3 +212,25 @@ test('lost refresh acknowledgement while native update is pending returns duplic
  const{context,create,feishu}=await setup(t);const{event}=await create('completed','analysis');let enter,release,updates=0;const entered=new Promise(r=>enter=r);feishu.updateCard=()=>{updates++;enter();return new Promise(r=>release=r);};const e=event('refresh');
  const first=handleCardAction(context,e);await entered;const second=await handleCardAction(context,e);assert.equal(second.duplicate,true);assert.equal(updates,1);release();assert.equal((await first).ok,true);
 });
+
+
+test('environment clarification card accepts actual confirmation for same or changed tier without replaying old denial',async t=>{
+ const {sourceEnvironmentConflict}=await import('../src/shared/source-environments.js');
+ for(const [answer,selected]of [['prd','prd'],['确认本次查PRD生产环境。','prd'],['SIT测试环境','sit']]){
+  const {context,create,store,cards}=await setup(t);
+  const project={analysisSourceMode:'isolated',analysisEnvironments:{prd:{runtimeTier:'prd'},sit:{runtimeTier:'uat'}}};context.projects.projects={demo:project};
+  const {job,event,key}=await create('awaiting_clarification','analysis');
+  await store.transact(s=>{const j=s.jobs.find(x=>x.id===job.id);j.sourceEnvironment='prd';j.currentQuestion='PRD环境（不是生产）';j.result={outcome:'needs_clarification',environmentConflict:{code:'SOURCE_ENVIRONMENT_CONFLICT'}};j.reportFiles=[{id:'saved-file'}];});
+  const current=await store.getJob(job.id);await cards.upsert(key,jobCard(current),{chatId:'group',replyTo:null,profile:'owner'},{terminal:true,immediate:true});
+  const submit=event('clarify',{action_name:`clarify_${jobActionVersion(current)}`,form_value:JSON.stringify({clarification:answer})});
+  const first=await handleCardAction(context,submit);assert.equal(first.ok,true,JSON.stringify(first));const again=await handleCardAction(context,submit);assert.equal(again.ok,true,JSON.stringify(again));
+  const updated=await store.getJob(job.id);assert.equal(updated.status,'queued');assert.equal(updated.sourceEnvironment,selected);assert.equal(updated.senderId,'creator');assert.equal(sourceEnvironmentConflict(project,selected,updated.currentQuestion),null);assert.equal(updated.events.filter(e=>e.type==='clarification_received').length,1);
+  assert.equal(updated.reportFiles.length,selected==='prd'?1:0);
+ }
+});
+test('environment clarification cannot be bypassed with ordinary continue or ambiguous tier',async t=>{
+ const {context,create,store}=await setup(t);context.projects.projects={demo:{analysisSourceMode:'isolated',analysisEnvironments:{prd:{runtimeTier:'prd'},sit:{runtimeTier:'uat'}}}};
+ const {job,event}=await create('awaiting_clarification','analysis');await store.transact(s=>{s.jobs.find(x=>x.id===job.id).result={outcome:'needs_clarification',environmentConflict:{code:'SOURCE_ENVIRONMENT_CONFLICT'}};});
+ for(const answer of ['继续','SIT生产环境'])assert.equal((await handleCardAction(context,event('clarify',{action_name:`clarify_${jobActionVersion(job)}`,form_value:JSON.stringify({clarification:answer})}))).ok,false);
+ await assert.rejects(store.resumeClarification(job.id,{instruction:'继续'}),/确认本次运行环境/);assert.equal((await store.getJob(job.id)).status,'awaiting_clarification');
+});

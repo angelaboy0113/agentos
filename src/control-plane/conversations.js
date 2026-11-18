@@ -633,7 +633,7 @@ export class ConversationService {
       }
       const resumed = await store.resumeClarification(job.id, {
         instruction: decision.instruction, sourceMessageId: turn.environmentResumeKey ? `${turn.id}:enrollment:${turn.environmentResumeKey}` : turn.id, replyToMessageId: turn.messageId,
-        senderId: turn.senderId, attachments,...(confirmedEnvironment?{sourceEnvironment:confirmedEnvironment}:{}),
+        senderId: turn.senderId, attachments,...(confirmedEnvironment?{sourceEnvironment:confirmedEnvironment,environmentConfirmation:turn.content}:{}),
       }, turn.id);
       return { jobId: job.id, notice: `${resumed.id} 已收到补充，将重新执行当前阶段。` };
     }
