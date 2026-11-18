@@ -25,3 +25,9 @@ export function pendingWebsiteReads(s,now=Date.now()){
  return {pendingReads:s.pendingReads?.size??0,pendingQueries:reads.filter(x=>x.queryInitiated).length,pendingReadDetails:reads.slice(-20)};
 }
 export function websiteDiagnostics(s){return {url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),readOnly:true,scope:'current-authorized-task-page',recent:s.readDiagnostics??[],blockedRequests:s.blockedRequestDetails??[],blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],...pendingWebsiteReads(s),note:'仅当前页面最近的脱敏错误、资源和只读请求状态；无控制台原文、响应正文、认证头、存储或新请求。不是完整应用日志。'};}
+
+export function websiteActionDiagnostics(s,action){
+ if(!action)return null;
+ const since=Date.parse(action.startedAt),until=action.endedAt?Date.parse(action.endedAt):Infinity,inWindow=x=>Date.parse(x.at)>=since&&Date.parse(x.at)<=until,recent=(s.readDiagnostics??[]).filter(inWindow);
+ return {...action,requestsObservedDuringAction:recent.filter(x=>x.kind==='request'),blockedDuringAction:(s.blockedRequestDetails??[]).filter(inWindow),recent:recent.filter(x=>x.kind!=='request'),note:'仅本次动作期间的观察，不代表因果关联；页面blockedRequests是历史累计。无新请求不等于无业务数据，先核对页面校验与本次脚本诊断。'};
+}

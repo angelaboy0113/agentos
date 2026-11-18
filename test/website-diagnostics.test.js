@@ -21,3 +21,9 @@ test('pending reads expose timing and scoped paths, distinguishing query action 
  const d=websiteDiagnostics(s);assert.equal(d.pendingQueries,1);assert.equal(d.pendingReadDetails.length,2);assert.ok(d.pendingReadDetails[0].elapsedMs>=5000);assert.equal(d.pendingReadDetails[0].path,'/api/history');assert.doesNotMatch(JSON.stringify(d),/secret|token|other\.example/);
  s.pendingReads.delete(a);assert.equal(websiteDiagnostics(s).pendingQueries,0);
 });
+test('action diagnostics distinguish an earlier auxiliary denial from current query observations',async()=>{
+ const {websiteActionDiagnostics}=await import('../src/shared/website-diagnostics.js');const s=state(),now=new Date().toISOString(),old='2026-01-01T00:00:00.000Z';
+ s.blockedRequestDetails=[{at:old,path:'/auxiliary'}];s.readDiagnostics=[{at:old,kind:'runtime',name:'TypeError'},{at:now,kind:'request',path:'/api/query',method:'GET'}];
+ const r=websiteActionDiagnostics(s,{tool:'browser_click',controlKind:'query',controlLabel:'开始查询',startedAt:now});assert.deepEqual(r.blockedDuringAction,[]);assert.equal(r.requestsObservedDuringAction.length,1);assert.equal(r.recent.length,0);assert.equal(r.controlKind,'query');
+ s.blockedRequestDetails.push({at:now,path:'/api/query'});assert.equal(websiteActionDiagnostics(s,{startedAt:now}).blockedDuringAction.length,1);
+});

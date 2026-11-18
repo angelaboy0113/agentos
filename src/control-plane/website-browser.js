@@ -5,7 +5,7 @@ import {readWebsiteAsset} from './website-assets.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,loginRenewalPage,validateLoginNavigation} from '../shared/login-navigation.js';
 import {websiteControls,controlMetadata,controlMetadataBatch,websiteFields} from '../shared/website-controls.js';
-import {pageDiagnostic,websiteDiagnostics,pendingWebsiteReads} from '../shared/website-diagnostics.js';
+import {pageDiagnostic,websiteDiagnostics,pendingWebsiteReads,websiteActionDiagnostics} from '../shared/website-diagnostics.js';
 export {controlMetadata} from '../shared/website-controls.js';
 import {waitForCaptureReady,screenshotSecretSelector} from '../shared/website-capture.js';
 import {browserLoginState,authResponseState} from '../shared/browser-login-state.js';
@@ -53,7 +53,7 @@ export class WebsiteBrowser {
     else if(state&&request.method==='POST'&&target.loginPreferences?.paths.includes(new URL(request.url).pathname))state.preferenceNeedsIdentity=true;
     if(allow&&!state)allow=false;
     if(allow&&state) {try{allow=await this.authorize(state.job,state.waiting,r);}catch{allow=false;}}
-    if(!allow){if(state){if(['script','stylesheet','font','image'].includes(r.resourceType()))state.blockedResources.add(websitePageLocation(r.url()));const location=websitePageLocation(r.url()),pathname=location.slice(new URL(r.url()).origin.length);state.blocked.add(`${r.method()} ${pathname}`);state.blockedRequestDetails??=[];state.blockedRequestDetails.push({method:r.method(),type:r.resourceType(),location,...(boundary?.allowed?{code:'TASK_AUTHORIZATION_REQUIRED',requiresEndpointReview:false}:boundary??{})});if(state.blockedRequestDetails.length>32)state.blockedRequestDetails.shift();if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${pathname}`);}await route.abort().catch(()=>{});return;}
+    if(!allow){if(state){if(['script','stylesheet','font','image'].includes(r.resourceType()))state.blockedResources.add(websitePageLocation(r.url()));const location=websitePageLocation(r.url()),pathname=location.slice(new URL(r.url()).origin.length);state.blocked.add(`${r.method()} ${pathname}`);state.blockedRequestDetails??=[];state.blockedRequestDetails.push({at:new Date().toISOString(),method:r.method(),type:r.resourceType(),location,...(boundary?.allowed?{code:'TASK_AUTHORIZATION_REQUIRED',requiresEndpointReview:false}:boundary??{})});if(state.blockedRequestDetails.length>32)state.blockedRequestDetails.shift();if(['xhr','fetch'].includes(r.resourceType())&&!/\.(?:js|css|map|png|jpe?g|svg|ico|woff2?)(?:$)/i.test(new URL(r.url()).pathname)&&new URL(r.url()).origin===new URL(e.baseUrl).origin)state.blockedLoginReads.add(`${r.method()} ${pathname}`);}await route.abort().catch(()=>{});return;}
     if(state?.environment.loginPreferences&&state?.pendingPrincipal&&r.method()==='POST'&&/\/(?:login|signin|sign-in|authenticate|auth|token)(?:\.[a-z]+)?$/i.test(new URL(r.url()).pathname)){
      // Observe this one authentication response before a redirect can discard
      // its body. Forward it unchanged; never retry authentication or fake it.
@@ -83,7 +83,7 @@ export class WebsiteBrowser {
   page.on('console',message=>{if(['error','warning'].includes(message.type())){const loc=message.location();pageDiagnostic(s,{kind:'console-'+message.type(),source:loc.url,line:loc.lineNumber,column:loc.columnNumber,message:message.text()});}});
   page.on('request',request=>{
    if(request.resourceType()==='script')s.observedScripts.add(request.url());
-   if(['xhr','fetch','document'].includes(request.resourceType())&&new URL(request.url()).origin===new URL(s.environment.baseUrl).origin){s.pendingReads.add(request);s.lastReadActivity=Date.now();s.pendingReadMetadata.set(request,{startedAt:s.lastReadActivity,queryInitiated:['xhr','fetch'].includes(request.resourceType())&&(s.queryAction===true||request.timing().startTime>=s.lastQueryAction?.startedAt&&request.timing().startTime<=s.lastQueryAction?.endedAt)});}
+   if(['xhr','fetch','document'].includes(request.resourceType())&&new URL(request.url()).origin===new URL(s.environment.baseUrl).origin){pageDiagnostic(s,{kind:'request',source:request.url(),method:request.method()});s.pendingReads.add(request);s.lastReadActivity=Date.now();s.pendingReadMetadata.set(request,{startedAt:s.lastReadActivity,queryInitiated:['xhr','fetch'].includes(request.resourceType())&&(s.queryAction===true||request.timing().startTime>=s.lastQueryAction?.startedAt&&request.timing().startTime<=s.lastQueryAction?.endedAt)});}
   });
   const settled=request=>{if(s.pendingReads.delete(request))s.lastReadActivity=Date.now();};
   page.on('requestfinished',settled);page.on('requestfailed',settled);
@@ -309,6 +309,7 @@ export class WebsiteBrowser {
   if(ref.type==='inspect')throw new BrowserInputError('BROWSER_CONTROL_TYPE','该引用只允许检查或悬停，不能点击、输入或按键执行。');
   const expected={browser_search:'search',browser_select:'select',browser_click:'read-action'}[tool];
   if(!['browser_key','browser_scroll'].includes(tool)&&ref.type!==expected&&!(tool==='browser_click'&&ref.type==='search'))throw new BrowserInputError('BROWSER_CONTROL_TYPE','当前引用不是该工具对应的控件；菜单和详情用browser_click，输入框用browser_search，原生下拉框用browser_select。');
+  s.lastReadAction={tool,controlLabel:cleanWebsiteText(current.label).slice(0,100),controlKind:current.kind,startedAt:new Date().toISOString()};
   s.queryAction=(tool==='browser_click'&&current.kind==='query')||(tool==='browser_key'&&args.key==='Enter'&&ref.type==='search');
   if(s.queryAction)s.lastQueryAction={startedAt:Date.now(),endedAt:Infinity};
   try{
@@ -342,9 +343,10 @@ export class WebsiteBrowser {
      }
     }
    }
-  }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}finally{if(s.queryAction)s.lastQueryAction.endedAt=Date.now();s.queryAction=false;}
+  }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}finally{if(s.queryAction)s.lastQueryAction.endedAt=Date.now();s.queryAction=false;s.lastReadAction.endedAt=new Date().toISOString();}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   const readiness=(current.kind==='navigation'||s.pendingReads.size)?await waitForCaptureReady(s):null;
+  s.lastReadAction.endedAt=new Date().toISOString();
   return {...await this.snapshot(s),...(readiness?{observationReadiness:readiness}:{})};
  }
  async readVisible(s,{section,offset,limit,contentHash,find}){
@@ -374,7 +376,7 @@ export class WebsiteBrowser {
   }
   const fields=await websiteDOM(s).evaluate(websiteFields,{secretSelector:screenshotSecretSelector});
   const loading=!text.trim()||s.pendingReads.size>0||await websiteDOM(s).locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));
-  return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,...pendingWebsiteReads(s),controlsLimited:controls.length>=300,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),pageText:cleanWebsiteText(text),fields:fields.slice(0,100),fieldsLimited:fields.length>100,controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
+  return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,...pendingWebsiteReads(s),action:websiteActionDiagnostics(s,s.lastReadAction),controlsLimited:controls.length>=300,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),pageText:cleanWebsiteText(text),fields:fields.slice(0,100),fieldsLimited:fields.length>100,controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
  }
  async screenshot(s){
   if(!/^[A-Za-z0-9_-]+$/.test(s.job.id))throw new Error('Invalid evidence job');
