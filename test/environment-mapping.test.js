@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
-import {sourceRuntimeTier,sourceEnvironmentForTier,assertSourceRuntimeTier,sourceEnvironmentCatalog,selectSourceEnvironment} from '../src/shared/source-environments.js';
+import {sourceEnvironmentConflict,sourceRuntimeTier,sourceEnvironmentForTier,assertSourceRuntimeTier,sourceEnvironmentCatalog,selectSourceEnvironment} from '../src/shared/source-environments.js';
 import {prepareWebsiteQuery} from '../src/control-plane/website-query.js';
 import {queryRejection} from '../src/shared/query-repair.js';
 import {interruptedInvestigation} from '../src/shared/investigation-budget.js';
@@ -69,10 +69,24 @@ test('continuous HTTP planning accepts mapped SIT web access but rejects PRD DB 
  const foreign=await fetch(`http://127.0.0.1:${app.server.address().port}/api/v1/jobs/${dual.id}/continuous-source`,{method:'POST',headers:{authorization:'Bearer test','content-type':'application/json'},body:JSON.stringify({...identity,leaseId:'foreign',result:{...source,environmentQuery:null,sourceEnvironmentQuery:{environmentId:'prd',reason:'test stale'}}})});assert.ok(foreign.status>=400);
  const turn={id:'runtime-first',questionId:'q3',chatId:'g',chatType:'group',profile:'owner',role:'owner_intake',senderId:'ou_member',messageId:'request',decision:{action:'create_task',intent:'analysis',instruction:'检查测试环境数据',environmentQuery:{environmentId:'testing',queryId:'clock',parameters:[]},attachmentIds:[]}};
  const created=await app.conversations.apply(turn);assert.ok(created.jobId,JSON.stringify(created));assert.equal((await app.store.getJob(created.jobId)).sourceEnvironment,'sit');
+ const conflictTurn={...turn,id:'conflict-turn',messageId:'conflict-message',questionId:'q-conflict',content:'当前PRD环境（不是生产）。请查记录',decision:{...turn.decision,sourceEnvironment:'prd',environmentQuery:null}};
+ const beforeCount=(await app.store.read()).jobs.length,notice=await app.conversations.apply(conflictTurn);assert.match(notice.notice,/环境说明存在冲突/);assert.equal((await app.store.read()).jobs.length,beforeCount);
+
 
 
 });
 test('first permanent rejection does not claim repeated failures or present source plans as ongoing work',()=>{
  const r=interruptedInvestigation({context:[{result:{handoffGate:{passed:true},finalMessage:'下一阶段将打开网页',summary:'已找到入口'}}]},'环境分级不一致','ENVIRONMENT_MISMATCH');
  assert.equal(r.outcome,'blocked');assert.match(r.finalMessage,/源码阶段历史记录（其中的后续计划已停止，不会自动执行）/);assert.match(r.finalMessage,/下一阶段将打开网页/);
+});
+
+
+test('explicit runtime denial is clarified before source/model tools, while comparisons and later confirmations remain valid',async()=>{
+ const cases=[['prd','当前PRD环境（不是生产）。请查记录'],['prd','PRD（非生产）'],['sit','SIT环境（不是测试）']];
+ for(const [id,text]of cases)assert.equal(sourceEnvironmentConflict(project,id,text)?.code,'SOURCE_ENVIRONMENT_CONFLICT');
+ for(const [id,text]of [['prd','PRD环境，不是生产故障，是查询说明'],['sit','SIT环境（不是生产）'],['prd','对比PRD生产和SIT测试'],['prd','请看文档 `不是生产` https://example.test/不是生产'],['prd','PRD环境（不是生产）。后续补充：确认是PRD生产环境。'],['prd','PRD环境（不是生产）。用户补充信息：就是生产']])assert.equal(sourceEnvironmentConflict(project,id,text),null);
+ const {executeJob}=await import('../src/runner/codex-executor.js');const events=[];
+ const job={id:'scope-conflict',projectId:'demo',taskIntent:'analysis',sourceEnvironment:'prd',currentQuestion:cases[0][1],context:[],reportFiles:[{id:'retained-report'}]};const before=JSON.stringify(job);
+ const result=await executeJob(job,{executor:'codex',projects:{demo:project},worktreeRoot:'/missing-must-not-prepare'},async e=>events.push(e));
+ assert.equal(result.outcome,'needs_clarification');assert.equal(result.environmentConflict.code,'SOURCE_ENVIRONMENT_CONFLICT');assert.equal(result.exportFiles,undefined);assert.deepEqual(events,[]);assert.equal(JSON.stringify(job),before);assert.match(result.finalMessage,/确认前不继续取数/);
 });

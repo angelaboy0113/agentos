@@ -1,5 +1,17 @@
 // Source environment IDs and runtime access tiers are separate namespaces.
 const aliases={sit:'uat',uat:'uat',test:'uat',testing:'uat',prd:'prd',prod:'prd',production:'prd'};
+// Only explicit denial of the selected runtime tier is a conflict. Technical
+// comparisons and phrases such as "不是生产故障" are not environment changes.
+export function sourceEnvironmentConflict(project,selected,content){
+ if(!selected)return null;
+ let text=String(content??'').replace(/https?:\/\/[^\s<>]+|```[\s\S]*?```|`[^`]*`/g,' ');
+ const supplement=text.split(/(?:后续补充|用户补充信息)\s*[：:]/).at(-1);
+ if(supplement!==text&&/(?:\b(?:prd|prod|production|sit|uat)\b|生产|测试)/i.test(supplement))text=supplement;
+ const tier=sourceRuntimeTier(project,selected),label=tier==='prd'?'生产':'测试';
+ const denied=new RegExp('(?:不是|非|并非)\\s*'+label+'(?:环境)?(?=\\s*(?:[）)。，,；;！!？?]|$))');
+ if(!denied.test(text))return null;
+ return {code:'SOURCE_ENVIRONMENT_CONFLICT',selected,tier,message:`你写的环境说明存在冲突：所选 ${selected} 对应${label}环境，但正文又说明“不是${label}”。请确认本次查 PRD 生产环境，还是 SIT/UAT 测试环境？已有结果和文件保留，确认前不继续取数或投递业务明细。`};
+}
 // Fallback for intake omitting its structured choice despite an explicit user
 // subject. URLs, snippets and competing/negative subjects are not a selection.
 export function explicitSourceEnvironment(project, content) {

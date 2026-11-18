@@ -10,6 +10,7 @@ import{inquiryExecutionContract,inquiryAcceptanceGuidance,normalizeSelfContinuat
 import{loadIntegrationProjects,taskReadCatalog}from '../shared/integration-peers.js';
 import {isModelCapacityError as capacityError,modelCapacityWait}from '../shared/model-capacity-wait.js';
 import {currentUserQuestion,fieldMappingContract}from '../shared/user-request-scope.js';
+import {sourceEnvironmentConflict}from '../shared/source-environments.js';
 import {comparisonContext,requireComparisonContinuation} from '../shared/source-comparison.js';
 import {loadSourceMethod,rememberSourceMethod,loadComparisonSourceHints} from './source-method-cache.js';
 import {readBusinessDefinitions,definitionActor,recordTaskDefinitions} from '../shared/business-definitions.js';
@@ -52,6 +53,8 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if (config.executor !== 'codex') throw new Error(`Unsupported executor: ${config.executor}`);
 
   const project = config.projects[job.projectId];
+  const environmentConflict=job.taskIntent==='analysis'?sourceEnvironmentConflict(project,job.sourceEnvironment,currentUserQuestion(job)+(job.sourceInstructionMessageId?'\n'+job.instruction:'')):null;
+  if(environmentConflict)return {outcome:'needs_clarification',summary:environmentConflict.message,finalMessage:environmentConflict.message,environmentConflict,verification:[]};
   const began = Date.now();
   const harness = await loadHarness(job);
   if(job.modelCheckpoint?.stage==='source'&&job.modelCheckpoint.harnessFingerprint&&job.modelCheckpoint.harnessFingerprint!==harness.metadata.fingerprint)throw new Error('Harness版本在任务链中发生变化；请先由管理员复核，不自动沿用旧批准。');

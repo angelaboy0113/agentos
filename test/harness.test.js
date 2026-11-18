@@ -133,3 +133,14 @@ test('reviewed source-metadata guidance resumes exact prior harnesses but reject
   await writeFile(path.join(directory,'roles','common.md'),'Unreviewed future authority or guidance change');
   await assert.rejects(loadHarness({...job,context:[{result:{harness:{fingerprint:prior[0]}}}]},directory),/版本/);
 });
+
+
+test('read-only partial evidence can name a follow-up owner without becoming a failed handoff', async t => {
+ const root=await fixture(t),r=result();r.outcome='partial';r.handoff.returnTo='owner';r.handoff.artifacts=[{kind:'code',path:'spec.md'}];r.handoff.risks=['Need original rule revision'];
+ r.handoff.checks.push({id:'pending',required:true,status:'not_run',evidence:'Original revision unavailable'});
+ const saved=JSON.stringify(r),gate=await validateHandoff(job,r,root);assert.deepEqual(gate.issues,[]);assert.equal(enforceHandoff(r,gate).outcome,'partial');assert.equal(JSON.stringify(r),saved);assert.equal(r.handoff.returnTo,'owner');
+ const ready={...r,outcome:'ready'};assert.ok((await validateHandoff(job,ready,root)).issues.some(x=>x.includes('退回责任')));
+ assert.ok((await validateHandoff({...job,taskIntent:'implementation'},r,root)).issues.some(x=>x.includes('partial只允许')));
+ const failed=structuredClone(r);failed.handoff.checks[1].status='failed';assert.ok((await validateHandoff(job,failed,root)).issues.some(x=>x.includes('必需验收项失败')));
+ const missing=structuredClone(r);missing.handoff.artifacts[0].path='missing.md';assert.ok((await validateHandoff(job,missing,root)).issues.length);
+});
