@@ -2157,3 +2157,7 @@ Reply addressing supports a Unicode name tail and a configurable common suffix, 
 
 ## 1.135.0 — scoped query toggles and log investigation continuity
 Shared browser metadata recognizes start/execute query labels in genuine search forms, exposing their labelled radio modes in both browser backends while keeping mutation forms, disabled/secret fields and network writes blocked. Investigation guidance verifies archived time partitions and uses selective known identifiers before record expansion. Application-log scopes remain explicit deployment configuration; discovering deployment history alone never implies historical log completeness. Includes configurable name-tail addressing from 1.134.0.
+
+## 1.135.1
+
+修复实际私有 TSF 普通分页重复第一页的问题：应用日志切换滚动游标，以空终止批次核验结束；游标绑定原查询、重复页可诊断恢复，不将批次条数误作全量。真实新卡暴露后补修，非通用权限放开；未修改业务写入与任务总时限。
