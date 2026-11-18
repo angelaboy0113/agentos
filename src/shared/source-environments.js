@@ -14,6 +14,7 @@ export function sourceEnvironmentConflict(project,selected,content){
  let text=String(content??'').replace(/https?:\/\/[^\s<>]+|```[\s\S]*?```|`[^`]*`/g,' ');
  const supplement=text.split(/(?:后续补充|用户补充信息)\s*[：:]/).at(-1);
  if(supplement!==text&&/(?:\b(?:prd|prod|production|sit|uat)\b|生产|测试)/i.test(supplement))text=supplement;
+ if(!/(?:不是|非|并非)\s*(?:生产|测试)(?:环境)?(?=\s*(?:[）)。，,；;！!？?]|$))/.test(text))return null;
  const tier=sourceRuntimeTier(project,selected),label=tier==='prd'?'生产':'测试';
  const denied=new RegExp('(?:不是|非|并非)\\s*'+label+'(?:环境)?(?=\\s*(?:[）)。，,；;！!？?]|$))');
  if(!denied.test(text))return null;
