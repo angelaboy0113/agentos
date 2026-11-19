@@ -120,9 +120,23 @@ export async function documentInputText(dataDir,jobId,item){
  return JSON.stringify({format:item.format,title:item.title,purpose:receipt.purpose,...(receipt.request.nativeSource?{actualFile:file,buildScript:receipt.request.nativeSource.buildScript??null,nativeSource:receipt.request.nativeSource}:{content:receipt.request.content}),...(receipt.request.imageGeneration?{actualFile:file,imageGeneration:receipt.request.imageGeneration}:{}),...(receipt.request.worksheetAudit?{worksheetSources:receipt.request.worksheetAudit,sourceReports:receipt.request.sourceReports}:{}),sourceSha256:item.sha256,note:'这是已交付实际文件的哈希绑定生成配方；修改应派生新文件，不能改原件。'});
 }
 export function requestedDocumentFormats(question=''){
- const rules={html:/\bhtml?\b|\bh5\b|网页文件/i,pptx:/\bpptx?\b|幻灯片|演示文稿/i,docx:/\bdocx\b|\bword\b/i,pdf:/\bpdf\b/i,png:/\bpng\b/i,xlsx:/\bxlsx\b/i,json:/\bjson文件\b|(?:生成|输出|导出).{0,8}json/i,md:/markdown|\.md\b/i,svg:/\bsvg\b/i,zip:/\bzip\b/i};
- const clauses=String(question).split(/[，。；\n]/).filter(c=>!/(?:不要|无需|不需要|不必).{0,6}(?:html|h5|ppt|word|pdf|png|xlsx|文件)/i.test(c));
- return Object.entries(rules).filter(([,re])=>clauses.some(c=>re.test(c)&&/(?:生成|输出|产出|提供|给我|做成|制作|导出|整理成|交付|改成|转换|转成|存为|保存为|发我)/i.test(c))).map(([f])=>f);
+ const aliases={html:/\bhtml?\b|\bh5\b|网页文件/i,pptx:/\bpptx?\b|幻灯片|演示文稿/i,docx:/\bdocx\b|\bword\b/i,md:/\bmarkdown\b|\bmd\b/i,txt:/\btxt\b|纯文本文件/i};
+ const clauses=String(question).split(/[，。；;\n]/);
+ const output=/(?:生成|输出|产出|提供|给我|做成|制作|导出|整理成|交付|改成|转换|转成|存为|保存为|发(?:给我|我|出来))|\b(?:export|deliver|generate|output|send|save|convert)\b/i;
+ return documentFormats.filter(format=>{
+  const name=aliases[format]??new RegExp('\\b'+format+'\\b','i');
+  return clauses.some(clause=>{
+   if(!output.test(clause))return false;
+   const match=name.exec(clause);
+   if(!match)return false;
+   const before=clause.slice(0,match.index), after=clause.slice(match.index+match[0].length);
+   if(/(?:不要|无需|不需要|不必|不能用|不接受|not|without)\s*(?:生成|输出|导出|制作|用|a\s+)?\s*\.?$/i.test(before))return false;
+   return /(?:为|成|用|以|按|as|to)\s*\.?$/i.test(before)
+     || /(?:生成|输出|产出|提供|给我|做成|制作|导出|交付|发我|文件|格式|\b(?:export|output|send|generate)\b)\s*\.?$/i.test(before)
+     || /^\s*(?:格式|文件|附件|文档|清单|报告|表格|发|导出|\b(?:format|file)\b)/i.test(after)
+     || ['html','pptx','docx','pdf','png','xlsx','svg','zip'].includes(format);
+  });
+ });
 }
 export function documentFailureResult(result,error){
  const code=error.code??'DOCUMENT_RENDER',message=String(error.message),imageWait=/^IMAGE_/.test(code)&&code!=='IMAGE_PROMPT';
@@ -131,7 +145,7 @@ export function documentFailureResult(result,error){
 export function enforceDocumentOutput(job,result){
  if(result.outcome!=='ready')return result;
  const required=requestedDocumentFormats(currentUserQuestion(job));if(creativeImageRequested(currentUserQuestion(job))&&!required.includes('png'))required.push('png');const files=[...(job.reportFiles??[]),...(result.exportFiles??[])];
- const missing=required.filter(format=>!files.some(f=>f.format===format&&f.verificationHash));
+ const missing=required.filter(format=>!files.some(f=>(f.format??(f.filename?.endsWith('.csv')?'csv':null))===format&&f.complete===true&&/^[a-f0-9]{64}$/.test(f.verificationHash??'')));
  if(!missing.length)return result;
  return {...result,outcome:'partial',reportReviewRequired:true,handoff:{...result.handoff,returnTo:'none',risks:[...(result.handoff?.risks??[]),'用户要求的实际文件尚未生成并核验']},investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'用户要求的实际文件尚缺：'+missing.join(',')}],nextStep:'用documentRequests生成缺少的实际文件，复用已有证据，不重查业务。'},finalMessage:result.finalMessage+'\n用户要求的 '+missing.join('/')+' 文件尚未生成并核验，不能声称已完整交付。'};
 }

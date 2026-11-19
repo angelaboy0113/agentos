@@ -1,3 +1,5 @@
+import {enforceDocumentOutput,requestedDocumentFormats} from './document-artifacts.js';
+import {currentUserQuestion} from './user-request-scope.js';
 import {requiresTabularFile} from './count-answer.js';
 import {normalizeReportFormatReview} from './report-output-policy.js';
 // Program verification and review against the user's request are separate states.
@@ -28,7 +30,12 @@ export function recordReportFiles(job,files,generation){
  for(const f of files){if(!job.reportFiles.some(x=>x.id===f.id))job.reportFiles.push({...structuredClone(f),sourceJobId:job.id,questionGeneration:generation??null});job.reportReviews[f.id]??={status:proof(f)?'awaiting_review':'draft',verificationHash:f.verificationHash};}
 }
 export function assessReportDelivery(job,result){
- if(requiresTabularFile(job)&&result?.outcome==='ready'&&!job.reportFiles?.some(f=>f.kind!=='document'&&proof(f)))return {...result,outcome:'partial',reportReviewRequired:true,investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'本请求需要可复用统计表文件，尚未生成核验文件'}],nextStep:'复用已保存数据整理完整表格，compose_report/finalize_report核验后交付；不因用户没写Excel而省略文件'}};
+ const explicitFormats=requestedDocumentFormats(currentUserQuestion(job));
+ if(explicitFormats.length&&result?.outcome==='ready'&&!result.documentRequests?.length){
+  const checked=enforceDocumentOutput(job,result);
+  if(checked!==result)return checked;
+ }
+ if(requiresTabularFile(job)&&!explicitFormats.length&&result?.outcome==='ready'&&!job.reportFiles?.some(f=>f.kind!=='document'&&proof(f)))return {...result,outcome:'partial',reportReviewRequired:true,investigation:{...result.investigation,status:'continue',blocker:null,goals:[{id:'original-question',required:true,status:'open',evidence:'本请求需要可复用统计表文件，尚未生成核验文件'}],nextStep:'复用已保存数据整理完整表格，compose_report/finalize_report核验后交付；不因用户没写Excel而省略文件'}};
 
  if(job.reportFiles?.length&&job.reportFiles.every(f=>f.kind==='document'))return pendingDocumentReview(job,result);
  result=normalizeReportFormatReview(job,result);
@@ -121,7 +128,7 @@ function componentScopeReviewed(scope,review){
 
 export function pendingDocumentReview(job,result){
  const files=[...(job.reportFiles??[]),...(result.exportFiles??[])].filter(f=>f.kind==='document'&&proof(f));
- if(job.taskIntent!=='analysis'||job.tabularDelivery||result?.outcome!=='partial'||result.sourceSyncBlocked||result.handoffGate?.passed===false||!files.length||assessment({...job,reportFiles:files},result))return result;
+ if(job.taskIntent!=='analysis'||(job.tabularDelivery&&!requestedDocumentFormats(currentUserQuestion(job)).some(format=>format!=='xlsx'&&format!=='csv'))||result?.outcome!=='partial'||result.sourceSyncBlocked||result.handoffGate?.passed===false||!files.length||assessment({...job,reportFiles:files},result))return result;
  const pending=files.filter(f=>!['accepted','accepted_partial','revision_required'].includes(job.reportReviews?.[f.id]?.status));
  if(!pending.length)return result;
  return {...result,reportReviewRequired:true,environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,status:'continue',blocker:null,nextStep:'先审阅已经生成且由内置渲染器核验的文档，不重复查询业务。按实际文件哈希、contentAudit、目的与源码证据填写reportAssessment；完整交付用deliver，整体仍缺其它内容但文档准确覆盖自身已核实范围时显式deliver_partial/coverage=incomplete，deliverables逐份列出fileId和范围证据，只将其它尚缺输出记required_output。保持原问题缺口和黄色状态；当前文件内容错误或来源不实仍需revise。文件：'+pending.map(f=>f.id+' ('+f.title+')').join('、')}};

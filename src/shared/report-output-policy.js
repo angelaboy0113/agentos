@@ -1,3 +1,5 @@
+import {requestedDocumentFormats} from './document-artifacts.js';
+import {currentUserQuestion} from './user-request-scope.js';
 // A request for an Excel-readable table is different from an explicit workbook contract.
 export function reportOutputPolicy(question='') {
  const q=String(question),csvOptIn=/csv.{0,8}(?:也行|也可以|可以|即可|就行|就好)/i.test(q);
@@ -9,7 +11,7 @@ export function reportOutputPolicy(question='') {
 export function normalizeReportFormatReview(job,result){
  const policy=reportOutputPolicy(job.originalQuestion??job.instruction),a=result?.reportAssessment;
  const file=job.reportFiles?.find(f=>f.id===a?.fileId&&f.filename?.endsWith('.csv')&&/^[a-f0-9]{64}$/.test(f.verificationHash??''));
- if(!policy.csvAcceptable||!file||!a?.issues?.some(i=>i.kind==='current_format'))return result;
+ if(requestedDocumentFormats(currentUserQuestion(job)).some(format=>format!=='csv')||!policy.csvAcceptable||!file||!a?.issues?.some(i=>i.kind==='current_format'))return result;
  return {...result,outcome:'partial',reportReviewRequired:true,environmentQuery:null,websiteQuery:null,
   summary:'现有CSV可直接用Excel打开，普通Excel清单需求不必转为XLSX；继续核对内容与原要求后交付。',
   reportAssessment:{...a,decision:'needs_review',issues:a.issues.map(i=>i.kind==='current_format'?{...i,kind:'optional_followup',evidence:'CSV兼容Excel，普通表格需求不以XLSX后缀作为交付门槛。'}:i)},

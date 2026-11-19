@@ -446,7 +446,12 @@ export class JsonStore {
       }
       if(result.exportFiles?.length)recordReportFiles(job,result.exportFiles,state.questions?.[job.questionId]?.generation);
       const decision = continuousReviewDecision(job, result);
-      if (!decision.continue) return { job: structuredClone(job), continued: false, terminalResult: structuredClone(result), reason: decision.reason ?? null };
+      if (!decision.continue) {
+        const terminalResult = decision.reason ? {...result,investigation:{...result.investigation,status:'wait',
+          blocker:{kind:'unavailable',needed:'修正当前文件验收缺口后继续',evidence:decision.reason},nextStep:decision.reason},
+          finalMessage:[result.finalMessage,decision.reason].filter(Boolean).join('\n\n')} : result;
+        return { job: structuredClone(job), continued: false, terminalResult: structuredClone(terminalResult), reason: decision.reason ?? null };
+      }
       recordReportReview(job,result);
       if(job.unseenVisualInputIds?.length){job.consumedVisualInputs??=[];job.consumedVisualInputs.push({at:new Date().toISOString(),ids:[...job.unseenVisualInputIds],threadId:result.threadId??null});delete job.unseenVisualInputIds;}
       job.context = compactContext([...job.context, { stage: job.stage, kind: 'analysis_turn', result: structuredClone(result) }]);

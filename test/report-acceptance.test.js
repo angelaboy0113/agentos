@@ -65,3 +65,15 @@ test('explicit report set accepts both verified components and invalidation bloc
  const bad=structuredClone(j);bad.reportReviews[file.id].status='revision_required';assert.equal(reportEligible(bad,extra),false);
  for(const mutate of [r=>r.reportAssessment.deliverables.push({fileId:'foreign',evidence:'unknown'}),r=>r.reportAssessment.deliverables=[{fileId:extra.id,evidence:'only supplement'}],r=>r.reportAssessment.deliverables[1].evidence='']){const copy=structuredClone(r);mutate(copy);assert.equal(assessReportDelivery(j,copy).outcome,'partial');}
 });
+
+test('an explicitly requested document satisfies a tabular follow-up in its own format',()=>{
+ const job={...fixture(),tabularDelivery:true,currentQuestion:'把这些名称一样的组织 以md格式 发出来'};
+ const ready={...review(),outcome:'ready',investigation:{status:'complete',goals:[{id:'original-question',required:true,status:'verified',evidence:'已核验完整清单'}]}};
+ for(const [format,question] of [['md',job.currentQuestion],['json','把已查到的结果按 JSON 格式发出来'],['txt','请导出 TXT 文件'],['pdf','以 PDF 格式发出来']]){
+  const request={...job,currentQuestion:question,reportFiles:[{...file,kind:'document',format,complete:true}]};
+  assert.equal(assessReportDelivery(request,ready).outcome,'ready',format);
+  assert.equal(assessReportDelivery({...request,reportFiles:[{...file,filename:'report-a.csv',complete:true}]},ready).outcome,'partial',format);
+ }
+ const both={...job,currentQuestion:'导出 Markdown 和 PDF 文件',reportFiles:[{...file,kind:'document',format:'md',complete:true}]};
+ assert.equal(assessReportDelivery(both,ready).outcome,'partial');
+});

@@ -185,9 +185,26 @@ export function reviewDecision(job,result){
  return {continue:true};
 }
 
+function reportEvidenceIdentity(result){
+ return (result.reportInspections??[]).map(e=>[e.binding?.sha256,e.binding?.verificationHash,e.status]).sort();
+}
+
 export function continuousReviewDecision(job,result){
  const r=result?.investigation,b=r?.blocker;
  if(result?.outcome!=='partial'||r?.status!=='continue'||b)return {continue:false};
+ // A repeated file rejection with identical evidence is an acceptance stall,
+ // not a new investigation. Changes in the file or evidence can still proceed.
+ if(result.reportReviewRequired){
+  const previous=job.context?.at(-1);
+  const prior=previous?.result;
+  if(previous?.kind==='analysis_turn'&&prior?.reportReviewRequired
+   &&signature(prior)===signature(result)
+   &&prior.investigation?.nextStep===r.nextStep
+   &&JSON.stringify(prior.reportAssessment??null)===JSON.stringify(result.reportAssessment??null)
+   &&JSON.stringify(reportEvidenceIdentity(prior))===JSON.stringify(reportEvidenceIdentity(result))){
+   return {continue:false,reason:'文件验收连续返回相同缺口，已保留文件与证据，待修正验收后接续。'};
+  }
+ }
  return {continue:true};
 }
 

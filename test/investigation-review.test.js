@@ -280,3 +280,13 @@ test('generated investigation instructions cannot turn an accepted reconciliatio
  const causal={...job,originalQuestion:'为什么订单与明细金额不一致？请查明根因',instruction:'只输出CSV即可'};assert.equal(requiresCausalEvidence(causal),true);assert.equal(investigationComplete(causal,result),false);
  assert.equal(requiresCausalEvidence({instruction:'为什么失败'}),true);
 });
+
+test('repeated file acceptance failure stops only when the evidence has not changed',async()=>{
+ const {continuousReviewDecision}=await import('../src/shared/investigation-review.js');
+ const r={outcome:'partial',reportReviewRequired:true,investigation:{status:'continue',nextStep:'核验原输出格式',goals:[{id:'original-question',status:'open',evidence:'缺目标文件'}]}};
+ const job={context:[{kind:'analysis_turn',result:r}]};
+ assert.equal(continuousReviewDecision({},r).continue,true);
+ assert.equal(continuousReviewDecision(job,structuredClone(r)).continue,false);
+ assert.equal(continuousReviewDecision(job,{...r,reportReviewRequired:false}).continue,true);
+ assert.equal(continuousReviewDecision(job,{...r,reportInspections:[{status:'verified',binding:{sha256:'new'}}]}).continue,true);
+});
