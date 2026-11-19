@@ -77,3 +77,16 @@ test('an explicitly requested document satisfies a tabular follow-up in its own 
  const both={...job,currentQuestion:'导出 Markdown 和 PDF 文件',reportFiles:[{...file,kind:'document',format:'md',complete:true}]};
  assert.equal(assessReportDelivery(both,ready).outcome,'partial');
 });
+
+test('an explicit Markdown delivery manifest uses its bound document inspection',()=>{
+ const md={...file,kind:'document',format:'md',complete:true,sha256:'b'.repeat(64),rowCount:0};
+ const job={...fixture(),tabularDelivery:true,currentQuestion:'将清单以md格式发出来',reportFiles:[md]};
+ const r={...review(),outcome:'ready',investigation:{status:'complete',goals:[{id:'original-question',required:true,status:'verified',evidence:'完整已审阅'}]},
+  reportInspections:[{status:'verified',binding:{fileId:md.id,sha256:md.sha256,verificationHash:md.verificationHash,rowCount:0},contentAudit:{structure:'passed'}}]};
+ r.reportAssessment.deliverables=[{fileId:md.id,evidence:'包含完整清单'}];
+ recordReportReview(job,r);
+ assert.equal(reportEligible(job,md),true);
+ const wrong={...job,reportReviews:{},reportDeliverySet:undefined};
+ recordReportReview(wrong,{...r,reportInspections:[{...r.reportInspections[0],binding:{...r.reportInspections[0].binding,sha256:'c'.repeat(64)}}]});
+ assert.equal(reportEligible(wrong,md),false);
+});

@@ -98,7 +98,7 @@ export function recordReportReview(job,result){
   if(Array.isArray(a.deliverables)&&a.deliverables.length){
    const files=a.deliverables.map(x=>job.reportFiles.find(f=>f.id===x.fileId));
    const inspections=result.reportInspections??[];
-   if(files.some(f=>!proof(f)||!inspections.some(e=>e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&e.calculationAudit?.status==='passed'))){job.reportReviews[file.id]={status:'awaiting_review',verificationHash:file.verificationHash};return;}
+   if(files.some(f=>!proof(f))||!validDeliverables(job,a.deliverables,file.id,inspections)){job.reportReviews[file.id]={status:'awaiting_review',verificationHash:file.verificationHash};return;}
    job.reportDeliverySet={files:files.map(f=>({fileId:f.id,verificationHash:f.verificationHash})),at:new Date().toISOString()};
    for(const component of files)job.reportReviews[component.id]={status:'accepted',verificationHash:component.verificationHash,issues:[],at:new Date().toISOString(),result:structuredClone(result)};
   }else delete job.reportDeliverySet;
@@ -115,7 +115,7 @@ export function acceptedReportResult(job){
 function validDeliverables(job,requested,primary,transportEvidence=[]){
  if(!Array.isArray(requested)||!requested.length||!requested.some(x=>x.fileId===primary)||new Set(requested.map(x=>x.fileId)).size!==requested.length)return false;
  const evidence=job.reportEvidence?[job.reportEvidence,...(job.reportEvidence.relatedReports??[])]:transportEvidence.filter(e=>e?.status==='verified'&&job.reportFiles?.some(f=>e.binding?.fileId===f.id&&e.binding.sha256===f.sha256&&e.binding.rowCount===f.rowCount&&(!f.sourceJobId||e.binding.sourceJobId===f.sourceJobId)));
- return requested.every(x=>typeof x.evidence==='string'&&x.evidence.trim()&&job.reportFiles?.some(f=>f.id===x.fileId&&proof(f)&&evidence.some(e=>e?.status==='verified'&&e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&(f.kind==='document'?(!job.tabularDelivery?e.contentAudit?.structure==='passed':verifiedWorkbook(f,e)):e.calculationAudit?.status==='passed'))));
+ return requested.every(x=>typeof x.evidence==='string'&&x.evidence.trim()&&job.reportFiles?.some(f=>f.id===x.fileId&&proof(f)&&evidence.some(e=>e?.status==='verified'&&e.binding?.fileId===f.id&&e.binding?.verificationHash===f.verificationHash&&(f.kind==='document'?(job.tabularDelivery&&isWorkbook(f)?verifiedWorkbook(f,e):(!job.tabularDelivery||requestedDocumentFormats(currentUserQuestion(job)).includes(f.format))&&e.contentAudit?.structure==='passed'):e.calculationAudit?.status==='passed'))));
 }
 
 function componentScopeReviewed(scope,review){
