@@ -1,3 +1,4 @@
+import { prdPrototypeRevision } from '../src/runner/document-handoff.js';
 import { runInNewContext } from 'node:vm';
 import { chromeDesignStyle } from '../src/control-plane/shared-chrome-browser.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
@@ -249,4 +250,18 @@ test('shared Chrome extracts actual colors and geometry without page text or for
   assert.deepEqual([...actual.styles.button[0].box],[10,20,100,36]);
   assert.equal(actual.styles.button[0].background,'rgb(196, 50, 42)');
   assert.doesNotMatch(JSON.stringify(actual),/业务敏感值|token123/);
+});
+
+
+test('a visually rejected PRD can construct just a hash-bound replacement without approving the original question', () => {
+  const file={id:'report-1',format:'png',sha256:'sha',verificationHash:'receipt',questionGeneration:2};
+  const job={id:'JOB-1',prd:{auto:true},questionGeneration:2,reportFiles:[file],
+    reportEvidence:{status:'verified',binding:{sourceJobId:'JOB-1',fileId:file.id,sha256:file.sha256,verificationHash:file.verificationHash}}};
+  const result={outcome:'partial',reportAssessment:{decision:'revise',fileId:file.id},
+    investigation:{status:'continue'},documentRequests:[{format:'png'}]};
+  const gate={issues:['必需验收项失败：original-question']};
+  assert.equal(prdPrototypeRevision(job,result,gate),file);
+  assert.equal(prdPrototypeRevision({...job,questionGeneration:3},result,gate),null);
+  assert.equal(prdPrototypeRevision(job,{...result,documentRequests:[{format:'md'}]},gate),null);
+  assert.equal(prdPrototypeRevision(job,result,{issues:[...gate.issues,'missing source']}),null);
 });
