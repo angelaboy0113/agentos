@@ -88,7 +88,7 @@ export function questionView(state, questionId, projects = {}) {
   const notice=enrollmentNotice(enrollment);
   const displayTurn={...turn,setupStatus:enrollment?.status,setupLoginIssue:enrollment?.loginIssue,setupHasCredentials:Boolean(enrollment?.credentialReceivedAt),setupPending:Boolean(enrollment)||turn.setupPending,...(notice?{response:notice}: {})};
   const shown = useJob ? job : displayTurn;
-  let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard(displayTurn);
+  let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard(displayTurn, Date.now(), { prd: !!q.prd });
   if (!useJob) card = addQuestionProgress(card, state, q, enrollment);
   const recovery=Object.values(state.recoveryEvents??{}).filter(e=>e.questionId===q.id&&e.jobId===job?.id&&e.profile===q.profile&&e.projectId===q.projectId&&e.chatId===q.chatId&&['blocked','failed','awaiting_clarification'].includes(job?.status)&&e.failureAt===job.updatedAt&&['maintenance_required','delegated','diagnosing'].includes(e.status)).at(-1);
   if(recovery&&card.body?.elements)card.body.elements.push({tag:'markdown',content:'**接续核查**\n'+recovery.diagnosis.message+(recovery.status==='maintenance_required'?'\n已登记维护复核；尚未自动确认修复。':'')});
@@ -106,7 +106,7 @@ export function questionView(state, questionId, projects = {}) {
     if (elements && d?.notice) elements.push({tag:'markdown',content:d.notice});
     if (elements && d?.sentAt && d.url) elements.push({tag:'markdown',content:`[打开飞书 PRD 评审稿 · v0.${d.revision}](${d.url})`});
     if (elements && prdAnswerVersion) {
-      const prompt = q.prd.intake?.prompt ?? job?.result?.investigation?.blocker?.needed;
+      const prompt = q.prd.intake ? null : job?.result?.investigation?.blocker?.needed;
       if (prompt) elements.push({tag:'markdown',content:'**请确认**\n'+publicText(prompt)});
       elements.push({tag:'form',name:'prd_answers',elements:[
         {tag:'input',name:'clarification',input_type:'multiline_text',width:'fill',required:true,rows:4,max_length:1000,

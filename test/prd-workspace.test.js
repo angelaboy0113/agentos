@@ -191,6 +191,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
     const view = questionView(await store.read(),questionId,projects);
     const form = view.card.body.elements.find(e => e.name === 'prd_answers');
     assert.ok(form);
+    assert.doesNotMatch(JSON.stringify(view.card), /补充或追问请在话题中@对应助手/);
     assert.match(view.mention.text, /提交补充/);
     await store.transact(state => {
       state.cardMessages ??= {};

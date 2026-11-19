@@ -59,7 +59,7 @@ export function resultParts(text) {
   if (amp > start.lastIndexOf(';') && start.slice(amp).length < 10) cut -= Array.from(start.slice(amp)).length;
   return { primary: points.slice(0, cut).join(''), overflow: points.slice(cut).join('') };
 }
-export function conversationCard(turn, now = Date.now()) {
+export function conversationCard(turn, now = Date.now(), { prd = false } = {}) {
   const final = ['ready', 'sent'].includes(turn.status);
   const failed = turn.aiFailed || turn.actionError;
   const clarification = turn.decision?.action==='reply'&&turn.decision.replyDisposition==='clarification';
@@ -71,7 +71,7 @@ export function conversationCard(turn, now = Date.now()) {
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));
-  elements.push(md(final ? '补充或追问请在话题中@对应助手；详情翻页只更新展示，不执行任务。'
+  if (!final || !prd) elements.push(md(final ? '补充或追问请在话题中@对应助手；详情翻页只更新展示，不执行任务。'
     : `已等待 ${elapsed(turn.createdAt, now)} · 本卡持续更新`, true));
   return card(`${stageLabel(turn.role)} · ${state}`, 'AgentOS / Codex', color, elements);
 }
