@@ -47,3 +47,19 @@ test('reviewed login documents accept a single trailing slash during nested SSO 
  assert.equal(websiteLoginReadAllowed({...request,url:page+'/?redirect_uri='+encodeURIComponent('https://foreign.test/callback')},true,rules,base,navigation),false);
  assert.equal(websiteLoginReadAllowed({...request,resourceType:'xhr'},true,rules,base,navigation),false);
 });
+
+test('reviewed identity login can open the QR challenge and refresh the provider expiry overlay',async t=>{
+ const c=await chromium.launch({headless:true});t.after(()=>c.close());const p=await c.newPage();
+ await p.route('**/*',r=>r.fulfill({contentType:'text/html;charset=utf-8',body:`<button onclick="document.body.innerHTML='<h1>扫码登录</h1><button id=refresh>刷新二维码</button>';document.getElementById('refresh').onclick=()=>{document.body.innerHTML='<h1>扫码登录</h1><p>用飞书扫码</p>'}">使用其他账号登录</button>`}));
+ await p.goto(page);
+ const b=new WebsiteBrowser('/unused'),e={baseUrl:base,loginNavigation:navigation},j={};
+ const s={page:p,environment:e,blockedLoginReads:new Set(),pendingReads:new Set(),lastReadActivity:Date.now()};
+ b.state=async()=>s;
+ const expired=await b.beginInteractiveLogin(j,e);
+ assert.equal(expired.verificationRequired,true);
+ assert.equal(expired.verificationExpired,true);
+ const active=await b.refreshLoginQr(j,e);
+ assert.equal(active.verificationRequired,true);
+ assert.equal(active.verificationExpired,false);
+ assert.equal(p.url(),page);
+});

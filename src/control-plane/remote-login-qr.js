@@ -25,20 +25,20 @@ export class RemoteLoginQr {
   return current?.status==='awaiting_clarification'&&current.result?.browserLoginRequired===true&&current.environmentAccess?.scopeHash===job.environmentAccess?.scopeHash&&current.originProfile===b.profile&&current.projectId===e.projectId;
  }
  async retire(entry){
-  if(entry?.messageId)await this.context.feishu.cardRequest('DELETE','/open-apis/im/v1/messages/'+encodeURIComponent(entry.messageId),{},{profile:entry.profile});
+  if(entry?.messageId&&!entry.retiredAt)await this.context.feishu.cardRequest('DELETE','/open-apis/im/v1/messages/'+encodeURIComponent(entry.messageId),{},{profile:entry.profile});
  }
  async update(job,e,status,b){
   if(!await this.valid(job,e,b))return;
   let entry=await stateView(this.context.store,s=>s.remoteLoginQr?.[b.key]);
   const terminal=status.pageReady===true&&!status.loginRequired?'authenticated':status.verificationExpired?'expired':null;
   if(terminal){
-   if(entry&&entry.state!==terminal){await this.context.store.transact(s=>{const v=s.remoteLoginQr?.[b.key];if(v?.generation===entry.generation){v.state=terminal;v.retirePending=true;}});await this.sweep();}return;
+   if(entry&&entry.state!==terminal&&(terminal==='authenticated'||entry.jobId===job.id)){await this.context.store.transact(s=>{const v=s.remoteLoginQr?.[b.key];if(v?.generation===entry.generation){v.state=terminal;v.retirePending=true;}});await this.sweep();}return;
   }
   if(!status.verificationRequired||!status.loginRequired)return;
   // Never resend an expired challenge. A private admin command can request a fresh challenge.
-  if(entry?.state==='expired'&&!entry.refreshRequested)return;
+  if(entry?.state==='expired'&&entry.jobId===job.id&&!entry.refreshRequested)return;
   if(entry?.state==='sent'&&this.now()-Date.parse(entry.createdAt)<180000)return;
-  if(entry?.retryAt>this.now())return;
+  if(!entry?.retiredAt&&entry?.retryAt>this.now())return;
   let image;
   try{
    image=await this.context.websiteBrowser.captureLoginQr(job,e);if(!image||!await this.valid(job,e,b))return;

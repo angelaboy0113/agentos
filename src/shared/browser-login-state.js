@@ -20,7 +20,7 @@ export function browserLoginState(targetDocument){
  const loginState=passwordChange?'password_change_required':verification?'verification_required':loginRequired?(error?'rejected':'login_required'):loading?'loading':'ready';
  const verificationImageReady=verification&&[...document.querySelectorAll('img')].filter(visible).some(e=>e.complete&&e.naturalWidth>0&&/qrcode|qrconnect|^data:image\//i.test(e.getAttribute('src')??''));
  const verificationFramePresent=verification&&[...document.querySelectorAll('iframe')].filter(visible).some(e=>/qrconnect|qrcode/i.test(e.getAttribute('src')??''));
- return {loginState,loginRequired,credentialFormVisible:passwords.length>0,verificationRequired:verification,verificationImageReady,verificationFramePresent,verificationExpired:verification&&/二维码.{0,8}(?:失效|过期)|QR code.{0,15}expired/i.test(text),passwordChangeRequired:passwordChange,credentialRejected:loginState==='rejected',pageReady:loginState==='ready'};
+ return {loginState,loginRequired,credentialFormVisible:passwords.length>0,verificationRequired:verification,verificationImageReady,verificationFramePresent,verificationExpired:verification&&/二维码.{0,8}(?:失效|过期)|(?:^|\n)刷新二维码(?:\n|$)|QR code.{0,15}expired/i.test(text),passwordChangeRequired:passwordChange,credentialRejected:loginState==='rejected',pageReady:loginState==='ready'};
 }
 // Examine allowlisted response fields transiently; raw payloads and text never leave this function.
 export function authResponseState(status,payload){

@@ -25,3 +25,23 @@ test('non-administrator and group refresh commands are never accepted',async t=>
 test('QR deletion failure preserves receipt and retries without preventing login recovery',async t=>{const f=await fixture(t);await f.service.observe(f.job,f.e,waiting);const request=f.context.feishu.cardRequest;f.context.feishu.cardRequest=async()=>{throw Error('offline');};await f.service.observe(f.job,f.e,{pageReady:true,loginRequired:false});const v=Object.values(f.state.remoteLoginQr)[0];assert.equal(v.retirePending,true);assert.equal(v.messageId,'image');f.context.feishu.cardRequest=request;await f.service.sweep();assert.equal(v.retirePending,false);assert.equal(v.state,'authenticated');});
 test('cancelled original task QR is retired and a later task receives a new generation',async t=>{const f=await fixture(t);await f.service.observe(f.job,f.e,waiting);const first=Object.values(f.state.remoteLoginQr)[0];f.job.status='cancelled';await f.service.sweep();const next={...f.job,id:'next',status:'awaiting_clarification'};f.state.jobs.push(next);await f.service.observe(next,f.e,waiting);const last=Object.values(f.state.remoteLoginQr)[0];assert.equal(last.generation,first.generation+1);assert.equal(last.jobId,'next');assert.equal(f.calls.filter(c=>c[0]==='image').length,2);});
 test('private owner refresh serializes the same scoped challenge and issues a new generation',async t=>{const f=await fixture(t);await f.service.observe(f.job,f.e,waiting);await f.service.observe(f.job,f.e,{...waiting,verificationExpired:true});let refreshed=0;f.context.websiteBrowser.refreshLoginQr=async(j,e)=>{assert.equal(j.id,f.job.id);assert.equal(e.tier,'uat');refreshed++;};f.context.websiteBrowser.loginStatusFor=async()=>waiting;const service=new RemoteLoginQr(f.context,{now:()=>1200000,load:async()=>({environments:{web:f.e}})});await service.handle({content:'刷新扫码',chat_type:'p2p',agent_profile:'bot',sender_id:'ou_admin'});assert.equal(refreshed,1);assert.equal(Object.values(f.state.remoteLoginQr)[0].generation,2);assert.equal(f.job.status,'awaiting_clarification');});
+
+test('a previously retired challenge cannot block a later task even if deleting it again would fail',async t=>{
+ const f=await fixture(t);
+ await f.service.observe(f.job,f.e,waiting);
+ await f.service.observe(f.job,f.e,{pageReady:true,loginRequired:false});
+ const previous=Object.values(f.state.remoteLoginQr)[0];assert.ok(previous.retiredAt);
+ previous.retryAt=2000000;
+ const request=f.context.feishu.cardRequest;
+ f.context.feishu.cardRequest=async(method,...args)=>{
+  if(method==='DELETE')throw Error('Already withdrawn');
+  return request(method,...args);
+ };
+ f.job.status='completed';
+ const later={...f.job,id:'later',status:'awaiting_clarification'};
+ f.state.jobs.push(later);
+ await f.service.observe(later,f.e,waiting);
+ const active=Object.values(f.state.remoteLoginQr)[0];
+ assert.equal(active.jobId,later.id);assert.equal(active.generation,2);assert.equal(active.state,'sent');
+ assert.equal(f.calls.filter(c=>c[0]==='image').length,2);
+});

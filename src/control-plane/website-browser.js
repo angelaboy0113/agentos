@@ -161,6 +161,10 @@ export class WebsiteBrowser {
     if(!rules.some(r=>r.method==='POST'&&r.reviewed===true&&r.bodyParameters&&Object.keys(r.bodyParameters).length>=3))throw Error('已有授权恢复缺少原应用、账号和权限的固定认证请求绑定');
     const result=await s.page.evaluate(loginRenewalPage,navigation.renewal);if(result.attempted)s.renewalAttempted=true;
    }
+   // Open the provider's alternate sign-in screen instead of choosing a saved
+   // identity on behalf of the operator.
+   const switchAccount=s.page.getByRole('button',{name:/^(?:使用其他账号登录|Use another account)$/i});
+   if(await switchAccount.count()===1&&await switchAccount.isVisible())await switchAccount.click();
    return this.loginStatus(s);
   }
   for(const step of navigation.steps){const r=await s.page.evaluate(loginNavigationPage,{...navigation,baseUrl:e.baseUrl,step});if(r.error)throw Error(r.error);if(r.ready)break;}
@@ -207,8 +211,15 @@ export class WebsiteBrowser {
  }
  async refreshLoginQr(job,e){
   if(e.loginNavigation?.remoteQr!==true)throw Error('Remote QR not configured');
-  const s=await this.state(job,e);if(!(await this.loginStatus(s)).loginRequired)return;
+  const s=await this.state(job,e),status=await this.loginStatus(s);if(!status.loginRequired)return;
   if(!await this.authorize(job,true,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('Login scope expired');
+  if(status.verificationExpired&&loginPageAllowed(s.page.url(),e.loginNavigation)){
+   const refresh=s.page.getByText(/^(?:刷新二维码|Refresh QR code)$/i);
+   if(await refresh.count()===1&&await refresh.isVisible()){
+    await refresh.click();
+    return this.loginStatus(s);
+   }
+  }
   await s.page.goto(s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});
   return this.beginInteractiveLogin(job,e); // Explicit administrator request, no business operation replay.
  }
