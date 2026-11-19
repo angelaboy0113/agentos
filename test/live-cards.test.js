@@ -322,3 +322,20 @@ test('identical terminal publication preserves revision and receipts, real paylo
  assert.deepEqual((await store.read()).cardMessages['chat:dedup'],before);assert.deepEqual(calls.map(c=>c.type),['send']);
  await cards.upsert('chat:dedup',card,dest,{terminal:true,immediate:true,resultText:'changed details'});assert.equal((await store.read()).cardMessages['chat:dedup'].revision,before.revision+1);assert.deepEqual(calls.map(c=>c.type),['send','patch']);
 });
+
+test('browser login diagnostics can refresh the card without sending another notice or changing its recipient',async t=>{
+ const {cards,calls,store}=await setup(t);
+ const key='job:login:diagnostics',destination={chatId:'group',profile:'owner'};
+ const job={id:'job-login',stage:'developer',status:'awaiting_clarification',events:[],result:{browserLoginRequired:true,finalMessage:'等待登录'}};
+ const mention={kind:'browser_login',replyTo:'root',profile:'owner',text:'<at user_id="ou_admin"></at> 扫码登录'};
+ const update=(finalMessage,terminalMention)=>cards.upsert(key,jobCard({...job,result:{...job.result,finalMessage}}),destination,{terminal:true,immediate:true,terminalMention});
+ await update('等待登录',mention);
+ await update('检测到登录请求失败',{...mention,text:'<at user_id="ou_admin"></at> 检查登录请求'});
+ const entry=(await store.read()).cardMessages[key];
+ assert.equal(entry.mentionDelivered,true);
+ assert.equal(entry.terminalMention.text,mention.text);
+ assert.match(JSON.stringify(entry.card),/检测到登录请求失败/);
+ assert.deepEqual(calls.map(x=>x.type),['send','text','patch']);
+ await assert.rejects(update('错误收件人',{...mention,text:'<at user_id="ou_other"></at> 检查登录请求'}),/identity/);
+ await assert.rejects(update('错误话题',{...mention,replyTo:'other'}),/identity/);
+});

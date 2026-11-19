@@ -6,7 +6,7 @@ export function validateLoginNavigation(value){
 }
 // Fixed page program: no selectors, arbitrary script, credential values or links.
 export function loginNavigationPage({baseUrl,usernameLabel,step,entryUrl,interactive,pages=[]}){
- const base=new URL(baseUrl),u=new URL(location.href),prefix=base.pathname.replace(/\/$/,'');const identityPage=pages.includes(u.origin+u.pathname);if(identityPage&&interactive)return{ready:true,interactive:true};if(u.origin!==base.origin||!(u.pathname===prefix||u.pathname.startsWith(prefix+'/')))return{error:'登录导航已离开批准应用范围'};
+ const base=new URL(baseUrl),u=new URL(location.href),prefix=base.pathname.replace(/\/$/,'');const identityLocation=u.origin+u.pathname.replace(/\/$/,'');const identityPage=pages.some(page=>page.replace(/\/$/,'')===identityLocation);if(identityPage&&interactive)return{ready:true,interactive:true};if(u.origin!==base.origin||!(u.pathname===prefix||u.pathname.startsWith(prefix+'/')))return{error:'登录导航已离开批准应用范围'};
  const visible=e=>!!e?.getClientRects().length&&!e.disabled&&getComputedStyle(e).visibility!=='hidden'&&getComputedStyle(e).display!=='none';
  if(interactive&&[...document.querySelectorAll('[role=dialog]')].filter(visible).some(e=>/扫码|QR code|验证码/i.test(e.innerText)))return{ready:true,interactive:true};
  if(interactive&&/欢迎登录|扫码登录/.test(document.body?.innerText??'')&&/扫码/.test(document.body?.innerText??''))return{ready:true,interactive:true};

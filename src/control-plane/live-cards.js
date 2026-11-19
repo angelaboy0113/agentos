@@ -17,6 +17,14 @@ export function messageIdOf(value) {
   return null;
 }
 
+function sameBrowserLoginRecipient(previous,next){
+ if(previous?.kind!=='browser_login'||next?.kind!=='browser_login')return false;
+ if(previous.replyTo!==next.replyTo||previous.profile!==next.profile||previous.replyInThread!==next.replyInThread)return false;
+ const mentions=text=>[...new Set(String(text??'').match(/<at user_id="ou_[A-Za-z0-9]+"><\/at>/g)??[])].sort();
+ const ids=mentions(previous.text);
+ return ids.length>0&&JSON.stringify(ids)===JSON.stringify(mentions(next.text));
+}
+
 // Durable delivery outbox: a failed update NEVER reruns Codex or creates another task.
 export class LiveCards {
   constructor(store, feishu, { intervalMs = 3000, authorizeDestination } = {}) {
@@ -59,14 +67,15 @@ export class LiveCards {
       if (existing?.terminal && !terminal && !reopening) return; // Late progress cannot overwrite a conclusion.
       const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval', 'environment_setup_missing','clarification'].includes(existing?.terminalMention?.kind)
         && terminalMention && (!terminalMention.kind||existing.terminalMention.kind==='clarification'&&terminalMention.kind==='clarification'&&existing.terminalMention.requestKey!==terminalMention.requestKey);
-      if (!reopening && !replacingWaitingMention && existing?.terminalMention && terminalMention
+      const refreshLoginNotice=!reopening&&sameBrowserLoginRecipient(existing?.terminalMention,terminalMention);
+      if (!reopening && !replacingWaitingMention && !refreshLoginNotice && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
       const proposed = { ...existing, destination, card, terminal, generation, overflow: [],
         ...(questionRound?{questionRound:structuredClone(questionRound)}:{}),
         deliveryToken: deliveryToken ?? (!reopening ? existing?.deliveryToken : undefined),
         mentionDelivered: reopening || replacingWaitingMention ? false : existing?.mentionDelivered,
         publicCompletionMention: publicCompletionMention || (!reopening && existing?.publicCompletionMention) || false,
-        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:replacingWaitingMention ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval','environment_setup_missing','clarification'].includes(terminalMention?.kind) ? terminalMention : null),
+        terminalMention: destination.visibility==='requester'&&!publicCompletionMention?null:(replacingWaitingMention || refreshLoginNotice&&!existing.mentionDelivered) ? terminalMention : (reopening ? null : existing?.terminalMention) ?? (terminal || ['browser_login','environment_approval','environment_setup_missing','clarification'].includes(terminalMention?.kind) ? terminalMention : null),
         detailPages: resultPages(resultText),
         revision: (existing?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
       // A startup repair/duplicate progress must not create a new outbox revision

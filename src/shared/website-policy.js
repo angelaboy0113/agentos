@@ -162,7 +162,9 @@ function loginRedirectAllowed(value,base,navigation,depth=0){
 export function websiteLoginReadAllowed(request,waiting,reads=[],base,navigation){
  if(!waiting||!['GET','POST'].includes(request.method))return false;
  try{validateWebsiteLoginReads(reads);const u=new URL(request.url);if(u.username||u.password||/%|\\/.test(u.pathname))return false;for(const[key,value]of u.searchParams)if(/^(?:redirect_?uri|redirect_?url|callback_?url|return_?url)$/i.test(key)&&(!base||!loginRedirectAllowed(value,base,navigation)))return false;return reads.some(e=>{
-   if((e.method??'GET')!==request.method||u.origin!==e.origin||!e.types.includes(request.resourceType)||!(u.pathname===e.path||request.method==='GET'&&e.path.endsWith('/')&&u.pathname.startsWith(e.path)))return false;
+   if((e.method??'GET')!==request.method||u.origin!==e.origin||!e.types.includes(request.resourceType))return false;
+   const slashAlias=request.method==='GET'&&request.resourceType==='document'&&loginPageAllowed(u.href,navigation)&&u.pathname.replace(/\/$/,'')===e.path.replace(/\/$/,'');
+   if(u.pathname!==e.path&&!slashAlias&&!(request.method==='GET'&&e.path.endsWith('/')&&u.pathname.startsWith(e.path)))return false;
    if(e.bodyParameters!==undefined){let body;try{body=parseExactJson(request.body);}catch{return false;}if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==Object.keys(e.bodyParameters).length||Object.entries(e.bodyParameters).some(([k,values])=>typeof body[k]!=='string'||!values.includes(body[k])))return false;}
    return true;
   });}catch{return false;}

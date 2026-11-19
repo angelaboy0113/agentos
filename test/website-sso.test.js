@@ -32,3 +32,18 @@ test('existing authorization renewal only clicks the reviewed original account a
  assert.equal(await p.evaluate(()=>window.confirmClicks||0),0);assert.equal((await p.evaluate(loginRenewalPage,renewal)).attempted,true);assert.equal(await p.evaluate(()=>window.confirmClicks),1);
  await p.evaluate(()=>document.querySelectorAll('p').forEach(e=>e.remove()));assert.equal((await p.evaluate(loginRenewalPage,renewal)).attempted,false);assert.equal(await p.evaluate(()=>window.confirmClicks),1);
 });
+
+test('reviewed login documents accept a single trailing slash during nested SSO without granting child routes',()=>{
+ const rules=[{origin:'https://identity.test',path:'/accounts/page/login',types:['document']}];
+ const target=authorization+'/?redirect_uri='+encodeURIComponent(base+'/callback');
+ const request={url:page+'/?force_login=1&redirect_uri='+encodeURIComponent(target),method:'GET',resourceType:'document'};
+ assert.equal(loginPageAllowed(request.url,navigation),true);
+ assert.equal(websiteLoginReadAllowed(request,true,rules,base,navigation),true);
+ assert.equal(websiteLoginReadAllowed(request,false,rules,base,navigation),false);
+ for(const path of [page+'//',page+'/child',page+'/%2f',page.replace('identity','foreign')]){
+  assert.equal(loginPageAllowed(path,navigation),false);
+  assert.equal(websiteLoginReadAllowed({...request,url:path+'?redirect_uri='+encodeURIComponent(target)},true,rules,base,navigation),false);
+ }
+ assert.equal(websiteLoginReadAllowed({...request,url:page+'/?redirect_uri='+encodeURIComponent('https://foreign.test/callback')},true,rules,base,navigation),false);
+ assert.equal(websiteLoginReadAllowed({...request,resourceType:'xhr'},true,rules,base,navigation),false);
+});
