@@ -142,15 +142,28 @@ export function assessInvestigation(job,result){
    && (result.environmentSetup || result.investigation?.status==='wait'&&['login','user_input'].includes(result.investigation?.blocker?.kind)))
   return {...result,outcome:'needs_clarification'};
  if(job.taskIntent==='analysis'&&['developer','owner_report'].includes(job.stage)&&!result.sourceSyncBlocked
-   &&result.outcome==='blocked'&&result.investigation?.status==='wait'&&result.investigation?.blocker?.kind==='unavailable'){
+   &&['blocked','partial'].includes(result.outcome)&&result.investigation?.status==='wait'){
+  const {blocker, attempts}=result.investigation;
+  // A missing source can block the remaining causal proof without invalidating
+  // the findings already delivered. Actual pending requests keep their routing.
+  const checks=result.handoff?.checks??[];
+  const needsStatusRepair=result.outcome==='blocked'||!['none','owner'].includes(result.handoff?.returnTo)
+   ||checks.some(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed');
+  const awaitingSourceAccess=needsStatusRepair&&blocker?.kind==='approval'&&!job.environmentAccess&&!result.environmentSetup
+   &&!result.browserLoginRequired&&!requiresLiveVerification(job)
+   &&!result.environmentQuery&&!result.websiteQuery&&!result.sourceEnvironmentQuery&&!result.sourceHistoryQuery
+   &&nonempty(blocker.needed)&&nonempty(blocker.evidence)&&attempts?.some(nonempty)
+   &&checks.some(check=>check.id!==QUESTION_GOAL_ID&&check.status==='passed'&&nonempty(check.evidence));
   const goals=result.investigation.goals??[],root=goals.find(goal=>goal.id===QUESTION_GOAL_ID);
   const supportingGoal=goals.some(goal=>goal.id!==QUESTION_GOAL_ID&&goal.status==='verified'&&nonempty(goal.evidence));
   const supportingCause=(result.investigation.causalAssessment?.evidence??[])
    .some(item=>diagnosticKinds.has(item?.kind)&&nonempty(item.reference)&&nonempty(item.finding));
   const usefulEvidence=nonempty(root?.evidence)&&nonempty(result.finalMessage)
    &&result.handoff?.artifacts?.length&&result.handoff?.risks?.length&&(supportingGoal||supportingCause);
-  if(usefulEvidence)result={...result,outcome:'partial',handoff:{...result.handoff,returnTo:'none',
-   checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed'?{...check,status:'not_run'}:check)}};
+  if(usefulEvidence&&(result.outcome==='blocked'&&blocker?.kind==='unavailable'||awaitingSourceAccess)){
+   result={...result,outcome:'partial',handoff:{...result.handoff,returnTo:awaitingSourceAccess?'owner':'none',
+    checks:result.handoff.checks?.map(check=>check.id===QUESTION_GOAL_ID&&check.status==='failed'?{...check,status:'not_run'}:check)}};
+  }
  }
  if(job.taskIntent!=='analysis'||!['developer','owner_report'].includes(job.stage)||!['ready','partial'].includes(result.outcome))return result;
  if(investigationComplete(job,result))return result;

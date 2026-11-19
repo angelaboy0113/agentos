@@ -153,6 +153,31 @@ test('useful findings waiting on unavailable request logs stay partial instead o
  assert.equal(actual.handoff.checks[0].status,'not_run');
  assert.match(actual.finalMessage,/V3已创建/);
 });
+test('verified findings stay partial when a separate source needs maintenance access',()=>{
+ const job={taskIntent:'analysis',stage:'developer',originalQuestion:'为什么审批通过但执行单仍在审批中',questionScopePolicy:'original-question-v1'};
+ const response={outcome:'blocked',finalMessage:'版本和节点归属已查实；流程终态仍需查专用库。',
+  investigation:{status:'wait',goals:[{id:QUESTION_GOAL_ID,required:true,status:'open',evidence:'已确认单据状态及节点记录，回调结果未知'},
+   {id:'version-state',required:false,status:'verified',evidence:'业务库确认实际版本状态'}],
+   attempts:['业务库读取成功','查过日志','查询专用流程库被拒绝'],blocker:{kind:'approval',needed:'维护专用流程库的只读入口',evidence:'当前连接的范围拒绝该库'}},
+  handoff:{returnTo:'owner',artifacts:[{kind:'code',path:'workflow.js'}],risks:['流程终态未核实'],checks:[
+   {id:QUESTION_GOAL_ID,required:true,status:'failed',evidence:'仍缺回调证据'},
+   {id:'version-state',required:false,status:'passed',evidence:'版本及节点关系已核实'},
+   {id:'flow-db',required:false,status:'failed',evidence:'独立数据源未接通'}]}};
+ const partial=assessInvestigation(job,response);
+ assert.equal(partial.outcome,'partial');
+ assert.equal(partial.handoff.returnTo,'owner');
+ assert.equal(partial.handoff.checks[0].status,'not_run');
+ assert.equal(partial.handoff.checks[2].status,'failed');
+ assert.deepEqual(partial.investigation.blocker,response.investigation.blocker);
+ const modelPartial=assessInvestigation(job,{...response,outcome:'partial',handoff:{...response.handoff,returnTo:'developer'}});
+ assert.equal(modelPartial.handoff.returnTo,'owner');
+ assert.equal(modelPartial.handoff.checks[0].status,'not_run');
+ assert.equal(assessInvestigation(job,{...response,environmentQuery:{environmentId:'pending'}}).outcome,'blocked');
+ assert.equal(assessInvestigation({...job,environmentAccess:{approvedBy:'operator'}},response).outcome,'blocked');
+ const withoutPassedCheck={...response,handoff:{...response.handoff,checks:response.handoff.checks.filter(check=>check.status!=='passed')}};
+ assert.equal(assessInvestigation(job,withoutPassedCheck).outcome,'blocked');
+ assert.equal(assessInvestigation({...job,taskIntent:'implementation'},response).outcome,'blocked');
+});
 test('source-backed operation guidance stays yellow when only optional live-page access is denied',()=>{
  const job={taskIntent:'analysis',stage:'developer',originalQuestion:'如果我想在uat环境创建一个搭赠方案我要怎么操作?',questionScopePolicy:'original-question-v1'};
  const actual=assessInvestigation(job,{outcome:'blocked',summary:'源码已确认创建入口和表单步骤',
