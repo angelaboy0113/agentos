@@ -22,3 +22,14 @@ test('joint goal guidance requires exact current public-message bindings and nev
  for(const change of[{chatId:'foreign'},{replyToMessageId:'another'},{originProfile:'foreign'},{projectId:'b'},{inquiryCoordination:{...j.inquiryCoordination,grantsShared:true}}])assert.match(inquiryAcceptanceGuidance({...j,...change}),/覆盖用户原始问题的全部问句/);
  const {assessInvestigation}=await import('../src/shared/investigation-review.js');const raw={outcome:'ready',summary:'原因未确认',investigation:{status:'complete',goals:[{id:'original-question',required:true,status:'verified',evidence:'原因未确认'}],causalAssessment:{status:'unknown',link:'unproven'}},handoff:{checks:[],risks:[]}};assert.equal(assessInvestigation({...j,taskIntent:'analysis',stage:'developer',originalQuestion:'为什么缺失'},raw).outcome,'partial');
 });
+
+test('a read-only evidence wait keeps the blocker and partial outcome when the model returns it to the same developer',()=>{
+ const job={taskIntent:'analysis',stage:'developer',continuousInvestigation:true};
+ const blocker={kind:'unavailable',needed:'需要该请求对应的异常证据',evidence:'日志入口已查询，此时段无索引匹配'};
+ const result={outcome:'partial',investigation:{status:'wait',blocker,attempts:['查询已登记日志入口']},handoff:{returnTo:'developer'}};
+ const fixed=normalizeSelfContinuation(job,result);
+ assert.equal(fixed.handoff.returnTo,'none');assert.equal(fixed.outcome,'partial');assert.equal(fixed.investigation.blocker,blocker);
+ assert.equal(fixed.protocolRepair.businessCompletionClaimed,false);
+ assert.equal(normalizeSelfContinuation(job,{...result,investigation:{...result.investigation,attempts:[]}}).handoff.returnTo,'developer');
+ assert.equal(normalizeSelfContinuation(job,{...result,investigation:{...result.investigation,blocker:{...blocker,kind:'approval'}}}).handoff.returnTo,'developer');
+});

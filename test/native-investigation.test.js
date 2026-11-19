@@ -244,3 +244,39 @@ test('controller grant refresh preserves trusted local artifact workspace for a 
  await runNativeInvestigation({job:original,config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({}),bindToolCall:h=>handler=h,downloadInputs:async(j,_c,dir)=>{downloads++;assert.equal(dir,directory);assert.deepEqual(j.attachments,[input]);return[{id:input.id,path:dir+'/template.pptx'}];}});
  assert.equal(receipt.success,true);assert.equal(downloads,1);assert.match(receipt.contentItems[0].text,/localTaskInputs/);
 });
+
+test('a proposed log wait rechecks the current authorized catalog and uses the tools within the same session',async t=>{
+ const directory=await temp(t),app=new EventEmitter(),phases=[];
+ const raw={outcome:'partial',finalMessage:'已核对状态，仍需查询日志',investigation:{status:'wait',blocker:{kind:'unavailable',needed:'读取服务端日志'}}};
+ let turns=0,reads=0,invoke;
+ const direct={job,sourceReceipts:[],untriedLogSources:async()=>[{environmentId:'prd-logs',queryId:'investigate'}],
+  call:async(name,args)=>{assert.equal(name,'agentos_environment_open');assert.equal(JSON.parse(args.request).environmentId,'prd-logs');reads++;return {state:'saved'};},close:async()=>{}};
+ app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.request=async()=>({thread:{id:'logs-thread'}});app.close=async()=>{};
+ app.turn=async input=>{
+  if(++turns===1)return{text:JSON.stringify(raw)};
+  assert.match(input.input[0].text,/尚未实际查过.*prd-logs/s);
+  app.emit('notification',{method:'turn/started',params:{threadId:'logs-thread',turn:{id:'log-evidence'}}});
+  await invoke({threadId:'logs-thread',turnId:'log-evidence',namespace:null,callId:'log-read',tool:'agentos_environment_open',arguments:{request:'{"environmentId":"prd-logs"}',website:false}});
+  return{text:JSON.stringify(raw)};
+ };
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async e=>phases.push(e.phase)},{app,direct,runtime:async()=>({}),bindToolCall:fn=>invoke=fn});
+ assert.equal(result.outcome,'partial');assert.equal(turns,2);assert.equal(reads,1);assert.equal(result.nativeTiming.modelSessions,1);
+ assert.ok(phases.includes('native_analysis_continuing'));
+});
+
+test('catalog fallback selects only the original project and tier and skips a source with a real log lookup',async()=>{
+ const app={applicationId:'application-a',groups:[{groupId:'group-a'}]},second={applicationId:'application-b',groups:[{groupId:'group-b'}]},query={applications:[app,second],logApplications:[app.applicationId,second.applicationId]};
+ const source=(projectId,tier,q=query)=>({kind:'tsf',projectId,tier,queries:{investigate:q}});
+ const endpoints={right:source('a','uat'),prd:source('a','prd'),peer:source('b','uat'),metadata:source('a','uat',{applications:[app]}),archived:source('a','uat',{...query,logReadWindow:{startTime:'older'}})};
+ const result={investigation:{status:'wait',blocker:{kind:'unavailable',needed:'日志记录需要核对'}}};
+ const scoped={...job,sourceEnvironment:'sit',originalQuestion:'接口为何返回错误'};
+ const tools=new InvestigationDirectTools({job:scoped},{loadEnvironments:async()=>({environments:endpoints})});
+ assert.deepEqual((await tools.untriedLogSources(result)).map(x=>x.environmentId),['right']);
+ tools.job={...scoped,context:[{kind:'environment_result',result:{environmentEvidence:{environmentId:'right'},toolResultCatalog:[{tool:'search_logs'}]}}]};
+ assert.deepEqual(await tools.untriedLogSources(result),[]);
+ tools.job={...scoped,originalQuestion:'application-b 的报错',context:[{kind:'environment_result',result:{environmentEvidence:{environmentId:'right'},toolResultCatalog:[{tool:'search_logs',applicationId:'application-a'}]}}]};
+ assert.deepEqual((await tools.untriedLogSources(result))[0].applications.map(a=>a.applicationId),['application-b']);
+ tools.job={...scoped,originalQuestion:'只看代码，不要查日志'};
+ assert.deepEqual(await tools.untriedLogSources(result),[]);
+ assert.deepEqual(await tools.untriedLogSources({...result,investigation:{status:'wait',blocker:{kind:'approval',needed:'待核对日志'}}}),[]);
+});

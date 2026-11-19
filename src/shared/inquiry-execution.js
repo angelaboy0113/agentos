@@ -33,7 +33,16 @@ export function jointInquiryFromAcceptedTurns(turns,current,agents,projects){
  if(members.length<2||!members.some(m=>m.profile===current.profile))return null;
  return{version:3,messageId:current.messageId,chatId:current.chatId,members,policy:'same-message-split-by-system',detectedBy:'accepted-assistant-events',identityLinked:false,grantsShared:false};
 }
-export function normalizeSelfContinuation(job,result){if(job.taskIntent!=='analysis'||job.stage!=='developer'||!job.continuousInvestigation||result.outcome!=='partial'||result.handoff?.returnTo!=='developer'||result.investigation?.status!=='continue'||result.investigation?.blocker)return result;return{...result,handoff:{...result.handoff,returnTo:'none'},protocolRepair:{kind:'analysis-self-continuation',originalReturnTo:'developer',businessCompletionClaimed:false}};}
+export function normalizeSelfContinuation(job,result){
+ if(job.taskIntent!=='analysis'||job.stage!=='developer'||!job.continuousInvestigation||result.outcome!=='partial'||result.handoff?.returnTo!=='developer')return result;
+ const investigation=result.investigation,blocker=investigation?.blocker;
+ const continuing=investigation?.status==='continue'&&!blocker;
+ const evidenceWait=investigation?.status==='wait'&&blocker?.kind==='unavailable'
+  &&blocker.needed?.trim()&&blocker.evidence?.trim()&&investigation.attempts?.some(attempt=>attempt.trim());
+ if(!continuing&&!evidenceWait)return result;
+ return {...result,handoff:{...result.handoff,returnTo:'none'},
+  protocolRepair:{kind:continuing?'analysis-self-continuation':'analysis-evidence-wait',originalReturnTo:'developer',businessCompletionClaimed:false}};
+}
 
 // Use the same acceptance boundary in initial and continuation instructions.
 // This changes neither evidence validation nor the result's outcome.

@@ -72,7 +72,7 @@ export async function runNativeInvestigation(options,adapters={}) {
   const store=new ToolResultStore({readMaxCharacters:24000,directory:path.join(config.dataDir,'exports',job.id),scope:hash(JSON.stringify([job.id,job.questionId,job.originProfile??job.agentProfile,job.senderId]))});
   // Host receipts live outside the model-writable artifact working directory.
   const journalDirectory=await store.root();
-  let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer,modelTurns=0,hostContinuations=0;const began=Date.now();
+  let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer,modelTurns=0,hostContinuations=0,checkedLogFallback=false;const began=Date.now();
   const pendingTools=new Set(),deferredTools=new Set(),deferredResults=[];
   const onToolCall=async params=>{
     if(!active||params.threadId!==threadId||!turnId||params.turnId!==turnId||params.namespace!==null||!investigationDynamicTools.some(x=>x.name===params.tool)&&params.tool!=='agentos_read_result')throw failure('NATIVE_TOOL_SCOPE');
@@ -148,13 +148,19 @@ export async function runNativeInvestigation(options,adapters={}) {
         // Persist the intermediate evidence, but never publish it as delivery.
         observation={state:'analysis_continuing',result};
         await emit({type:'progress',phase:'native_analysis_continuing',message:'继续同一调查会话处理尚未完成的原需求，已有来源和成果保持'});
+      }else if(!checkedLogFallback){
+        const sources=await direct.untriedLogSources?.(result)??[];
+        if(!sources.length)break;
+        checkedLogFallback=true;
+        observation={state:'check_registered_logs',sources,needed:result.investigation.blocker.needed};
+        await emit({type:'progress',phase:'native_analysis_continuing',message:'发现当前环境已有日志读取入口，继续核验相关服务与时段'});
       }else break;
     }
     hostContinuations++;
     if(observation.state==='source_transition_required'){result={...result,environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:observation.sourceEnvironmentQuery};break;}
     if(direct.waiting)break;
     const presented=await store.present('host_continuation',observation,24000,{persist:true,reader:'agentos_read_result'});
-    input=[{type:'text',text:(observation.state==='analysis_continuing'?'原需求仍有可执行工作；保持用户实际要求的粒度，不把未要求的逐对象深层规则穷尽当作完成前置条件。中间证据已持久化，继续在当前会话直接完成取证、制作和核验，不必交回OS重新准备源码或技能。保留原身份、固定源码和工具范围，不重复已经完成的查询；真实外部缺口则准确记录，不虚报成功。':'你输出了旧式接续申请；宿主已按原身份与范围在本会话执行，结果如下。')+'继续使用agentos_*工具完成同一原问题，不需要结束本轮交回OS或再写environmentQuery/websiteQuery/sourceHistoryQuery。只有真实等待、最终交付或独立源码环境交接才结束。关闭当前来源后可直接打开下一已授权来源。最终结果把已经执行的旧式申请字段设为null。\n'+JSON.stringify(presented)}];
+    input=[{type:'text',text:(observation.state==='analysis_continuing'?'原需求仍有可执行工作；保持用户实际要求的粒度，不把未要求的逐对象深层规则穷尽当作完成前置条件。中间证据已持久化，继续在当前会话直接完成取证、制作和核验，不必交回OS重新准备源码或技能。保留原身份、固定源码和工具范围，不重复已经完成的查询；真实外部缺口则准确记录，不虚报成功。':observation.state==='check_registered_logs'?'当前配置存在尚未实际查过的同环境日志入口。先按原问题和已有证据找对应服务、组和时间，再调用受控日志工具；实际查询后如实记录命中、空匹配和请求失败，缺口才交付外部核查。下面是经过范围筛选的候选，勿遍历无关服务。':'你输出了旧式接续申请；宿主已按原身份与范围在本会话执行，结果如下。')+'继续使用agentos_*工具完成同一原问题，不需要结束本轮交回OS或再写environmentQuery/websiteQuery/sourceHistoryQuery。只有真实等待、最终交付或独立源码环境交接才结束。关闭当前来源后可直接打开下一已授权来源。最终结果把已经执行的旧式申请字段设为null。\n'+JSON.stringify(presented)}];
     active=true;
     }
     if(direct.channel){await direct.call('agentos_environment_close',{summary:'外层结束前保存已有证据；本来源尚未声明完成。',complete:false});result={...result,outcome:'partial',summary:'已有取证已保存，仍需完成原问题核验'};}

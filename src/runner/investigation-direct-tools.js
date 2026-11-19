@@ -3,6 +3,7 @@ import {executeEnvironmentJob} from './environment-job.js';
 import {controlPost} from './control-client.js';
 import {runWithSourceHistory} from './source-history-runner.js';
 import {loadEnvironments} from '../shared/environment-access.js';
+import {currentUserQuestion} from '../shared/user-request-scope.js';
 import {requestedSourceEnvironments} from '../shared/source-comparison.js';
 import {sourceRuntimeTier,assertSourceRuntimeTier} from '../shared/source-environments.js';
 import {environmentPlannerInstructions} from './environment-planner-instructions.js';
@@ -29,6 +30,33 @@ export class InvestigationDirectTools {
   }
   identity() {return {runnerId:this.job.lease.runnerId,leaseId:this.job.lease.id};}
   route(suffix) {return `/api/v1/jobs/${encodeURIComponent(this.job.id)}/${suffix}`;}
+  async untriedLogSources(result) {
+    const blocker=result.investigation?.blocker;
+    if(this.job.taskIntent!=='analysis'||result.investigation?.status!=='wait'||blocker?.kind!=='unavailable'
+      ||!/(日志|异常栈|\b(?:logs?|stack trace)\b)/i.test(blocker.needed??'')
+      ||/(?:无需|不要|不用|不需要).{0,8}(?:查|读|看)?日志|\b(?:do not|don.t)\s+(?:read|check|query)\s+(?:the\s+)?logs?/i.test(currentUserQuestion(this.job)))return [];
+    let tier;
+    try{tier=sourceRuntimeTier(this.options.project,this.job.sourceEnvironment);}catch{return [];}
+    const config=await this.loadEnvironments().catch(()=>null);
+    if(!config)return [];
+    const attempts=(this.job.context??[]).filter(c=>c.kind==='environment_result').flatMap(c=>
+      (c.result?.toolResultCatalog??[]).filter(item=>item.tool==='search_logs')
+        .map(item=>({environmentId:c.result.environmentEvidence?.environmentId,applicationId:item.applicationId})));
+    const candidates=Object.entries(config.environments)
+      .filter(([,e])=>e.kind==='tsf'&&e.projectId===this.job.projectId&&e.tier===tier)
+      .flatMap(([environmentId,e])=>Object.entries(e.queries??{}).filter(([,q])=>q.logApplications?.length&&!q.logReadWindow)
+        .map(([queryId,q])=>({environmentId,queryId,applications:q.applications.filter(app=>q.logApplications.includes(app.applicationId))})));
+    const clue=[currentUserQuestion(this.job),blocker.needed,blocker.evidence].join(' ').toLowerCase();
+    const named=candidates.map(source=>({...source,applications:source.applications.filter(app=>
+      [app.applicationId,app.applicationName].some(name=>name&&clue.includes(name.toLowerCase())))}))
+      .filter(source=>source.applications.length);
+    if(named.length)return named.map(source=>({...source,applications:source.applications.filter(app=>
+      !attempts.some(a=>a.environmentId===source.environmentId&&(!a.applicationId||a.applicationId===app.applicationId)))}))
+      .filter(source=>source.applications.length);
+    // Without a specific second service, one completed search is enough reason
+    // to avoid guessing and scanning the rest of the deployment catalog.
+    return candidates.some(source=>attempts.some(a=>a.environmentId===source.environmentId))?[]:candidates;
+  }
   async openInitial() {
     if(!this.job.environmentAccess||this.initialOpened)return null;
     assertSourceRuntimeTier(this.options.project,this.job.sourceEnvironment,this.job.environmentAccess.tier);
