@@ -15,12 +15,12 @@ const profile = 'knowledge-ltx';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2l8AAAAASUVORK5CYII=', 'base64');
 const md = '# 订单补贴状态\n\n**评审稿**\n\n|系统|影响|\n|---|---|\n|LTX|展示|\n|TPM|状态来源|\n\n## 原型图\n';
 
-async function fixture(t, cli) {
+async function fixture(t, cli, ltx = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agentos-prd-'));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   const store = new JsonStore(path.join(dataDir, 'agentos.json'));
   const cards = { enabled: true, upsert: async () => 'om_card' };
-  const projects = { projects: { ltx: { displayName: 'LTX' }, tpm: { displayName: 'TPM' } },
+  const projects = { projects: { ltx: { displayName: 'LTX', ...ltx }, tpm: { displayName: 'TPM' } },
     chatProfileProjectMap: { [chat]: { [profile]: 'ltx', 'knowledge-tpm': 'tpm' } } };
   const workspace = new PrdWorkspace({ store, cards, projects, config: { dataDir } },
     { chatIds: [chat], publisher: { profile, ownerOpenId: owner, chatIds: [chat] } }, { cli });
@@ -57,6 +57,19 @@ test('bare PRD trigger then unmentioned description and decisions keep one quest
   assert.equal(state.jobs[0].currentQuestion, '只做 PC，隐藏金额');
   assert.equal((await send('om_decision', '只做 PC，隐藏金额', 'om_root')).duplicate, true);
   assert.equal(await send('om_another', '另一条普通消息', 'om_unrelated'), null);
+});
+
+test('PRD as a document name does not collide with a later SIT environment clarification', async t => {
+  const { store, send } = await fixture(t, undefined, { analysisSourceMode: 'isolated',
+    analysisEnvironments: { sit: {}, prd: {} } });
+  const { questionId } = await send('om_prd', '我要做prd');
+  await send('om_request', '【补贴状态 PRD】输出订单详情的需求设计', 'om_prd');
+  assert.equal((await store.read()).jobs.length, 0);
+  await send('om_environment', '明确使用 SIT 环境核对 LTX 和 TPM 源码', 'om_prd');
+  const [job] = (await store.read()).jobs;
+  assert.equal(job.questionId, questionId);
+  assert.equal(job.sourceEnvironment, 'sit');
+  assert.match(job.originalQuestion, /补贴状态 PRD/);
 });
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');

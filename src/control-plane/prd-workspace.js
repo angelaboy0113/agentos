@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createId } from '../shared/protocol.js';
 import { createJobRecord } from '../shared/store.js';
 import { resolveProjectId } from '../shared/project-scope.js';
-import { explicitSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict } from '../shared/source-environments.js';
+import { confirmedSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict } from '../shared/source-environments.js';
 import { prdStart, prdExport } from '../shared/prd-workspace.js';
 import { requestsPrivateCard } from './private-cards.js';
 import { publishQuestion, questionJob } from './questions.js';
@@ -109,6 +109,18 @@ export class PrdWorkspace {
   }
 }
 
+function prdSourceEnvironment(project, messages) {
+  for (const { text } of messages.toReversed()) {
+    // PRD is also the name of the deliverable. Only treat it as production
+    // when the user labels it as an environment or sends a bare confirmation.
+    const selection = confirmedSourceEnvironment(project, text);
+    if (selection && /^(?:(?:确认|查|用|使用)\s*)?(?:prd|prod|production|sit|uat|生产|测试)(?:\s*环境)?[。.!！]?$/i.test(text)) return selection;
+    const environmentText = text.replace(/\bPRD\b(?!\s*(?:环境|机|库))/gi, '');
+    const explicit = confirmedSourceEnvironment(project, environmentText);
+    if (explicit) return explicit;
+  }
+}
+
 function applyPending(state, q, project) {
   if (['creating','inserting','sharing','unknown'].includes(q.prd.delivery?.phase)) return false;
   const pending = q.prd.messages.filter(m => !m.applied && (m.text || m.attachments.length));
@@ -118,14 +130,14 @@ function applyPending(state, q, project) {
   const text = pending.map(m => m.text).join('\n');
   const head = pending.at(-1), exporting = prdExport.test(head.text);
   const attachments = pending.flatMap(m => m.attachments);
-  if (!job && exporting) {
+  if (!job && exporting && !pending.slice(0, -1).some(m => m.text || m.attachments.length)) {
     state.conversations.find(t => t.id === head.turnId).response = '请先描述需求，再导出飞书文档。';
     head.applied = true;
     return false;
   }
   if (!job) {
     let sourceEnvironment;
-    try { sourceEnvironment = selectSourceEnvironment(project, explicitSourceEnvironment(project, text)); }
+    try { sourceEnvironment = selectSourceEnvironment(project, prdSourceEnvironment(project, pending)); }
     catch {
       state.conversations.find(t => t.id === head.turnId).response = '请先明确希望核对哪个已接入的源码环境，再继续补充需求。';
       return false;
@@ -140,12 +152,12 @@ function applyPending(state, q, project) {
       senderId: q.senderId, agentProfile: q.profile, originProfile: q.profile, originChatType: 'group', agentRole: 'developer', stage: 'developer',
       workflow: 'continuous_analysis', continuousInvestigation: true, taskIntent: 'analysis', sourceEnvironment,
       sourceMessageId: turn.id, replyToMessageId: q.messageId, originalQuestion: text, currentQuestion: text, instruction: text, attachments,
-      prd: { revision: 1 } });
+      prd: { revision: 1, ...(exporting ? { exportRevision: 1 } : {}) } });
     job = created.job;
     q.title = text.slice(0, 120);
   } else {
     if (!editableStates.has(job.status)) return false;
-    const requestedEnvironment = explicitSourceEnvironment(project, text);
+    const requestedEnvironment = prdSourceEnvironment(project, pending);
     if (requestedEnvironment && requestedEnvironment !== job.sourceEnvironment || sourceEnvironmentConflict(project, job.sourceEnvironment, text)) {
       pending.forEach(m => { m.applied = true; });
       state.conversations.find(t => t.id === head.turnId).response = '当前需求已绑定源码环境。要不同环境的基线，请新开需求，或在本话题补充该环境的资料。';
