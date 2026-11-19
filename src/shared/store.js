@@ -134,70 +134,7 @@ export class JsonStore {
   }
 
   async createJob(input) {
-    return this.transact((state) => {
-      if (input.sourceMessageId && state.processedMessages[input.sourceMessageId]) {
-        const existing = state.jobs.find((job) => job.id === state.processedMessages[input.sourceMessageId]);
-        return { job: existing, duplicate: true };
-      }
-      // A same-question supplement adds execution context; it cannot replace the root request.
-      const question = input.questionId && state.questions?.[input.questionId];
-      if(question?.withdrawnAt)throw Error('原提问已撤回，不再创建任务');
-      if (input.taskIntent === 'analysis' && question && question.projectId === input.projectId && question.chatId === input.chatId) {
-        const root = (state.conversations ?? []).find(t => t.id === question.rootTurnId);
-        const prior = state.jobs.filter(j => j.questionId === question.id && j.projectId === input.projectId && j.chatId === input.chatId && j.taskIntent === 'analysis');
-        const original = prior[0]?.originalQuestion ?? input.originalQuestion ?? root?.content;
-        const context = questionEvidence(prior, input.context ?? []);
-        const attachments = [...new Map([...prior.flatMap(j=>j.attachments??[]), ...(input.attachments??[])].map(a=>[a.id,a])).values()];
-        input = {...input,...((prior[0]?.currentQuestion??input.currentQuestion)?{currentQuestion:prior[0]?.currentQuestion??input.currentQuestion}:{}), ...(original ? {originalQuestion:original} : {}), context, attachments,
-          ...(prior[0] ? {missionId:prior[0].missionId} : {})};
-      }
-      const now = new Date().toISOString();
-      const job = {
-        id: createId('JOB'),
-        ...(input.visibility==='requester'?{visibility:'requester'}:{}),
-        ...(input.questionId ? { questionId: input.questionId } : {}),
-        ...(input.connectionSourceDiscovery ? {connectionSourceDiscovery:structuredClone(input.connectionSourceDiscovery)} : {}),
-        ...(input.connectionEnrollmentPending ? {connectionEnrollmentPending:true} : {}),
-        ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
-        ...(input.continuousInvestigation ? { continuousInvestigation: true, ...(input.taskIntent==='analysis'?{availableSourceReviewPolicy:'preserve-and-review-v1'}:{}) } : {}),
-        missionId: input.missionId ?? createId('MISSION'),
-        tabularDelivery:requiresTabularFile(input),...(input.inquiryCoordination?{inquiryCoordination:structuredClone(input.inquiryCoordination)}:{}),
-        projectId: input.projectId,
-        projectName: input.projectName ?? input.projectId,
-        chatId: input.chatId ?? null,
-        sourceMessageId: input.sourceMessageId ?? null,
-        replyToMessageId: input.replyToMessageId ?? input.sourceMessageId ?? null,
-        originMessageId: input.originMessageId ?? input.replyToMessageId ?? input.sourceMessageId ?? null,
-        senderId: input.senderId ?? null,
-        agentRole: input.agentRole ?? input.stage ?? null,
-        agentProfile: input.agentProfile ?? null,
-        requestedAgentRole: input.requestedAgentRole ?? input.agentRole ?? input.stage ?? null,
-        requestedAgentProfile: input.requestedAgentProfile ?? input.agentProfile ?? null,
-        delegation: input.delegation ?? null,
-        workflow: input.workflow,
-        stage: input.stage,
-        instruction: input.instruction,
-        originalQuestion: input.originalQuestion ?? input.instruction,
-        ...(input.currentQuestion?{currentQuestion:input.currentQuestion}:{}),
-        taskIntent: input.taskIntent ?? 'implementation',
-        ...(input.taskIntent === 'analysis' ? { questionScopePolicy: 'original-question-v1' } : {}),
-        ...(input.sourceEnvironment ? { sourceEnvironment: input.sourceEnvironment } : {}),
-        originProfile: input.originProfile ?? input.requestedAgentProfile ?? input.agentProfile ?? null,
-        originChatType: input.originChatType ?? null,
-        context: input.context ?? [],
-        attachmentRefs: input.attachmentRefs ?? [],
-        attachments: input.attachments ?? [],
-        status: input.status ?? 'queued',
-        lease: null,
-        events: [],
-        result: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-      state.jobs.push(job);
-      if (input.sourceMessageId) state.processedMessages[input.sourceMessageId] = job.id;
-      return { job, duplicate: false };
-    });
+    return this.transact(state => createJobRecord(state, input));
   }
 
   async renewEnvironment(id,effectKey,guard=()=>{}) {
@@ -879,4 +816,70 @@ function requireJob(state, id) {
 function requireActiveLease(job, identity) {
   if (job.status !== 'running' || job.lease?.id !== identity.leaseId || job.lease?.runnerId !== identity.runnerId
     || !(Date.parse(job.lease?.expiresAt) > Date.now())) throw new Error('任务执行租约已失效');
+}
+
+export function createJobRecord(state, input) {
+  if (input.sourceMessageId && state.processedMessages[input.sourceMessageId]) {
+    const existing = state.jobs.find((job) => job.id === state.processedMessages[input.sourceMessageId]);
+    return { job: existing, duplicate: true };
+  }
+  // A same-question supplement adds execution context; it cannot replace the root request.
+  const question = input.questionId && state.questions?.[input.questionId];
+  if(question?.withdrawnAt)throw Error('原提问已撤回，不再创建任务');
+  if (input.taskIntent === 'analysis' && question && question.projectId === input.projectId && question.chatId === input.chatId) {
+    const root = (state.conversations ?? []).find(t => t.id === question.rootTurnId);
+    const prior = state.jobs.filter(j => j.questionId === question.id && j.projectId === input.projectId && j.chatId === input.chatId && j.taskIntent === 'analysis');
+    const original = prior[0]?.originalQuestion ?? input.originalQuestion ?? root?.content;
+    const context = questionEvidence(prior, input.context ?? []);
+    const attachments = [...new Map([...prior.flatMap(j=>j.attachments??[]), ...(input.attachments??[])].map(a=>[a.id,a])).values()];
+    input = {...input,...((prior[0]?.currentQuestion??input.currentQuestion)?{currentQuestion:prior[0]?.currentQuestion??input.currentQuestion}:{}), ...(original ? {originalQuestion:original} : {}), context, attachments,
+      ...(prior[0] ? {missionId:prior[0].missionId} : {})};
+  }
+  const now = new Date().toISOString();
+  const job = {
+    id: createId('JOB'),
+    ...(input.visibility==='requester'?{visibility:'requester'}:{}),
+    ...(input.questionId ? { questionId: input.questionId } : {}),
+    ...(input.prd ? { prd: structuredClone(input.prd) } : {}),
+    ...(input.connectionSourceDiscovery ? {connectionSourceDiscovery:structuredClone(input.connectionSourceDiscovery)} : {}),
+    ...(input.connectionEnrollmentPending ? {connectionEnrollmentPending:true} : {}),
+    ...(input.environmentAccess ? { environmentAccess: structuredClone(input.environmentAccess) } : {}),
+    ...(input.continuousInvestigation ? { continuousInvestigation: true, ...(input.taskIntent==='analysis'?{availableSourceReviewPolicy:'preserve-and-review-v1'}:{}) } : {}),
+    missionId: input.missionId ?? createId('MISSION'),
+    tabularDelivery:requiresTabularFile(input),...(input.inquiryCoordination?{inquiryCoordination:structuredClone(input.inquiryCoordination)}:{}),
+    projectId: input.projectId,
+    projectName: input.projectName ?? input.projectId,
+    chatId: input.chatId ?? null,
+    sourceMessageId: input.sourceMessageId ?? null,
+    replyToMessageId: input.replyToMessageId ?? input.sourceMessageId ?? null,
+    originMessageId: input.originMessageId ?? input.replyToMessageId ?? input.sourceMessageId ?? null,
+    senderId: input.senderId ?? null,
+    agentRole: input.agentRole ?? input.stage ?? null,
+    agentProfile: input.agentProfile ?? null,
+    requestedAgentRole: input.requestedAgentRole ?? input.agentRole ?? input.stage ?? null,
+    requestedAgentProfile: input.requestedAgentProfile ?? input.agentProfile ?? null,
+    delegation: input.delegation ?? null,
+    workflow: input.workflow,
+    stage: input.stage,
+    instruction: input.instruction,
+    originalQuestion: input.originalQuestion ?? input.instruction,
+    ...(input.currentQuestion?{currentQuestion:input.currentQuestion}:{}),
+    taskIntent: input.taskIntent ?? 'implementation',
+    ...(input.taskIntent === 'analysis' ? { questionScopePolicy: 'original-question-v1' } : {}),
+    ...(input.sourceEnvironment ? { sourceEnvironment: input.sourceEnvironment } : {}),
+    originProfile: input.originProfile ?? input.requestedAgentProfile ?? input.agentProfile ?? null,
+    originChatType: input.originChatType ?? null,
+    context: input.context ?? [],
+    attachmentRefs: input.attachmentRefs ?? [],
+    attachments: input.attachments ?? [],
+    status: input.status ?? 'queued',
+    lease: null,
+    events: [],
+    result: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  state.jobs.push(job);
+  if (input.sourceMessageId) state.processedMessages[input.sourceMessageId] = job.id;
+  return { job, duplicate: false };
 }

@@ -1,0 +1,8 @@
+{
+  "chatIds": ["oc_APPROVED_CHAT"],
+  "publisher": {
+    "profile": "approved-user-cli-profile",
+    "ownerOpenId": "ou_AUTHORIZED_OWNER_IN_PUBLISHER_APP",
+    "chatIds": ["oc_APPROVED_CHAT"]
+  }
+}

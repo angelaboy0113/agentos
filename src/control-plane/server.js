@@ -1,3 +1,4 @@
+import { PrdWorkspace, loadPrdWorkspace } from './prd-workspace.js';
 import {RemoteLoginQr} from './remote-login-qr.js';
 import{DeliveryMaintenance}from'./delivery-maintenance.js';
 import{deliveryAttention,resumeDelivery}from'../shared/delivery-retry.js';
@@ -114,6 +115,7 @@ export async function createControlPlane(overrides = {}) {
   });
   const conversations = new ConversationService(context, { ...await loadConversationSettings(config.conversationFile), memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
+  context.prd = new PrdWorkspace(context, overrides.prdSettings ?? await loadPrdWorkspace(config), overrides.prdDependencies);
   context.withdrawals=new WithdrawalWatcher(context);
   const receptionPolicy=await loadReceptionPolicy(config.receptionFile);store.receptionPolicy=receptionPolicy;context.reception=new ReceptionService(context,receptionPolicy,overrides.receptionOptions);
   context.retention = new HistoryRetention(context);
@@ -136,6 +138,7 @@ export async function createControlPlane(overrides = {}) {
     context.retention.start();context.backupMaintenance.start();
     cards.start();context.longNotices.start();context.reception.start();
     context.websiteEvidence.retry().catch(()=>console.error('[website-evidence] recovery unavailable'));
+    context.prd.publisher.recover().catch(()=>console.error('[prd-doc] recovery deferred'));
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
     context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));
@@ -144,7 +147,7 @@ export async function createControlPlane(overrides = {}) {
   server.once('close', () => {
     context.memoryAdmission.stop?.();
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.successStickers.close(),context.websiteEvidence.close(), context.remoteLoginQr.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.prd.publisher.close(),context.successStickers.close(),context.websiteEvidence.close(), context.remoteLoginQr.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
 }
@@ -624,6 +627,11 @@ export async function handleLarkCliEvent(context, event) {
   const directReception=await context.reception?.direct(event);if(directReception)return directReception;
   if (agent?.systemAssistant && event.chat_type === 'p2p') return { ignored: true, reason: 'assistant_group_only' };
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
+  const prdContent = stripMentions(event.content, event.mentions);
+  const prdMentionIds = (event.mentions ?? []).flatMap(item => [item.id?.open_id ?? item.id?.app_id ?? item.id, item.open_id, item.user_id]).filter(Boolean);
+  const prd = await context.prd?.handle({...event,message_id:messageId}, {agent, content:prdContent,
+    addressed:[agent?.openId,agent?.appId].filter(Boolean).some(id => prdMentionIds.includes(id))});
+  if (prd) return prd;
   const reception=await context.reception?.observe(event,agent);if(reception)return reception;
   // Group-only system assistants must route the addressee before credential
   // intake; a shared topic/root is not permission for every bot to respond.
@@ -727,7 +735,8 @@ async function createJobFromMessage(context, input) {
 export async function notifyJobEvent(context, { job, event }) {
   if(['completed','failed','cancelled'].includes(event.type))void context.retention?.collectSnapshots?.().catch(()=>{});
   if (!job.chatId && !job.replyToMessageId) return;
-  if(event.type==='completed')await context.reports?.enqueue(await context.store.getJob(job.id));
+  if (job.prd && ['completed','failed'].includes(event.type)) await context.prd?.onCompleted(await context.store.getJob(job.id));
+  if(event.type==='completed'&&!job.prd)await context.reports?.enqueue(await context.store.getJob(job.id));
   if (context.cards?.enabled) {
     if (!['queued', 'started', 'completed', 'failed', 'cancelled', 'cancel_requested', 'progress'].includes(event.type)) return;
     if (event.type === 'progress' && !['codex_waiting', 'codex_working', 'connection_retry', 'model_capacity_retry', 'verification', 'tool_activity'].includes(event.phase)) return;

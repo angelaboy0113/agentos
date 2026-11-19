@@ -13,7 +13,7 @@ import {messageIdOf} from './live-cards.js';
 export class ReportDelivery {
  constructor(context){this.context=context;this.workers=new Map();this.closed=false;}
  async enqueue(job){
-  if(!job||job.nextJobId||job.status!=='completed'||!reportDeliveryReady(job))return;
+  if(!job||job.prd||job.nextJobId||job.status!=='completed'||!reportDeliveryReady(job))return;
   if(!await stateView(this.context.store,s=>s.jobs.some(j=>(job.questionId?j.questionId===job.questionId:j.id===job.id)&&j.reportFiles?.length)))return;
   await this.context.store.transact(state=>{
    const current=state.jobs.find(j=>j.id===job.id);if(current?.status!=='completed'||!reportDeliveryReady(current))return;

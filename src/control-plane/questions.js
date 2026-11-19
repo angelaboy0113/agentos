@@ -96,6 +96,15 @@ export function questionView(state, questionId, projects = {}) {
   const label = card.header.title.content;
   card.header.title.content = questionTitle(q.title);
   card.header.subtitle.content = `${q.id} · ${label}`;
+  if (q.prd) {
+    const d = q.prd.delivery;
+    card.header.subtitle.content = `${q.id} · PRD 需求工作台${d?.sentAt ? ' · 飞书评审稿已送达' : ''}`;
+    const elements = card.body?.elements;
+    if (!d?.sentAt && card.header.template === 'green') card.header.template = d?.notice ? 'orange' : 'blue';
+    if (elements && d?.notice) elements.push({tag:'markdown',content:d.notice});
+    if (elements && d?.sentAt && d.url) elements.push({tag:'markdown',content:`[打开飞书 PRD 评审稿 · v0.${d.revision}](${d.url})`});
+    if (elements && !d?.sentAt) elements.push({tag:'markdown',text_size:'notation',content:'继续在原话题补充，准备好时发送「导出飞书文档」。'});
+  }
   card.config.summary.content = `${questionTitle(q.title)} · ${label}`;
   if (useJob) {
     const roles = { developer: '开发', owner_report: '负责人汇总', owner_intake: '负责人', pm: 'PM', qa: '测试', owner_audit: '审计' };
@@ -138,7 +147,7 @@ export function questionView(state, questionId, projects = {}) {
 // Fence a snapshot against incoming replies, transitions and result changes between read and publish.
 function sourceVersion(state, id) {
   const q = state.questions[id];
-  return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId,
+  return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId, q.prd?.delivery?.updatedAt,
     // Heartbeats/progress may arrive during name lookup. They must not starve
     // publication; question rounds, status and accepted results still fence it.
     state.jobs.filter((j) => j.questionId === id).map((j) => [j.id, j.status, j.stage, j.nextJobId, jobActionVersion(j), j.result]),

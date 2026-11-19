@@ -1,0 +1,173 @@
+import { receptionSensitive } from '../shared/reception-policy.js';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { createId } from '../shared/protocol.js';
+import { createJobRecord } from '../shared/store.js';
+import { resolveProjectId } from '../shared/project-scope.js';
+import { explicitSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict } from '../shared/source-environments.js';
+import { prdStart, prdExport } from '../shared/prd-workspace.js';
+import { requestsPrivateCard } from './private-cards.js';
+import { publishQuestion, questionJob } from './questions.js';
+import { stateView } from '../shared/state-view.js';
+import { PrdCloudDelivery } from './prd-cloud-delivery.js';
+
+const editableStates = new Set(['completed', 'awaiting_clarification', 'failed', 'blocked']);
+const active = new Set(['queued', 'running', 'cancelling']);
+
+export async function loadPrdWorkspace(config) {
+  const file = path.join(path.dirname(config.dataDir), 'prd-workspace.local.json');
+  const value = await readFile(file, 'utf8').then(JSON.parse).catch(error => {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  });
+  if (!Array.isArray(value.chatIds ?? []) || (value.chatIds ?? []).some(id => !/^oc_[a-zA-Z0-9]+$/.test(id))) throw Error('PRD workspace group scope is invalid');
+  return value;
+}
+
+export class PrdWorkspace {
+  constructor(context, settings = {}, dependencies = {}) {
+    this.context = context;
+    this.chatIds = new Set(settings.chatIds ?? []);
+    this.publisher = new PrdCloudDelivery(context, settings.publisher, {...dependencies, onPublished: id => this.resumePending(id)});
+  }
+
+  async handle(event, { agent, addressed, content }) {
+    if (event.chat_type !== 'group' || event.sender_type !== 'user' || !agent?.systemAssistant
+      || !this.context.cards?.enabled || !this.chatIds.has(event.chat_id) || !event.message_id || !event.sender_id) return null;
+    if (event.mentions?.length && !addressed) return null;
+    const lineage = [event.root_id, event.reply_to].filter(Boolean);
+    if (!addressed && !lineage.length) return null;
+    const possible = await stateView(this.context.store, state => Object.values(state.questions ?? {}).some(q =>
+      q.prd && q.profile === event.agent_profile && q.chatId === event.chat_id && lineage.includes(q.threadRootId)));
+    if (!possible && !(addressed && prdStart.test(content))) return null;
+    if (receptionSensitive(content)) return { ignored: true, reason: 'prd_sensitive_group_input' };
+    if (requestsPrivateCard(content)) return { ignored: true, reason: 'prd_public_group_only' };
+    const accepted = await this.context.store.transact(state => {
+      state.questions ??= {};
+      state.conversations ??= [];
+      let q = Object.values(state.questions).find(q => q.prd && q.profile === event.agent_profile && q.chatId === event.chat_id && lineage.includes(q.threadRootId));
+      if (!q) {
+        if (!addressed || !prdStart.test(content)) return { ignored: true };
+        // The root message ID is common to all subscribed assistants, so one owns this topic.
+        const rootId = event.root_id || event.message_id;
+        if (Object.values(state.questions).some(x => x.prd && x.chatId === event.chat_id && x.threadRootId === rootId)) return { ignored: true, reason: 'prd_owned_by_another_assistant' };
+        const projectId = resolveProjectId(this.context.projects, event.chat_id, event.agent_profile);
+        if (!this.context.projects.projects?.[projectId]) return { ignored: true };
+        const id = createId('QST');
+        q = state.questions[id] = { id, title: content, messageId: event.message_id, threadRootId: rootId,
+          senderId: event.sender_id, chatId: event.chat_id, profile: event.agent_profile, projectId, createdAt: new Date().toISOString(),
+          generation: 1, replyInThread: true, prd: { messages: [], closed: false } };
+      }
+      if (q.withdrawnAt || q.prd.closed || q.senderId !== event.sender_id) return { ignored: true, reason: 'not_prd_requester' };
+      if (q.prd.messages.some(m => m.id === event.message_id)) return { duplicate: true };
+      const opening = !q.rootTurnId;
+      const firstContent = opening ? content.replace(prdStart, '').replace(/^[\s：:，,。]+/, '') : content;
+      const id = createId('CHAT');
+      const text = firstContent.trim();
+      const j = questionJob(state, q.id);
+      const turn = { id, questionId: q.id, messageId: event.message_id, chatId: q.chatId, chatType: 'group', senderId: q.senderId,
+        profile: q.profile, projectId: q.projectId, role: 'developer', content, replyInThread: true, status: 'sent', createdAt: new Date().toISOString(),
+        response: !text && opening ? '需求已创建。接着在本话题说想改什么、希望达到什么效果，可以附截图。准备好时发「导出飞书文档」。' : '' };
+      state.conversations.push(turn);
+      q.rootTurnId ??= id;
+      q.latestTurnId = id;
+      q.prd.messages.push({ id: event.message_id, turnId: id, text, attachments: event.attachments ?? [] });
+      if (!text && opening) return { questionId: q.id };
+      if (j?.status === 'cancelling' || j?.status === 'cancelled') return { ignored: true, reason: 'prd_cancelled' };
+      if (j && (active.has(j.status) || this.publisher.workers.has(q.id))) return { questionId: q.id, pending: true };
+      const exportRun = j?.prd?.exportRevision && !q.prd.delivery?.sentAt && prdExport.test(text) && j.result?.outcome === 'ready';
+      if (exportRun) { q.prd.messages.at(-1).applied = true; return { questionId: q.id, retryPublish: true }; }
+      if (prdExport.test(text) && q.prd.delivery?.sentAt && j?.prd?.exportRevision === j?.prd.revision) {
+        q.prd.messages.at(-1).applied = true;
+        return { questionId: q.id };
+      }
+      applyPending(state, q, this.context.projects.projects[q.projectId]);
+      return { questionId: q.id };
+    });
+    if (accepted.questionId && !accepted.pending) await publishQuestion(this.context, accepted.questionId).catch(() => {});
+    if (accepted.retryPublish) this.publisher.wake(accepted.questionId);
+    return accepted;
+  }
+
+  async onCompleted(job) {
+    if (!job.prd || !job.questionId) return;
+    if (job.prd.exportRevision === job.prd.revision && job.status === 'completed' && job.result?.outcome === 'ready') {
+      this.publisher.wake(job.questionId);
+      return;
+    }
+    if (!editableStates.has(job.status)) return;
+    await this.resumePending(job.questionId);
+  }
+
+  async resumePending(questionId) {
+    const changed = await this.context.store.transact(state => {
+      const q = state.questions[questionId], j = questionJob(state, questionId);
+      if (!q?.prd || q.withdrawnAt || !editableStates.has(j?.status)) return false;
+      return applyPending(state, q, this.context.projects.projects[q.projectId]);
+    });
+    if (changed) await publishQuestion(this.context, questionId).catch(() => {});
+  }
+}
+
+function applyPending(state, q, project) {
+  if (['creating','inserting','sharing','unknown'].includes(q.prd.delivery?.phase)) return false;
+  const pending = q.prd.messages.filter(m => !m.applied && (m.text || m.attachments.length));
+  if (!pending.length) return false;
+  let job = questionJob(state, q.id);
+  if (job?.environmentAccess || job?.result?.browserLoginRequired || job?.result?.modelCapacityWaiting || job?.result?.environmentConflict) return false;
+  const text = pending.map(m => m.text).join('\n');
+  const head = pending.at(-1), exporting = prdExport.test(head.text);
+  const attachments = pending.flatMap(m => m.attachments);
+  if (!job && exporting) {
+    state.conversations.find(t => t.id === head.turnId).response = '请先描述需求，再导出飞书文档。';
+    head.applied = true;
+    return false;
+  }
+  if (!job) {
+    let sourceEnvironment;
+    try { sourceEnvironment = selectSourceEnvironment(project, explicitSourceEnvironment(project, text)); }
+    catch {
+      state.conversations.find(t => t.id === head.turnId).response = '请先明确希望核对哪个已接入的源码环境，再继续补充需求。';
+      return false;
+    }
+    if (sourceEnvironmentConflict(project, sourceEnvironment, text)) {
+      state.conversations.find(t => t.id === head.turnId).response = '请先明确本需求要核对的环境，例如 PRD 或 SIT。';
+      pending.forEach(m => { m.applied = true; });
+      return false;
+    }
+    const turn = state.conversations.find(t => t.id === head.turnId);
+    const created = createJobRecord(state, { questionId: q.id, projectId: q.projectId, projectName: project.displayName, chatId: q.chatId,
+      senderId: q.senderId, agentProfile: q.profile, originProfile: q.profile, originChatType: 'group', agentRole: 'developer', stage: 'developer',
+      workflow: 'continuous_analysis', continuousInvestigation: true, taskIntent: 'analysis', sourceEnvironment,
+      sourceMessageId: turn.id, replyToMessageId: q.messageId, originalQuestion: text, currentQuestion: text, instruction: text, attachments,
+      prd: { revision: 1 } });
+    job = created.job;
+    q.title = text.slice(0, 120);
+  } else {
+    if (!editableStates.has(job.status)) return false;
+    const requestedEnvironment = explicitSourceEnvironment(project, text);
+    if (requestedEnvironment && requestedEnvironment !== job.sourceEnvironment || sourceEnvironmentConflict(project, job.sourceEnvironment, text)) {
+      pending.forEach(m => { m.applied = true; });
+      state.conversations.find(t => t.id === head.turnId).response = '当前需求已绑定源码环境。要不同环境的基线，请新开需求，或在本话题补充该环境的资料。';
+      return false;
+    }
+    const revision = job.prd.revision + 1;
+    job.prd = { revision, ...(exporting ? { exportRevision: revision } : {}) };
+    if (job.result) job.context = [...job.context, { stage: 'developer', kind: 'prd_previous_turn', result: job.result }].slice(-8);
+    job.currentQuestion = exporting ? '导出当前需求评审版飞书文档，生成 Markdown 与 PNG 原型图。' : text;
+    job.instruction = `需求初始描述：${job.originalQuestion}\n本轮补充：${text}`;
+    job.attachments = [...new Map([...job.attachments, ...attachments].map(a => [a.id, a])).values()];
+    job.status = 'queued';
+    job.result = null;
+    job.lease = null;
+    job.updatedAt = new Date().toISOString();
+    job.events.push({ id: createId('EVT'), type: 'prd_continued', at: job.updatedAt, revision });
+    q.generation++;
+    delete job.investigationProgress;
+    delete job.continuousContinuationKeys;
+    delete job.continuousRejectedCount;
+  }
+  for (const m of pending) m.applied = true;
+  state.conversations.find(t => t.id === head.turnId).outcome = { jobId: job.id };
+  return true;
+}
