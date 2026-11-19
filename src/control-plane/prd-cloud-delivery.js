@@ -7,9 +7,10 @@ import { prdDocumentTitle, prdIntentDigest } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
 import { questionJob, publishQuestion } from './questions.js';
 
+const publishingScopes = 'docx:document docs:document.media:upload docs:permission.member:create docs:permission.member:read';
 const validToken = /^[a-zA-Z0-9_-]{6,150}$/;
 const hasNativeTable = xml => /<table(?:\s|>)/i.test(xml);
-const authError = error => /no user logged in|app_scope_not_applied|user_scope_not_granted|99991672|99991679/i.test(error.message);
+const authError = error => /no user logged in|app_scope_not_applied|user_scope_not_granted|missing_scope|missing required scope|99991672|99991679/i.test(error.message);
 
 function documentIdentity(result) {
   const d = result.data ?? result;
@@ -109,6 +110,14 @@ export class PrdCloudDelivery {
           return;
         }
         if (['pending', 'authorization_required', 'artifacts_missing'].includes(delivery.phase)) {
+          const authorization = await call(['auth', 'check', '--scope', publishingScopes]).catch(error => {
+            if (authError(error) || /"missing"\s*:\s*\[/.test(error.message)) return null;
+            throw error;
+          });
+          if (!authorization?.ok || (authorization.missing?.length ?? 0) > 0) {
+            await save('authorization_required', { notice: '已保留稿件。飞书账号尚未授权创建文档、上传图片及设置本群协作者。授权后请再次发送「导出飞书文档」。' });
+            return;
+          }
           await save('creating');
           const created = await call(['docs', '+create', '--as', 'user', '--parent-position', 'my_library',
             '--doc-format', 'markdown', '--title', prdDocumentTitle(q, revision), '--content', '-'], { input: markdown, timeoutMs: 90_000 });

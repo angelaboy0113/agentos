@@ -98,6 +98,10 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   const cli = async (args, opts) => {
     calls.push([args, opts]);
     assert.equal(opts.profile, profile);
+    if (args[0] === 'auth') {
+      assert.match(args[3], /docs:permission.member:create/);
+      return { ok: true, missing: [] };
+    }
     assert.ok(args.includes('user'));
     if (args[0] === 'api') return { data: { open_id: owner } };
     if (args[1] === '+create') { assert.equal(opts.input, md.trim()); return { data: { document_id: doc, url: 'https://unit.feishu.cn/docx/' + doc } }; }
@@ -149,5 +153,27 @@ test('missing owner authorization never creates a document or expands sharing', 
   ]);
   await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: { outcome: 'ready' }, reportFiles: files }); });
   await workspace.publisher.deliver(questionId);
+  assert.equal((await store.read()).questions[questionId].prd.delivery.phase, 'authorization_required');
+});
+
+test('an ungranted document scope leaves a retryable draft before any create request', async t => {
+  const calls = [];
+  const { workspace, store, send, dataDir } = await fixture(t, async args => {
+    calls.push(args[0]);
+    if (args[0] === 'api') return { data: { open_id: owner } };
+    if (args[0] === 'auth') throw Error('lark-cli exited 1: {"ok":false,"missing":["docx:document"]}');
+    assert.fail('Document creation must wait for user consent');
+  });
+  const { questionId } = await send('om_start', '我要做PRD：新增状态');
+  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
+  await send('om_export', '导出飞书文档', 'om_start');
+  const [job] = (await store.read()).jobs;
+  const files = await Promise.all([
+    saveArtifact(dataDir, job, 'report-55555555-5555-5555-5555-555555555555', 'md', Buffer.from(md)),
+    saveArtifact(dataDir, job, 'report-66666666-6666-6666-6666-666666666666', 'png', png),
+  ]);
+  await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: { outcome: 'ready' }, reportFiles: files }); });
+  await workspace.publisher.deliver(questionId);
+  assert.deepEqual(calls, ['api', 'auth']);
   assert.equal((await store.read()).questions[questionId].prd.delivery.phase, 'authorization_required');
 });
