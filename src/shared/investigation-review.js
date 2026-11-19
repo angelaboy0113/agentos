@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 const nonempty = s => typeof s === 'string' && s.trim().length > 0;
 export const QUESTION_GOAL_ID = 'original-question';
 const causalQuestion = /(?:为什么|为何|为啥|原因|根因|怎么回事|咋回事|分析.{0,12}(?:报错|失败|异常)|(?:报错|失败|异常).{0,12}(?:怎么|咋))|(?:\bwhy\b|root\s*cause|what\s+caused|reason\s+for)/i;
+const explicitCausalRequest = /(?:为什么|为何|为啥|什么原因|怎么回事|咋回事|(?:排查|调查|定位|找出|核实|查清).{0,16}(?:原因|根因))|(?:\bwhy\b|root\s*cause|what\s+caused)/i;
 const deepInvestigation = /(?:深度|深入|彻底|完整|全面).{0,8}(?:排查|调查|分析)|(?:排查|调查|分析).{0,8}(?:到底|根因)|查到底|刨根问底|deep\s+(?:investigation|dive)|root\s*cause/i;
 const causalGoal = /(?:cause|reason|root|failure|unfinished|原因|根因|成因|为何|为什么|未完成|失败|异常)/i;
 const causalUncertainty = /(?:根因|原因|具体(?:超时|失败|异常)?(?:步骤|环节|位置)?).{0,16}(?:未查明|未找到|未确认|不能确认|无法确认|无法确定|不能确定|未知)|(?:尚未|尚不能|无法|不能).{0,12}(?:确认|确定|定位).{0,12}(?:根因|原因|步骤|环节|位置)/;
@@ -24,7 +25,8 @@ function originalAcceptanceText(job){
 
 export function requiresCausalEvidence(job) {
  // Generated directions must not add a causal acceptance gate to a report.
- return causalQuestion.test(originalAcceptanceText(job));
+ const text=originalAcceptanceText(job);
+ return (job.prd?explicitCausalRequest:causalQuestion).test(text);
 }
 export function requiresDeepInvestigation(job) {
  return deepInvestigation.test(originalAcceptanceText(job));

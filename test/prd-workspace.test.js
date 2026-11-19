@@ -8,6 +8,7 @@ import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
 import { prdGuidance } from '../src/shared/prd-workspace.js';
+import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
 const chat = 'oc_team';
 const owner = 'ou_owner';
@@ -70,6 +71,12 @@ test('PRD as a document name does not collide with a later SIT environment clari
   assert.equal(job.questionId, questionId);
   assert.equal(job.sourceEnvironment, 'sit');
   assert.match(job.originalQuestion, /补贴状态 PRD/);
+});
+
+test('a PRD display rule about rejection reasons is not a request to investigate a live incident', () => {
+  const prd = { revision: 1 };
+  assert.equal(requiresCausalEvidence({ prd, originalQuestion: '增加状态字段，不展示驳回原因' }), false);
+  assert.equal(requiresCausalEvidence({ prd, originalQuestion: '核实这笔补贴被驳回的原因' }), true);
 });
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
