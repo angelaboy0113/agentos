@@ -4,7 +4,7 @@ import {cloudSheetTarget} from '../shared/feishu-cloud-sheet.js';
 import{loadIntegrationProjects,assertTaskReadScope}from '../shared/integration-peers.js';
 import {modelCapacityWait}from '../shared/model-capacity-wait.js';
 import {readBusinessDefinitions,definitionActor} from '../shared/business-definitions.js';
-import {BrowserInputError,validateBrowserTool,correctableBrowserCodes,screenshotRequested} from '../shared/browser-tool-input.js';
+import {BrowserInputError,validateBrowserTool,correctableBrowserCodes,screenshotAvailable} from '../shared/browser-tool-input.js';
 import {QueryInputError} from './environment-tools.js';
 import {controlPost} from './control-client.js';
 import {buildTaskSourceQueryContext} from './source-query-context.js';
@@ -88,7 +88,7 @@ export function websiteTools(job,config,environment={}){
  const native=Boolean(cloudSheetTarget(job.environmentAccess?.websiteTarget??environment.baseUrl));
  return {spec:[...(native?[{tool:'read_cloud_sheet',args:{sheetId:'metadata sheetId',startRow:1,endRow:'inclusive row number',startColumn:1,endColumn:'inclusive column number'},description:'以原机器人身份读取当前已批准的飞书知识库/在线表格；connection取得元数据后按行列完整分页，保留编号字符串、空值与重复项；程序自动保存分页，同revision全表覆盖后登记inputAttachment供数据库import_task_input。未完整时按assembly缺口继续。权限失败不是个人登录失败；不接收其他文档URL。'},{tool:'read_cloud_document',args:{},description:'以原机器人身份读取当前知识库中的上传文件或在线文档。上传的DOCX、XLSX、CSV/TSV、TXT/Markdown/JSON/XML/YAML通过飞书原生下载接口读取并登记为当前任务附件；在线文档按原生分页读取。权限、共享范围、格式错误分别返回，不降级为个人网页登录。'},{tool:'restore_cloud_sheet_input',args:{resultRefs:['current task stored read_cloud_sheet resultRef']},description:'恢复当前任务、当前已授权文档环境内已有完整保存的原生表格分页；验证SHA/范围/版本后按同一登记流程汇集，不重读平台、不接受路径或外部JSON。完整后直接到数据库import_task_input，不重复抄录。'}]:[]),{tool:'connection',args:{},description:native?'以原机器人身份识别当前飞书知识库节点、在线表格、在线文档或上传文件；不需要个人网页登录':'打开从原问题或项目源码发现的业务网页，复用本机登录会话'},
  {tool:'report_wrong_site',args:{kind:'other_application/target_not_found/navigation_blocked',targetKind:'application/interface/record',expectedApplication:'本次需要的应用名称，不是接口名称',observedApplication:'最新页面实际标题或菜单名称',evidence:'最新页面原文片段',reason:'具体差异、未找到的目标或受阻步骤'},description:'区分不同应用、同一共享平台中尚未找到目标、导航受阻；程序刷新快照核对实际证据。ESB/网关/调度等共享平台可管理多个系统，未找到某接口不代表入口错误，不重复索取已存账号。'},
- {tool:'browser_screenshot',args:{},description:'等待接口返回和页面稳定后保存视口截图，仅遮挡凭据和显式敏感区，由控制服务发送原话题；异常页面应截图并记路径和复现步骤'},
+ {tool:'browser_screenshot',args:{},description:job.prd?.auto?'捕获已授权目标页面的布局和颜色作为内部原型参考；隐藏正文、业务数据和图片。请在定位页面后执行。':'等待接口返回和页面稳定后保存视口截图，仅遮挡凭据和显式敏感区，由控制服务发送原话题；异常页面应截图并记路径和复现步骤'},
  {tool:'browser_open',args:{},description:'查看当前业务网页'}, {tool:'browser_snapshot',args:{},description:'刷新页面文本和引用'},
  {tool:'browser_frames',args:{},description:'列出当前任务原应用范围内可见内嵌页和主页面；外层空白或只有导航时先核对，不读取跨域/隐藏帧。'},
  {tool:'browser_frame',args:{ref:'browser_frames返回的当前内嵌页引用'},description:'选择同源可见内嵌页并刷新文本/控件；旧控件引用失效。登录和页面读取仍须原身份与授权，不传URL/JS。'},
@@ -104,7 +104,7 @@ export function websiteTools(job,config,environment={}){
  {tool:'browser_key',args:{ref:'当前控件引用，或page仅用于Escape',key:'Enter/Tab/Escape/ArrowDown/ArrowUp/ArrowLeft/ArrowRight/Home/End/PageDown/PageUp/Space'},description:'日期/下拉框的键盘交互，Tab提交本地筛选输入，Escape关闭弹窗；不能执行系统快捷键'},
  {tool:'browser_scroll',args:{ref:'当前控件引用或page',direction:'up/down/left/right'},description:'滚动当前控件所在容器或页面，读取表格更多列与详情下部'},
  {tool:'browser_select',args:{ref:'当前select引用',value:'返回的选项value'},description:'选择查询筛选项'},
- {tool:'browser_search',args:{ref:'当前search引用',text:'查询条件'},description:'填写搜索条件，再点击查询'}].filter(x=>!native||['connection','read_cloud_sheet','read_cloud_document','restore_cloud_sheet_input','report_wrong_site'].includes(x.tool)).filter(x=>x.tool!=='browser_screenshot'||screenshotRequested(job)),
+ {tool:'browser_search',args:{ref:'当前search引用',text:'查询条件'},description:'填写搜索条件，再点击查询'}].filter(x=>!native||['connection','read_cloud_sheet','read_cloud_document','restore_cloud_sheet_input','report_wrong_site'].includes(x.tool)).filter(x=>x.tool!=='browser_screenshot'||screenshotAvailable(job)),
  async run(tool,args={}){if(tool==='report_wrong_site'){try{return websiteFinding(args,await this.run('browser_snapshot',{}));}catch(error){if(error instanceof BrowserInputError)throw new QueryInputError(error.code,error.message);throw error;}};try{if(!['read_cloud_sheet','read_cloud_document','restore_cloud_sheet_input'].includes(tool))validateBrowserTool(tool,args);else if(!native)throw new BrowserInputError('BROWSER_ARGUMENTS','当前范围不是飞书原生文档');}catch(error){if(error instanceof BrowserInputError)throw new QueryInputError(error.code,error.message);throw error;}const response=await fetch(`${config.serverUrl}/api/v1/jobs/${encodeURIComponent(job.id)}/website-tool`,{method:'POST',signal:AbortSignal.timeout(tool==='browser_screenshot'?60000:tool==='read_cloud_document'?150000:45000),headers:{authorization:`Bearer ${config.runnerToken}`,'content-type':'application/json'},body:JSON.stringify({leaseId:job.lease.id,runnerId:job.lease.runnerId,tool,args})});const value=await response.json();if(!response.ok){if(response.status===400&&(correctableBrowserCodes.has(value.code)||String(value.code??'').startsWith('CLOUD_DOCUMENT_')))throw new QueryInputError(value.code,value.error);throw new Error(value.error??'网页工具执行失败');}return value.result;},async close(){}};
 }
 

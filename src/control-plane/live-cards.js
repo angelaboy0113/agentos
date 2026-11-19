@@ -1,3 +1,4 @@
+import { needsPrdAnswer } from '../shared/prd-workspace.js';
 import {jobTerminalMention} from './requester-mention.js';
 import{deliveryHeld,deliveryFailure,deliveryFingerprint}from'../shared/delivery-retry.js';
 import {withdrawnCardInert} from '../shared/withdrawn-delivery.js';
@@ -181,7 +182,7 @@ export class LiveCards {
         &&!fresh.conversations.some(t=>t.questionId===question.id&&['queued','thinking','decided'].includes(t.status))
         &&!fresh.jobs.some(j=>j.questionId===question.id&&['queued','running','cancelling','awaiting_approval',...(['browser_login','clarification'].includes(entry.terminalMention?.kind)?[]:['awaiting_clarification']),...(entry.terminalMention?.kind==='environment_approval'?[]:['awaiting_environment_approval'])].includes(j.status)))};
       });
-      if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady && (entry.terminalMention.kind!=='clarification'||await stateView(this.store,s=>{const jobs=(s.jobs??[]).filter(j=>key.startsWith('question:')?j.questionId===key.slice(9):j.id===entry.terminalMention.jobId),j=jobs.at(-1);return j?.id===entry.terminalMention.jobId&&jobTerminalMention(j)?.requestKey===entry.terminalMention.requestKey;}))) {
+      if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady && (entry.terminalMention.kind!=='clarification'||await stateView(this.store,s=>{const jobs=(s.jobs??[]).filter(j=>key.startsWith('question:')?j.questionId===key.slice(9):j.id===entry.terminalMention.jobId),j=jobs.at(-1);const m=entry.terminalMention,q=key.startsWith('question:')?s.questions?.[key.slice(9)]:null;if(m.requestKey?.startsWith('prd:')){const version=q?.prd?.intake?.version??(q?.prd&&needsPrdAnswer(j)?String(q.generation):null);return (j?.id??null)===m.jobId&&version!==null&&m.requestKey==='prd:'+version;}return j?.id===m.jobId&&jobTerminalMention(j)?.requestKey===m.requestKey;}))) {
         if(entry.publicCompletionMention)await this.authorizeDestination?.(entry.destination,entry);
         await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile, replyInThread: entry.terminalMention.replyInThread ?? entry.destination.replyInThread,

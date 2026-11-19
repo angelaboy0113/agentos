@@ -130,7 +130,7 @@ export function jobCard(job, now = Date.now(), { startAt = job.createdAt } = {})
   if (job.taskIntent === 'analysis') metadata?.push(md(job.environmentAccess ? '环境只读查询 · 不修改数据库或配置' : '只读分析 · 不修改代码', true));
   if (job.nextJobId) metadata?.push(md(`已交给项目负责人汇总 · ${publicText(job.nextJobId)}`, true));
   if (job.delegation) metadata?.push(md(`协作：${stageLabel(job.delegation.fromStage)} → ${stageLabel(job.delegation.toStage)}`, true));
-  if (job.status === 'awaiting_clarification' && !job.result?.browserLoginRequired && !job.result?.modelCapacityWaiting) elements.push({ tag: 'form', name: 'clarification_form', elements: [
+  if (!job.prd && job.status === 'awaiting_clarification' && !job.result?.browserLoginRequired && !job.result?.modelCapacityWaiting) elements.push({ tag: 'form', name: 'clarification_form', elements: [
     { tag: 'input', name: 'clarification', input_type: 'multiline_text', rows: 3, max_length: 1000, required: true,
       width: 'fill', placeholder: { tag: 'plain_text', content: '填写需要补充的范围、路径或验收要求…' } },
     { tag: 'button', name: `clarify_${jobActionVersion(job)}`, form_action_type: 'submit', type: 'primary_filled',

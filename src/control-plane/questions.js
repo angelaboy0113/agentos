@@ -1,3 +1,4 @@
+import { needsPrdAnswer } from '../shared/prd-workspace.js';
 import {isPendingEnrollment} from '../shared/enrollment-lifecycle.js';
 import {addressCard} from './reply-addressing.js';
 import { addQuestionProgress, enrollmentNotice } from './enrollment-cards.js';
@@ -7,7 +8,7 @@ import { resultPages, withResultPage } from './result-presentation.js';
 import { createHash } from 'node:crypto';
 import { createId } from '../shared/protocol.js';
 import { conversationCard, jobCard, publicText,jobActionVersion } from './message-cards.js';
-import { conversationTerminalMention, jobTerminalMention, failureNotice } from './requester-mention.js';
+import { conversationTerminalMention, jobTerminalMention, failureNotice, requesterMentionText } from './requester-mention.js';
 import { isAdministrator, isTaskCreator } from './authorization.js';
 export const questionTitle = text => publicText(text).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\*\*|__|~~|`/g, '').replace(/\s+/g, ' ').trim().slice(0,60) || '附件问题';
 const pending = (turn) => ['queued', 'thinking', 'decided'].includes(turn.status);
@@ -96,6 +97,7 @@ export function questionView(state, questionId, projects = {}) {
   const label = card.header.title.content;
   card.header.title.content = questionTitle(q.title);
   card.header.subtitle.content = `${q.id} · ${label}`;
+  const prdAnswerVersion = q.prd?.intake?.version ?? (q.prd && needsPrdAnswer(job) ? String(q.generation) : null);
   if (q.prd) {
     const d = q.prd.delivery;
     card.header.subtitle.content = `${q.id} · PRD 需求工作台${d?.sentAt ? ' · 飞书评审稿已送达' : ''}`;
@@ -103,7 +105,17 @@ export function questionView(state, questionId, projects = {}) {
     if (!d?.sentAt && card.header.template === 'green') card.header.template = d?.notice ? 'orange' : 'blue';
     if (elements && d?.notice) elements.push({tag:'markdown',content:d.notice});
     if (elements && d?.sentAt && d.url) elements.push({tag:'markdown',content:`[打开飞书 PRD 评审稿 · v0.${d.revision}](${d.url})`});
-    if (elements && !d?.sentAt) elements.push({tag:'markdown',text_size:'notation',content:'继续在原话题补充，准备好时发送「导出飞书文档」。'});
+    if (elements && prdAnswerVersion) {
+      const prompt = q.prd.intake?.prompt ?? job?.result?.investigation?.blocker?.needed;
+      if (prompt) elements.push({tag:'markdown',content:'**请确认**\n'+publicText(prompt)});
+      elements.push({tag:'form',name:'prd_answers',elements:[
+        {tag:'input',name:'clarification',input_type:'multiline_text',width:'fill',required:true,rows:4,max_length:1000,
+          placeholder:{tag:'plain_text',content:'按上面的要点填写，多个问题可分行回答。'}},
+        {tag:'button',name:'prd_'+prdAnswerVersion,form_action_type:'submit',type:'primary_filled',width:'fill',
+          text:{tag:'plain_text',content:'提交补充，继续整理'}},
+      ]});
+      card.header.template = 'orange';
+    } else if (elements && !d?.sentAt) elements.push({tag:'markdown',text_size:'notation',content:'信息齐备后自动生成并交付飞书评审稿。'});
   }
   card.config.summary.content = `${questionTitle(q.title)} · ${label}`;
   if (useJob) {
@@ -126,6 +138,15 @@ export function questionView(state, questionId, projects = {}) {
     if(ids.length) mention={kind:'environment_setup_missing',profile:q.profile,replyTo:q.messageId,
       text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+' 排查尚未完成：需要补充本话题对应环境的接入信息或选择数据源。请查看卡片中的具体缺口；原需求和已有证据已保留。'};
   }
+  if (q.prd && !enrollment && !job?.result?.browserLoginRequired) {
+    if (prdAnswerVersion) {
+      const text = requesterMentionText(q.senderId, '请在上方 PRD 卡片的输入框填写，并点「提交补充，继续整理」。');
+      mention = text ? {kind:'clarification',profile:q.profile,replyTo:q.messageId,text,jobId:job?.id??null,requestKey:'prd:'+prdAnswerVersion} : null;
+    } else if (q.prd.delivery?.sentAt) {
+      const text = requesterMentionText(q.senderId, '飞书 PRD 评审稿已就绪，本群成员可编辑。链接在上方卡片。');
+      mention = text ? {profile:q.profile,replyTo:q.messageId,text} : null;
+    } else if (!['blocked','failed','cancelled','awaiting_environment_approval'].includes(job?.status)) mention = null;
+  }
   mention=failureNotice(mention,{card,terminal,profile:q.profile,chatType:root.chatType,visibility:q.visibility,occurredAt:useJob?job.updatedAt:turn.completedAt??turn.aiCompletedAt??turn.createdAt},projects);
   if (mention && q.replyInThread) mention.replyInThread = true;
   const currentResult=useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '';
@@ -147,7 +168,7 @@ export function questionView(state, questionId, projects = {}) {
 // Fence a snapshot against incoming replies, transitions and result changes between read and publish.
 function sourceVersion(state, id) {
   const q = state.questions[id];
-  return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId, q.prd?.delivery?.updatedAt,
+  return createHash('sha256').update(JSON.stringify([q.generation, q.latestTurnId, q.prd?.delivery?.updatedAt, q.prd?.intake,
     // Heartbeats/progress may arrive during name lookup. They must not starve
     // publication; question rounds, status and accepted results still fence it.
     state.jobs.filter((j) => j.questionId === id).map((j) => [j.id, j.status, j.stage, j.nextJobId, jobActionVersion(j), j.result]),

@@ -44,7 +44,7 @@ export async function handleCardAction(context, event) {
       state.cardCallbackAudit??=[];
       state.cardCallbackAudit.push({at:new Date().toISOString(),profile:event.agent_profile??null,eventId:event.event_id??null,
         messageId:event.message_id??null,operatorId:typeof event.operator_id==='string'?event.operator_id:null,
-        action:(()=>{try{const a=parse(event.action_value).action;return ['cancel','approve','approve_environment','renew_environment','clarify','refresh','result_page','enrollment_refresh','enrollment_cancel'].includes(a)?a:event.action_name?.startsWith('clarify_')?'clarify':'unknown';}catch{return 'invalid';}})(),cardContentPresent:!!event.card_content,
+        action:(()=>{try{const a=parse(event.action_value).action;return ['cancel','approve','approve_environment','renew_environment','clarify','refresh','result_page','enrollment_refresh','enrollment_cancel'].includes(a)?a:/^(?:clarify|prd)_/.test(event.action_name??'')?'clarify':'unknown';}catch{return 'invalid';}})(),cardContentPresent:!!event.card_content,
         outcome:result?.ok?'accepted':result?.ignored?'ignored':result?'rejected':'delivery_failed',
         reason:result?.reason??result?.message??'处理未完成，可按同一事件重试'});
       state.cardCallbackAudit=state.cardCallbackAudit.slice(-200);
@@ -75,6 +75,19 @@ async function applyCardAction(context, event) {
   if (questionId && ['enrollment_refresh','enrollment_cancel'].includes(parsedValue.action)) {
     try { return await handleEnrollmentCard(context,event,key,savedCard,parsedValue,effectiveChatId); }
     catch { return {ok:false,message:'接入操作未完成，请核对身份并刷新最新卡片后重试。'}; }
+  }
+  if (questionId && state.questions[questionId]?.prd && event.action_name?.startsWith('prd_')) {
+    try {
+      const q = state.questions[questionId];
+      const content = String(parse(event.form_value).clarification ?? '').trim();
+      if (q.senderId !== event.operator_id || q.chatId !== effectiveChatId || q.profile !== profile) return { ignored:true, reason:'not_prd_requester' };
+      if (!content || content.length > 1000) return { ok:false, message:'请填写 1–1000 字的补充信息。', notification:'callback_only' };
+      const result = await context.prd?.handle({ chat_type:'group',sender_type:'user',agent_profile:profile,chat_id:q.chatId,
+        message_id:'prd-form:'+event.event_id,sender_id:event.operator_id,root_id:q.threadRootId },
+      { agent:{systemAssistant:true},addressed:true,content,form:{questionId,cardId:event.message_id,version:event.action_name.slice(4)} });
+      if (result?.questionId || result?.duplicate) return {ok:true,duplicate:result.duplicate,message:'已收到补充，将沿用本需求继续。'};
+      return {ok:false,message:'补充未接收。请使用最新卡片，并勿填写密码或令牌。',notification:'callback_only'};
+    } catch { return {ok:false,message:'补充未接收，请刷新卡片后重试。',notification:'callback_only'}; }
   }
   const jobId = questionId ? questionJob(state, questionId)?.id : key.split(':')[1];
   const job = state.jobs.find((item) => item.id === jobId);

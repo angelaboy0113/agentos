@@ -38,6 +38,7 @@ export class PrdCloudDelivery {
     this.onPublished = onPublished;
     this.workers = new Map();
     this.closed = false;
+    this.authorizationTimer = null;
   }
 
   wake(questionId) {
@@ -47,14 +48,34 @@ export class PrdCloudDelivery {
     task.finally(() => this.workers.delete(questionId)).catch(() => {});
   }
 
+  start() {
+    this.recover().catch(() => {});
+    this.authorizationTimer = setInterval(() => this.recover().catch(() => {}), 60_000);
+    this.authorizationTimer.unref();
+  }
+
   async recover() {
-    const ids = await stateView(this.context.store, s => Object.values(s.questions ?? {}).filter(q => q.prd && !q.withdrawnAt
-      && ['pending', 'created', 'body_verified', 'image_verified', 'shared', undefined].includes(q.prd.delivery?.phase)).map(q => q.id));
-    for (const id of ids) this.wake(id);
+    const { ready, waiting } = await stateView(this.context.store, state => {
+      const ready = [], waiting = [];
+      for (const q of Object.values(state.questions ?? {})) {
+        if (!q.prd || q.withdrawnAt) continue;
+        const job = questionJob(state,q.id), phase = q.prd.delivery?.phase;
+        if (job?.status !== 'completed' || job.result?.outcome !== 'ready' || job.prd?.exportRevision !== job.prd?.revision) continue;
+        if (phase === 'authorization_required' && job.prd.auto) waiting.push(q.id);
+        if (['pending','created','body_verified','image_verified','shared',undefined].includes(phase)) ready.push(q.id);
+      }
+      return {ready,waiting};
+    });
+    for (const id of ready) this.wake(id);
+    if (!waiting.length || !this.config?.profile || this.closed) return;
+    const scopes = await this.cli(['auth','check','--scope',publishingScopes],
+      {profile:this.config.profile,cliEntry:this.context.config.feishu?.cliEntry}).catch(() => null);
+    if (scopes?.ok && !scopes.missing?.length) for (const id of waiting) this.wake(id);
   }
 
   async close() {
     this.closed = true;
+    clearInterval(this.authorizationTimer);
     await Promise.allSettled(this.workers.values());
   }
 
@@ -93,7 +114,7 @@ export class PrdCloudDelivery {
         return;
       }
       if (files.some(f => !f)) {
-        await save('artifacts_missing', { notice: '需要已核验的 Markdown 和 PNG 原型。请补齐后再次导出。' });
+        await save('artifacts_missing', { notice: '需要已核验的 Markdown 和 PNG 原型。请在原话题补齐所缺的原型依据。' });
         return;
       }
       const dir = this.context.config.dataDir;
@@ -115,7 +136,7 @@ export class PrdCloudDelivery {
             throw error;
           });
           if (!authorization?.ok || (authorization.missing?.length ?? 0) > 0) {
-            await save('authorization_required', { notice: '已保留稿件。飞书账号尚未授权创建文档、上传图片及设置本群协作者。授权后请再次发送「导出飞书文档」。' });
+            await save('authorization_required', { notice: '已保留稿件。飞书账号尚未授权创建文档、上传图片及设置本群协作者。授权后会自动继续原卡交付。' });
             return;
           }
           await save('creating');
@@ -160,7 +181,7 @@ export class PrdCloudDelivery {
       const uncertain = ['creating', 'inserting', 'sharing'].includes(delivery.phase);
       const phase = authorization && delivery.phase === 'creating' ? 'authorization_required' : uncertain ? 'unknown' : delivery.phase;
       await save(phase === 'pending' && authorization ? 'authorization_required' : phase, { notice: authorization
-        ? '飞书用户身份或应用权限尚未接通，稿件已保留。完成授权后可再次发送「导出飞书文档」。'
+        ? '飞书用户身份或应用权限尚未接通，稿件已保留。授权后会自动继续原卡交付。'
         : '飞书文档或权限回读未完成，稿件已保留。请维护者核对记录后接续。' }).catch(() => {});
     } finally {
       await publishQuestion(this.context, id).catch(() => {});

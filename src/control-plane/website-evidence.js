@@ -1,6 +1,6 @@
 import{deliveryHeld,deliveryFailure,deliveryFingerprint}from'../shared/delivery-retry.js';
 import path from 'node:path';
-import {lstat,readFile} from 'node:fs/promises';
+import {lstat,readFile,rename,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {realDirectory} from '../shared/retention.js';
 import {privateRecipient} from './private-cards.js';
@@ -14,6 +14,16 @@ export async function websiteEvidenceFile(dataDir,jobId,item){
  const dir=path.join(dataDir,'website-evidence',jobId);if(!await realDirectory(dir))throw new Error('Invalid evidence directory');
  const file=path.join(dir,item.name),st=await lstat(file);if(!st.isFile()||st.isSymbolicLink()||st.size!==item.bytes)throw new Error('Invalid evidence file');
  const buffer=await readFile(file);if(buffer.subarray(0,8).toString('hex')!=='89504e470d0a1a0a'||createHash('sha256').update(buffer).digest('hex')!==item.sha256)throw new Error('Evidence integrity failed');return file;
+}
+// The tool response never exposes an image path. The native renderer reads a
+// host-written receipt scoped to this task, environment and design revision.
+export async function savePrdDesignReference(dataDir, job, item) {
+ await websiteEvidenceFile(dataDir,job.id,item);
+ const dir=path.join(dataDir,'website-evidence',job.id);
+ const target=path.join(dir,'prd-'+job.prd.revision+'.json');
+ const temp=path.join(dir,item.name+'.ref');
+ await writeFile(temp,JSON.stringify({jobId:job.id,questionId:job.questionId,environment:job.sourceEnvironment,revision:job.prd.revision,item}),{mode:0o600,flag:'wx'});
+ await rename(temp,target);
 }
 export class WebsiteEvidenceDelivery {
  constructor(context){this.context=context;this.workers=new Map();this.closed=false;}

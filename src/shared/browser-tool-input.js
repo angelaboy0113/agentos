@@ -30,3 +30,5 @@ export function websitePageRoute(value){
 }
 
 export const screenshotRequested=job=>{const text=String(job.originalQuestion??job.instruction??'');return /截图|screenshot/i.test(text)&&!/(?:不要|无需|不需要|禁止|不能|不允许|不必).{0,8}截图|(?:no|without|don.t).{0,12}screenshots?/i.test(text);};
+
+export const screenshotAvailable = job => !!job.prd?.auto || screenshotRequested(job);

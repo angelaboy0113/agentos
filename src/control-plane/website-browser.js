@@ -404,6 +404,15 @@ export class WebsiteBrowser {
   if((await this.loginStatus(s)).loginRequired)return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   const dir=path.join(this.evidenceRoot,s.job.id);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.evidenceRoot,0o700);await chmod(dir,0o700);
   const name=randomUUID()+'.png',file=path.join(dir,name);
+  if (s.job.prd?.auto) {
+   if (readiness.status !== 'ready') return {partial:true,stage:'页面尚未稳定，未保存视觉基线',rows:[]};
+   const style = '*, *::before, *::after {color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;caret-color:transparent!important;background-image:none!important;list-style-image:none!important} img, svg, canvas, iframe, video, object, embed {visibility:hidden!important} input, textarea, select, [contenteditable] {color:transparent!important;-webkit-text-fill-color:transparent!important}';
+   const pixels = await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,style,animations:'disabled',
+    mask:s.page.frames().map(frame=>frame.locator(screenshotSecretSelector)),maskColor:'#6b7280'});
+   await chmod(file,0o600);
+   return {designReference:{name,sha256:createHash('sha256').update(pixels).digest('hex'),bytes:pixels.length,
+    capturedAt:new Date().toISOString()},rows:[],stage:'已保存当前页面的内部脱敏布局参考，原型生成会自动使用'};
+  }
   const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:s.page.frames().map(frame=>frame.locator(screenshotSecretSelector)),maskColor:'#6b7280',...(readiness.status==='ready'?{}:{style:'body::after{content:"页面加载尚未完成 · 现场截图";position:fixed;top:8px;right:12px;z-index:2147483647;background:#fff3cd;color:#704d00;padding:6px 10px;border:1px solid #e6ce81;border-radius:4px;font:13px sans-serif;pointer-events:none}'})});await chmod(file,0o600);
   return {...await this.snapshot(s),...(readiness.status==='ready'?{}:{pageStatus:'loading',partial:true}),stage:readiness.status==='ready'?'已保存稳定网页截图':'已保存加载未完成的现场截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),readiness},rows:[],note:'已等待接口、加载指示和页面稳定；正常业务字段保留，凭据及显式敏感区用灰色遮挡。readiness.status为ready仅代表渲染稳定，不代表业务正常；其它状态是加载未完成的现场证据。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};
  }

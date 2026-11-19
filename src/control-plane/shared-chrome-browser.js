@@ -45,9 +45,17 @@ export class SharedChromeBrowser{
   return raw;
  }
  run(job,e,tool,args={}){return this.serial(async()=>{
-  if(!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_frames','browser_frame','browser_recover','browser_navigate','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
+  if(!(job.prd?.auto&&tool==='browser_screenshot')&&!['connection','browser_open','browser_snapshot','browser_inspect','browser_assets','browser_frames','browser_frame','browser_recover','browser_navigate','browser_click','browser_search','browser_select'].includes(tool))throw new Error('未开放该网页操作');
   if(['browser_frames','browser_frame'].includes(tool))validateBrowserTool(tool,args);
   await this.allowed(job,e);const s=await this.state(job,e);
+  if(tool==='browser_screenshot'){
+   validateBrowserTool(tool,args);
+   const page=await this.snapshot(job,e,s,'browser_snapshot',{});
+   if(page.loginRequired||page.pageReady!==true)return page;
+   const designStyle=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,
+    script:`JSON.stringify((${chromeDesignStyle.toString()})(${JSON.stringify(s.baseUrl)}))`});
+   return {designStyle,rows:[],stage:'已读取实际页面的布局和计算样式，样式中不包含页面文案或业务数据'};
+  }
   if(tool==='browser_navigate'){validateBrowserTool(tool,args);try{websiteNavigationTarget(args.url,e.baseUrl);}catch{throw new BrowserInputError('BROWSER_ARGUMENTS','目标地址未通过同应用只读校验；核对实际菜单或源码地址，不执行越界或修改操作。');}await this.navigate(job,e,s,args.url);return this.snapshot(job,e,s,'browser_snapshot',{});}
   if(tool==='browser_recover'){
    validateBrowserTool(tool,args);let status;try{status=await this.transport({operation:'execute',tabId:s.tabId,windowId:s.windowId,script:'JSON.stringify({blank:location.href==="about:blank",url:location.origin+location.pathname})'});}catch(error){if(!/原Chrome标签页已关闭/.test(error.message))throw error;this.pages.delete(job.id);const reopened=await this.state(job,e);return this.snapshot(job,e,reopened,'browser_snapshot',{});}
@@ -79,4 +87,23 @@ export class SharedChromeBrowser{
  loginStatusFor(job,e){return this.serial(async()=>{await this.allowed(job,e,true);const s=await this.state(job,e);return this.snapshot(job,e,s,'browser_snapshot',{});});}
  async release(id){const session=this.pages.get(id);this.pages.delete(id);if(session)session.releasedAt=Date.now();} // Keep the scoped lineage session for a continuation job.
  async close(){this.pages.clear();this.sessions.clear();} // Never close or quit the user's browser.
+}
+
+export function chromeDesignStyle(baseUrl) {
+ if (location.origin !== new URL(baseUrl).origin || document.readyState !== 'complete') throw Error('当前页面还未通过视觉基线检查');
+ const roles = { navigation:'nav,[role=navigation]', header:'header,[role=banner]', content:'main,[role=main]',
+  table:'table,[role=table],[role=grid]', form:'form', input:'input:not([type=hidden]),select', button:'button,[role=button]',
+  dialog:'[role=dialog],dialog', heading:'h1,h2,h3' };
+ const styles = {};
+ for (const [role,selector] of Object.entries(roles)) {
+  const matches = [...document.querySelectorAll(selector)].flatMap(el => {
+   const box=el.getBoundingClientRect(),css=getComputedStyle(el);
+   if (box.width<4||box.height<4||box.right<=0||box.bottom<=0||box.x>=innerWidth||box.y>=innerHeight||css.visibility!=='visible') return [];
+   return [{box:[box.x,box.y,box.width,box.height].map(Math.round),
+    background:css.backgroundColor,foreground:css.color,border:css.borderTopColor,borderWidth:css.borderTopWidth,
+    radius:css.borderTopLeftRadius,fontSize:css.fontSize,fontWeight:css.fontWeight}];
+  });
+  if(matches.length)styles[role]=matches.slice(0,4);
+ }
+ return {viewport:[innerWidth,innerHeight],background:getComputedStyle(document.body).backgroundColor,styles};
 }

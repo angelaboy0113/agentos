@@ -1,3 +1,9 @@
+import { runInNewContext } from 'node:vm';
+import { chromeDesignStyle } from '../src/control-plane/shared-chrome-browser.js';
+import { handleCardAction } from '../src/control-plane/card-actions.js';
+import { questionView } from '../src/control-plane/questions.js';
+import { savePrdDesignReference } from '../src/control-plane/website-evidence.js';
+import { nativeImageReferences } from '../src/shared/image-generation.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -17,7 +23,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const md = '# 订单补贴状态\n\n**评审稿**\n\n|系统|影响|\n|---|---|\n|LTX|展示|\n|TPM|状态来源|\n\n## 原型图\n';
 
 async function fixture(t, cli, ltx = {}) {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agentos-prd-'));
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agentos-prd-')));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   const store = new JsonStore(path.join(dataDir, 'agentos.json'));
   const cards = { enabled: true, upsert: async () => 'om_card' };
@@ -28,7 +34,7 @@ async function fixture(t, cli, ltx = {}) {
   const group = { chat_type: 'group', chat_id: chat, sender_id: owner, sender_type: 'user', agent_profile: profile };
   const send = (id, content, root, args = {}) => workspace.handle({ ...group, message_id: id, ...(root ? { root_id: root } : {}), ...args.event },
     { agent: { systemAssistant: true }, addressed: args.addressed ?? !root, content });
-  return { store, workspace, dataDir, send };
+  return { store, workspace, dataDir, send, cards, projects };
 }
 
 test('bare PRD trigger then unmentioned description and decisions keep one question, job and native checkpoint', async t => {
@@ -82,7 +88,7 @@ test('a PRD display rule about rejection reasons is not a request to investigate
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 async function saveArtifact(dataDir, job, id, format, bytes) {
   const dir = path.join(dataDir, 'exports', job.id), item = { id, filename: id + '.' + format, format, kind: 'document',
-    sha256: hash(bytes), bytes: bytes.length, rowCount: 0, complete: true, questionGeneration: 2 };
+    sha256: hash(bytes), bytes: bytes.length, rowCount: 0, complete: true, questionGeneration: job.prd.revision };
   await fs.mkdir(dir, { recursive: true });
   const receipt = Buffer.from(JSON.stringify({ version: 2, kind: 'document', status: 'verified',
     binding: { jobId: job.id }, file: item, coverage: { rowCount: 0 } }));
@@ -114,7 +120,6 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   const { store, workspace, send, dataDir } = await fixture(t, cli);
   const { questionId } = await send('om_start', '我要写 PRD：LTX 订单详情增加 TPM 补贴状态');
   await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
-  await send('om_export', '导出飞书文档', 'om_start');
   const exportJob = (await store.read()).jobs[0];
   assert.match(prdGuidance(exportJob), /提交一个 md 和一个 png/);
   const files = await Promise.all([
@@ -145,7 +150,6 @@ test('missing owner authorization never creates a document or expands sharing', 
   });
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
   await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
-  await send('om_export', '生成飞书文档', 'om_start');
   const j = (await store.read()).jobs[0];
   const files = await Promise.all([
     saveArtifact(dataDir, j, 'report-33333333-3333-3333-3333-333333333333', 'md', Buffer.from(md)),
@@ -166,7 +170,6 @@ test('an ungranted document scope leaves a retryable draft before any create req
   });
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
   await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
-  await send('om_export', '导出飞书文档', 'om_start');
   const [job] = (await store.read()).jobs;
   const files = await Promise.all([
     saveArtifact(dataDir, job, 'report-55555555-5555-5555-5555-555555555555', 'md', Buffer.from(md)),
@@ -176,4 +179,73 @@ test('an ungranted document scope leaves a retryable draft before any create req
   await workspace.publisher.deliver(questionId);
   assert.deepEqual(calls, ['api', 'auth']);
   assert.equal((await store.read()).questions[questionId].prd.delivery.phase, 'authorization_required');
+});
+
+
+test('the requester submits the revision-bound PRD card and processing resumes without an export command', async t => {
+  const { store, workspace, cards, projects, send } = await fixture(t);
+  const context = {store,cards,projects,prd:workspace,agents:{agents:{developer:{profile}}}};
+  const {questionId} = await send('om_card_root','我要做 PRD');
+  const cardId = 'om_prd_card';
+  async function saveCard() {
+    const view = questionView(await store.read(),questionId,projects);
+    const form = view.card.body.elements.find(e => e.name === 'prd_answers');
+    assert.ok(form);
+    assert.match(view.mention.text, /提交补充/);
+    await store.transact(state => {
+      state.cardMessages ??= {};
+      state.cardMessages['question:'+questionId] = {messageId:cardId,destination:view.destination,card:view.card};
+    });
+    return form.elements[1].name;
+  }
+  const makeEvent = (name,id,answer,operator=owner) => ({type:'card.action.trigger',event_id:id,
+    operator_id:operator,agent_profile:profile,message_id:cardId,chat_id:chat,action_name:name,form_value:{clarification:answer}});
+  const initial = await saveCard();
+  assert.equal((await handleCardAction(context,makeEvent(initial,'other','加状态','ou_other'))).reason,'not_prd_requester');
+  assert.ok((await handleCardAction(context,makeEvent(initial,'first','订单详情增加补贴状态'))).ok);
+  const [first] = (await store.read()).jobs;
+  assert.equal(first.prd.exportRevision,1);
+  await store.transact(state => {
+    const j=state.jobs[0];
+    j.status='awaiting_clarification';
+    j.result={outcome:'needs_clarification',investigation:{blocker:{kind:'user_input',needed:'需要显示补贴金额吗？'}}};
+    j.analysisContinuation={questionId,threadId:'same-native-thread',workspace:'/fixed'};
+  });
+  const follow = await saveCard();
+  assert.equal((await handleCardAction(context,makeEvent(initial,'stale','错误补充'))).ok,false);
+  const event = makeEvent(follow,'next','不展示金额。');
+  assert.ok((await handleCardAction(context,event)).ok);
+  assert.equal((await handleCardAction(context,event)).duplicate,true);
+  const [job] = (await store.read()).jobs;
+  assert.equal(job.id,first.id);
+  assert.equal(job.analysisContinuation.threadId,'same-native-thread');
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true});
+  assert.equal(job.currentQuestion,'不展示金额。');
+});
+
+test('website design references are hash-bound to the real page capture, job, environment and revision', async t => {
+  const {dataDir} = await fixture(t);
+  const job={id:'JOB-design',questionId:'QST-design',sourceEnvironment:'sit',prd:{auto:true,revision:2}};
+  const dir=path.join(dataDir,'website-evidence',job.id);
+  await fs.mkdir(dir,{recursive:true});
+  const item={name:'a-0.png',sha256:hash(png),bytes:png.length};
+  await fs.writeFile(path.join(dir,item.name),png);
+  await savePrdDesignReference(dataDir,job,item);
+  assert.deepEqual(await nativeImageReferences(dataDir,job),[{path:path.join(dir,item.name),sha256:item.sha256,kind:'website-design-reference'}]);
+  assert.deepEqual(await nativeImageReferences(dataDir,{...job,prd:{...job.prd,revision:3}}),[]);
+  await assert.rejects(nativeImageReferences(dataDir,{...job,sourceEnvironment:'prd'}),{code:'IMAGE_INPUT'});
+});
+
+
+test('shared Chrome extracts actual colors and geometry without page text or form values', () => {
+  const node={innerText:'业务敏感值',value:'token123',getBoundingClientRect:()=>({x:10,y:20,width:100,height:36,right:110,bottom:56})};
+  const body={};
+  const actual=runInNewContext(`(${chromeDesignStyle.toString()})('https://test.example/')`,{
+    URL,location:{origin:'https://test.example'},innerWidth:1000,innerHeight:720,
+    document:{readyState:'complete',body,querySelectorAll:selector=>selector.startsWith('button')?[node]:[]},
+    getComputedStyle:el=>el===body?{backgroundColor:'rgb(249, 250, 251)'}:{backgroundColor:'rgb(196, 50, 42)',color:'rgb(255, 255, 255)',visibility:'visible'},
+  });
+  assert.deepEqual([...actual.styles.button[0].box],[10,20,100,36]);
+  assert.equal(actual.styles.button[0].background,'rgb(196, 50, 42)');
+  assert.doesNotMatch(JSON.stringify(actual),/业务敏感值|token123/);
 });
