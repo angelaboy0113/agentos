@@ -5,11 +5,8 @@ import { environmentFile,loadEnvironments,fingerprint,isEnvironmentOwner } from 
 import { CONNECTION_SQL } from '../shared/database-account-policy.js';
 import { credential,boundedFetch,mysqlRead } from '../runner/environment-connector.js';
 import { databaseCredential } from '../runner/config-endpoints.js';
-import {saveKeychainCredential} from '../shared/keychain-credential.js';
+import {saveEncryptedCredential} from '../shared/credential-vault.js';
 const sha=x=>createHash('sha256').update(x).digest('hex');
-async function saveCredential(ref,value) {
- await saveKeychainCredential(ref,value);
-}
 export async function automaticDatabaseEnrollment(context, enrollment, adapters={}) {
  const file=adapters.file??environmentFile();const original=await readFile(file);const config=await loadEnvironments(file);
  const source=enrollment.databaseSource, e=config.environments[source?.sourceEnvironmentId];
@@ -42,7 +39,7 @@ export async function automaticDatabaseEnrollment(context, enrollment, adapters=
  const temp=file+'.'+enrollment.id+'.tmp';
  try {
   config.environments[id]=target;await writeFile(temp,JSON.stringify(config,null,2)+'\n',{mode:0o600});await loadEnvironments(temp);
-  await (adapters.saveCredential??saveCredential)(id,dbCred);
+  await (adapters.saveCredential??saveEncryptedCredential)(id,dbCred);
   if(expired() || !(await readFile(file)).equals(original))throw new Error('配置或申请已变更，请重新确认');
   const backup=path.join(context.config.dataDir,'environment-config-backups',enrollment.id);await mkdir(backup,{recursive:true,mode:0o700});
   await writeFile(path.join(backup,'environments.local.json'),original,{mode:0o400});await writeFile(path.join(backup,'manifest.json'),JSON.stringify({sha256:sha(original),bytes:original.length}),{mode:0o400});

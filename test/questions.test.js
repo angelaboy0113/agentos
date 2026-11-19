@@ -380,3 +380,19 @@ test('a table-first analysis answer publishes its table and flow metadata withou
  const state={questions:{q:{id:'q',title:'Field names',latestTurnId:'t',rootTurnId:'t',profile:'owner',senderId:'ou_user',messageId:'m'}},conversations:[{id:'t',questionId:'q',status:'sent',chatType:'group',outcome:{jobId:'j'}}],jobs:[{id:'j',questionId:'q',status:'completed',stage:'developer',taskIntent:'analysis',events:[],result:{outcome:'ready',summary:'Fields',finalMessage:'| 字段 | 来源 |\n| --- | --- |\n| 编码 | CODE |'}}]};
  const view=questionView(state,'q');assert.equal(view.card.body.elements[0].tag,'table');assert.equal(view.card.body.elements[0].rows[0].column_2,'CODE');assert.match(JSON.stringify(view.card),/流程：开发/);
 });
+
+test('discovered database enrollment shows its next step on the card without an administrator mention',async t=>{
+ const {app,context,send,calls}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'investigate approval'}));await send('sourced-db');
+ const state=await app.store.read(),qid=state.jobs[0].questionId;
+ await app.store.transact(s=>{
+  const q=s.questions[qid],t=s.conversations[0];
+  q.generation++;
+  t.setupPending=true;t.response='已定位流程库，等待只读接入确认。';
+  s.jobs[0].status='completed';s.jobs[0].result={outcome:'partial',finalMessage:'已取得节点证据，待继续核验'};
+  s.environmentEnrollments={discovered:{id:'discovered',questionId:qid,projectId:'demo',chatId:'group',profile:'owner',kind:'mysql',tier:'prd',url:'mysql://fixture.test/flows',databaseSource:{sourceEnvironmentId:'source'},status:'requested'}};
+ });
+ await publishQuestion(context,qid);await publishQuestion(context,qid);
+ assert.equal(questionView(await app.store.read(),qid,app.projects).mention,null);
+ assert.equal(calls.filter(c=>c.type==='mention').length,0);
+ assert.match(JSON.stringify((await app.store.read()).cardMessages['question:'+qid].card),/接入|节点证据/);
+});

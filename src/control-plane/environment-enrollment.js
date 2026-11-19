@@ -89,7 +89,7 @@ export async function requestEnrollment(context, turn) {
     };
     return {
       enrollmentId: id,
-      notice: source ? `请管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 数据库 ${target.url}。将从本次Nacos配置在Mac本机提取业务凭据、验证TLS证书与只读事务，并开放本库基础表的受控查询；账号本身可能有写权限。凭据不交给模型、不发群。接入成功后的受控只读查询自动执行，任何写操作仍需另行审批。` : `该环境尚未接入。请本群管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；这是本机接入配置确认，接入后的受控只读查询自动执行，密码不要发到群里。`,
+      notice: source ? `已定位 ${target.tier.toUpperCase()} 数据库 ${target.url}，现有证据已保留。管理员可在本卡回复“同意”确认只读接入，确认后自动继续。凭据由本机从已核验的配置读取，请勿在群内提供账号或密码。` : `该环境尚未接入。请本群管理员回复此卡“同意”，确认 ${target.tier.toUpperCase()} 的 ${target.kind} 入口 ${target.url}。确认后将打开运行AgentOS电脑上的登录窗口；这是本机接入配置确认，接入后的受控只读查询自动执行，密码不要发到群里。`,
     };
   });
 }

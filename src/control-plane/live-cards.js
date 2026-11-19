@@ -58,7 +58,7 @@ export class LiveCards {
       let existing = state.cardMessages[key];
       // A resolved/manual wait can become automatic recovery before dispatch.
       // Do not keep an obsolete waiting mention when the latest view needs none.
-      if(['browser_login','clarification'].includes(existing?.terminalMention?.kind)&&!terminalMention)existing={...existing,terminalMention:null,mentionDelivered:false};
+      if(['browser_login','clarification','environment_approval'].includes(existing?.terminalMention?.kind)&&!terminalMention)existing={...existing,terminalMention:null,mentionDelivered:false};
       if (generation && (!key.startsWith('question:') || !Number.isSafeInteger(generation) || generation < 1)) throw new Error('Invalid card generation');
       if ((existing?.generation ?? 0) > generation) return;
       if (existing && JSON.stringify(existing.destination) !== JSON.stringify(destination)) throw new Error('Card identity cannot change');
