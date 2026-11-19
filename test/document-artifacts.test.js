@@ -79,6 +79,22 @@ test('multi-sheet business XLSX preserves independent sources, notes, long IDs a
  const view=await inspectReport(dir,{...j,reportFiles:[a,b,native]},{fileId:native.id});assert.equal(view.contentAudit.worksheets.length,3);assert.equal(view.contentAudit.worksheets[0].verificationHash,a.verificationHash);
  const reviewed={...j,reportFiles:[a,b,native],reportEvidence:view,reportReviews:{}};const decision={outcome:'ready',summary:'多表完整',handoffGate:{passed:true},reportInspections:[view],reportAssessment:{fileId:native.id,coverage:'complete',decision:'deliver',issues:[],scopeReview:null},investigation:{status:'complete',goals:[{id:'original-question',required:true,status:'verified'}]}};assert.equal(assessReportDelivery(reviewed,decision).outcome,'ready','derived workbook uses verified per-sheet sources, not a nonexistent CSV calculationAudit');
  assert.equal(assessReportDelivery({...reviewed,reportEvidence:{...view,contentAudit:{structure:'passed'}}},decision).outcome,'partial','layout-only structure cannot substitute source verification');
+ const controllerJob={...reviewed,reportFiles:[a,b,{...native,sourceJobId:j.id}],reportReviews:{}};delete controllerJob.reportEvidence;
+ const sourceView=await inspectReport(dir,j,{fileId:a.id});
+ assert.equal(assessReportDelivery({...controllerJob,reportEvidence:{...sourceView,relatedReports:[view]}},{...decision,reportInspections:[]}).outcome,'ready','worksheet evidence can follow the primary CSV in the preloaded audit');
+ const complete=assessReportDelivery(controllerJob,decision);
+ assert.equal(complete.outcome,'ready','controller accepts the runner’s hash-bound worksheet audit without ephemeral runner state');
+ recordReportReview(controllerJob,complete);assert.ok(reportEligible(controllerJob,native));
+ const wrongBindings={fileId:a.id,sha256:a.sha256,verificationHash:a.verificationHash,rowCount:1,sourceJobId:'JOB-other'};
+ for(const reportInspections of [undefined,[],[sourceView],...Object.entries(wrongBindings).map(([k,v])=>[{...view,binding:{...view.binding,[k]:v}}])]){
+  const rejected=assessReportDelivery({...controllerJob,reportReviews:{}},{...decision,reportInspections});
+  assert.equal(rejected.outcome,'partial');assert.equal(rejected.reportReviewRequired,true);
+  assert.equal(rejected.investigation.status,'continue');
+  assert.equal(rejected.investigation.goals[0].status,'open');
+ }
+ const gap=structuredClone(view);
+ gap.contentAudit.worksheets[0].populationAudit.comparisons.push({datasetRef:'other-population',keyColumn:'id',onlyReferenceCount:1});
+ assert.equal(assessReportDelivery(controllerJob,{...decision,reportInspections:[gap]}).outcome,'partial','transported worksheet population differences still block complete coverage');
  const partial={...decision,outcome:'partial',reportAssessment:{...decision.reportAssessment,coverage:'incomplete',decision:'deliver_partial',issues:[{kind:'required_output',evidence:'另需业务文档'}],deliverables:[{fileId:native.id,evidence:'工作簿完整覆盖自身来源'}]}};recordReportReview(reviewed,partial);assert.equal(reportEligible(reviewed,native),true,'verified workbook can be delivered as a complete component while another output stays pending');assert.equal(JSON.parse(await documentInputText(dir,j.id,native)).nativeSource.sha256,native.sha256);
  wb.worksheets[1].getCell('B2').value='999.00';await wb.xlsx.writeFile(path.join(working.directory,'wrong.xlsx'));await assert.rejects(createDocuments(dir,j,[{...request,content:JSON.stringify({artifactFile:'wrong.xlsx',sourceFile:null,sheets})}]),/单元格与来源不一致/);
  wb.addWorksheet('未绑定');await wb.xlsx.writeFile(path.join(working.directory,'extra.xlsx'));await assert.rejects(createDocuments(dir,j,[{...request,content:JSON.stringify({artifactFile:'extra.xlsx',sourceFile:null,sheets})}]),/工作表数量/);
@@ -87,6 +103,36 @@ test('multi-sheet business XLSX preserves independent sources, notes, long IDs a
  await assert.rejects(createDocuments(dir,{...j,reportFiles:[a]},[request]),/当前任务/);
  await assert.rejects(createDocuments(dir,j,[{...request,content:JSON.stringify({sheets:[sheets[0],{name:'金额',rows:[['999']]}]})}]),/notes/);
 });
+test('native tool refresh preserves earlier and newly finalized workbook review evidence',async t=>{
+ const {executeJob}=await import('../src/runner/codex-executor.js');
+ const {execFile}=await import('node:child_process'),{promisify}=await import('node:util');
+ const dir=await mkdtemp(path.join(os.tmpdir(),'aos-native-workbook-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const root=path.join(dir,'workspace'),repo=path.join(root,'business'),origin=path.join(dir,'origin.git');
+ await mkdir(repo,{recursive:true});
+ const git=(cwd,...args)=>promisify(execFile)('git',['-C',cwd,...args]);
+ await git(dir,'init','--bare',origin);await git(repo,'init','-b','prd');
+ await writeFile(path.join(repo,'main.js'),'export const fixture = true;');
+ await git(repo,'add','.');await git(repo,'-c','user.name=Test','-c','user.email=test@example.invalid','commit','-m','fixture');
+ await git(repo,'remote','add','origin',origin);await git(repo,'push','-u','origin','prd');
+ const j={...job,tabularDelivery:true,originalQuestion:'导出有多张工作表的业务数据',continuousInvestigation:true,context:[]};delete j.sourceEnvironment;
+ const a=await verifiedSheetFixture(dir,j,[{id:'row-1',amount:'1.20'}]);
+ recordReportFiles(j,[a],1);
+ const [workbook]=await createDocuments(dir,j,[{...request('xlsx'),content:JSON.stringify({sheets:[{name:'业务表',sourceReportId:a.id},{name:'说明',role:'notes',rows:[['字段说明']],evidence:'字段字典'}]})}]);
+ const config={executor:'codex',analysisEngine:'native-tools-v1',dataDir:dir,worktreeRoot:path.join(dir,'worktrees'),projects:{alpha:{repoPath:root,analysisRepositories:[{path:'business',branch:'prd'}]}}};
+ const result=await executeJob(j,config,async()=>{},{runNative:async({job:host})=>{
+  assert.equal(host.reportEvidence.binding.fileId,a.id);
+  const refreshed=structuredClone(j);recordReportFiles(refreshed,[workbook],1);
+  return {hostCurrentJob:refreshed,nativeTiming:{},sourceEvidenceReceipts:[],threadId:'test-native-workbook',
+   outcome:'ready',summary:'已核对数据和说明表',finalMessage:'已核对数据和说明表',
+   handoff:{artifacts:[{kind:'code',path:'business/main.js'}],checks:[{id:'original-question',required:true,status:'passed',evidence:'checked actual worksheet contents against original requirements'}],risks:[],returnTo:'none'},
+   reportAssessment:{fileId:workbook.id,decision:'deliver',coverage:'complete',issues:[]}};
+ }});
+ assert.equal(result.outcome,'ready',result.finalMessage);
+ assert.equal(result.reportInspections.find(e=>e.binding.fileId===workbook.id).contentAudit.worksheets.length,2);
+ const persisted=structuredClone(j);recordReportFiles(persisted,[workbook],1);recordReportReview(persisted,result);
+ assert.equal(reportEligible(persisted,workbook),true);
+});
+
 test('multi-sheet exports remain isolated across concurrent systems and environments',async t=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'aos-multisheet-isolation-'));t.after(()=>rm(dir,{recursive:true,force:true}));const other={...job,id:'JOB-other-sheets',questionId:'QST-other-sheets',projectId:'beta',originProfile:'bot-beta',sourceEnvironment:'sit'};
  const [a,b]=await Promise.all([verifiedSheetFixture(dir,job,[{id:'a',amount:'1.00'}]),verifiedSheetFixture(dir,other,[{id:'b',amount:'2.00'}])]),req=id=>({format:'xlsx',title:'多表',purpose:'完整数据',content:JSON.stringify({sheets:[{name:'data',sourceReportId:id},{name:'copy',sourceReportId:id}]})});

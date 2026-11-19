@@ -10,9 +10,18 @@ const assessment=(job,result)=>{
  if(!file||!['deliver','deliver_partial','revise','needs_review'].includes(a.decision)||!['complete','incomplete'].includes(a.coverage)||!Array.isArray(a.issues)||a.issues.length>12||a.issues.some(i=>!kinds.has(i?.kind)||typeof i.evidence!=='string'||!i.evidence.trim()||i.evidence.length>1200))return null;
  return {a,file,blocking:a.issues.filter(i=>material.has(i.kind))};
 };
+const isWorkbook=file=>file?.kind==='document'&&file.format==='xlsx';
+
+function workbookEvidence(job,file,transportEvidence=[]){
+ const preloaded=[job.reportEvidence,...(job.reportEvidence?.relatedReports??[])];
+ return [...preloaded,...(transportEvidence??[])].find(e=>e?.binding?.fileId===file.id
+  &&e.binding.verificationHash===file.verificationHash&&e.binding.sha256===file.sha256
+  &&e.binding.rowCount===file.rowCount&&(!file.sourceJobId||e.binding.sourceJobId===file.sourceJobId));
+}
+
 function verifiedWorkbook(file,evidence){
  const sheets=evidence?.contentAudit?.worksheets;
- return file?.kind==='document'&&file.format==='xlsx'&&evidence.contentAudit?.structure==='passed'&&Array.isArray(sheets)&&sheets.some(s=>s.role==='data')&&sheets.every(s=>s.role==='notes'?typeof s.evidence==='string'&&Boolean(s.evidence.trim()):s.role==='data'&&proof(s)&&/^[a-f0-9]{64}$/.test(s.sha256??'')&&typeof s.id==='string'&&Number.isSafeInteger(s.rowCount)&&s.rowCount>=0);
+ return isWorkbook(file)&&evidence?.status==='verified'&&evidence.contentAudit?.structure==='passed'&&Array.isArray(sheets)&&sheets.some(s=>s.role==='data')&&sheets.every(s=>s.role==='notes'?typeof s.evidence==='string'&&Boolean(s.evidence.trim()):s.role==='data'&&proof(s)&&/^[a-f0-9]{64}$/.test(s.sha256??'')&&typeof s.id==='string'&&Number.isSafeInteger(s.rowCount)&&s.rowCount>=0);
 }
 export function recordReportFiles(job,files,generation){
  job.reportFiles??=[];job.reportReviews??={};
@@ -28,11 +37,17 @@ export function assessReportDelivery(job,result){
  const requested=result?.reportAssessment?.deliverables;
  if(requested && !validDeliverables(job,requested,result.reportAssessment.fileId,result.reportInspections))return {...result,outcome:'partial',reportReviewRequired:true,environmentQuery:null,websiteQuery:null,
   investigation:{...result.investigation,status:'continue',blocker:null,nextStep:'共同交付必须显式列出每份文件及分工，包含主文件，且每份文件均已完成实际CSV及公式核验；不能以补充文件替代未交付主表。'}};
- if(reviewed&&reviewed.a.decision!=='deliver_partial'&&job.reportEvidence&&(job.reportEvidence.status!=='verified'||job.reportEvidence.binding?.fileId!==reviewed.file.id||job.reportEvidence.binding?.verificationHash!==reviewed.file.verificationHash||job.reportEvidence.calculationAudit?.status!=='passed'&&!verifiedWorkbook(reviewed.file,job.reportEvidence)))return {...result,reportReviewRequired:true,outcome:'partial',environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,goals:(result.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),status:'continue',blocker:null,nextStep:'先读取与当前文件绑定的inspect_report资料，不能仅凭元数据接受文件。'}};
- const scope=job.reportEvidence?.populationAudit,scopeReview=reviewed?.a.scopeReview;
- const workbookScopes=reviewed&&verifiedWorkbook(reviewed.file,job.reportEvidence)?job.reportEvidence.contentAudit.worksheets.map(s=>s.populationAudit).filter(Boolean):[];
+ const workbook=reviewed&&isWorkbook(reviewed.file);
+ const evidence=workbook?workbookEvidence(job,reviewed.file,result.reportInspections):job.reportEvidence;
+ const needsEvidence=reviewed&&reviewed.a.decision!=='deliver_partial'&&(workbook
+  ?!verifiedWorkbook(reviewed.file,evidence)
+  :evidence&&(evidence.status!=='verified'||evidence.binding?.fileId!==reviewed.file.id
+   ||evidence.binding?.verificationHash!==reviewed.file.verificationHash||evidence.calculationAudit?.status!=='passed'));
+ if(needsEvidence)return {...result,reportReviewRequired:true,outcome:'partial',environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,goals:(result.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),status:'continue',blocker:null,nextStep:'先读取与当前文件绑定的inspect_report资料，不能仅凭元数据接受文件。'}};
+ const scope=workbook?null:evidence?.populationAudit,scopeReview=reviewed?.a.scopeReview;
+ const workbookScopes=workbook&&verifiedWorkbook(reviewed.file,evidence)?evidence.contentAudit.worksheets.map(s=>s.populationAudit).filter(Boolean):[];
  const differences=[...(scope?.comparisons??[]),...workbookScopes.flatMap(s=>s.comparisons??[])].filter(c=>c.onlyReferenceCount||c.onlyFileCount);
- const scopeReviewed=!differences.length||([scope?.selected?.datasetRef,...workbookScopes.map(s=>s.selected?.datasetRef)].includes(scopeReview?.populationRef)&&typeof scopeReview.evidence==='string'&&scopeReview.evidence.trim()&&Array.isArray(scopeReview.comparisons)&&differences.every(c=>scopeReview.comparisons.some(r=>r.datasetRef===c.datasetRef&&r.keyColumn===c.keyColumn&&r.decision==='out_of_scope'&&typeof r.evidence==='string'&&r.evidence.trim())));
+ const scopeReviewed=!differences.length||(scopeReview?.populationRef&&[scope?.selected?.datasetRef,...workbookScopes.map(s=>s.selected?.datasetRef)].includes(scopeReview.populationRef)&&typeof scopeReview.evidence==='string'&&scopeReview.evidence.trim()&&Array.isArray(scopeReview.comparisons)&&differences.every(c=>scopeReview.comparisons.some(r=>r.datasetRef===c.datasetRef&&r.keyColumn===c.keyColumn&&r.decision==='out_of_scope'&&typeof r.evidence==='string'&&r.evidence.trim())));
  if(reviewed&&reviewed.a.coverage==='complete'&&!reviewed.blocking.length&&!scopeReviewed)return {...result,reportReviewRequired:true,outcome:'partial',environmentQuery:null,websiteQuery:null,investigation:{...result.investigation,goals:(result.investigation?.goals??[]).map(g=>g.id==='original-question'?{...g,status:'open'}:g),status:'continue',blocker:null,nextStep:'先审阅populationAudit列出的主键范围差异；当前集合不是天然全集。按原问题修订遗漏对象，或在scopeReview中逐项提供明确排除依据，不能仅凭金额合计通过认定完整。'}};
  if(reviewed&&(reviewed.a.decision==='deliver'||reviewed.a.decision==='revise'&&reviewed.a.issues.length>0)&&reviewed.a.coverage==='complete'&&!reviewed.blocking.length){
   const root={id:'original-question',required:true,status:'verified',evidence:result.investigation?.goals?.find(g=>g.id==='original-question')?.evidence||result.summary||'原要求与已核验文件已逐项审阅'};

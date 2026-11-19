@@ -103,7 +103,12 @@ export async function reportReviewEvidence(dataDir,job){
    // because another file happened to be finalized last.
    try{const r=await inspectReport(dataDir,job,{fileId:file.id}),bytes=Buffer.byteLength(JSON.stringify(r));
     if(reviewBytes+bytes<=96000){primary.relatedReports.push(r);reviewBytes+=bytes;}
-    else primary.relatedReports.push({status:r.status,binding:r.binding,headers:r.headers,calculationAudit:r.calculationAudit,populationAudit:r.populationAudit,limited:true,note:'多文件审阅包达到有界上下文预算；该文件的哈希、表头、全文件计算审计和范围审计仍已预载。'});
+    else {
+     const worksheetAudit=r.contentAudit?.worksheets;
+     primary.relatedReports.push({status:r.status,binding:r.binding,headers:r.headers,calculationAudit:r.calculationAudit,populationAudit:r.populationAudit,
+      ...(worksheetAudit?{contentAudit:{structure:r.contentAudit.structure,worksheets:worksheetAudit}}:{}),
+      limited:true,note:'多文件审阅资料已精简，保留文件哈希及适用的计算、范围和逐表审计。'});
+    }
    }
    catch{primary.relatedReports.push({status:'unavailable',binding:{fileId:file.id}});}
   }

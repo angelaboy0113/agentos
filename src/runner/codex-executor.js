@@ -71,7 +71,8 @@ export async function executeJob(job, config, emit, adapters = {}) {
   const attachmentPaths = await downloadAttachments(job, config,
     job.taskIntent === 'analysis' ? path.join(config.worktreeRoot, 'analysis-resources') : workspace);
   const ledger = job.taskIntent === 'analysis'&&!resumingAnalysis ? await readProjectLedger(workspace, project, sourceSync) : [];
-  if(job.reportFiles?.length)job={...job,reportEvidence:await reportReviewEvidence(config.dataDir??path.dirname(config.worktreeRoot),job)};
+  const dataDir=config.dataDir??path.dirname(config.worktreeRoot);
+  if(job.reportFiles?.length)job={...job,reportEvidence:await reportReviewEvidence(dataDir,job)};
   if(job.taskIntent==='analysis')job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile,actor:definitionActor(job),projectId:job.projectId,environment:sourceSync?.environment??job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
   if(job.taskIntent==='analysis'&&!resumingAnalysis){
     try{const hints=await loadSourceMethod(job,sourceSync,{dataDir:config.dataDir??path.dirname(config.worktreeRoot)})??await loadComparisonSourceHints(job,sourceSync);if(hints){job={...job,sourceMethodHints:hints};await emit({type:'progress',phase:'source_method_reused',message:hints.policy==='active-environment-counterpart-hints-v1'?'正在复核另一环境的对应代码路径；只复用本环境摘要匹配的源码片段':'当前源码与口径版本匹配，复用已校验定位证据；数据仍重新查询',files:hints.matchedFiles});}}catch{/* Cache failure falls back to the ordinary source investigation. */}
@@ -88,7 +89,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   let generated,nativeState;
   const nativeRun=async options=>{
     if(nativeState?.threadId)options={...options,job:{...options.job,analysisContinuation:{questionId:job.questionId,workspace,threadId:nativeState.threadId,executionEngine:'native-tools-v1',artifactPolicy}}};
-    const result=await runNativeInvestigation(options);
+    const result=await (adapters.runNative??runNativeInvestigation)(options);
     nativeState={job:result.hostCurrentJob,threadId:result.threadId,sourceHistory:result.sourceHistory,receipts:[...(nativeState?.receipts??[]),...(result.sourceEvidenceReceipts??[])],timing:result.nativeTiming};
     return result;
   };
@@ -101,7 +102,17 @@ export async function executeJob(job, config, emit, adapters = {}) {
   // Only the host adapter can supply state/receipts. Never trust identically
   // named fields in legacy model JSON or injected model test responses.
   delete generated.hostCurrentJob;
-  if(nativeState){job={...nativeState.job,artifactWorkspace:job.artifactWorkspace};generated.sourceEvidenceReceipts.push(...nativeState.receipts);generated.sourceHistory??=nativeState.sourceHistory;}
+  delete generated.reportInspections;
+  if(nativeState){
+    if(nativeState.job!==job){
+      job={...nativeState.job,artifactWorkspace:job.artifactWorkspace};
+      // A native tool can replace the host job with a fresh controller snapshot.
+      // Reload independently verified files before accepting its final answer.
+      job.reportEvidence=await reportReviewEvidence(dataDir,job);
+    }
+    generated.sourceEvidenceReceipts.push(...nativeState.receipts);
+    generated.sourceHistory??=nativeState.sourceHistory;
+  }
   if(nativeState&&generated.browserLoginRequired){
     const {hostCurrentJob,...waiting}=generated;
     return {...waiting,sourceSync,workspace,harness:harness.metadata,timing:{prepareMs:prepared-began,codexMs:Date.now()-prepared,totalMs:Date.now()-began}};
