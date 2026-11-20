@@ -65,6 +65,12 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  if(calendar&&!label){const c=String(el.className);label=/d-arrow-left|prev-year|super-prev/.test(c)?'上一年':/d-arrow-right|next-year|super-next/.test(c)?'下一年':/arrow-left|prev-month|prev-btn/.test(c)?'上个月':/arrow-right|next-month|next-btn/.test(c)?'下个月':'';}
  if(calendar&&el.matches('td,[role="gridcell"]')){const header=el.closest('.el-date-range-picker__content')?.querySelector('.el-date-range-picker__header')??calendar.querySelector('.el-date-picker__header,.ant-picker-header-view,.ant-calendar-header');label='日期选择：'+(el.getAttribute('title')||el.closest('td')?.getAttribute('title')||(header?.innerText??'').trim())+' '+label;}
  if(pagination&&!label)label=tag==='input'?'前往页码':el.matches('.btn-next,.ant-pagination-next')?'下一页':el.matches('.btn-prev,.ant-pagination-prev')?'上一页':'';
+ if(reviewedNavigation&&/^\d+$/.test(label)){
+  const cell=el.closest('td,[role="gridcell"]'),month=el.closest('.el-calendar')?.querySelector('.el-calendar__title')?.innerText?.trim();
+  const date=cell?.getAttribute('data-date')||cell?.getAttribute('aria-label')||cell?.getAttribute('title')
+    ||cell?.querySelector('.el-calendar-day > p')?.innerText?.trim();
+  if(date)label=[month,date,'查看 '+label+' 条'].filter(Boolean).join(' · ').slice(0,100);
+ }
  if(!label)return {visible:true,label,type:null};
  const mutation=/立即执行|执行一次|单次执行|立即运行|运行一次|重放|重发|重新发送|试运行|测试接口|接口测试|新增|创建|保存|修改|编辑|删除|启动|停止|触发|重跑|终止|发布|启用|禁用|提交|支付|注销|退出|作废|驳回|撤回|取消订单|关闭订单|确认收货|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|cancel|resend|replay)\b/i;
  const querySubmit=/^(?:(?:开始|执行)?(?:查询|搜索|检索)(?:\s*[\/／]\s*分析)?|(?:run|start|execute) (?:query|search))$/i.test(label);
@@ -133,6 +139,6 @@ export function websiteFields({secretSelector,full=false}){
 
 // Maintainer-reviewed single component selectors only, never model selectors or JS.
 export function validateWebsiteNavigationSelectors(value){
- if(!Array.isArray(value)||value.length>32||value.some(s=>typeof s!=='string'||s.length>200||! /^(?:[.#][A-Za-z][A-Za-z0-9_-]*)(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/.test(s)||/password|secret|token|credential/i.test(s)))throw new Error('只读导航控件必须为审核后的固定class/id选择器');
+ if(!Array.isArray(value)||value.length>32||value.some(s=>typeof s!=='string'||s.length>200||! /^(?:[.#][A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*)(?: (?:[.#][A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*)){0,3}$/.test(s)||/password|secret|token|credential/i.test(s)))throw new Error('只读导航控件必须为审核后的固定class/id选择器');
  return value;
 }

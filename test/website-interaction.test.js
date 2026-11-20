@@ -148,3 +148,26 @@ test('a verification form that was filled but never submitted does not consume t
  const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'login-verification-'));let logins=0;const server=http.createServer((req,res)=>{if(req.url==='/login'){logins++;res.setHeader('content-type','application/json');res.end('{}');return;}res.setHeader('content-type','text/html; charset=utf-8');res.end(`<h1>登录</h1><input name="username"><input type="password"><input id="challenge" aria-label="验证码"><button onclick="fetch('/login',{method:'POST'}).then(()=>document.body.innerHTML='<h1>首页</h1>')">登录</button>`);});await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=new WebsiteBrowser(dir,{launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP fixture.test 127.0.0.1']})});t.after(async()=>{await browser.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});const e={projectId:'two',tier:'uat',baseUrl:`http://fixture.test:${server.address().port}/`},j={id:'challenge'},cred={username:'synthetic',password:'synthetic-password'};
  const waiting=await browser.submitCredentials(j,e,cred);assert.equal(waiting.verificationRequired,true);assert.equal(logins,0);await (await browser.state(j,e)).page.locator('#challenge').evaluate(el=>el.remove());const ready=await browser.submitCredentials(j,e,cred);assert.equal(ready.authenticated,true);assert.equal(logins,1);
 });
+
+test('scoped reviewed calendar count can open details with date context and no matching controls outside the calendar', async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'calendar-read-'));
+ const server=http.createServer((req,res)=>{
+  res.setHeader('content-type','text/html; charset=utf-8');
+  if(req.url==='/details'){res.end('<h1>只读日历明细</h1>');return;}
+  res.end(`<div class="el-calendar"><div class="el-calendar__title">2026 年 11 月</div>
+    <table><tr><td><div class="el-calendar-day"><p>20</p><div class="info-content">
+    <span class="el-tag el-tag--danger" onclick="location.href='/details'">2</span></div></div></td></tr></table></div>
+    <span class="el-tag el-tag--danger" onclick="location.href='/delete'">3</span>`);
+ });
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP calendar.test 127.0.0.1']})};
+ const browser=new WebsiteBrowser(dir,driver);
+ t.after(async()=>{await browser.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
+ const selector='.el-calendar .info-content .el-tag.el-tag--danger';
+ const e={projectId:'practice',tier:'uat',baseUrl:`http://calendar.test:${server.address().port}/`,queries:{inspect:{readNavigationSelectors:[selector]}}};
+ const job={id:'calendar',environmentAccess:{queryId:'inspect'}};
+ const before=await browser.run(job,e,'connection');
+ const item=before.controls.find(c=>c.label==='2026 年 11 月 · 20 · 查看 2 条');
+ assert.equal(item.type,'read-action');assert.ok(!before.controls.some(c=>c.label==='3'));
+ const after=await browser.run(job,e,'browser_click',{ref:item.ref});assert.match(after.pageText,/只读日历明细/);
+});
