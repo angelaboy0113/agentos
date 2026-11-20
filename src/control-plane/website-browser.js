@@ -1,3 +1,4 @@
+import { passivePublicImage, fetchPassivePublicImage } from './public-website-image.js';
 import {loginPageAllowed} from '../shared/website-sso.js';
 import {websiteFrames,websiteDOM,assertWebsiteFrame} from './website-frames.js';
 import {advanceWebsiteDocumentDiagnostics}from'../shared/website-document-diagnostics.js';
@@ -32,7 +33,7 @@ export function routePrdWebsiteBrowser(shared, isolated) {
 }
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
- constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch}={}){this.authorize=authorize;this.publicFetch=publicFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
+ constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch,passiveImageFetch=fetchPassivePublicImage}={}){this.authorize=authorize;this.publicFetch=publicFetch;this.passiveImageFetch=passiveImageFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
  async session(e) {
   const key=websiteSessionKey(e.projectId,e.tier,e.baseUrl);
   if(this.contexts.has(key))return this.contexts.get(key);
@@ -50,13 +51,19 @@ export class WebsiteBrowser {
     const state=[...this.pages.values()].find(s=>s.page===page),target=state?.environment??e;
     const request={url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()};
     const policy=target.queries?.[state?.job?.environmentAccess?.queryId];
-    const image=state&&websiteImageResourceAllowed(request,policy?.imageResourceRoots);
-    if(state&&(image||websiteStaticResourceAllowed(target.baseUrl,request,policy?.staticResources??[],policy?.staticResourceRoots??[],{identityPage:loginPageAllowed(state.page.url(),target.loginNavigation)}))){
+    const identityPage=state&&loginPageAllowed(state.page.url(),target.loginNavigation);
+    const reviewedImage=state&&websiteImageResourceAllowed(request,policy?.imageResourceRoots);
+    const reviewedStatic=state&&websiteStaticResourceAllowed(target.baseUrl,request,policy?.staticResources??[],policy?.staticResourceRoots??[],{identityPage});
+    const passiveImage=state&&request.resourceType==='image'&&!reviewedImage&&!reviewedStatic&&!state.waiting&&!identityPage
+     &&passivePublicImage(request,r.frame().url(),target.baseUrl)
+     &&!websiteLoginReadAllowed(request,true,policy?.loginReads??[],target.baseUrl,target.loginNavigation);
+    const image=reviewedImage||passiveImage;
+    if(state&&(image||reviewedStatic)){
      // Public GET via an independent client: no browser cookies, tokens, referer,
      // post body, authentication, redirects or response Set-Cookie cross the boundary.
      let permitted=false;try{permitted=await this.authorize(state.job,state.waiting,r);}catch{}
      if(!permitted){await route.abort().catch(()=>{});return;}
-     try{const response=await this.publicFetch(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const contentType=response.headers.get('content-type')??'application/octet-stream';if(image&&!/^image\/(?:jpeg|png|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)(?:;|$)/i.test(contentType)){await response.body?.cancel();throw new Error('IMAGE_CONTENT_TYPE');}const headers={'content-type':contentType,'cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
+     try{const response=await (passiveImage?this.passiveImageFetch:this.publicFetch)(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const contentType=response.headers.get('content-type')??'application/octet-stream';if(image&&!/^image\/(?:jpeg|png|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)(?:;|$)/i.test(contentType)){await response.body?.cancel();throw new Error('IMAGE_CONTENT_TYPE');}const headers={'content-type':contentType,'cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
     }
     let allow=false,boundary;try{boundary=websiteRequestBoundary(target.baseUrl,request,state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);allow=boundary.allowed;}catch{}
     const loginReads=target.queries?.[state?.job?.environmentAccess?.queryId]?.loginReads??[];

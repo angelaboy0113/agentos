@@ -398,4 +398,4 @@ Memory headroom and durable overload waiting: see [memory-admission.md](memory-a
 已由源码核实为查看明细的自定义组件，可在同一查询的 `readNavigationSelectors` 中登记最多四层、以空格连接的固定类名或 ID。可用于按父级日历范围区分数字入口与页面其它标签。控制面仍核验实际请求，控件登记不授予接口或写入权限。
 
 
-已接入网站的业务图片若托管在独立对象存储，可在同一网站 `investigate` 查询设置 `imageResourceRoots`。每项是 HTTPS 目录，可用整段 `{date}` 或 `{compactDate}` 匹配按日归档；例如 `https://media.example.com/photos/{date}/store/`。当前页面发起的 位图 图片 GET 会通过独立客户端加载，无浏览器凭据、重定向或业务接口授权。不同系统及环境各自使用自己的配置，页面新增对象时无需逐张登记。
+已接入网站默认显示当前业务页面引用的公开 HTTPS 图片，无需为每个站点登记。公开图片由独立请求读取，仅连接已验证的公网地址，便于排查人员复现页面。位于私有对象存储的业务图片，可在同一网站 `investigate` 查询设置 `imageResourceRoots`。每项是 HTTPS 目录，可用整段 `{date}` 或 `{compactDate}` 匹配按日归档；例如 `https://media.example.com/photos/{date}/store/`。当前页面发起的 位图 图片 GET 会通过独立客户端加载，无浏览器凭据、重定向或业务接口授权。不同系统及环境各自使用自己的配置，页面新增对象时无需逐张登记。
