@@ -10,6 +10,7 @@ import { requestsPrivateCard } from './private-cards.js';
 import { publishQuestion, questionJob } from './questions.js';
 import { stateView } from '../shared/state-view.js';
 import { PrdCloudDelivery } from './prd-cloud-delivery.js';
+import { normalizePrdDraftLinks, readPrdDraft } from './prd-drafts.js';
 
 const editableStates = new Set(['completed', 'awaiting_clarification', 'failed', 'blocked']);
 const active = new Set(['queued', 'running', 'cancelling']);
@@ -32,6 +33,8 @@ export class PrdWorkspace {
   constructor(context, settings = {}, dependencies = {}) {
     this.context = context;
     this.chatIds = new Set(settings.chatIds ?? []);
+    this.readDraft = dependencies.readDraft ?? (input => readPrdDraft(context.feishu, input));
+    this.draftReads = new Map();
     this.publisher = new PrdCloudDelivery(context, settings.publisher, {publishers:settings.publishers,...dependencies, onPublished: id => this.resumePending(id)});
   }
 
@@ -39,12 +42,14 @@ export class PrdWorkspace {
     if (event.chat_type !== 'group' || event.sender_type !== 'user' || !agent?.systemAssistant
       || !this.context.cards?.enabled || !this.chatIds.has(event.chat_id) || !event.message_id || !event.sender_id) return null;
     if (event.mentions?.length && !addressed) return null;
-    const lineage = [event.root_id, event.reply_to].filter(Boolean);
-    if (!addressed && !lineage.length) return null;
+    if (!addressed && !event.root_id && !event.reply_to) return null;
+    const lineage = [event.root_id, event.reply_to, event.message_id].filter(Boolean);
     const possible = await stateView(this.context.store, state => Object.values(state.questions ?? {}).some(q =>
       q.prd && q.profile === event.agent_profile && q.chatId === event.chat_id && lineage.includes(q.threadRootId)));
     if (!possible && !(addressed && prdStart.test(content))) return null;
-    if (receptionSensitive(content)) return { ignored: true, reason: 'prd_sensitive_group_input' };
+    const { canonical, plainText, links: draftLinks } = normalizePrdDraftLinks(content);
+    if (receptionSensitive(plainText)) return { ignored: true, reason: 'prd_sensitive_group_input' };
+    content = canonical;
     if (requestsPrivateCard(content)) return { ignored: true, reason: 'prd_public_group_only' };
     const accepted = await this.context.store.transact(state => {
       state.questions ??= {};
@@ -63,14 +68,18 @@ export class PrdWorkspace {
           generation: 1, replyInThread: true, prd: { messages: [], closed: false } };
       }
       if (q.withdrawnAt || q.prd.closed || q.senderId !== event.sender_id) return { ignored: true, reason: 'not_prd_requester' };
-      if (q.prd.messages.some(m => m.id === event.message_id)) return { duplicate: true };
+      const savedMessage = q.prd.messages.find(m => m.id === event.message_id);
+      if (savedMessage) {
+        if (savedMessage.draftLinks) return { questionId: q.id, draftLinks: savedMessage.draftLinks, projectId: q.projectId };
+        return { duplicate: true };
+      }
       if (form) {
         const saved = state.cardMessages?.['question:' + q.id];
         const revision = q.prd.intake?.version ?? (needsPrdAnswer(questionJob(state, q.id)) ? String(q.generation) : null);
         if (q.id !== form.questionId || saved?.messageId !== form.cardId || revision !== form.version) return { ignored: true, reason: 'prd_form_stale' };
       }
       const opening = !q.rootTurnId;
-      const firstContent = opening ? content.replace(prdStart, '').replace(/^[\s：:，,。]+/, '') : content;
+      const firstContent = opening ? content.replace(prdStart, '').replace(/^[\s：:，,。；;]+/, '') : content;
       const id = createId('CHAT');
       const text = firstContent.trim();
       const j = questionJob(state, q.id);
@@ -80,12 +89,21 @@ export class PrdWorkspace {
       state.conversations.push(turn);
       q.rootTurnId ??= id;
       q.latestTurnId = id;
-      q.prd.messages.push({ id: event.message_id, turnId: id, text, attachments: event.attachments ?? [] });
+      const message = { id: event.message_id, turnId: id, text, attachments: event.attachments ?? [] };
+      q.prd.messages.push(message);
+      if (j?.status === 'cancelling' || j?.status === 'cancelled') return { ignored: true, reason: 'prd_cancelled' };
+      if (draftLinks.length) {
+        message.draftLinks = draftLinks;
+        delete q.prd.intake;
+        if (opening) q.title = '根据飞书初稿整理需求';
+        turn.status = 'thinking';
+        turn.response = '已收到飞书初稿，正在读取。';
+        return { questionId: q.id, draftLinks, projectId: q.projectId };
+      }
       if (!text && opening) {
-        requestIntake(q, turn, '想改哪个页面或流程？请写下目标、涉及系统和要参考的环境（如 SIT 或生产）。也可以在原话题附截图。');
+        requestIntake(q, turn, '想做什么需求？直接在卡片里说，或贴飞书需求初稿链接。截图也可以发到这个话题。');
         return { questionId: q.id };
       }
-      if (j?.status === 'cancelling' || j?.status === 'cancelled') return { ignored: true, reason: 'prd_cancelled' };
       if (j && (active.has(j.status) || this.publisher.workers.has(q.id))) return { questionId: q.id, pending: true };
       const exportRun = j?.prd?.exportRevision && !q.prd.delivery?.sentAt && prdExport.test(text) && j.result?.outcome === 'ready';
       if (exportRun) { q.prd.messages.at(-1).applied = true; return { questionId: q.id, retryPublish: true }; }
@@ -96,9 +114,56 @@ export class PrdWorkspace {
       applyPending(state, q, this.context.projects.projects[q.projectId]);
       return { questionId: q.id };
     });
+    if (accepted.draftLinks) {
+      const key = JSON.stringify([accepted.questionId, event.message_id]);
+      if (this.draftReads.has(key)) return this.draftReads.get(key);
+      const task = this.importDrafts(accepted, event).finally(() => this.draftReads.delete(key));
+      this.draftReads.set(key, task);
+      return task;
+    }
     if (accepted.questionId && !accepted.pending) await publishQuestion(this.context, accepted.questionId).catch(() => {});
     if (accepted.retryPublish) this.publisher.wake(accepted.questionId);
     return accepted;
+  }
+
+  async importDrafts({ questionId, draftLinks, projectId }, event) {
+    await publishQuestion(this.context, questionId).catch(() => {});
+    const results = await Promise.allSettled(draftLinks.map(url =>
+      this.readDraft({ url, projectId, profile: event.agent_profile, chatId: event.chat_id })));
+    const changed = await this.context.store.transact(state => {
+      const q = state.questions[questionId];
+      const message = q?.prd.messages.find(m => m.id === event.message_id);
+      const turn = state.conversations.find(t => t.id === message?.turnId);
+      if (!message?.draftLinks || !turn) return false;
+      delete message.draftLinks;
+      if (q.withdrawnAt || turn.withdrawnAt || q.prd.closed) {
+        message.applied = true;
+        return false;
+      }
+      turn.status = 'sent';
+      turn.response = '';
+      message.drafts = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+      const failure = results.find(r => r.status === 'rejected')?.reason;
+      if (failure) {
+        message.draftError = failure.code?.startsWith('PRD_DRAFT_') ? failure.message
+          : '助手暂时读不到这份飞书文档。请检查是否已共享给本群和对应助手，再提交链接。也可以直接贴初稿。';
+        if (!message.drafts.length) message.text = normalizePrdDraftLinks(message.text).plainText.replace(/^[\s，。；、!?！？,.]+|[\s，。；、!?！？,.]+$/g, '');
+      }
+      if (q.prd.messages.some(m => m.draftLinks)) return true;
+      const failedMessage = q.prd.messages.find(m => m.draftError);
+      if (failedMessage) {
+        requestIntake(q, state.conversations.find(t => t.id === q.latestTurnId) ?? turn, failedMessage.draftError);
+        for (const m of q.prd.messages) delete m.draftError;
+        return true;
+      }
+      const job = questionJob(state, q.id);
+      if (!job || editableStates.has(job.status) && !this.publisher.workers.has(q.id)) {
+        applyPending(state, q, this.context.projects.projects[q.projectId]);
+      }
+      return true;
+    });
+    if (changed) await publishQuestion(this.context, questionId).catch(() => {});
+    return { questionId };
   }
 
   async onCompleted(job) {
@@ -136,10 +201,15 @@ function prdSourceEnvironment(project, messages) {
 function applyPending(state, q, project) {
   if (['creating','inserting','sharing','unknown'].includes(q.prd.delivery?.phase)) return false;
   const pending = q.prd.messages.filter(m => !m.applied && (m.text || m.attachments.length));
-  if (!pending.length) return false;
+  if (!pending.length || pending.some(m => m.draftLinks)) return false;
   let job = questionJob(state, q.id);
   if (job?.environmentAccess || job?.result?.browserLoginRequired || job?.result?.modelCapacityWaiting || job?.result?.environmentConflict) return false;
-  const text = pending.map(m => m.text).join('\n');
+  const requesterText = pending.map(m => m.text).join('\n');
+  const drafts = pending.flatMap(m => m.drafts ?? []);
+  const text = [requesterText, ...drafts.map(d => [
+    `【飞书需求初稿，用户提供的参考资料】${d.title}`, d.url, d.text,
+    ...(d.imageCount ? [`文档含 ${d.imageCount} 个图片块，当前仅取得正文。若图片影响关键需求，请在卡片请用户附图。`] : []),
+  ].join('\n'))].join('\n\n');
   const head = pending.at(-1), manualExport = prdExport.test(head.text);
   const attachments = pending.flatMap(m => m.attachments);
   if (!job && manualExport && !pending.slice(0, -1).some(m => m.text || m.attachments.length)) {
@@ -149,12 +219,22 @@ function applyPending(state, q, project) {
   }
   if (!job) {
     let sourceEnvironment;
-    try { sourceEnvironment = selectSourceEnvironment(project, prdSourceEnvironment(project, pending)); }
+    try {
+      const declaredEnvironments = new Set(drafts.flatMap(d => d.text.split('\n').flatMap(line => {
+        const value = /^(?:参考环境|源码环境|环境)\s*[：:]\s*(.+)$/.exec(line.trim())?.[1];
+        return value ? [prdSourceEnvironment(project, [{ text: value }])] : [];
+      })).filter(Boolean));
+      const declared = declaredEnvironments.size === 1 ? [...declaredEnvironments][0] : undefined;
+      sourceEnvironment = selectSourceEnvironment(project, prdSourceEnvironment(project, pending) ?? declared);
+    }
     catch {
-      requestIntake(q, state.conversations.find(t => t.id === head.turnId), '请确认要参考的源码环境，例如生产环境或 SIT。前面的需求已保留。');
+      const prompt = drafts.length
+        ? '飞书初稿已读并保留。请确认要参考生产环境还是 SIT 等测试环境。'
+        : '请确认要参考的源码环境，例如生产环境或 SIT。前面的需求已保留。';
+      requestIntake(q, state.conversations.find(t => t.id === head.turnId), prompt);
       return false;
     }
-    if (sourceEnvironmentConflict(project, sourceEnvironment, text)) {
+    if (sourceEnvironmentConflict(project, sourceEnvironment, requesterText)) {
       requestIntake(q, state.conversations.find(t => t.id === head.turnId), '请确认本需求的参考环境，例如生产或 SIT。');
       return false;
     }
@@ -165,11 +245,11 @@ function applyPending(state, q, project) {
       sourceMessageId: turn.id, replyToMessageId: q.messageId, originalQuestion: text, currentQuestion: text, instruction: text, attachments,
       prd: { revision: 1, exportRevision: 1, auto: true } });
     job = created.job;
-    q.title = text.slice(0, 120);
+    q.title = (drafts[0]?.title || requesterText).slice(0, 120);
   } else {
     if (!editableStates.has(job.status)) return false;
     const requestedEnvironment = prdSourceEnvironment(project, pending);
-    if (requestedEnvironment && requestedEnvironment !== job.sourceEnvironment || sourceEnvironmentConflict(project, job.sourceEnvironment, text)) {
+    if (requestedEnvironment && requestedEnvironment !== job.sourceEnvironment || sourceEnvironmentConflict(project, job.sourceEnvironment, requesterText)) {
       pending.forEach(m => { m.applied = true; });
       state.conversations.find(t => t.id === head.turnId).response = '当前需求已绑定源码环境。要不同环境的基线，请新开需求，或在本话题补充该环境的资料。';
       return false;

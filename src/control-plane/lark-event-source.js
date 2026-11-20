@@ -1,4 +1,5 @@
 import {receptionSensitive} from '../shared/reception-policy.js';
+import {normalizePrdDraftLinks} from './prd-drafts.js';
 import { EditedMentionWatcher } from './edited-mentions.js';
 import { copyFile, mkdir, readdir, stat, readFile, writeFile, rename, unlink, lstat, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -124,7 +125,9 @@ export class LarkEventSource {
     event.agent_role = this.config.role ?? null;
     if(reception){
       // Durable, text-only reception. The control plane checks exact topic/owner again.
-      if(!['text','post',undefined].includes(event.message_type)||receptionSensitive(event.content))return;
+      const {canonical, plainText}=normalizePrdDraftLinks(event.content);
+      if(!['text','post',undefined].includes(event.message_type)||receptionSensitive(plainText))return;
+      event.content=canonical;
       const file=path.join(this.callbackDirectory,createHash('sha256').update(event.message_id??event.id).digest('hex')+'.json');
       await mkdir(this.callbackDirectory,{recursive:true,mode:0o700});
       await writeFile(file+'.tmp',JSON.stringify(event),{mode:0o600});await rename(file+'.tmp',file);

@@ -1,4 +1,4 @@
-import {cloudReadRoute} from '../shared/feishu-cloud-sheet.js';
+import {cloudReadRoute,cloudSheetTarget} from '../shared/feishu-cloud-sheet.js';
 import {openAsBlob} from 'node:fs';
 import {stat} from 'node:fs/promises';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -52,6 +52,14 @@ export class FeishuClient {
     if(!cloudReadRoute(route))throw new Error('Invalid cloud read scope');
     const response=await fetch('https://open.feishu.cn'+route+'?'+new URLSearchParams(params),{headers:{authorization:'Bearer '+await this.tenantToken()},signal:AbortSignal.timeout(30000)});const result=await response.json();
     if(!response.ok||result.code!==0)throw new Error(`Cloud read failed ${String(result.code)} ${String(result.msg??'').slice(0,300)}`);return result.data;
+  }
+  async cloudDocumentMembers(token){
+    if(!/^[A-Za-z0-9]+$/.test(token??''))throw new Error('Invalid cloud document scope');
+    const response=await fetch(`${OPEN_API}/drive/v1/permissions/${token}/members?type=docx`,
+      {headers:{authorization:'Bearer '+await this.tenantToken()},signal:AbortSignal.timeout(30000)});
+    const result=await response.json();
+    if(!response.ok||result.code!==0)throw new Error('Cloud document sharing unavailable');
+    return result.data;
   }
   async cloudDownload(fileToken){
     if(!/^[A-Za-z0-9]+$/.test(fileToken??''))throw new Error('Invalid cloud file scope');
@@ -156,6 +164,8 @@ export function parseFeishuMessage(message) {
       for (const paragraph of locale.content ?? []) {
         for (const item of paragraph) {
           if (item.tag === 'text' || item.tag === 'a') text += `${item.text ?? ''} `;
+          if (item.tag === 'a' && item.href !== item.text && /^https:\/\/[^\s]+$/.test(item.href ?? '')
+            && cloudSheetTarget(item.href)) text += `${item.href} `;
           if (item.tag === 'img' && item.image_key) resources.push({ key: item.image_key, type: 'image' });
         }
       }

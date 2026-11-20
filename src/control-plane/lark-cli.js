@@ -104,6 +104,13 @@ export class LarkCliFeishuClient {
     const result=await runLarkCli(['api','GET',route,'--as','bot','--params',JSON.stringify(params),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
     if(!result.data||typeof result.data!=='object')throw new Error('Invalid cloud read response');return result.data;
   }
+  async cloudDocumentMembers(token,{profile}={}){
+    if(!/^[A-Za-z0-9]+$/.test(token??'')||!profile)throw new Error('Invalid cloud document scope');
+    await mkdir(this.cwd,{recursive:true,mode:0o700});
+    const result=await runLarkCli(['drive','+member-list','--as','bot','--type','docx','--token',token,'--json'],
+      {cwd:this.cwd,cliEntry:this.cliEntry,profile});
+    return result.data;
+  }
   async cloudDownload(fileToken,options={}){
     if(!/^[A-Za-z0-9]+$/.test(fileToken??'')||!options.profile)throw new Error('Invalid cloud file scope');
     await mkdir(this.cwd,{recursive:true,mode:0o700});

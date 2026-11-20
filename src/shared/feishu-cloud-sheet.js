@@ -49,7 +49,7 @@ async function parseUploadedCloudFile(title,bytes){
  if(plain[extension]){let content;try{content=textDecoder.decode(bytes);}catch{throw new CloudSheetError('CLOUD_DOCUMENT_FORMAT','文本文件不是有效 UTF-8；未替换损坏字符或当作空文件。');}return {extension,contentType:plain[extension],content,structure:null};}
  return {extension,contentType:'application/octet-stream',content:'原文件已接收。此格式未进行结构化解析，请使用当前任务登记的原始附件及对应工具处理；未解析不表示空文件，未执行文件内容。',structure:null,parseStatus:'raw_only',parseDiagnostic:{code:'CLOUD_DOCUMENT_UNPARSED',message:'原始文件可供后续工具读取；尚无结构化预览。'}};
 }
-export async function readCloudSheet(client,job,environment,tool,args={}){
+export async function readCloudSheet(client,job,environment,tool,args={},options={}){
  const url=job.environmentAccess?.websiteTarget??environment.baseUrl,target=cloudSheetTarget(url);
  if(!target||environment.kind!=='website'||environment.projectId!==job.projectId||!job.originProfile)throw invalid();
  if(!['connection','read_cloud_sheet','read_cloud_document'].includes(tool)||!args||Array.isArray(args)||typeof args!=='object')throw invalid();
@@ -60,6 +60,7 @@ export async function readCloudSheet(client,job,environment,tool,args={}){
   if(!['sheet','file','docx'].includes(node?.obj_type)||!/^[A-Za-z0-9]+$/.test(node.obj_token??''))throw new CloudSheetError('CLOUD_DOCUMENT_TYPE','此知识库节点不是当前支持的在线表格、在线文档或上传文件；没有降级为个人网页会话。');
   token=node.obj_token;title=node.title;documentType=node.obj_type;
  }
+ if(options.authorizeDocument)await options.authorizeDocument({token,documentType});
  if(documentType!=='sheet'){
   if(tool==='connection'){
    if(Object.keys(args).length)throw invalid();

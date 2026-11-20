@@ -24,20 +24,112 @@ const profile = 'knowledge-ltx';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2l8AAAAASUVORK5CYII=', 'base64');
 const md = '# 订单补贴状态\n\n**评审稿**\n\n|系统|影响|\n|---|---|\n|LTX|展示|\n|TPM|状态来源|\n\n## 原型图\n';
 
-async function fixture(t, cli, ltx = {}) {
+async function fixture(t, cli, ltx = {}, feishu) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agentos-prd-')));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   const store = new JsonStore(path.join(dataDir, 'agentos.json'));
   const cards = { enabled: true, upsert: async () => 'om_card' };
   const projects = { projects: { ltx: { displayName: 'LTX', ...ltx }, tpm: { displayName: 'TPM' } },
     chatProfileProjectMap: { [chat]: { [profile]: 'ltx', 'knowledge-tpm': 'tpm' } } };
-  const workspace = new PrdWorkspace({ store, cards, projects, config: { dataDir } },
+  const workspace = new PrdWorkspace({ store, cards, projects, feishu, config: { dataDir } },
     { chatIds: [chat], publisher: { profile, ownerOpenId: owner, chatIds: [chat] } }, { cli });
   const group = { chat_type: 'group', chat_id: chat, sender_id: owner, sender_type: 'user', agent_profile: profile };
   const send = (id, content, root, args = {}) => workspace.handle({ ...group, message_id: id, ...(root ? { root_id: root } : {}), ...args.event },
-    { agent: { systemAssistant: true }, addressed: args.addressed ?? !root, content });
+    { agent: { systemAssistant: true }, addressed: args.addressed ?? !root, content, form: args.form });
   return { store, workspace, dataDir, send, cards, projects };
 }
+
+test('ordinary requirement language starts a PRD card while lookup and negated requests do not', async t => {
+  const { store, send } = await fixture(t);
+  for (const [i, text] of ['我想要做一个prd', '我想要做一个需求', '我需要写一份需求文档', '帮我起草个PRD'].entries()) {
+    assert.ok((await send('om_natural'+i, text)).questionId, text);
+  }
+  for (const [i, text] of ['我想查一个需求', '我不想做一个需求', '我想做一个需求查询', '解释一下 PRD'].entries()) {
+    assert.equal(await send('om_regular'+i, text), null, text);
+  }
+  const state = await store.read();
+  assert.equal(state.jobs.length, 0);
+  assert.equal(Object.values(state.questions).length, 4);
+});
+
+function draftFeishu(calls, { shared = true, environment = '参考环境：SIT' } = {}) {
+  const text = content => ({ elements: [{ text_run: { content } }] });
+  return {
+    async cloudDocumentMembers(token, options) {
+      calls.push(['acl', token, options.profile]);
+      return { items: [{ member_type: 'openchat', member_id: shared ? chat : 'oc_elsewhere', perm: 'view' }] };
+    },
+    async cloudRequest(route, params, options) {
+      calls.push([route, params.token, options.profile]);
+      if (route.includes('/get_node')) return { node: { obj_type: 'docx', obj_token: 'DraftToken', title: '补贴状态' } };
+      return { items: [
+        { block_id: 'root', block_type: 1, page: text('补贴状态') },
+        { block_id: '1', text: text(environment) },
+        { block_id: '2', text: text('LTX订单显示TPM补贴状态') },
+        { block_id: '3', block_type: 27 },
+        { block_id: '4', table: { cells: ['5','6'], property: { column_size: 2 } } },
+        { block_id: '5', children: ['7'] }, { block_id: '6', children: ['8'] },
+        { block_id: '7', text: text('TPM') }, { block_id: '8', text: text('状态来源') },
+      ] };
+    },
+  };
+}
+
+test('natural PRD request plus a wiki link alone reads the shared draft first and uses its explicit source environment', async t => {
+  const calls = [];
+  const { store, send } = await fixture(t, undefined, { analysisSourceMode: 'isolated',
+    analysisEnvironments: { sit: {}, prd: {} } }, draftFeishu(calls));
+  const prompt = '我需要做一个prd，https://unit.feishu.cn/wiki/WikiToken?from=im。';
+  const { questionId } = await send('om_prdlink', prompt);
+  const state = await store.read();
+  assert.equal(state.questions[questionId].title, '补贴状态');
+  const [job] = state.jobs;
+  assert.equal(job.questionId, questionId);
+  assert.equal(job.sourceEnvironment, 'sit');
+  assert.match(job.originalQuestion, /LTX订单显示TPM补贴状态/);
+  assert.match(job.originalQuestion, /TPM \| 状态来源/);
+  assert.match(job.originalQuestion, /1 个图片块/);
+  assert.equal((await send('om_prdlink', prompt)).duplicate, true);
+  assert.deepEqual(calls, [
+    ['/open-apis/wiki/v2/spaces/get_node', 'WikiToken', profile],
+    ['acl', 'DraftToken', profile],
+    ['/open-apis/docx/v1/documents/DraftToken/blocks', undefined, profile],
+  ]);
+});
+
+test('a follow-up draft link and environment answer in the card reuse the original PRD question', async t => {
+  const calls = [];
+  const { store, send } = await fixture(t, undefined, { analysisSourceMode: 'isolated',
+    analysisEnvironments: { sit: {}, prd: {} } }, draftFeishu(calls, { environment: '' }));
+  const { questionId } = await send('om_prdroot', '我想做个需求');
+  await send('om_link', 'https://unit.feishu.cn/docx/DraftToken', 'om_prdroot');
+  const first = await store.read();
+  const view = questionView(first, questionId);
+  assert.equal(first.jobs.length, 0);
+  assert.match(JSON.stringify(view.card), /飞书初稿已读并保留/);
+  const { version } = first.questions[questionId].prd.intake;
+  await store.transact(s => { s.cardMessages = { ['question:'+questionId]: { messageId: 'om_card' } }; });
+  await send('om_form', '生产环境', 'om_prdroot', { form: { questionId, cardId: 'om_card', version } });
+  const current = await store.read();
+  assert.equal(current.jobs.length, 1);
+  assert.equal(current.jobs[0].sourceEnvironment, 'prd');
+  assert.match(current.jobs[0].originalQuestion, /LTX订单显示TPM补贴状态/);
+  assert.equal(calls.length, 2);
+});
+
+test('an outside-group draft never reads the body and can be replaced with text in the same PRD card', async t => {
+  const calls = [];
+  const { store, send } = await fixture(t, undefined, {}, draftFeishu(calls, { shared: false }));
+  const { questionId } = await send('om_private', '我想做一个需求 https://unit.feishu.cn/docx/DraftToken');
+  const first = await store.read();
+  assert.equal(first.jobs.length, 0);
+  assert.match(first.questions[questionId].prd.intake.prompt, /共享给本群/);
+  assert.equal(calls.length, 1);
+  await send('om_text', '订单详情加补贴状态', 'om_private');
+  const [job] = (await store.read()).jobs;
+  assert.equal(job.questionId, questionId);
+  assert.equal(job.originalQuestion, '订单详情加补贴状态');
+});
 
 test('bare PRD trigger then unmentioned description and decisions keep one question, job and native checkpoint', async t => {
   const { store, workspace, send } = await fixture(t);

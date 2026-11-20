@@ -2244,3 +2244,7 @@ Shared browser metadata recognizes start/execute query labels in genuine search 
 ## 1.138.4 · 飞书协作者权限
 
 发布预检使用协作者列表接口的权限标识 docs:permission.member:retrieve。
+
+## 1.139.0 · PRD 初稿入口
+
+需求工作台识别自然说法，可从单条消息或原卡补充里的飞书文档链接启动。先核验本群共享，再以原助手身份读取初稿正文和表格；文档明确参考环境时复用，缺少时在原卡询问。已登记的需求、审批范围和同一 Codex 会话接续方式沿用。链接误触发的敏感信息拦截已修正，私人凭据和文档授权检查继续生效。
