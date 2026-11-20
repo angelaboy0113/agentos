@@ -2,13 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {realpath,mkdtemp,mkdir,writeFile,readFile,utimes,symlink,access,rm} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';
-import {pruneHistory,sweepArtifacts,retentionPolicy} from '../src/shared/retention.js';
+import {archiveHistory,pruneHistory,sweepArtifacts,retentionPolicy} from '../src/shared/retention.js';
 import {JsonStore} from '../src/shared/store.js';
 import {MemoryService} from '../src/control-plane/memory.js';
 import {SessionRegistry} from '../src/control-plane/session-registry.js';
 import {KnowledgeStore} from '../src/control-plane/knowledge-store.js';
 import {ContactIndex} from '../src/control-plane/contact-index.js';
 import {HistoryRetention} from '../src/control-plane/retention.js';
+import {adminUsage} from '../src/control-plane/admin-usage.js';
+import {attachQuestion} from '../src/control-plane/questions.js';
 const DAY=86400000,now=Date.parse('2026-10-23T08:00:00Z'),before=new Date(now-40*DAY).toISOString(),recent=new Date(now-DAY).toISOString(),cutoff=now-30*DAY;
 const exists=p=>access(p).then(()=>true,()=>false);
 async function fixture(t){const d=await realpath(await mkdtemp(path.join(os.tmpdir(),'retention-')));t.after(()=>rm(d,{recursive:true,force:true}));return d;}
@@ -78,4 +80,56 @@ test('only expired source containers with valid ownership manifests are swept, p
  assert.equal(await sweepArtifacts({root,cutoff,manifest:true}),1);assert.equal(await exists(full),false);
  const s=state();assert.equal(pruneHistory(s,cutoff,{busyCards:new Set(['question:q'])}).removed.size,0);
  const disabled=new HistoryRetention({config:{retentionDays:0}});disabled.start();assert.ok(disabled.timer);assert.deepEqual(await disabled.run(now),{disabled:true,snapshots:[]});await disabled.stop();
+});
+
+test('archive retains points, original card and routing, and a reply starts a fresh question',()=>{
+ const s=state();
+ Object.assign(s.conversations[0],{content:'',attachments:[{id:'image',path:'/old/image'}],senderId:'ou_user',profile:'p',chatId:'group',
+  chatType:'group',projectId:'project',messageId:'msg',decision:{action:'create_task',jobId:'j1',executionTrace:'old'}});
+ Object.assign(s.questions.q,{senderId:'ou_user',profile:'p',chatId:'group',projectId:'project',messageId:'msg',threadRootId:'msg'});
+ Object.assign(s.cardMessages['question:q'],{messageId:'card',card:{visible:'old answer'},detailPages:['page 1','page 2']});
+ const usage=adminUsage(s,{}, {now}),card=structuredClone(s.cardMessages),receipts=structuredClone(s.reportDeliveries);
+ const result=archiveHistory(s,cutoff,{now});
+ assert.deepEqual(result.counts,{jobs:2,conversations:1,questions:1});
+ assert.deepEqual(adminUsage(s,{}, {now}),usage);
+ assert.deepEqual(s.cardMessages,card);assert.deepEqual(s.reportDeliveries,receipts);
+ assert.equal(s.jobs[1].context,undefined);assert.equal(s.conversations[0].decision.executionTrace,undefined);
+ assert.equal(s.processedMessages.msg,'j1');
+ const turn={id:'new',createdAt:recent,content:'重新查一下',senderId:'ou_user',profile:'p',chatId:'group',projectId:'project',messageId:'new-msg'};
+ attachQuestion(s,turn,{reply_to:'card'},{});
+ assert.notEqual(turn.questionId,'q');
+ assert.equal(s.questions[turn.questionId].parentQuestionId,'q');
+ assert.equal(s.questions[turn.questionId].threadRootId,'msg');
+ assert.deepEqual(archiveHistory(s,cutoff,{now}).counts,{jobs:0,conversations:0,questions:0});
+});
+
+test('archive waits for PRD, recovery, and remaining attachment parts',()=>{
+ for(const change of [
+  s=>s.questions.q.prd={},
+  s=>s.jobs[0].status='blocked',
+  s=>s.recoveryEvents={ticket:{jobId:'j1',status:'maintenance_required'}},
+  s=>s.reportDeliveries.f.parts=[{messageId:'first'},{}],
+  s=>s.jobs[0].result={outcome:'needs_clarification'}
+ ]){
+  const s=state();change(s);
+  assert.deepEqual(archiveHistory(s,cutoff,{now}).counts,{jobs:0,conversations:0,questions:0});
+ }
+});
+
+test('scheduled archive removes owned old files and preserves unknown and actively referenced files',async t=>{
+ const d=await fixture(t),store=new JsonStore(path.join(d,'agentos.json')),s=state();
+ const owned=path.join(d,'exports','j1'),pinned=path.join(d,'exports','j2'),unmapped=path.join(d,'exports','unknown');
+ for(const dir of [owned,pinned,unmapped]){
+  await aged(path.join(dir,'file'));
+  await utimes(dir,cutoff/1000-100,cutoff/1000-100);
+ }
+ s.jobs.push({...job('active','running',recent,'next'),attachments:[{path:path.join(pinned,'file')}]});
+ await store.write(s);
+ const retention=new HistoryRetention({config:{retentionDays:15,archiveHistory:true,dataDir:d},store,projects:{projects:{}},
+  conversations:{key:t=>t.id,memory:new MemoryService({dataDir:d})}});
+ const result=await retention.run(now);
+ assert.equal(result.files,1);assert.equal(await exists(owned),false);
+ assert.equal(await exists(pinned),true);assert.equal(await exists(unmapped),true);
+ assert.equal((await store.read()).questions.q.archivedAt,new Date(now).toISOString());
+ assert.equal((await retention.run(now)).files,0);
 });

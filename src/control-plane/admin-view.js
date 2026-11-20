@@ -59,7 +59,7 @@ function jobRecord(job, question) {
   const activity = (job.events ?? []).filter((event) => event.type === 'progress' && event.activity).at(-1)?.activity;
   const toolCount = job.result?.environmentEvidence?.toolCount ?? (Number(activity?.total) || 0);
   return {
-    id: job.id, kind: 'job', title: clip(job.originalQuestion ?? job.instruction ?? job.id, 180),
+    archivedAt:job.archivedAt??null, id: job.id, kind: 'job', title: clip(job.originalQuestion ?? job.instruction ?? job.id, 180),
     projectId: job.projectId ?? null, projectName: job.projectName ?? job.projectId ?? '未归属项目',
     stage: job.stage ?? null, status: job.status ?? 'unknown', displayStatus: taskDisplayStatus(job), createdAt: job.createdAt, updatedAt: job.updatedAt,
     durationMs, model: job.result?.model ?? null, reasoningEffort: job.result?.reasoningEffort ?? null,
@@ -69,7 +69,7 @@ function jobRecord(job, question) {
 
 function conversationRecord(turn) {
   return {
-    id: turn.id, kind: 'conversation', title: clip(turn.content ?? turn.id, 180),
+    archivedAt:turn.archivedAt??null, id: turn.id, kind: 'conversation', title: clip(turn.content ?? turn.id, 180),
     projectId: turn.projectId ?? null, projectName: turn.projectId ?? '普通对话', stage: turn.role ?? null,
     status: turn.status ?? 'unknown', createdAt: turn.createdAt, updatedAt: turn.completedAt ?? turn.aiCompletedAt ?? turn.createdAt,
     durationMs: turn.timing?.totalMs ?? elapsed(turn.createdAt, turn.completedAt ?? turn.aiCompletedAt, turn.status),

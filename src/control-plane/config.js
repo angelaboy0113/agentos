@@ -12,6 +12,7 @@ export function controlConfig(overrides = {}) {
     port: Number(overrides.port ?? process.env.AGENTOS_PORT ?? 8787),
     dataDir,
     retentionDays: Number(overrides.retentionDays ?? process.env.AGENTOS_RETENTION_DAYS ?? 0),
+    archiveHistory: overrides.archiveHistory ?? process.env.AGENTOS_ARCHIVE_HISTORY === '1',
     runtimeDir: overrides.runtimeDir ?? process.env.AGENTOS_RUNTIME_DIR ?? null,
     receptionFile: overrides.receptionFile ?? process.env.AGENTOS_RECEPTION_FILE ?? './config/reception.local.json',
     conversationFile: overrides.conversationFile ?? process.env.AGENTOS_CONVERSATION_FILE ?? './config/conversation.local.json',

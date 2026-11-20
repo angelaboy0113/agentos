@@ -4,10 +4,10 @@ import path from 'node:path';
 import {readdir} from 'node:fs/promises';
 import {readFile} from 'node:fs/promises';
 import {realDirectory} from '../shared/retention.js';
-import {pruneHistory,retentionPolicy,sweepArtifacts} from '../shared/retention.js';
+import {archiveHistory,pruneHistory,retentionPolicy,sweepArtifacts} from '../shared/retention.js';
 const DAY=86400000;
 export class HistoryRetention {
- constructor(context){this.context=context;this.policy=retentionPolicy(context.config.retentionDays);this.lastRun=null;this.running=null;}
+ constructor(context){this.context=context;this.policy=retentionPolicy(context.config.retentionDays);if(context.config.archiveHistory)this.policy.archive=true;this.lastRun=null;this.running=null;}
  start(){if(this.timer)return;this.run().catch(()=>{});this.timer=setInterval(()=>this.run().catch(()=>{}),this.policy.intervalMs);this.timer.unref();}
  async stop(){this.closed=true;clearInterval(this.timer);await Promise.allSettled([this.running,this.snapshotRunning].filter(Boolean));}
  async collectSnapshots({apply=true}={}){
@@ -27,8 +27,29 @@ export class HistoryRetention {
   this.running=this.collect(now).catch(error=>{this.lastRun={at:new Date(now).toISOString(),ok:false,code:'RETENTION_FAILED'};console.error('[retention] 清理失败，未清理部分保留，下次重试');throw error;});
   try{return await this.running;}finally{this.running=null;}
  }
+ async archive(now,cutoff){
+  const c=this.context;
+  const projection=await c.store.transact(state=>{
+   const busyJobs=new Set([...(c.reports?.workers?.keys()??[])].map(key=>key.split(':')[0]));
+   const busyCards=new Set(c.cards?.workers?.keys()??[]);
+   const result=archiveHistory(state,cutoff,{now,busyJobs,busyCards});
+   state.retention={days:this.policy.days,at:new Date(now).toISOString(),mode:'archive',counts:result.counts};
+   return {...result,sessionKeys:new Set((state.conversations??[]).filter(turn=>!turn.archivedAt).map(turn=>c.conversations.key(turn)))};
+  });
+  await c.conversations.memory.prune(cutoff,projection.expiredRefs,{preserveTombstones:true});
+  await c.conversations.engine?.prune(cutoff,projection.sessionKeys);
+  // Only exact, known task-owned directory names are eligible. Dates alone
+  // cannot establish ownership of an arbitrary file in the runtime.
+  let files=0;
+  for(const name of ['exports','website-evidence','attachments','worktrees/analysis-resources'])
+   files+=await sweepArtifacts({root:path.join(c.config.dataDir,name),cutoff,...projection});
+  await this.collectSnapshots();
+  this.lastRun={at:new Date(now).toISOString(),ok:true,days:this.policy.days,mode:'archive',counts:projection.counts,files};
+  console.log('[retention]',JSON.stringify(this.lastRun));return this.lastRun;
+ }
  async collect(now){
   const c=this.context,cutoff=now-this.policy.days*DAY;
+  if(this.policy.archive)return this.archive(now,cutoff);
   // Serialize with message/job commits. Active records are kept, never cancelled by retention.
   const projection=await c.store.transact(state=>{
    const busyJobs=new Set([...(c.reports?.workers?.keys()??[])].map(key=>key.split(':')[0]));

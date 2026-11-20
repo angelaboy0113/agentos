@@ -397,7 +397,7 @@ export class ConversationService {
       questionIds.add(q.id); q = state.questions?.[q.parentQuestionId];
     }
     if (scoped) questionIds.add(turn.questionId);
-    const preceding = (state.conversations ?? []).filter((item) => item.id !== turn.id && item.chatId === turn.chatId
+    const preceding = (state.conversations ?? []).filter((item) => !item.archivedAt && item.id !== turn.id && item.chatId === turn.chatId
       && item.profile === turn.profile && (item.visibility!=='requester'||turn.visibility==='requester'&&item.senderId===turn.senderId) && (scoped ? questionIds.has(item.questionId) : item.senderId === turn.senderId) && item.status === 'sent'
       && conversationProject(item) === projectId);
     const memory = scoped ? { enabled: false, available: true, policy: 'question-scoped-native-v2' } : await this.memory.retrieve(state, turn, projectId);
@@ -414,7 +414,7 @@ export class ConversationService {
     relatedMessages.add(turn.id); relatedMessages.add(turn.messageId);
     if(turn.directoryChannel)return {requestId:turn.id,questionId:turn.questionId,role:turn.role,nativeSession:true,currentActor:{senderId:turn.senderId,profile:turn.profile},project:{id:projectId},message:turn.content,history:history.map(t=>({user:t.content,assistant:t.response})),attachments:[],currentAttachmentIds:[],contactDirectory:await this.context.contacts.catalog(turn),delivery:{visibility:'requester_and_owner'},channel:{kind:'contacts_only',allowedActions:['lookup_contact','reply'],rule:'只根据姓名或完整工号调用lookup_contact查询；联系人事实必须来自工具结果。需要补充姓名/工号时用reply，不得编造资料，不得创建开发、数据库或环境任务。结果在群内私有卡片中展示，仅提问者和群主可见。'}};
     const explicitJob = job => !scoped && isAdministrator(projects,turn) && String(turn.content).split(/[^A-Za-z0-9_-]+/).includes(job.id);
-    const jobs = (memory.available === false ? [] : state.jobs).filter((job) => job.chatId === turn.chatId && job.projectId === projectId && (!isPrivate(state,job)||turn.visibility==='requester'&&job.senderId===turn.senderId)
+    const jobs = (memory.available === false ? [] : state.jobs).filter((job) => !job.archivedAt && job.chatId === turn.chatId && job.projectId === projectId && (!isPrivate(state,job)||turn.visibility==='requester'&&job.senderId===turn.senderId)
       && (explicitJob(job) || (job.originProfile ?? job.agentProfile ?? null) === (turn.profile ?? null))
       && (scoped ? questionIds.has(job.questionId) : relatedMessages.has(job.originMessageId) || relatedMessages.has(job.sourceMessageId) || explicitJob(job))
       && !suppressed.has(`job:${job.id}`) && !suppressed.has(`conversation:${job.sourceMessageId}`) && !suppressedMessages.has(job.originMessageId)).slice(-20).map((job) => ({
@@ -442,6 +442,9 @@ export class ConversationService {
       questionResult: jobs.filter(job=>job.status==='completed'&&job.finalMessage&&job.evidence?.applicability==='historical_snapshot_not_current_check').slice(-1).map(job=>({jobId:job.id,sourceEnvironment:job.sourceEnvironment,recordedAt:job.evidence.recordedAt,finalMessage:job.finalMessage,policy:'已完成任务的历史交付，只可用于同话题解释或改写；不是新查询、实时状态或操作授权。'})),
       questionTask: turn.questionId ? questionJob(state, turn.questionId)?.id ?? null : null,
       questionOriginalRequest: turn.questionId ? questionRequest(state, turn.questionId) : null,
+      ...([...questionIds].some(id=>state.questions?.[id]?.archivedAt) ? {
+        archivedQuestionHistory:'此前任务明细已归档。原问题与已交付内容只用于识别追问对象；当前状态或新证据须发起新调查。'
+      } : {}),
       deliveredFiles:{files:deliveredFiles.inputs.map(({id,filename,source})=>({attachmentId:id,filename,sourceJobId:source.sourceJobId,sourceEnvironment:source.sourceEnvironment,sha256:source.sha256,deliveredAt:source.deliveredAt})),unavailable:deliveredFiles.unavailable,
         rule:'这些是本问题可见链已经实际交付的文件，不是当前数据库。文件问题或修改必须创建只读analysis并携带对应attachmentId，Runner会下载完整原文件；不要让用户重传，不以历史文字或前三行猜全表。只做选列/改表头/筛选/排序时可用revise_report_file生成新核验CSV，不重新查询数据库；新增字段用import_task_input导入原键、完整in_set补查，再append_report_columns关联并显式格式化，不刷新旧列；新金额或业务口径另按原权限核验。'} ,
       currentActor: { senderId: turn.senderId, profile: turn.profile },

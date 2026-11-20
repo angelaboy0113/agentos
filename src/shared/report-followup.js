@@ -20,6 +20,10 @@ export async function deliveredReportInputs(state,actor,projectId,dataDir,{attac
   if(attachmentId&&id!==attachmentId)continue;
   const job=jobs.find(j=>j.id===entry.sourceJobId),item=job.reportFiles?.find(f=>f.id===entry.item.id&&f.sha256===entry.item.sha256&&f.verificationHash===entry.item.verificationHash);
   if(!item)continue;
+  if(job.archivedAt){
+   unavailable.push({fileId:item.id,sourceJobId:job.id,reason:'本地交付缓存已归档。原文件仍可从飞书投递消息打开；需要按当前数据重查时请发起新调查。'});
+   continue;
+  }
   try{
    const {file}=await reportFile(dataDir,entry.sourceJobId,item,{includeContent:false});
    if(inputs.some(a=>a.id===id))continue;

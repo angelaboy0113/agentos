@@ -106,6 +106,7 @@ async function applyCardAction(context, event) {
     // Recheck inside the same state transaction as mutation; old cards cannot control a new attempt.
     const guard = (freshState, current) => {
       const freshCard = freshState.cardMessages?.[key];
+      if(current.archivedAt)throw new Error('这张卡的任务明细已归档。如需重新排查，请在原话题追问。');
       if (freshCard?.messageId !== event.message_id || freshCard.destination.profile !== profile
         || current.chatId !== cardActionChat(freshCard,event) || (questionId ? freshState.questions?.[questionId]?.profile : current.agentProfile) !== profile
         || (questionId && questionJob(freshState, questionId)?.id !== current.id)

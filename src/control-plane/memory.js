@@ -43,7 +43,7 @@ export function terms(text) {
 
 // Filter BEFORE ranking. No implicit cross-person/profile/group/project sharing, including administrators.
 export function memorySources(state, turn, projectId, suppressed = new Set()) {
-  const conversations = (state.conversations ?? []).filter((item) => item.visibility!=='requester' && item.id !== turn.id && item.status === 'sent'
+  const conversations = (state.conversations ?? []).filter((item) => !item.archivedAt && item.visibility!=='requester' && item.id !== turn.id && item.status === 'sent'
     && item.chatId === turn.chatId && (item.profile ?? null) === (turn.profile ?? null)
     && item.senderId === turn.senderId && memoryProject(item) === projectId && !suppressed.has(`conversation:${item.id}`));
   const ids = new Set(conversations.flatMap((item) => [item.id, item.messageId]).filter(Boolean));
@@ -52,6 +52,7 @@ export function memorySources(state, turn, projectId, suppressed = new Set()) {
     receiptOnly: Boolean(item.outcome?.jobId || item.outcome?.nextJobId),
     evidence: { applicability: 'historical_conversation_not_current_fact', requiresRecheckForCurrentSource: true } }));
   for (const job of state.jobs ?? []) {
+    if(job.archivedAt)continue;
     if (job.visibility==='requester' || job.environmentAccess || job.chatId !== turn.chatId || job.projectId !== projectId || (job.originProfile ?? null) !== (turn.profile ?? null)
       || !(ids.has(job.originMessageId) || ids.has(job.sourceMessageId))
       || !['completed', 'cancelled', 'failed', 'blocked'].includes(job.status)) continue;
@@ -143,14 +144,14 @@ export class MemoryService {
       }
     });
   }
-  async prune(cutoff, expiredRefs) {
+  async prune(cutoff, expiredRefs, {preserveTombstones=false}={}) {
     return this.serial(async()=>{
       const cache=await this.read();
       for(const [key,scope] of Object.entries(cache.scopes)) {
         scope.items=(scope.items??[]).filter(x=>!expiredRefs.has(x.ref));
         if(Date.parse(scope.updatedAt)<cutoff||!scope.items.length)delete cache.scopes[key];
       }
-      for(const [key,refs] of Object.entries(cache.tombstones)) {
+      if(!preserveTombstones)for(const [key,refs] of Object.entries(cache.tombstones)) {
         cache.tombstones[key]=refs.filter(ref=>!expiredRefs.has(ref));
         if(!cache.tombstones[key].length)delete cache.tombstones[key];
       }

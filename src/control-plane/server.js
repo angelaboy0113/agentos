@@ -157,7 +157,7 @@ export async function createControlPlane(overrides = {}) {
 }
 
 export async function repairStaleTerminalQuestionCards(context) {
-  const entries=await stateView(context.store,s=>Object.entries(s.cardMessages??{}).map(([key,saved])=>({key,saved,status:questionJob(s,key.replace(/^question:/,''))?.status}))), repairs = [];
+  const entries=await stateView(context.store,s=>Object.entries(s.cardMessages??{}).map(([key,saved])=>({key,saved,status:s.questions?.[key.slice(9)]?.archivedAt?null:questionJob(s,key.replace(/^question:/,''))?.status}))), repairs = [];
   const terminalLabels = { cancelled: '已取消', failed: '执行失败', blocked: '任务受阻', completed: '当前阶段已完成' };
   for (const {key,saved,status} of entries) {
     if (!key.startsWith('question:') || !saved.messageId) continue;

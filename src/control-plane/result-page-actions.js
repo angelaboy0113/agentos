@@ -17,9 +17,10 @@ export async function handleResultPage(context, event) {
       const [key, entry] = found;
       if(entry.destination.visibility==='requester'&&entry.destination.openId!==event.operator_id)throw new Error('private recipient mismatch');
       const sourceKey=entry.destination.sourceKey??key;
-      const view = sourceKey.startsWith('question:') ? questionView(state, sourceKey.slice(9), context.projects) : null;
-      const record = view ? view.question : sourceKey.startsWith('job:') ? state.jobs.find((job) => job.id === sourceKey.split(':')[1])
-        : state.conversations?.find((turn) => `chat:${turn.id}` === sourceKey);
+      const question = sourceKey.startsWith('question:') ? state.questions?.[sourceKey.slice(9)] : null;
+      const view = question && !question.archivedAt ? questionView(state, question.id, context.projects) : null;
+      const record = question ?? (sourceKey.startsWith('job:') ? state.jobs.find((job) => job.id === sourceKey.split(':')[1])
+        : state.conversations?.find((turn) => `chat:${turn.id}` === sourceKey));
       if (!record || record.chatId !== cardActionChat(entry,event) || !entry.terminal) throw new Error('wrong scope');
       const admin = isAdministrator(context.projects, { profile: event.agent_profile, senderId: event.operator_id });
       const creator = isTaskCreator(context.projects, record, { profile: event.agent_profile, senderId: event.operator_id });
@@ -29,7 +30,7 @@ export async function handleResultPage(context, event) {
         || value.version !== detailVersion(pages) || !containsPageAction(entry.card, value)) throw new Error('stale page');
       // Validate the button against the published version first. Then rebuild only
       // presentation from the original evidence, including cards saved by older versions.
-      const source = view ? view.resultText : sourceKey.startsWith('job:') ? record.result?.finalMessage : record.response;
+      const source = record.archivedAt ? null : view ? view.resultText : sourceKey.startsWith('job:') ? record.result?.finalMessage : record.response;
       const formatted = typeof source === 'string' && source.trim() ? resultPages(source) : pages;
       entry.detailPages = formatted;
       entry.card = withResultPage(entry.card, formatted, Math.min(value.page, formatted.length - 1), true);

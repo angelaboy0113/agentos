@@ -14,7 +14,7 @@ export function retentionPolicy(days=0){
  if(!Number.isInteger(days)||days<0||days>3650)throw new Error('Invalid retentionDays');
  return {enabled:days>0,days,intervalMs:DAY};
 }
-export function pruneHistory(state,cutoff,{busyJobs=new Set(),busyCards=new Set()}={}){
+function expiredHistory(state,cutoff,{busyJobs=new Set(),busyCards=new Set(),archive=false}={}){
  // Connected records are retained together: stages, supplements, enrollments and cross-job evidence.
  const nodes=[...(state.jobs??[]),...(state.conversations??[]),...values(state.questions),...values(state.environmentEnrollments)];
  const parent=new Map(nodes.map(x=>[x.id,x.id]));
@@ -27,7 +27,19 @@ export function pruneHistory(state,cutoff,{busyJobs=new Set(),busyCards=new Set(
  }
  const retained=new Set();
  const keep=id=>{if(parent.has(id))retained.add(root(id));};
- for(const x of nodes)if(!old(x,cutoff))keep(x.id);
+ for(const x of nodes)if(!old(x,cutoff)||!archive&&x.archivedAt)keep(x.id);
+ if(archive){
+  for(const q of values(state.questions))if(q.prd)keep(q.id);
+  for(const t of state.conversations??[])if(t.outcome?.contactCandidates?.length||t.prdDraftReading)keep(t.id);
+  for(const j of state.jobs??[])if(j.status==='blocked'||j.status!=='cancelled'&&(
+   ['needs_approval','needs_clarification'].includes(j.result?.outcome)||j.result?.browserLoginRequired))keep(j.id);
+  for(const e of values(state.recoveryEvents))if(['queued','diagnosing','delegated','maintenance_required'].includes(e.status)){
+   keep(e.jobId);keep(e.questionId);
+  }
+  for(const entry of Object.values(state.reportDeliveries??{})){
+   if(!entry.superseded&&entry.parts?.some(part=>!part.messageId))keep(entry.sourceJobId);
+  }
+ }
  for(const j of state.jobs??[])if(!terminalJobs.has(j.status)||busyJobs.has(j.id))keep(j.id);
  for(const t of state.conversations??[])if(activeTurns.has(t.status)||t.setupPending)keep(t.id);
  for(const e of values(state.environmentEnrollments))if(!closedEnrollments.has(e.status))keep(e.id);
@@ -35,7 +47,10 @@ export function pruneHistory(state,cutoff,{busyJobs=new Set(),busyCards=new Set(
   keep(key.split(':')[1]);
  }
  for(const e of [...values(state.reportDeliveries),...values(state.websiteEvidenceDeliveries),...values(state.stickerDeliveries),...values(state.longInvestigationNotices)])if(!e.messageId&&!e.superseded) {keep(e.sourceJobId);keep(e.questionId);}
- const removed=new Set(nodes.filter(x=>!retained.has(root(x.id))).map(x=>x.id));
+ return new Set(nodes.filter(x=>!retained.has(root(x.id))).map(x=>x.id));
+}
+export function pruneHistory(state,cutoff,options){
+ const removed=expiredHistory(state,cutoff,options);
  const counts={};
  for(const key of ['jobs','conversations'])if(state[key]){const n=state[key].length;state[key]=state[key].filter(x=>!removed.has(x.id));counts[key]=n-state[key].length;}
  for(const key of ['questions','environmentEnrollments'])for(const [id] of Object.entries(state[key]??{}))if(removed.has(id)){delete state[key][id];counts[key]=(counts[key]??0)+1;}
@@ -55,6 +70,57 @@ export function pruneHistory(state,cutoff,{busyJobs=new Set(),busyCards=new Set(
  const paths=new Set();visit(state,v=>{if(path.isAbsolute(v))paths.add(path.resolve(v));});
  return {counts,removed,keptIds,paths};
 }
+const select=(value,keys)=>Object.fromEntries(keys.filter(key=>value[key]!==undefined).map(key=>[key,value[key]]));
+const jobRecordKeys=['id','questionId','missionId','stage','workflow','status','projectId','projectName','chatId','senderId','originProfile','agentProfile',
+ 'originMessageId','originChatType','sourceMessageId','replyToMessageId','visibility','createdAt','updatedAt','completedAt','sourceEnvironment','instruction','originalQuestion',
+ 'isMaintenanceTest','nextJobId','reportFiles'];
+const resultRecordKeys=['outcome','summary','finalMessage','model','reasoningEffort','timing'];
+const turnRecordKeys=['id','questionId','messageId','parentId','rootId','chatId','chatType','senderId','senderName','profile','projectId','role','visibility',
+ 'directoryChannel','content','response','responseIds','feedbackMessageId','status','createdAt','updatedAt','completedAt','aiCompletedAt','timing','outcome','credentialSubmission','isMaintenanceTest'];
+const turnDecisionKeys=['action','intent','reply','reason','jobId','sourceEnvironment','responseStyle','receptionIntent'];
+
+export function archiveHistory(state,cutoff,{now=Date.now(),...options}={}){
+ const eligible=expiredHistory(state,cutoff,{...options,archive:true});
+ const expiredRefs=new Set(),eligibleIds=new Set(),counts={jobs:0,conversations:0,questions:0};
+ const archivedAt=new Date(now).toISOString();
+ const archive=(key,record,fields,ref)=>{
+  if(!eligible.has(record.id))return record;
+  eligibleIds.add(record.id);
+  if(ref)expiredRefs.add(ref+':'+record.id);
+  if(record.archivedAt)return record;
+  counts[key]++;
+  return {...select(record,fields),archivedAt};
+ };
+ if(state.jobs)state.jobs=state.jobs.map(job=>{
+  const summary=archive('jobs',job,jobRecordKeys,'job');
+  if(summary===job)return job;
+  if(job.result){
+   summary.result=select(job.result,resultRecordKeys);
+   const progress=(job.events??[]).findLast(e=>e.type==='progress'&&e.activity);
+   const toolCount=job.result.environmentEvidence?.toolCount??progress?.activity?.total;
+   if(toolCount!=null)summary.result.environmentEvidence={toolCount};
+  }
+  // Keep the terminal time used by the dashboard without retaining execution traces.
+  summary.events=(job.events??[]).filter(e=>['completed','failed','blocked','cancelled'].includes(e.type)).map(e=>select(e,['id','at','type']));
+  return summary;
+ });
+ if(state.conversations)state.conversations=state.conversations.map(turn=>{
+  const summary=archive('conversations',turn,turnRecordKeys,'conversation');
+  if(summary===turn)return turn;
+  if(turn.decision)summary.decision=select(turn.decision,turnDecisionKeys);
+  // The leaderboard distinguishes an attachment-only question from an empty message.
+  if(turn.attachments?.length)summary.attachments=[{}];
+  return summary;
+ });
+ for(const q of values(state.questions))if(eligible.has(q.id)){
+  eligibleIds.add(q.id);
+  if(!q.archivedAt){q.archivedAt=archivedAt;counts.questions++;}
+ }
+ const paths=new Set();
+ visit(state,value=>{if(path.isAbsolute(value))paths.add(path.resolve(value));});
+ return {counts,expiredRefs,eligibleIds,paths};
+}
+
 const within=(root,p)=>p===root||p.startsWith(root+path.sep);
 // Reject symlinks in every existing ancestor, not merely the leaf.
 export async function realDirectory(directory){
@@ -74,12 +140,12 @@ async function treeTime(file){
  }
  return latest;
 }
-export async function sweepArtifacts({root,cutoff,paths=new Set(),keptIds=new Set(),pattern,manifest=false,depth=1}){
+export async function sweepArtifacts({root,cutoff,paths=new Set(),keptIds=new Set(),eligibleIds,pattern,manifest=false,depth=1}){
  if(!await realDirectory(root))return 0;
  let removed=0;
  for(const name of await readdir(root)){
   const full=path.join(root,name),s=await lstat(full);
-  if(s.isSymbolicLink()||pattern&&!pattern.test(name))continue;
+  if(s.isSymbolicLink()||pattern&&!pattern.test(name)||eligibleIds&&!eligibleIds.has(name))continue;
   if(depth>1&&s.isDirectory()){removed+=await sweepArtifacts({root:full,cutoff,paths,keptIds,depth:depth-1});continue;}
   if([...paths].some(p=>within(full,p)||within(p,full))||[...keptIds].some(id=>name.includes(id)))continue;
   if(manifest){try{const m=JSON.parse(await readFile(path.join(full,'source-manifest.json'),'utf8'));if(m.policy!=='isolated-environment-source-v1'||path.resolve(m.workspace)!==path.join(full,'workspace'))continue;}catch{continue;}}

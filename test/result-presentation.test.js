@@ -208,3 +208,25 @@ test('multi-question replies retain question order, local gaps and inline tables
     assert.match(rules, /不得为分点展示重复调查/);
   }
 });
+
+test('archived question pages still open from the original card with its original permissions', async t => {
+ const dir=await mkdtemp(path.join(os.tmpdir(),'agentos-archived-pages-'));
+ t.after(()=>rm(dir,{recursive:true,force:true}));
+ const store=new JsonStore(path.join(dir,'state.json'));
+ const at='2026-10-01T00:00:00Z',pages=['原卡首页','原卡第二页'];
+ const turn={id:'turn',questionId:'q',archivedAt:at,status:'sent',profile:'owner',chatId:'group',senderId:'creator',response:'后台摘要'};
+ const card=withResultPage(conversationCard(turn),pages);
+ await store.transact(s=>{
+  s.questions={q:{id:'q',rootTurnId:turn.id,latestTurnId:turn.id,archivedAt:at,chatId:'group',profile:'owner',senderId:'creator'}};
+  s.conversations=[turn];s.cardMessages={'question:q':{messageId:'old-card',destination:{profile:'owner'},terminal:true,card,detailPages:pages,revision:1}};
+ });
+ let flushed=0;
+ const context={store,projects:{},agents:{agents:{owner_intake:{profile:'owner'}}},cards:{flush:async()=>{flushed++;}}};
+ const event={type:'card.action.trigger',event_id:'archive-page',operator_id:'creator',agent_profile:'owner',chat_id:'group',message_id:'old-card',
+  action_value:{action:'result_page',page:1,version:detailVersion(pages)}};
+ assert.equal((await handleCardAction(context,{...event,operator_id:'other'})).ok,false);
+ assert.equal((await handleCardAction(context,event)).ok,true);
+ const updated=(await store.read()).cardMessages['question:q'];
+ assert.equal(updated.messageId,'old-card');assert.deepEqual(updated.detailPages,pages);
+ assert.match(JSON.stringify(updated.card),/原卡第二页/);assert.equal(flushed,1);
+});

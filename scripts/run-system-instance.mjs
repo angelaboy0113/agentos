@@ -55,7 +55,7 @@ for (const key of Object.keys(process.env)) if (/^(AGENTOS_|FEISHU_|LARKSUITE_CL
 Object.assign(process.env, {
   ...officeEnvironment,
   AGENTOS_ANALYSIS_ENGINE: analysisEngine,
-  AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
+  AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_ARCHIVE_HISTORY: instance.archiveHistory === true ? '1' : '0', AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),
   AGENTOS_DATA_DIR: path.join(runtime, 'data'), AGENTOS_RUNNER_WORKTREE_ROOT: path.join(runtime, 'data', 'worktrees'),
   AGENTOS_CREDENTIAL_VAULT_DIR: path.join(runtime, 'secure', 'credential-vault'),
