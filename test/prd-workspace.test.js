@@ -24,6 +24,22 @@ const profile = 'knowledge-ltx';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2l8AAAAASUVORK5CYII=', 'base64');
 const md = '# 订单补贴状态\n\n**评审稿**\n\n|系统|影响|\n|---|---|\n|LTX|展示|\n|TPM|状态来源|\n\n## 原型图\n';
 
+test('PRD publisher removes byte-matched prototype and input image duplicates from Markdown', () => {
+  const source = Buffer.concat([png, Buffer.from([0])]);
+  const sourceMarkup = '![' + '初稿' + '](data:image/png;base64,' + source.toString('base64') + ')';
+  const prototypeMarkup = '![' + '新原型' + '](data:image/png;base64,' + png.toString('base64') + ')';
+  const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+  const result = prdMarkdown(md + sourceMarkup + '\n' + prototypeMarkup, {
+    prototypeHash: sha(png), referenceHashes: [sha(source)],
+  });
+  assert.match(result, /初稿图片作为设计参考/);
+  assert.match(result, /新原型见文末/);
+  assert.match(result, /\|TPM\|状态来源\|/);
+  assert.doesNotMatch(result, /base64/);
+  assert.throws(() => prdMarkdown(md + sourceMarkup, { prototypeHash: sha(png) }), /PRD_NATIVE_BLOCK_CONTENT/);
+  assert.throws(() => prdMarkdown(md + '![外部图](https://example.org/image.png)'), /PRD_NATIVE_BLOCK_CONTENT/);
+});
+
 async function fixture(t, cli, ltx = {}, feishu) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agentos-prd-')));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));

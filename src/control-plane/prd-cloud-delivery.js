@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { runLarkCli } from './lark-cli.js';
 import { reportFile } from '../shared/report-files.js';
@@ -23,8 +24,17 @@ function documentIdentity(result) {
   return { token, url: url.href };
 }
 
-export function prdMarkdown(body) {
-  const text = body.trim();
+export function prdMarkdown(body, { prototypeHash, referenceHashes = [] } = {}) {
+  const references = new Set(referenceHashes);
+  const text = body.replace(/!\[[^\]\r\n]*\]\(data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})\)/gi,
+    (markup, base64) => {
+      const bytes = Buffer.from(base64, 'base64');
+      if (bytes.toString('base64') !== base64) return markup;
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      if (hash === prototypeHash) return '（新原型见文末）';
+      if (references.has(hash)) return '（初稿图片作为设计参考）';
+      return markup;
+    }).trim();
   if (!/^#{1,3}\s+\S/m.test(text) || !/^\s*\|.+\|\s*$/m.test(text) || !/\*\*[^*]+\*\*/.test(text)
     || /<\/?[A-Za-z][^>]*>|!\[[^\]]*\]\(|(?:data|javascript):/i.test(text)) throw Error('PRD_NATIVE_BLOCK_CONTENT');
   return text;
@@ -137,7 +147,10 @@ export class PrdCloudDelivery {
       }
       const dir = this.context.config.dataDir;
       const [{ content }, { file: image }] = await Promise.all(files.map((f, i) => reportFile(dir, job.id, f, { includeContent: i === 0 })));
-      const markdown = prdMarkdown(content.toString('utf8'));
+      const referenceHashes = (job.attachments ?? []).filter(a => a.source?.kind === 'authorized-prd-document-image'
+        && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
+        .map(a => a.source.sha256);
+      const markdown = prdMarkdown(content.toString('utf8'), { prototypeHash: files[1].sha256, referenceHashes });
       const parent = path.join(dir, 'prd-delivery');
       await mkdir(parent, { recursive: true, mode: 0o700 });
       const cwd = await mkdtemp(path.join(parent, 'export-'));
