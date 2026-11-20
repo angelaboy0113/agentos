@@ -3,7 +3,7 @@ import {hashFile} from './file-digest.js';
 import {lstat,realpath,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
-export async function reportFile(dataDir,jobId,item,{includeContent=true}={}){
+export async function reportFile(dataDir,jobId,item,{includeContent=true,includeReceipt=false}={}){
  if(!/^[A-Za-z0-9_-]{1,100}$/.test(jobId)||!/^report-[a-f0-9-]{36}$/.test(item?.id??'')||item.filename!==item.id+'.'+(item.kind==='document'&&documentFormats.includes(item.format)?item.format:'csv')||item.complete!==true||!Number.isSafeInteger(item.rowCount)||item.rowCount<0||!Number.isSafeInteger(item.bytes)||item.bytes<1||!/^[a-f0-9]{64}$/.test(item.sha256??''))throw new Error('报表文件登记信息无效');
  const root=await realpath(path.join(dataDir,'exports')),file=path.join(dataDir,'exports',jobId,item.filename);
  const jobRoot=path.join(dataDir,'exports',jobId),jobInfo=await lstat(jobRoot),jobActual=await realpath(jobRoot);
@@ -18,7 +18,7 @@ export async function reportFile(dataDir,jobId,item,{includeContent=true}={}){
  const receipt=JSON.parse(body.toString());
  if((receipt.version!==1&&!(receipt.version===2&&item.kind==='document'&&receipt.kind==='document'&&receipt.binding?.jobId===jobId&&receipt.file?.format===item.format))||receipt.status!=='verified'||receipt.file?.sha256!==item.sha256||receipt.file?.id!==item.id||receipt.coverage?.rowCount!==item.rowCount)throw new Error('报表核验记录与文件不符');
  if(item.kind==='document')await inspectDocumentBytes(item.format,await readFile(actual));
- return {file:actual,...(includeContent?{content:await readFile(actual)}:{})};
+ return {file:actual,...(includeContent?{content:await readFile(actual)}:{}),...(includeReceipt?{receipt}:{})};
 }
 export async function validateReportFiles(dataDir,jobId,files){
  if(files===undefined)return [];

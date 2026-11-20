@@ -26,3 +26,31 @@ test('capture gate reports ongoing requests, spinners and blank pages without cl
  pending.pendingReads.clear();pending.page.evaluate=async()=>({loading:true,blank:false,documentReady:true,signature:'same'});result=await waitForCaptureReady(pending,{timeoutMs:30,quietMs:5,sampleMs:5});assert.equal(result.loadingIndicator,true);assert.equal(result.status,'loading_timeout');
  pending.page.evaluate=async()=>({loading:false,blank:true,documentReady:true,signature:'same'});assert.equal((await waitForCaptureReady(pending,{timeoutMs:30,quietMs:5,sampleMs:5})).status,'blank_timeout');
 });
+
+test('PRD captures a real browser PNG only for the confirmed visible target',async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'prd-capture-'));
+ const server=http.createServer((req,res)=>{
+  res.setHeader('content-type','text/html; charset=utf-8');
+  res.end(req.url==='/detail/pane'?'<main><h1>内嵌订单明细</h1><p>参考示意</p></main>':
+   '<main style="background:#b34737;padding:30px"><h1>订单详情</h1><h2 hidden>首页</h2><p>本页模拟测试数据</p><button>查看</button><iframe src="/detail/pane"></iframe></main>');
+ });
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP prd-capture.test 127.0.0.1']})};
+ const browser=new WebsiteBrowser(dir,driver);
+ t.after(async()=>{await browser.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
+ const baseUrl=`http://prd-capture.test:${server.address().port}/detail`,environment={projectId:'orders',tier:'uat',baseUrl};
+ const job={id:'prd-capture-job',projectId:'orders',sourceEnvironment:'sit',prd:{auto:true,revision:1}};
+ await browser.run(job,environment,'browser_open');
+ await assert.rejects(browser.run(job,environment,'browser_screenshot',{}),{code:'BROWSER_ARGUMENTS'});
+ await assert.rejects(browser.run(job,environment,'browser_screenshot',{url:baseUrl,targetText:'首页'}),{code:'BROWSER_CONTENT_CHANGED'});
+ const captured=await browser.run(job,environment,'browser_screenshot',{url:baseUrl,targetText:'订单详情'});
+ assert.equal(captured.designReference.pageUrl,baseUrl);
+ assert.ok(captured.designReference.bytes>100);
+ assert.equal(captured.screenshot,undefined);
+ const frames=await browser.run(job,environment,'browser_frames');
+ const pane=frames.frames.find(frame=>frame.url===baseUrl+'/pane');
+ await browser.run(job,environment,'browser_frame',{ref:pane.ref});
+ const framed=await browser.run(job,environment,'browser_screenshot',{url:pane.url,targetText:'内嵌订单明细'});
+ assert.equal(framed.designReference.pageUrl,pane.url);
+ assert.ok(framed.designReference.bytes>100);
+});

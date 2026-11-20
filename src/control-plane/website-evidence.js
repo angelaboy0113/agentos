@@ -18,11 +18,13 @@ export async function websiteEvidenceFile(dataDir,jobId,item){
 // The tool response never exposes an image path. The native renderer reads a
 // host-written receipt scoped to this task, environment and design revision.
 export async function savePrdDesignReference(dataDir, job, item) {
+ if(!/^https?:\/\//.test(item.pageUrl??'')||!job.projectId||!(job.originProfile??job.agentProfile))throw new Error('Invalid PRD screenshot scope');
  await websiteEvidenceFile(dataDir,job.id,item);
  const dir=path.join(dataDir,'website-evidence',job.id);
  const target=path.join(dir,'prd-'+job.prd.revision+'.json');
  const temp=path.join(dir,item.name+'.ref');
- await writeFile(temp,JSON.stringify({jobId:job.id,questionId:job.questionId,environment:job.sourceEnvironment,revision:job.prd.revision,item}),{mode:0o600,flag:'wx'});
+ await writeFile(temp,JSON.stringify({capture:'live-page-v1',jobId:job.id,questionId:job.questionId,projectId:job.projectId,
+  profile:job.originProfile??job.agentProfile,environment:job.sourceEnvironment,revision:job.prd.revision,item}),{mode:0o600,flag:'wx'});
  await rename(temp,target);
 }
 export class WebsiteEvidenceDelivery {

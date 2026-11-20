@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { runLarkCli } from './lark-cli.js';
 import { reportFile } from '../shared/report-files.js';
+import { readPrdDesignReference } from '../shared/image-generation.js';
 import { reportEligible } from '../shared/report-acceptance.js';
 import { prdDocumentTitle, prdIntentDigest } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
@@ -146,7 +147,19 @@ export class PrdCloudDelivery {
         return;
       }
       const dir = this.context.config.dataDir;
-      const [{ content }, { file: image }] = await Promise.all(files.map((f, i) => reportFile(dir, job.id, f, { includeContent: i === 0 })));
+      const [{ content }, { file: image, receipt }] = await Promise.all(files.map((f, i) =>
+        reportFile(dir, job.id, f, { includeContent: i === 0, includeReceipt: i === 1 })));
+      const reference = await readPrdDesignReference(dir, job);
+      const provenance = receipt.request?.imageGeneration;
+      if (!reference || provenance?.status !== 'verified' || provenance.provider !== 'codex-native'
+        || provenance.sha256 !== files[1].sha256 || provenance.inputHashes?.[0] !== reference.sha256
+        || provenance.referenceKinds?.[0] !== 'website-design-reference'
+        || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id
+        || provenance.binding?.projectId !== q.projectId || provenance.binding?.profile !== q.profile
+        || provenance.binding?.environment !== job.sourceEnvironment || provenance.binding?.generation !== q.generation) {
+        await save('artifacts_missing', { notice: '原型缺少本轮真实目标页面截图的生成凭据。请先取得对应系统和环境的截图，再重做原型。' });
+        return;
+      }
       const referenceHashes = (job.attachments ?? []).filter(a => a.source?.kind === 'authorized-prd-document-image'
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
         .map(a => a.source.sha256);

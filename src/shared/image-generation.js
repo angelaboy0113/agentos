@@ -30,20 +30,28 @@ async function safeBytes(file,root=null){
  let p=path.parse(resolved).root;for(const part of resolved.slice(p.length).split(path.sep)){p=path.join(p,part);if((await lstat(p)).isSymbolicLink())throw failure('IMAGE_PATH','图片路径不能包含符号链接');}
  const handle=await open(resolved,'r');try{const a=await handle.stat(),b=await lstat(resolved);if(!a.isFile()||a.nlink!==1||a.ino!==b.ino||a.dev!==b.dev||await realpath(resolved)!==resolved)throw failure('IMAGE_PATH','图片必须是独立普通文件');const bytes=await handle.readFile(),after=await handle.stat();if(after.size!==a.size||after.mtimeMs!==a.mtimeMs)throw failure('IMAGE_PATH','图片读取时发生变化');return {bytes,mtimeMs:a.mtimeMs};}finally{await handle.close();}
 }
-export async function nativeImageReferences(dataDir,job){
- const refs=[],seen=new Set();
+export async function readPrdDesignReference(dataDir,job){
  if(job.prd?.auto&&/^[A-Za-z0-9_-]+$/.test(job.id)&&Number.isSafeInteger(job.prd.revision)){
   const dir=path.join(dataDir,'website-evidence',job.id),manifest=path.join(dir,'prd-'+job.prd.revision+'.json');
   let receipt;
   try{receipt=JSON.parse((await safeBytes(manifest)).bytes);}catch(error){if(error.code!=='ENOENT')throw error;}
-  if(receipt){
-   if(receipt.jobId!==job.id||receipt.questionId!==job.questionId||receipt.environment!==job.sourceEnvironment||receipt.revision!==job.prd.revision||!/^[-a-f0-9]+\.png$/.test(receipt.item?.name))throw failure('IMAGE_INPUT','原型参考范围不匹配');
+  if(receipt?.capture==='live-page-v1'){
+   if(receipt.jobId!==job.id||receipt.questionId!==job.questionId||receipt.projectId!==job.projectId||
+    receipt.profile!==(job.originProfile??job.agentProfile)||receipt.environment!==job.sourceEnvironment||
+    receipt.revision!==job.prd.revision||!/^[-a-f0-9]+\.png$/.test(receipt.item?.name)||
+    !/^https?:\/\//.test(receipt.item?.pageUrl??''))throw failure('IMAGE_INPUT','原型参考截图的任务、系统或环境不匹配');
    const file=path.join(dir,receipt.item.name),actual=await safeBytes(file),digest=sha(actual.bytes);
    if(digest!==receipt.item.sha256||actual.bytes.length!==receipt.item.bytes||!actual.bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))throw failure('IMAGE_INPUT','原型参考截图校验失败');
-   refs.push({path:file,sha256:digest,kind:'website-design-reference'});
-   seen.add(digest);
+   return {path:file,sha256:digest,kind:'website-design-reference'};
   }
  }
+}
+export async function nativeImageReferences(dataDir,job){
+ if(job.prd?.auto){
+  const reference=await readPrdDesignReference(dataDir,job);
+  return reference?[reference]:[];
+ }
+ const refs=[],seen=new Set();
  for(const item of job.attachments??[]){if(item.type!=='image'||!item.path)continue;const actual=await safeBytes(item.path);if(item.sha256&&sha(actual.bytes)!==item.sha256)throw failure('IMAGE_INPUT','任务图片摘要不一致');if(!seen.has(sha(actual.bytes))){refs.push({path:item.path,sha256:sha(actual.bytes)});seen.add(sha(actual.bytes));}}
  for(const item of job.reportFiles??[]){if(item.format!=='png')continue;const {reportFile}=await import('./report-files.js');const actual=await reportFile(dataDir,item.sourceJobId??job.id,item);if(!seen.has(item.sha256)){refs.push({path:actual.file,sha256:item.sha256});seen.add(item.sha256);}}
  return refs;
@@ -68,7 +76,9 @@ export async function runNativeImage({cwd,prompt,references=[],onProgress=()=>{}
 }
 export async function generateNativeImage(dataDir,job,prompt,options={}){
  if(typeof prompt!=='string'||!prompt.trim()||/<(?:!doctype|html|body|svg|script)[\s>]/i.test(prompt))throw failure('IMAGE_PROMPT','图片创作需要生图描述和准确文案，不接受HTML/SVG截图配方；只有用户明确指定H5/HTML截图才可渲染');
- const workspace=await prepareArtifactWorkspace(dataDir,job.id),references=await nativeImageReferences(dataDir,job);
+ const references=await nativeImageReferences(dataDir,job);
+ if(job.prd?.auto&&!references.length)throw failure('IMAGE_LIVE_SCREEN_REQUIRED','缺少本需求对应系统、环境和当前轮的真实目标页面截图；先打开目标页面取得截图');
+ const workspace=await prepareArtifactWorkspace(dataDir,job.id);
  const binding={jobId:job.id,questionId:job.questionId,profile:job.originProfile??job.agentProfile,projectId:job.projectId,environment:job.sourceEnvironment,generation:job.questionGeneration??null,questionHash:sha(String(currentUserQuestion(job)))};
  const key=sha(JSON.stringify({policy:nativeImagePolicy,binding,prompt,references:references.map(x=>x.sha256)})),dir=path.join(workspace.directory,'native-image-'+key);await mkdir(dir,{recursive:true,mode:0o700});
  return withSnapshotLock(dir,async()=>{

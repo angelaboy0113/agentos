@@ -33,7 +33,7 @@ import { TeamKnowledgeService } from './team-knowledge.js';
 import { queryRejection } from '../shared/query-repair.js';
 import { enrollmentTarget } from './environment-enrollment.js';
 import { SharedChromeBrowser } from './shared-chrome-browser.js';
-import { WebsiteBrowser } from './website-browser.js';
+import { WebsiteBrowser, routePrdWebsiteBrowser } from './website-browser.js';
 import { prepareWebsiteQuery } from './website-query.js';
 import { EnrollmentCredentialService } from './enrollment-credentials.js';
 import { WebsiteCredentialService } from './website-credentials.js';
@@ -83,8 +83,9 @@ export async function createControlPlane(overrides = {}) {
   const authorizeBrowser = (initial,waiting,request)=>authorizeWebsiteRequest({store,projects},initial,waiting,request);
   const browserMode = process.env.AGENTOS_BROWSER_MODE ?? (process.platform === 'darwin' ? 'shared-chrome' : 'isolated');
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
+  const isolated = new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser);
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
-    websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? new SharedChromeBrowser(authorizeBrowser) : new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser)) };
+    websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? routePrdWebsiteBrowser(new SharedChromeBrowser(authorizeBrowser),isolated) : isolated) };
   context.runnerConcurrency=overrides.runnerConcurrency??Number(process.env.AGENTOS_RUNNER_CONCURRENCY??3);
   if(!Number.isInteger(context.runnerConcurrency)||context.runnerConcurrency<1||context.runnerConcurrency>8)throw Error('Invalid global Runner concurrency');
   context.memoryAdmission=overrides.memoryAdmission??new MemoryAdmission(process.env.AGENTOS_MEMORY_ADMISSION_MIB?{treeBudgetMiB:Number(process.env.AGENTOS_MEMORY_ADMISSION_MIB)}:{});
@@ -461,10 +462,13 @@ async function route(context) {
     if(job?.status!=='running'||!job.lease?.id||body.leaseId!==job.lease.id||body.runnerId!==job.lease.runnerId)return json(response,409,{error:'Stale or foreign Runner lease'});
     const e=verifyApprovedPlan(await loadEnvironments(),job.environmentAccess??{});if(e.kind!=='website')throw new Error('Not a website grant');
     if(body.tool==='browser_screenshot'&&!screenshotAvailable(job))throw new Error('当前原问题未要求截图交付');
+    if(body.tool==='browser_screenshot'&&job.prd?.auto){
+      if(e.projectId!==job.projectId)throw new Error('原型参考须来自本需求对应系统');
+      if(!job.sourceEnvironment)throw new Error('原型截图前须确认对应环境');
+      assertSourceRuntimeTier(context.projects.projects[job.projectId],job.sourceEnvironment,e.tier);
+    }
     let result=body.tool==='restore_cloud_sheet_input'?await restoreCloudSheetInput(store,config.dataDir,job,e,body.args):cloudSheetTarget(job.environmentAccess.websiteTarget??e.baseUrl)&&['connection','read_cloud_sheet','read_cloud_document'].includes(body.tool)?await readCloudSheet(context.feishu,job,e,body.tool,body.args):await context.websiteBrowser.run(job,e,body.tool,body.args);
     if(body.tool==='browser_screenshot'&&job.prd?.auto&&result.designReference){
-      if(e.projectId!==job.projectId)throw new Error('原型参考须来自本需求对应系统');
-      assertSourceRuntimeTier(context.projects.projects[job.projectId],job.sourceEnvironment,e.tier);
       const current=await store.getJob(job.id);
       if(current?.status!=='running'||current.lease?.id!==job.lease.id||current.prd?.revision!==job.prd.revision)throw new Error('PRD design reference lease changed');
       await savePrdDesignReference(config.dataDir,job,result.designReference);

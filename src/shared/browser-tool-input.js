@@ -4,6 +4,11 @@ export class BrowserInputError extends Error {
 }
 export const correctableBrowserCodes=new Set(['BROWSER_ARGUMENTS','BROWSER_REF_STALE','BROWSER_CONTROL_TYPE','BROWSER_CONTROL_CHANGED','BROWSER_OPERATION_TIMEOUT','BROWSER_CONTENT_CHANGED','BROWSER_ASSET_RESPONSE','BROWSER_NAVIGATION_SCOPE']);
 export function validateBrowserTool(tool,args={}){
+ if(tool==='browser_screenshot'&&args&&Object.keys(args).length){
+  if(Object.keys(args).length!==2||typeof args.url!=='string'||!args.url||args.url.length>2048||
+    typeof args.targetText!=='string'||!args.targetText.trim()||args.targetText.length>100)throw new BrowserInputError('BROWSER_ARGUMENTS','原型截图需要最近快照的url和视口中目标界面的标题targetText。');
+  return;
+ }
  if(tool==='browser_navigate'){
   if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).length!==1||typeof args.url!=='string'||!args.url.trim())throw new BrowserInputError('BROWSER_ARGUMENTS','browser_navigate仅接受同一已授权应用中、由页面或源码发现的只读url；不能传JS、选择器或凭据');return;
  }

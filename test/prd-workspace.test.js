@@ -5,7 +5,8 @@ import { chromeDesignStyle } from '../src/control-plane/shared-chrome-browser.js
 import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { questionView } from '../src/control-plane/questions.js';
 import { savePrdDesignReference } from '../src/control-plane/website-evidence.js';
-import { nativeImageReferences } from '../src/shared/image-generation.js';
+import { generateNativeImage, nativeImageReferences } from '../src/shared/image-generation.js';
+import { routePrdWebsiteBrowser } from '../src/control-plane/website-browser.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -291,12 +292,23 @@ test('a PRD display rule about rejection reasons is not a request to investigate
 });
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-async function saveArtifact(dataDir, job, id, format, bytes) {
+async function saveScreenshot(dataDir, job) {
+  const dir=path.join(dataDir,'website-evidence',job.id);
+  const item={name:'a-0.png',sha256:hash(png),bytes:png.length,pageUrl:'https://test.example/target'};
+  await fs.mkdir(dir,{recursive:true});
+  await fs.writeFile(path.join(dir,item.name),png);
+  await savePrdDesignReference(dataDir,job,item);
+  return item;
+}
+async function saveArtifact(dataDir, job, id, format, bytes, screenshot) {
   const dir = path.join(dataDir, 'exports', job.id), item = { id, filename: id + '.' + format, format, kind: 'document',
     sha256: hash(bytes), bytes: bytes.length, rowCount: 0, complete: true, questionGeneration: job.prd.revision };
   await fs.mkdir(dir, { recursive: true });
   const receipt = Buffer.from(JSON.stringify({ version: 2, kind: 'document', status: 'verified',
-    binding: { jobId: job.id }, file: item, coverage: { rowCount: 0 } }));
+    binding: { jobId: job.id }, file: item, coverage: { rowCount: 0 },
+    ...(screenshot ? {request:{imageGeneration:{status:'verified',provider:'codex-native',sha256:item.sha256,inputHashes:[screenshot.sha256],
+      referenceKinds:['website-design-reference'],binding:{jobId:job.id,questionId:job.questionId,projectId:job.projectId,profile:job.originProfile,
+        generation:job.prd.revision,environment:job.sourceEnvironment}}}} : {}) }));
   await fs.writeFile(path.join(dir, item.filename), bytes);
   await fs.writeFile(path.join(dir, id + '.verification.json'), receipt);
   return { ...item, verificationHash: hash(receipt) };
@@ -326,10 +338,11 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   const { questionId } = await send('om_start', '我要写 PRD：LTX 订单详情增加 TPM 补贴状态');
   await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
   const exportJob = (await store.read()).jobs[0];
+  const screenshot = await saveScreenshot(dataDir, exportJob);
   assert.match(prdGuidance(exportJob), /提交一个 md 和一个 png/);
   const files = await Promise.all([
     saveArtifact(dataDir, exportJob, 'report-11111111-1111-1111-1111-111111111111', 'md', Buffer.from(md)),
-    saveArtifact(dataDir, exportJob, 'report-22222222-2222-2222-2222-222222222222', 'png', png),
+    saveArtifact(dataDir, exportJob, 'report-22222222-2222-2222-2222-222222222222', 'png', png, screenshot),
   ]);
   await store.transact(s => {
     const j = s.jobs[0];
@@ -356,9 +369,10 @@ test('missing owner authorization never creates a document or expands sharing', 
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
   await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
   const j = (await store.read()).jobs[0];
+  const screenshot = await saveScreenshot(dataDir, j);
   const files = await Promise.all([
     saveArtifact(dataDir, j, 'report-33333333-3333-3333-3333-333333333333', 'md', Buffer.from(md)),
-    saveArtifact(dataDir, j, 'report-44444444-4444-4444-4444-444444444444', 'png', png),
+    saveArtifact(dataDir, j, 'report-44444444-4444-4444-4444-444444444444', 'png', png, screenshot),
   ]);
   await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: { outcome: 'ready' }, reportFiles: files }); });
   await workspace.publisher.deliver(questionId);
@@ -376,9 +390,10 @@ test('an ungranted document scope leaves a retryable draft before any create req
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
   await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
   const [job] = (await store.read()).jobs;
+  const screenshot = await saveScreenshot(dataDir, job);
   const files = await Promise.all([
     saveArtifact(dataDir, job, 'report-55555555-5555-5555-5555-555555555555', 'md', Buffer.from(md)),
-    saveArtifact(dataDir, job, 'report-66666666-6666-6666-6666-666666666666', 'png', png),
+    saveArtifact(dataDir, job, 'report-66666666-6666-6666-6666-666666666666', 'png', png, screenshot),
   ]);
   await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: { outcome: 'ready' }, reportFiles: files }); });
   await workspace.publisher.deliver(questionId);
@@ -431,15 +446,39 @@ test('the requester submits the revision-bound PRD card and processing resumes w
 
 test('website design references are hash-bound to the real page capture, job, environment and revision', async t => {
   const {dataDir} = await fixture(t);
-  const job={id:'JOB-design',questionId:'QST-design',sourceEnvironment:'sit',prd:{auto:true,revision:2}};
+  const job={id:'JOB-design',questionId:'QST-design',projectId:'ltx',originProfile:profile,sourceEnvironment:'sit',prd:{auto:true,revision:2}};
   const dir=path.join(dataDir,'website-evidence',job.id);
-  await fs.mkdir(dir,{recursive:true});
-  const item={name:'a-0.png',sha256:hash(png),bytes:png.length};
-  await fs.writeFile(path.join(dir,item.name),png);
-  await savePrdDesignReference(dataDir,job,item);
+  const item=await saveScreenshot(dataDir,job);
   assert.deepEqual(await nativeImageReferences(dataDir,job),[{path:path.join(dir,item.name),sha256:item.sha256,kind:'website-design-reference'}]);
   assert.deepEqual(await nativeImageReferences(dataDir,{...job,prd:{...job.prd,revision:3}}),[]);
   await assert.rejects(nativeImageReferences(dataDir,{...job,sourceEnvironment:'prd'}),{code:'IMAGE_INPUT'});
+  await assert.rejects(nativeImageReferences(dataDir,{...job,projectId:'tpm'}),{code:'IMAGE_INPUT'});
+  const next={...job,prd:{...job.prd,revision:3},attachments:[{type:'image',path:path.join(dir,item.name)}]};
+  await assert.rejects(generateNativeImage(dataDir,next,'在详情页加入状态',{generate:()=>assert.fail('Never generate without a live screenshot')}),{code:'IMAGE_LIVE_SCREEN_REQUIRED'});
+});
+
+test('Feishu delivery does not accept a prototype made without the current screenshot receipt', async t => {
+  const {store,workspace,send,dataDir}=await fixture(t,()=>assert.fail('Never create a cloud draft without verified visual evidence'));
+  const {questionId}=await send('om_unsourced','我想做一个需求，新增订单状态');
+  const [job]=(await store.read()).jobs;
+  await saveScreenshot(dataDir,job);
+  const files=await Promise.all([
+    saveArtifact(dataDir,job,'report-77777777-7777-7777-7777-777777777777','md',Buffer.from(md)),
+    saveArtifact(dataDir,job,'report-88888888-8888-8888-8888-888888888888','png',png),
+  ]);
+  await store.transact(s=>Object.assign(s.jobs[0],{status:'completed',result:{outcome:'ready'},reportFiles:files}));
+  await workspace.publisher.deliver(questionId);
+  assert.match((await store.read()).questions[questionId].prd.delivery.notice,/真实目标页面截图/);
+});
+
+test('PRD website actions and login recovery use the same isolated browser', async () => {
+  const browser = name=>({run:()=>name,loginStatusFor:()=>name,captureLoginQr:()=>name});
+  const route=routePrdWebsiteBrowser(browser('shared'),browser('isolated'));
+  assert.equal(route.run({}), 'shared');
+  const prd={prd:{auto:true}};
+  assert.equal(route.run(prd), 'isolated');
+  assert.equal(route.loginStatusFor(prd), 'isolated');
+  assert.equal(route.captureLoginQr(prd), 'isolated');
 });
 
 

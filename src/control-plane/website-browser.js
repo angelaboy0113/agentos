@@ -15,6 +15,21 @@ import { chromium } from 'playwright';
 import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
 import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
+
+export function routePrdWebsiteBrowser(shared, isolated) {
+ const browser=job=>job.prd?.auto?isolated:shared;
+ return {
+  run:(job,...args)=>browser(job).run(job,...args),
+  loginReady:(job,...args)=>browser(job).loginReady(job,...args),
+  loginStatusFor:(job,...args)=>browser(job).loginStatusFor(job,...args),
+  submitCredentials:(job,...args)=>browser(job).submitCredentials(job,...args),
+  captureLoginQr:(job,...args)=>browser(job).captureLoginQr?.(job,...args),
+  refreshLoginQr:(job,...args)=>browser(job).refreshLoginQr?.(job,...args),
+  health:()=>shared.health(),
+  release:id=>Promise.allSettled([shared.release(id),isolated.release(id)]),
+  close:()=>Promise.allSettled([shared.close(),isolated.close()]),
+ };
+}
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
  constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch}={}){this.authorize=authorize;this.publicFetch=publicFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
@@ -295,7 +310,7 @@ export class WebsiteBrowser {
   if(tool==='browser_assets')return readWebsiteAsset(s,args,this.authorize,this.publicFetch);
   const login=await this.loginStatus(s);
   if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
-  if(tool==='browser_screenshot')return this.screenshot(s);
+  if(tool==='browser_screenshot')return this.screenshot(s,args);
   if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded'});}
   if(tool==='browser_read')return this.readVisible(s,args);
@@ -398,20 +413,38 @@ export class WebsiteBrowser {
   const loading=!text.trim()||s.pendingReads.size>0||await websiteDOM(s).locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));
   return {stage:'已读取业务网页',pageStatus:loading?'loading':'ready',loading,...pendingWebsiteReads(s),action:websiteActionDiagnostics(s,s.lastReadAction),controlsLimited:controls.length>=300,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),pageText:cleanWebsiteText(text),fields:fields.slice(0,100),fieldsLimited:fields.length>100,controls,blockedRequests:[...s.blocked].slice(-10),rows:[],note:'来自当前网页；菜单可通过read-action展开；仅当前引用有效。异步列表尚在加载或截图出现新内容后，应使用最新快照的控件，不沿用加载前清单判断按钮缺失。'};
  }
- async screenshot(s){
+ async screenshot(s,args={}){
   if(!/^[A-Za-z0-9_-]+$/.test(s.job.id))throw new Error('Invalid evidence job');
+  const prd=Boolean(s.job.prd?.auto), dom=websiteDOM(s);
+  const pageUrl=()=>websitePageLocation(dom.url());
+  if(prd&&(!args.targetText||args.url!==pageUrl()))throw new BrowserInputError('BROWSER_ARGUMENTS','请先打开目标页面，传入当前快照的url及详情区标题targetText。');
   const readiness=await waitForCaptureReady(s);
   if((await this.loginStatus(s)).loginRequired)return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
+  if(prd&&readiness.status!=='ready')return {partial:true,stage:'页面尚未稳定，未保存视觉基线',rows:[]};
   const dir=path.join(this.evidenceRoot,s.job.id);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.evidenceRoot,0o700);await chmod(dir,0o700);
   const name=randomUUID()+'.png',file=path.join(dir,name);
-  if (s.job.prd?.auto) {
-   if (readiness.status !== 'ready') return {partial:true,stage:'页面尚未稳定，未保存视觉基线',rows:[]};
-   const style = '*, *::before, *::after {color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;caret-color:transparent!important;background-image:none!important;list-style-image:none!important} img, svg, canvas, iframe, video, object, embed {visibility:hidden!important} input, textarea, select, [contenteditable] {color:transparent!important;-webkit-text-fill-color:transparent!important}';
-   const pixels = await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,style,animations:'disabled',
-    mask:s.page.frames().map(frame=>frame.locator(screenshotSecretSelector)),maskColor:'#6b7280'});
+  if (prd) {
+   const targetVisible=async()=>{
+    if(pageUrl()!==args.url)return false;
+    const bounds=await s.page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+    for(const target of await dom.getByText(args.targetText,{exact:true}).all()){
+     const box=await target.boundingBox();
+     if(box&&box.width&&box.height&&box.x<bounds.width&&box.y<bounds.height&&box.x+box.width>0&&box.y+box.height>0)return true;
+    }
+    return false;
+   };
+   if(!await targetVisible())throw new BrowserInputError('BROWSER_CONTENT_CHANGED','未在当前视口看到目标标题，请打开目标详情、弹窗或模块后重新截图。');
+   const style = '*, *::before, *::after {color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;caret-color:transparent!important;background-image:none!important;list-style-image:none!important} img, svg, canvas, video, object, embed {visibility:hidden!important}';
+   const options={path:file,type:'png',timeout:10000,style,animations:'disabled',
+    mask:[dom.locator(screenshotSecretSelector),dom.locator('iframe,frame')],maskColor:'#6b7280'};
+   const frameElement=s.dom?await s.dom.frameElement():null;
+   let pixels;
+   try{pixels=await (frameElement?frameElement.screenshot(options):s.page.screenshot(options));}
+   finally{await frameElement?.dispose();}
    await chmod(file,0o600);
+   if(!await targetVisible().catch(()=>false)){await rm(file,{force:true});throw new BrowserInputError('BROWSER_CONTENT_CHANGED','截图期间目标已变化，请重新打开目标界面。');}
    return {designReference:{name,sha256:createHash('sha256').update(pixels).digest('hex'),bytes:pixels.length,
-    capturedAt:new Date().toISOString()},rows:[],stage:'已保存当前页面的内部脱敏布局参考，原型生成会自动使用'};
+    capturedAt:new Date().toISOString(),pageUrl:args.url},rows:[],stage:'已截取当前真实目标页面，原型生成会使用这张脱敏截图'};
   }
   const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:s.page.frames().map(frame=>frame.locator(screenshotSecretSelector)),maskColor:'#6b7280',...(readiness.status==='ready'?{}:{style:'body::after{content:"页面加载尚未完成 · 现场截图";position:fixed;top:8px;right:12px;z-index:2147483647;background:#fff3cd;color:#704d00;padding:6px 10px;border:1px solid #e6ce81;border-radius:4px;font:13px sans-serif;pointer-events:none}'})});await chmod(file,0o600);
   return {...await this.snapshot(s),...(readiness.status==='ready'?{}:{pageStatus:'loading',partial:true}),stage:readiness.status==='ready'?'已保存稳定网页截图':'已保存加载未完成的现场截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),readiness},rows:[],note:'已等待接口、加载指示和页面稳定；正常业务字段保留，凭据及显式敏感区用灰色遮挡。readiness.status为ready仅代表渲染稳定，不代表业务正常；其它状态是加载未完成的现场证据。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};
