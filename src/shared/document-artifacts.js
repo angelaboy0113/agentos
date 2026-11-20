@@ -83,14 +83,17 @@ async function resolveDocumentRequest(dataDir,job,request){
  if(spec.artifactFile){
   const {readArtifactFile}=await import('./artifact-workspace.js'),artifact=await readArtifactFile(dataDir,job.id,spec.artifactFile);
   await inspectDocumentBytes('xlsx',artifact.bytes);
-  const {default:ExcelJS}=await import('exceljs'),wb=new ExcelJS.Workbook();await wb.xlsx.load(artifact.bytes);
-  if(wb.worksheets.length!==resolved.length)fail('实际工作表数量与逐表来源声明不符');
-  for(let i=0;i<resolved.length;i++){const expected=resolved[i],ws=wb.worksheets[i];if(ws.name!==expected.name||ws.rowCount!==expected.rows.length)fail('实际工作表名称、顺序或行数与来源不符');
-   for(let r=0;r<expected.rows.length;r++){const row=ws.getRow(r+1),cells=expected.rows[r];if(row.cellCount>cells.length)fail('实际工作表含未绑定的额外列');for(let c=0;c<cells.length;c++){const value=row.getCell(c+1).value;if((value??'')!==(cells[c]??''))fail('实际工作表单元格与来源不一致；金额、编号、公式及行序不得静默变更');}}
-  }
+  await verifyWorkbookCells(artifact.bytes,resolved);
   return {...request,content:{artifactFile:spec.artifactFile,sourceFile:spec.sourceFile??null},sourceWorkbookSha256:artifact.sha256,sourceReports:sources,worksheetAudit:bindings};
  }
  return {...request,content:JSON.stringify({sheets:resolved}),sourceReport:spec.sourceReportId?sources[0]:undefined,sourceReports:sources,worksheetAudit:bindings};
+}
+async function verifyWorkbookCells(bytes,sheets){
+  const {default:ExcelJS}=await import('exceljs'),wb=new ExcelJS.Workbook();await wb.xlsx.load(bytes);
+  if(wb.worksheets.length!==sheets.length)fail('实际工作表数量与逐表来源声明不符');
+  for(let i=0;i<sheets.length;i++){const expected=sheets[i],ws=wb.worksheets[i];if(ws.name!==expected.name||ws.rowCount!==expected.rows.length)fail('实际工作表名称、顺序或行数与来源不符');
+   for(let r=0;r<expected.rows.length;r++){const row=ws.getRow(r+1),cells=expected.rows[r];if(row.cellCount>cells.length)fail('实际工作表含未绑定的额外列');for(let c=0;c<cells.length;c++){const value=row.getCell(c+1).value;if((value??'')!==(cells[c]??''))fail('实际工作表单元格与来源不一致；金额、编号、公式及行序不得静默变更');}}
+  }
 }
 async function encodeNative(dataDir,job,request){
  const {readArtifactFile}=await import('./artifact-workspace.js');
@@ -110,7 +113,11 @@ export async function createDocuments(dataDir,job,requests,options={}){
  try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'&&!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;if(request.format==='png')audit.generation=image?'codex-native':'explicit-html-screenshot';
  const item={id,filename,format:request.format,kind:'document',title:request.title,contentType:documentMime[request.format],bytes:bytes.length,sha256:hash(bytes),rowCount:0,complete:true};
  const {officePreview}=await import('./office-preview.js');const preview=await officePreview(bytes,request.format,directory);if(preview)audit.preview=preview;
- if(request.worksheetAudit)audit.worksheets=request.worksheetAudit;
+ if(request.worksheetAudit){
+  if(!native)await verifyWorkbookCells(bytes,parse(request.content).sheets);
+  audit.worksheets=request.worksheetAudit;
+  audit.actualCellsVerified=true;
+ }
  const receipt={version:2,kind:'document',status:'verified',file:item,coverage:{rowCount:0},binding:{jobId:job.id,projectId:job.projectId,profile:job.originProfile??job.agentProfile,questionId:job.questionId,sourceEnvironment:job.sourceEnvironment??null},purpose:request.purpose,contentAudit:audit,businessVerification:'结构和实际文件核验不等于业务金额核验；业务结论沿用任务独立证据与handoff门控',request};
  const body=Buffer.from(JSON.stringify(receipt));await writeFile(path.join(directory,filename),bytes,{mode:0o600,flag:'wx'});await writeFile(path.join(directory,id+'.verification.json'),body,{mode:0o600,flag:'wx'});item.verificationHash=hash(body);files.push(item);
  }return files;}catch(e){for(const f of files)for(const n of [f.filename,f.id+'.verification.json'])await rm(path.join(directory,n),{force:true});throw e;}

@@ -293,3 +293,11 @@ Runner 对纯展示的 `codex_working`、`tool_activity` 进度使用每任务�
 历史补取保持系统级共享生命周期锁，另对被写入的独立Git目录加排他锁；最终源码校验使用共享生命周期锁，不再等待其它仓库远端历史下载。创建、恢复与回收仍要求系统排他锁，不能在读取或补历史时删除缓存。固定HEAD、工作树、来源、独立对象库、符号/硬链接与worktree边界校验保持；只对可信fetch期间消失的Git临时元数据重试完整扫描，不忽略越界。最终校验单列sourceVerificationMs与进度，不与模型分析混为一谈。离线并发试验验证网络读取挂起时最终核对完成、生命周期写入仍被阻止；真实同题耗时另计。包含1.133.9新文件同会话接续。
 
 Accepted native host tools remain owned by their original job/thread/turn even if a yielded code cell returns before them. Before accepting a final answer, the runner joins these calls and returns their persisted receipts to the same model thread; it does not replay them or turn an internal in-flight cell into a user login/clarification request. Actual external authorization waits and unknown-execution diagnostics remain distinct.
+
+### 随机样本、关联选取与 Excel 回读
+
+`sample_dataset` 从同一任务已完整保存的授权总体按非空唯一键无放回抽样。先按业务条件生成总体，只需抽样时可先读取主键，再读取选中主键的所需明细。工具在宿主生成并保存随机种子、总体引用和样本规模，重启后复用同一样本，审阅时重新验证选中行。样本覆盖只适用于明确要求抽样的任务，金额及计算分量仍按已有规则独立核验。
+
+`relate_dataset` 已支持多来源、复合键和一对多。新增 `selectFirstBy` 可在 lookup 关联中用实际字段按文本或精确十进制升降序选择首行。排序值为空或首行并列时，按业务依据补明确排序或空值处理后再试。同一任务的来源范围和原访问授权继续检查。
+
+业务 Excel 按工作表绑定已核验报表。内置生成后读取实际文件，逐表比对名称、行数和单元格。编号、精确金额及前导零沿用原文件的文本表示。明确要求导出 XLSX 时，按该格式检查实际交付。

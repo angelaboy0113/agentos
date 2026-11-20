@@ -1,4 +1,5 @@
 import {mysqlJsonText} from '../shared/mysql-json-text.js';
+import {sampleDataset} from '../shared/dataset-sample.js';
 import {extendDimension} from '../shared/dimension-extension.js';
 import {datasetHash,datasetBytes} from '../shared/dataset-json.js';
 import {buildWindowDataset} from '../shared/window-dataset.js';
@@ -9,7 +10,7 @@ import {deploymentEvidence} from '../shared/deployment-evidence.js';
 import {queryEvidenceIdentity} from '../shared/query-evidence.js';
 import {buildPeriodDataset,verifyPeriodDataset} from '../shared/period-dataset.js';
 import {datasetDependencies,TaskDatasetStore} from './task-dataset-store.js';
-import {randomUUID,createHash} from 'node:crypto';
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {mkdir,writeFile,rename,rm,readFile,lstat} from 'node:fs/promises';
 import path from 'node:path';
 import {reportColumns,validateReportHeaders} from '../shared/report-headers.js';
@@ -179,6 +180,21 @@ export class ReportDatasets {
   if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
   return {datasetRef:ref,complete:true,rowCount:data.rows.length,columns:data.columns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'显式展示维度已保存；数量/金额仍需完整业务来源和独立核验，不把新增标签当数据库记录'};
  }
+ async sample({datasetRef,keyColumn,size}){
+  await this.check();
+  const source=await this.restore(datasetRef);
+  await this.verifyDerived(source);
+  if(!this.storage)throw new ReportInputError('随机样本需要本任务持久化证据空间');
+  const data=sampleDataset({datasetRef,keyColumn,size,seed:randomBytes(32).toString('hex')},source);
+  const ref='dataset-'+randomUUID();
+  await this.check();
+  await this.storage.save(ref,data,data.snapshotId,data.readAt);
+  await this.check();
+  this.remember(ref,data);
+  return {datasetRef:ref,complete:true,rowCount:data.rows.length,columns:data.columns,readAt:data.readAt,
+   audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),
+   stage:'无放回随机样本已保存；仅代表样本范围。可用样本键关联明细并逐行核验。'};
+ }
  async relate(args){
   await this.check();const validation={};
   const load=async ref=>{const d=await this.restore(ref);if(d)await this.verifyDerived(d,validation);return d;};
@@ -210,7 +226,7 @@ export class ReportDatasets {
    const proof=await this.windowEvidence(data,column,validation);return proof.ids.length===1?proof.ids[0]:proof.ids.length?hash(proof.ids):null;
   }
   if(data.derivation?.kind==='dimension_extension')return null;
-  if(data.derivation?.kind==='dataset_transform')return this.rawEvidence(await this.restore(data.derivation.args.datasetRef),column,validation);
+  if(['dataset_transform','random_sample'].includes(data.derivation?.kind))return this.rawEvidence(await this.restore(data.derivation.args.datasetRef),column,validation);
   if(data.derivation?.kind==='dataset_relation'){
    const p=data.derivation.provenance[column];return p?this.rawEvidence(await this.restore(p.datasetRef),p.column,validation):null;
   }
@@ -344,6 +360,7 @@ export class ReportDatasets {
   const visit=async(ref,depth=0)=>{
    if(graph.has(ref))return;if(visiting.has(ref))throw new ReportInputError('报表来源图循环，不能安全集中刷新');
    visiting.add(ref);const d=await this.restore(ref);if(!d?.complete)throw new ReportInputError('刷新来源不完整');
+   if(d.derivation?.kind==='random_sample')throw new ReportInputError('随机样本刷新须从新范围重新抽样');
    if(d.reportDraft){for(const source of d.reportDraft.sources)await visit(source.datasetRef,depth+1);if(d.reportDraft.population)await visit(d.reportDraft.population.datasetRef,depth+1);}
    else if(['dataset_summary','dataset_transform','dimension_extension'].includes(d.derivation?.kind)){await visit(d.derivation.args.datasetRef,depth+1);}
    else if(d.derivation?.kind==='dataset_relation'){await visit(d.derivation.args.datasetRef,depth+1);for(const j of d.derivation.args.joins)await visit(j.datasetRef,depth+1);}
@@ -385,9 +402,11 @@ export class ReportDatasets {
   try{validateReportHeaders(data.columns,this.originalQuestion);}catch(error){throw new ReportInputError(error.message);}
   const population=await this.restore(args.populationRef);
   await this.verifyDerived(population??{},validation);
+  const samplePopulation=population?.derivation?.kind==='random_sample';
+  if(samplePopulation&&(!/(?:抽样|随机|random|sample)/i.test(this.originalQuestion)||population.derivation.args.keyColumn!==args.populationKey))throw new ReportInputError('随机样本仅可验收用户明确要求的抽样，并使用保存的抽样键');
   const periodPopulation=population?.derivation?.kind==='period_grid'&&population.derivation.args.sources.length===0;
   let populationBase=periodPopulation?await this.restore(population.derivation.args.populationRef):population;
-  const populationVisited=new Set();while(['dataset_summary','dataset_transform','dataset_relation','dimension_extension'].includes(populationBase?.derivation?.kind)){const ref=populationBase.derivation.args.datasetRef;if(populationVisited.has(ref))throw new ReportInputError('范围依赖循环');populationVisited.add(ref);populationBase=await this.restore(ref);}
+  const populationVisited=new Set();while(['dataset_summary','dataset_transform','dataset_relation','dimension_extension','random_sample'].includes(populationBase?.derivation?.kind)){const ref=populationBase.derivation.args.datasetRef;if(populationVisited.has(ref))throw new ReportInputError('范围依赖循环');populationVisited.add(ref);populationBase=await this.restore(ref);}
   if(!population?.complete||population.reportDraft||!(populationBase?.queryHash&&populationBase.queryDefinition||[1,2].includes(populationBase?.inputEvidence?.version)&&populationBase.inputEvidence.kind==='native-cloud-sheet'&&populationBase.inputEvidence.rowKey===args.populationKey&&populationBase.inputEvidence.rowCount===populationBase.rows.length)||!population.columns.includes(args.populationKey))throw new ReportInputError('完整对象范围必须来自独立原始查询数据集，不能拿草稿自身当覆盖证明；期间覆盖请从原始对象集合单独period_dataset，sources=[]，populationKey使用其period_key；inspect_dataset的finalization.populationCandidates和populationPlans可定位已有来源及范围，不需重查整套数据');
   const expected=uniqueKeys(population,args.populationKey);
   if(!Array.isArray(draft.keys)||draft.keys.length!==data.rows.length||new Set(draft.keys).size!==draft.keys.length||draft.keys.some(k=>typeof k!=='string'||!k))throw new ReportInputError('草稿缺少完整内部主键索引；重新生成草稿后核验');

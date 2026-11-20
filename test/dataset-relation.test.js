@@ -82,3 +82,15 @@ test('fresh restore refuses symlinked dependency files even if their content/has
  const d=new ReportDatasets({directory:f.directory,scope:f.scope,maxRows:'all'}),saved=await d.restore(out.datasetRef);
  await assert.rejects(d.verifyDerived(saved),/校验失败/);
 });
+
+test('ranked lookup selects a scoped latest revision and refuses a tied winner',async()=>{
+ const left=data([{id:'master',tenant:'01',code:'0001'}]);
+ const item=(id,tenant,revision)=>({id,tenant,code:'0001',revision});
+ const right=data([item('a','01','9'),item('b','01','10'),item('c','02','99')]);
+ const join={datasetRef:'products',leftKeys:['tenant','code'],rightKeys:['tenant','code'],rightRowKey:['id'],
+  relationship:'lookup',selectFirstBy:[{column:'revision',type:'decimal',direction:'desc'}],
+  fields:[{column:'id',as:'selected'}],empty:'error',unmatched:'error'};
+ const run=rows=>buildRelationalDataset({...args,joins:[join]},async ref=>ref==='main'?left:data(rows));
+ assert.equal((await run(right.rows)).rows[0].selected,'b');
+ await assert.rejects(run([...right.rows,item('d','01','10.0')]),/首位并列/);
+});

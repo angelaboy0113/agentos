@@ -1,3 +1,4 @@
+import {compareExact} from './dataset-summary.js';
 import {datasetHash} from './dataset-json.js';
 const bad=message=>{throw Object.assign(new Error(message),{code:'REPORT_INPUT'});};
 const field=x=>typeof x==='string'&&x.trim()&&!['__proto__','prototype','constructor'].includes(x);
@@ -12,6 +13,26 @@ function split(value,options){
  if(options.whitespace)values=values.flatMap(v=>v.split(/\s+/));
  if(options.trim)values=values.map(v=>v.trim());
  values=values.filter(v=>v!=='');return options.duplicates==='set'?[...new Set(values)]:values;
+}
+function firstBy(rows, order) {
+ if (!order) return rows;
+ const compare = (a, b) => {
+  for (const {column, type, direction} of order) {
+   const x = a[column], y = b[column];
+   const n = type === 'decimal' ? compareExact(x, y) : x < y ? -1 : x > y ? 1 : 0;
+   if (n) return direction === 'desc' ? -n : n;
+  }
+  return 0;
+ };
+ if (!rows.length) return rows;
+ let best = rows[0], tied = false;
+ for (const row of rows.slice(1)) {
+  const comparison = compare(row, best);
+  if (comparison < 0) { best = row; tied = false; }
+  else if (comparison === 0) tied = true;
+ }
+ if (tied) bad('选取规则首位并列；须声明有业务依据的排序字段，不能按读取顺序选取');
+ return [best];
 }
 // Deterministic fixed data operations only. No code, regex, SQL, filesystem paths or global data access.
 export async function buildRelationalDataset(args,load,{check=async()=>{},maxRows=Number.MAX_SAFE_INTEGER}={}){
@@ -28,8 +49,21 @@ export async function buildRelationalDataset(args,load,{check=async()=>{},maxRow
   if(join.leftKeys.length!==join.rightKeys.length||!['lookup','expand'].includes(join.relationship)||!['keep','drop','error'].includes(join.empty)||!['keep','drop','error'].includes(join.unmatched)||!Array.isArray(join.fields))bad('关联须明确同宽键、relationship=lookup/expand、empty及unmatched=keep/drop/error和fields');
   if(join.split){const s=join.split;if(join.leftKeys.length!==1||!Array.isArray(s.delimiters)||s.delimiters.some(v=>typeof v!=='string'||!v.length)||!['set','preserve'].includes(s.duplicates)||typeof s.trim!=='boolean'||typeof s.whitespace!=='boolean')bad('文本拆分仅单键，明确字面delimiters、trim、whitespace、duplicates=set/preserve；不接收正则');}
   for(const f of join.fields){if(!f||typeof f!=='object'||!right.columns.includes(f.column)||!field(f.as)||names.includes(f.as)||f.as===rowKey)bad('关联输出列不存在、重复或覆盖原字段');names.push(f.as);if(right.numericColumns?.includes(f.column))numericColumns.push(f.as);provenance[f.as]={datasetRef:join.datasetRef,column:f.column};}
+  const order = join.selectFirstBy;
+  if (order !== undefined) {
+   if (join.relationship !== 'lookup' || join.split || !Array.isArray(order) || !order.length ||
+       order.some(o => !o || !['text','decimal'].includes(o.type) || !['asc','desc'].includes(o.direction))) {
+    bad('selectFirstBy需唯一查找、非拆分键与明示的text/decimal、asc/desc排序');
+   }
+   columns(right, order.map(o => o.column));
+   for (const row of right.rows) for (const {column,type} of order) {
+    if (typeof row[column] !== 'string' || !row[column]) bad('选取规则排序值不能为空，先按已核实业务口径整理');
+    if (type === 'decimal') compareExact(row[column], row[column]);
+   }
+  }
   const rightOrder=new Map(right.rows.map((r,i)=>[r,i]));
-  const index=new Map();for(const row of right.rows){if(join.fields.some(f=>row[f.column]===undefined))bad('右来源行缺少已声明输出字段，不可当作null');const k=key(row,join.rightKeys,true);if(k===null)continue;const group=index.get(k)??[];if(group.length&&join.relationship==='lookup')bad('lookup右键重复；一对多须明确expand及实际右侧行键');group.push(row);index.set(k,group);}
+  const index=new Map();for(const row of right.rows){if(join.fields.some(f=>row[f.column]===undefined))bad('右来源行缺少已声明输出字段，不可当作null');const k=key(row,join.rightKeys,true);if(k===null)continue;const group=index.get(k)??[];if(group.length&&join.relationship==='lookup'&&!order)bad('lookup右键重复；一对多须明确expand及实际右侧行键');group.push(row);index.set(k,group);}
+  if (order) for (const [k, group] of index) index.set(k, firstBy(group, order));
   const audit={inputRows:work.length,rightRows:right.rows.length,matchedInputRows:0,emptyInputRows:0,unmatchedInputRows:0,outputRows:0,duplicateTokens:0,unmatchedKeys:[],scopeEvidence:args.scopeEvidence};
   const next=[];
   for(const [i,item] of work.entries()){
