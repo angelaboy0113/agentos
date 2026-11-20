@@ -387,3 +387,10 @@ Memory headroom and durable overload waiting: see [memory-admission.md](memory-a
 
 
 1.125.1补修：多助手同一公开消息的初始与接续提示统一采用控制面确定的本系统贡献验收，避免同时要求每位助手回答全系统而重复调查。单助手仍覆盖完整原问题，因果/金额/文件校验及权限不变，不自动提升结果颜色。原题真人验收另记实例记录。
+
+
+### 网页查询端点的按需维护
+
+已接入网站可复用原应用、环境和只读会话。页面链接和页面调用的查询请求是不同层，常见只读请求直接使用。新出现的 `READ_ENDPOINT_REVIEW_REQUIRED` 表示本机尚未认可该精确 POST。先继续查同环境的等价来源；必须走网页时，由本地维护者对照固定源码检查控制器、服务、实际数据库查询和账号范围。提问者无需配置接口。
+
+维护者用 Node 运行 `scripts/review-website-read.mjs <私有环境配置> <私有源证据记录> <私有审计输出> --apply`。证据 JSON 字段为 `environmentId`、`projectId`、`tier`、`origin`、`queryId`、`method`、`path`、`sourceCommit`、`evidence`。该入口只登记被观察且经核查的精确 POST，使命令重复运行无副作用；维护者必须审查真实实现，提交号和说明用于留痕。配置更新后重新申请原环境的受控查询，已有投递回执和原权限沿用。此入口不提供给运行任务中的模型。

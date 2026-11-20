@@ -11,6 +11,7 @@ required.unshift('src/shared/credential-vault.js','scripts/credential-read.mjs',
 required.unshift('src/shared/withdrawn-delivery.js','src/control-plane/withdrawals.js','test/withdrawals.test.js','docs/withdrawal-cancellation.md');
 required.unshift('test/short-website-evidence.test.js');
 required.unshift('src/shared/count-answer.js','test/count-answer.test.js');
+required.unshift('scripts/review-website-read.mjs','src/shared/website-read-review.js','test/website-read-review.test.js');
 required.unshift('test/cloud-read-recovery.test.js','test/website-read-boundary.test.js');
 required.unshift('src/shared/job-tool-results.js','test/job-tool-results.test.js');
 required.unshift('src/shared/tsf-policy.js','src/runner/cloud-read-session.js','src/runner/tsf-tools.js','test/tsf-tools.test.js','docs/tsf-deployment-reads.md','config/tsf-deployment.example.json');
