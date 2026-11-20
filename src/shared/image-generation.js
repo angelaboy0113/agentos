@@ -79,7 +79,8 @@ export async function generateNativeImage(dataDir,job,prompt,options={}){
  const references=await nativeImageReferences(dataDir,job);
  if(job.prd?.auto&&!references.length)throw failure('IMAGE_LIVE_SCREEN_REQUIRED','缺少本需求对应系统、环境和当前轮的真实目标页面截图；先打开目标页面取得截图');
  const workspace=await prepareArtifactWorkspace(dataDir,job.id);
- const binding={jobId:job.id,questionId:job.questionId,profile:job.originProfile??job.agentProfile,projectId:job.projectId,environment:job.sourceEnvironment,generation:job.questionGeneration??null,questionHash:sha(String(currentUserQuestion(job)))};
+ const generation=job.questionGeneration??(job.prd?.auto?job.prd.revision:null);
+ const binding={jobId:job.id,questionId:job.questionId,profile:job.originProfile??job.agentProfile,projectId:job.projectId,environment:job.sourceEnvironment,generation,questionHash:sha(String(currentUserQuestion(job)))};
  const key=sha(JSON.stringify({policy:nativeImagePolicy,binding,prompt,references:references.map(x=>x.sha256)})),dir=path.join(workspace.directory,'native-image-'+key);await mkdir(dir,{recursive:true,mode:0o700});
  return withSnapshotLock(dir,async()=>{
   const receiptPath=path.join(dir,'generation.json'),output=path.join(dir,'image.png');let saved;try{saved=JSON.parse((await safeBytes(receiptPath)).bytes);}catch(e){if(e.code!=='ENOENT')throw e;}

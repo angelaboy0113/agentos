@@ -8,6 +8,7 @@ import { previousPrdDelivery, prdRevisionSection, readPrdRevisionBaseline } from
 import { reportEligible } from '../shared/report-acceptance.js';
 import { prdDocumentTitle, prdIntentDigest } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
+import { currentUserQuestion } from '../shared/user-request-scope.js';
 import { questionJob, publishQuestion } from './questions.js';
 
 const publishingScopes = 'docx:document docs:document.media:upload docs:permission.member:create docs:permission.member:retrieve';
@@ -71,12 +72,12 @@ export class PrdCloudDelivery {
   }
 
   start() {
-    this.recover().catch(() => {});
+    this.recover({ recheckArtifacts: true }).catch(() => {});
     this.authorizationTimer = setInterval(() => this.recover().catch(() => {}), 60_000);
     this.authorizationTimer.unref();
   }
 
-  async recover() {
+  async recover({ recheckArtifacts = false } = {}) {
     const { ready, waiting } = await stateView(this.context.store, state => {
       const ready = [], waiting = new Map();
       for (const q of Object.values(state.questions ?? {})) {
@@ -89,7 +90,8 @@ export class PrdCloudDelivery {
           if (!waiting.has(config.profile)) waiting.set(config.profile,[]);
           waiting.get(config.profile).push(q.id);
         }
-        if (['pending','created','body_verified','image_verified','shared',undefined].includes(phase)) ready.push(q.id);
+        if (['pending','created','body_verified','image_verified','shared',undefined].includes(phase)
+          || recheckArtifacts && phase === 'artifacts_missing') ready.push(q.id);
       }
       return {ready,waiting};
     });
@@ -157,12 +159,18 @@ export class PrdCloudDelivery {
         reportFile(dir, job.id, f, { includeContent: i === 0, includeReceipt: i === 1 })));
       const reference = await readPrdDesignReference(dir, job);
       const provenance = receipt.request?.imageGeneration;
+      // Older runners omitted the generation. A current-generation accepted file,
+      // exact request digest and revision-scoped live screenshot still bind it.
+      const binding = provenance?.binding;
+      const matchingGeneration = binding?.generation === q.generation
+        || (binding?.generation === null && revision === q.generation
+          && binding.questionHash === createHash('sha256').update(String(currentUserQuestion(job))).digest('hex'));
       if (!reference || provenance?.status !== 'verified' || provenance.provider !== 'codex-native'
         || provenance.sha256 !== files[1].sha256 || provenance.inputHashes?.[0] !== reference.sha256
         || provenance.referenceKinds?.[0] !== 'website-design-reference'
         || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id
         || provenance.binding?.projectId !== q.projectId || provenance.binding?.profile !== q.profile
-        || provenance.binding?.environment !== job.sourceEnvironment || provenance.binding?.generation !== q.generation) {
+        || provenance.binding?.environment !== job.sourceEnvironment || !matchingGeneration) {
         await save('artifacts_missing', { notice: '原型缺少本轮真实目标页面截图的生成凭据。请先取得对应系统和环境的截图，再重做原型。' });
         return;
       }

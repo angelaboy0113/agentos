@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdGuidance } from '../src/shared/prd-workspace.js';
+import { prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
 import { prdRevisionSection } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
@@ -322,7 +322,7 @@ async function saveScreenshot(dataDir, job) {
   await savePrdDesignReference(dataDir,job,item);
   return item;
 }
-async function saveArtifact(dataDir, job, id, format, bytes, screenshot) {
+async function saveArtifact(dataDir, job, id, format, bytes, screenshot, generation = job.prd.revision) {
   const dir = path.join(dataDir, 'exports', job.id), item = { id, filename: id + '.' + format, format, kind: 'document',
     sha256: hash(bytes), bytes: bytes.length, rowCount: 0, complete: true, questionGeneration: job.prd.revision };
   await fs.mkdir(dir, { recursive: true });
@@ -330,7 +330,7 @@ async function saveArtifact(dataDir, job, id, format, bytes, screenshot) {
     binding: { jobId: job.id }, file: item, coverage: { rowCount: 0 },
     ...(screenshot ? {request:{imageGeneration:{status:'verified',provider:'codex-native',sha256:item.sha256,inputHashes:[screenshot.sha256],
       referenceKinds:['website-design-reference'],binding:{jobId:job.id,questionId:job.questionId,projectId:job.projectId,profile:job.originProfile,
-        generation:job.prd.revision,environment:job.sourceEnvironment}}}} : {}) }));
+        generation,questionHash:hash(String(job.currentQuestion??job.originalQuestion??job.instruction??'')),environment:job.sourceEnvironment}}}} : {}) }));
   await fs.writeFile(path.join(dir, item.filename), bytes);
   await fs.writeFile(path.join(dir, id + '.verification.json'), receipt);
   return { ...item, verificationHash: hash(receipt) };
@@ -371,7 +371,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   assert.match(prdGuidance(exportJob), /提交一个 md 和一个 png/);
   const files = await Promise.all([
     saveArtifact(dataDir, exportJob, 'report-11111111-1111-1111-1111-111111111111', 'md', Buffer.from(md)),
-    saveArtifact(dataDir, exportJob, 'report-22222222-2222-2222-2222-222222222222', 'png', png, screenshot),
+    saveArtifact(dataDir, exportJob, 'report-22222222-2222-2222-2222-222222222222', 'png', png, screenshot, null),
   ]);
   await store.transact(s => {
     const j = s.jobs[0];
@@ -379,7 +379,16 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
     j.result = { outcome: 'ready' };
     j.reportFiles = files;
     j.reportReviews = Object.fromEntries(files.map(f => [f.id, { status: 'accepted', verificationHash: f.verificationHash }]));
+    s.questions[questionId].prd.delivery = { revision: exportJob.prd.revision, phase: 'artifacts_missing',
+      digest: prdIntentDigest([questionId, chat, exportJob.prd.revision, exportJob.prd.revision, ...files.map(f => f.sha256)]) };
   });
+  await store.transact(s => { s.jobs[0].currentQuestion = '另一轮请求'; });
+  await workspace.publisher.deliver(questionId);
+  assert.equal((await store.read()).questions[questionId].prd.delivery.phase, 'artifacts_missing');
+  assert.equal(calls.length, 0);
+  await store.transact(s => { s.jobs[0].currentQuestion = exportJob.currentQuestion; });
+  await workspace.publisher.recover({ recheckArtifacts: true });
+  await workspace.publisher.workers.get(questionId);
   await workspace.publisher.deliver(questionId);
   await workspace.publisher.deliver(questionId);
   const d = (await store.read()).questions[questionId].prd.delivery;
