@@ -5,7 +5,8 @@ import { createId } from '../shared/protocol.js';
 import { createJobRecord } from '../shared/store.js';
 import { resolveProjectId } from '../shared/project-scope.js';
 import { confirmedSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict } from '../shared/source-environments.js';
-import { prdStart, prdExport, prdFormVersion } from '../shared/prd-workspace.js';
+import { prdStart, prdExport, prdDelivered, prdFormVersion } from '../shared/prd-workspace.js';
+import { previousPrdDelivery } from '../shared/prd-revision.js';
 import { requestsPrivateCard } from './private-cards.js';
 import { publishQuestion, questionJob } from './questions.js';
 import { stateView } from '../shared/state-view.js';
@@ -108,7 +109,7 @@ export class PrdWorkspace {
       if (j && (active.has(j.status) || this.publisher.workers.has(q.id))) return { questionId: q.id, pending: true };
       const exportRun = j?.prd?.exportRevision && !q.prd.delivery?.sentAt && prdExport.test(text) && j.result?.outcome === 'ready';
       if (exportRun) { q.prd.messages.at(-1).applied = true; return { questionId: q.id, retryPublish: true }; }
-      if (prdExport.test(text) && q.prd.delivery?.sentAt && j?.prd?.exportRevision === j?.prd.revision) {
+      if (prdExport.test(text) && prdDelivered(q, j) && j?.prd?.exportRevision === j?.prd.revision) {
         q.prd.messages.at(-1).applied = true;
         return { questionId: q.id };
       }
@@ -231,7 +232,7 @@ function prdSourceEnvironment(project, messages) {
 }
 
 function applyPending(state, q, project) {
-  if (['creating','inserting','sharing','unknown'].includes(q.prd.delivery?.phase)) return false;
+  if (['creating','created','body_verified','inserting','image_verified','sharing','shared','unknown'].includes(q.prd.delivery?.phase)) return false;
   const pending = q.prd.messages.filter(m => !m.applied && (m.text || m.attachments.length));
   if (!pending.length || pending.some(m => m.draftLinks)) return false;
   let job = questionJob(state, q.id);
@@ -290,7 +291,10 @@ function applyPending(state, q, project) {
       return false;
     }
     const revision = job.prd.revision + 1;
-    job.prd = { revision, exportRevision: revision, auto: true };
+    const previous = previousPrdDelivery(q, revision);
+    job.prd = { revision, exportRevision: revision, auto: true, ...(previous ? { previousRevision: {
+      revision: previous.revision, url: previous.url, sentAt: previous.sentAt, digest: previous.digest, artifacts: previous.artifacts,
+    } } : {}) };
     if (q.prd.delivery && !q.prd.delivery.sentAt && !q.prd.delivery.token) delete q.prd.delivery;
     if (job.result) job.context = [...job.context, { stage: 'developer', kind: 'prd_previous_turn', result: job.result }].slice(-8);
     job.currentQuestion = manualExport ? '按已确认需求完成本版评审稿。' : text;

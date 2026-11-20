@@ -4,6 +4,7 @@ import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { runLarkCli } from './lark-cli.js';
 import { reportFile } from '../shared/report-files.js';
 import { readPrdDesignReference } from '../shared/image-generation.js';
+import { previousPrdDelivery, prdRevisionSection, readPrdRevisionBaseline } from '../shared/prd-revision.js';
 import { reportEligible } from '../shared/report-acceptance.js';
 import { prdDocumentTitle, prdIntentDigest } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
@@ -122,6 +123,7 @@ export class PrdCloudDelivery {
     if (q.prd.delivery && q.prd.delivery.revision !== revision && !q.prd.delivery.sentAt) return;
     const files = ['md', 'png'].map(format => job.reportFiles?.findLast(file => file.format === format
       && file.questionGeneration === q.generation && reportEligible(job, file)));
+    const previous = previousPrdDelivery(q, revision);
     const digest = prdIntentDigest([id, q.chatId, revision, q.generation, ...files.map(f => f?.sha256)]);
     let delivery = q.prd.delivery?.revision === revision ? q.prd.delivery : { revision, digest, phase: 'pending' };
     if (delivery.digest !== digest) return;
@@ -131,6 +133,10 @@ export class PrdCloudDelivery {
         if (fresh?.withdrawnAt || fresh.generation !== q.generation || questionJob(state, id)?.prd?.revision !== revision) throw Error('PRD_SCOPE_CHANGED');
         const prior = fresh.prd.delivery;
         if (prior?.revision === revision && prior.digest !== digest) throw Error('PRD_ARTIFACT_CHANGED');
+        if (prior?.sentAt && prior.revision !== revision) {
+          fresh.prd.deliveryHistory ??= {};
+          fresh.prd.deliveryHistory[prior.revision] = prior;
+        }
         fresh.prd.delivery = { ...delivery, ...values, phase, updatedAt: new Date().toISOString() };
         return fresh.prd.delivery;
       });
@@ -163,7 +169,10 @@ export class PrdCloudDelivery {
       const referenceHashes = (job.attachments ?? []).filter(a => a.source?.kind === 'authorized-prd-document-image'
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
         .map(a => a.source.sha256);
-      const markdown = prdMarkdown(content.toString('utf8'), { prototypeHash: files[1].sha256, referenceHashes });
+      const raw = content.toString('utf8');
+      const baseline = previous ? await readPrdRevisionBaseline(dir, job, previous).catch(() => null) : null;
+      const comparison = prdRevisionSection(previous, baseline, raw, files[1].sha256);
+      const markdown = comparison + prdMarkdown(raw, { prototypeHash: files[1].sha256, referenceHashes });
       const parent = path.join(dir, 'prd-delivery');
       await mkdir(parent, { recursive: true, mode: 0o700 });
       const cwd = await mkdtemp(path.join(parent, 'export-'));
@@ -195,7 +204,7 @@ export class PrdCloudDelivery {
         };
         if (delivery.phase === 'created') {
           const xml = await render();
-          if (!hasNativeTable(xml) || !/<h[1-6](?:\s|>)/i.test(xml)) throw Error('PRD_NATIVE_BLOCK_READBACK');
+          if (!hasNativeTable(xml) || !/<h[1-6](?:\s|>)/i.test(xml) || previous && !xml.includes('本次变更')) throw Error('PRD_NATIVE_BLOCK_READBACK');
           await save('body_verified');
         }
         if (delivery.phase === 'body_verified') {
@@ -217,7 +226,8 @@ export class PrdCloudDelivery {
           const acl = await call(['drive', '+member-list', '--as', 'user', '--token', doc, '--type', 'docx']);
           const items = acl.data?.items ?? acl.data?.members ?? acl.items ?? [];
           if (!items.some(m => m.member_id === q.chatId && m.perm === 'edit' && m.member_type === 'openchat')) throw Error('PRD_ACL_READBACK');
-          await save('delivered', { sentAt: new Date().toISOString(), notice: '飞书评审稿已创建，本群成员可编辑。' });
+          await save('delivered', { sentAt: new Date().toISOString(), notice: '飞书评审稿已创建，本群成员可编辑。',
+            artifacts:{ generation:q.generation, markdownId:files[0].id, prototypeId:files[1].id } });
         }
       } finally { await rm(cwd, { recursive: true, force: true }); }
     } catch (error) {

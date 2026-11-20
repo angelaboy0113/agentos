@@ -1,4 +1,5 @@
 import { needsPrdAnswer, prdDelivered, prdFormVersion } from '../shared/prd-workspace.js';
+import { prdDeliveryLink, previousPrdDelivery } from '../shared/prd-revision.js';
 import {isPendingEnrollment} from '../shared/enrollment-lifecycle.js';
 import {addressCard} from './reply-addressing.js';
 import { addQuestionProgress, enrollmentNotice } from './enrollment-cards.js';
@@ -107,12 +108,16 @@ export function questionView(state, questionId, projects = {}) {
     const currentDelivery = d?.revision === job?.prd?.revision ? d : null;
     if (!prdDeliveryComplete && card.header.template === 'green') card.header.template = currentDelivery?.notice ? 'orange' : 'blue';
     if (elements && currentDelivery?.notice) elements.push({tag:'markdown',content:currentDelivery.notice});
-    if (elements && prdDeliveryComplete && d.url) elements.push({tag:'markdown',content:`[打开飞书 PRD 评审稿 · v0.${d.revision}](${d.url})`});
+    const currentLink = prdDeliveryComplete && prdDeliveryLink(d);
+    const previous = previousPrdDelivery(q, job?.prd?.revision ?? 0);
+    if (elements && currentLink) elements.push({tag:'markdown',content:`[打开飞书 PRD 评审稿 · v0.${d.revision}](${currentLink})`});
+    if (elements && previous) elements.push({tag:'markdown',content:`[对照上一版 · v0.${previous.revision}](${prdDeliveryLink(previous)})`});
     if (elements && prdAnswerVersion) {
       const prompt = prdClarification && !q.prd.intake ? job?.result?.investigation?.blocker?.needed : null;
       if (prompt) elements.push({tag:'markdown',content:'**请确认**\n'+publicText(prompt)});
       const hasPending = q.prd.messages.some(m => !m.applied && !m.draftLinks && (m.text || m.attachments?.length));
-      const hint = !prdClarification && hasPending && activeQuestionJob(job)
+      const hint = prdDeliveryComplete ? '如需改版，填写这轮要改的内容。新稿会列出与上一版的差异。'
+        : !prdClarification && hasPending && activeQuestionJob(job)
         ? '已收到补充，当前轮结束后会沿用本需求继续。'
         : '需要补充时直接填写此卡。信息齐备后自动交付飞书评审稿。';
       elements.push({tag:'markdown',text_size:'notation',content:hint});
@@ -120,7 +125,7 @@ export function questionView(state, questionId, projects = {}) {
         {tag:'input',name:'clarification',input_type:'multiline_text',width:'fill',required:true,rows:4,max_length:1000,
           placeholder:{tag:'plain_text',content:prdClarification ? '按上面的要点填写，多个问题可分行回答。' : '填写需求补充或粘贴飞书文档链接。'}},
         {tag:'button',name:'prd_'+prdAnswerVersion,form_action_type:'submit',type:'primary_filled',width:'fill',
-          text:{tag:'plain_text',content:'提交补充，继续整理'}},
+          text:{tag:'plain_text',content:prdDeliveryComplete ? '提交改版' : '提交补充，继续整理'}},
       ]});
       if (prdClarification) card.header.template = 'orange';
     }

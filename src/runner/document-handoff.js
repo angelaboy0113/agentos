@@ -40,17 +40,20 @@ export function prdPrototypeRevision(job,result,gate) {
 // File construction is an intermediate step, not delivery or business success.
 // A partial analysis may need its first artifact constructed before the ordinary
 // handoff can verify it. Never waive unrelated gate failures or final checks.
-export async function prepareDocumentHandoff(job,result,workspace,{dataDir,emit=async()=>{}}){
+export async function prepareDocumentHandoff(job,result,workspace,{dataDir,emit=async()=>{},createFiles=createDocuments}){
  result=await bindReviewedReportArtifacts(job,result,dataDir);
  let current=job,gate=await validateHandoff(current,result,workspace,{dataDir});
  const candidate=prdPrototypeRevision(job,result,gate);
  const materializable=candidate||gate.issues.every(issue=>issue==='部分分析必须有可核验工件、已通过的检查及明确证据缺口');
  if(job.taskIntent==='analysis'&&result.documentRequests?.length&&materializable){
   try{
-   const files=await createDocuments(dataDir,job,result.documentRequests,{onProgress:event=>emit({type:'progress',...event})});
+   const files=await createFiles(dataDir,job,result.documentRequests,{onProgress:event=>emit({type:'progress',...event})});
    if(candidate&&files.some(f=>f.sha256===candidate.sha256))throw Object.assign(Error('修订原型与待修订文件一致'),{code:'PRD_IMAGE_UNCHANGED'});
-   if(candidate)result={...result,reportReviewRequired:true,handoff:{...result.handoff,checks:result.handoff.checks.map(check=>
-    check.id==='original-question'&&check.status==='failed'?{...check,status:'not_run'}:check)}};
+   if(candidate)result={...result,reportReviewRequired:true,handoff:{...result.handoff,
+    risks:[...(result.handoff.risks??[]),'修订图已生成，仍需对照现场截图验收。'],
+    checks:[...result.handoff.checks.filter(check=>check.id!=='prd-prototype-file').map(check=>
+     check.id==='original-question'&&check.status==='failed'?{...check,status:'not_run'}:check),
+    {id:'prd-prototype-file',required:false,status:'passed',evidence:'新 PNG 已完成文件生成与结构校验，文件 '+files[0].id}]}};
    current={...job,reportFiles:[...(job.reportFiles??[]),...files]};
    result={...result,exportFiles:[...(result.exportFiles??[]),...files],handoff:{...result.handoff,artifacts:[...(result.handoff?.artifacts??[]),...files.map(f=>({kind:'report',path:f.id}))]}};
    gate=await validateHandoff(current,result,workspace,{dataDir});

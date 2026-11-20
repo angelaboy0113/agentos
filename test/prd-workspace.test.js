@@ -1,5 +1,5 @@
 import { PrdCloudDelivery } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdPrototypeRevision } from '../src/runner/document-handoff.js';
+import { prepareDocumentHandoff, prdPrototypeRevision } from '../src/runner/document-handoff.js';
 import { runInNewContext } from 'node:vm';
 import { chromeDesignStyle } from '../src/control-plane/shared-chrome-browser.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
@@ -17,6 +17,7 @@ import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
 import { prdGuidance } from '../src/shared/prd-workspace.js';
+import { prdRevisionSection } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
 const chat = 'oc_team';
@@ -234,7 +235,7 @@ test('PRD as a document name does not collide with a later SIT environment clari
   assert.match(job.originalQuestion, /补贴状态 PRD/);
 });
 
-test('a single PRD form stays open through execution and partial results, then closes on verified delivery', async t => {
+test('a single PRD form accepts supplements during execution and switches to revision after delivery', async t => {
   const { cards, store, workspace, send } = await fixture(t);
   const { questionId } = await send('om_live_form', '我想做一个需求，订单详情增加补贴状态');
   await store.transact(s => {
@@ -281,8 +282,29 @@ test('a single PRD form stays open through execution and partial results, then c
       url: 'https://unit.feishu.cn/docx/FinalDoc' };
   });
   const delivered = await render();
-  assert.equal(formIn(delivered).length, 0);
+  assert.equal(formIn(delivered).length, 1);
+  assert.equal(formIn(delivered)[0].elements[1].text.content, '提交改版');
   assert.match(JSON.stringify(delivered.card), /https:\/\/unit\.feishu\.cn\/docx\/FinalDoc/);
+  const revisionForm = { form: { questionId, cardId:'om_card', version:formIn(delivered)[0].elements[1].name.slice(4) } };
+  await send('prd-form:revision','表格加一列更新时间','om_live_form',revisionForm);
+  const next=await store.read();
+  assert.equal(next.jobs.length,1);
+  assert.equal(next.jobs[0].prd.previousRevision.revision,2);
+  assert.equal(next.jobs[0].analysisContinuation.threadId,'prd-fixed-thread');
+  assert.match(JSON.stringify((await render()).card),/对照上一版/);
+});
+
+test('PRD revision comparison shows before and after without treating every section as new when the title changes', () => {
+  const previous = { revision:1,sentAt:'2026-11-20T03:00:00Z',url:'https://unit.feishu.cn/docx/FirstDoc' };
+  const baseline = { markdown:'# PRD v1\n## 规则\n侧栏打开\n## 保留\n沿用权限\n## 临时\n旧说明', prototypeHash:'old' };
+  const text=prdRevisionSection(previous,baseline,'# PRD v2\n## 规则\n弹窗打开\n## 保留\n沿用权限\n## 新规则\n只读', 'new');
+  assert.match(text,/本次变更/);
+  assert.match(text,/规则 \| 修改 \| 侧栏打开 \| 弹窗打开/);
+  assert.match(text,/新规则 \| 新增/);
+  assert.match(text,/临时 \| 删除/);
+  assert.match(text,/原型图 \| 更新/);
+  assert.doesNotMatch(text,/保留 \|/);
+  assert.match(prdRevisionSection(previous,null,'','new'),/上一版交付快照已不可读/);
 });
 
 test('a PRD display rule about rejection reasons is not a request to investigate a live incident', () => {
@@ -317,6 +339,7 @@ async function saveArtifact(dataDir, job, id, format, bytes, screenshot) {
 test('cross-system PRD delivers styled cloud review draft as the owner with native table/image and scoped editable ACL', async t => {
   const calls = [];
   let image = false;
+  const drafts = [];
   const doc = 'AbcDocumentToken';
   const cli = async (args, opts) => {
     calls.push([args, opts]);
@@ -327,8 +350,14 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
     }
     assert.ok(args.includes('user'));
     if (args[0] === 'api') return { data: { open_id: owner } };
-    if (args[1] === '+create') { assert.equal(opts.input, md.trim()); return { data: { document_id: doc, url: 'https://unit.feishu.cn/docx/' + doc } }; }
-    if (args[1] === '+fetch') return { data: { content: '<h1>订单补贴状态</h1><table/><table><tr><td>TPM</td></tr></table>' + (image ? '<img href="owned.png"/>' : '') } };
+    if (args[1] === '+create') {
+      drafts.push(opts.input);
+      image=false;
+      const token=drafts.length===1?doc:doc+'Second';
+      return { data: { document_id: token, url: 'https://unit.feishu.cn/docx/' + token } };
+    }
+    if (args[1] === '+fetch') return { data: { content: '<h1>订单补贴状态</h1><table/><table><tr><td>TPM</td></tr></table>'
+      + (drafts.length>1?'<h2>本次变更</h2>':'') + (image ? '<img href="owned.png"/>' : '') } };
     if (args[1] === '+media-insert') { image = true; assert.deepEqual(await fs.readFile(path.join(opts.cwd, 'prototype.png')), png); return {}; }
     if (args[1] === '+member-add') { assert.ok(args.includes(chat)); assert.ok(args.includes('openchat')); assert.ok(args.includes('edit')); return {}; }
     if (args[1] === '+member-list') return { data: { items: [{ member_id: chat, member_type: 'openchat', perm: 'edit' }] } };
@@ -358,6 +387,27 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   assert.ok(d.sentAt);
   assert.equal(calls.filter(([a]) => a[1] === '+create').length, 1);
   assert.equal(calls.filter(([a]) => a[1] === '+member-add').length, 1);
+  assert.equal(drafts[0],md.trim());
+  await send('om_revision','请把 LTX 的展示改成弹窗','om_start');
+  const next = (await store.read()).jobs[0];
+  const secondScreenshot=await saveScreenshot(dataDir,next);
+  const revised=await Promise.all([
+    saveArtifact(dataDir,next,'report-99999999-9999-9999-9999-999999999991','md',Buffer.from(md.replace('|LTX|展示|','|LTX|弹窗|'))),
+    saveArtifact(dataDir,next,'report-99999999-9999-9999-9999-999999999992','png',png,secondScreenshot),
+  ]);
+  await store.transact(s=>{
+    const j=s.jobs[0];j.status='completed';j.result={outcome:'ready'};
+    j.reportFiles.push(...revised);
+    for(const f of revised)j.reportReviews[f.id]={status:'accepted',verificationHash:f.verificationHash};
+  });
+  await workspace.publisher.deliver(questionId);
+  const after=(await store.read()).questions[questionId].prd;
+  assert.equal(after.delivery.phase,'delivered',after.delivery.notice);
+  assert.equal(after.delivery.revision,2);
+  assert.equal(after.deliveryHistory[1].url,d.url);
+  assert.match(drafts[1],/本次变更/);
+  assert.match(drafts[1],/LTX／展示.*LTX／弹窗/);
+  assert.match(drafts[1],new RegExp(d.url));
   assert.throws(() => prdMarkdown(md + '![remote](https://example.com/pixel.png)'));
 });
 
@@ -507,6 +557,25 @@ test('a visually rejected PRD can construct just a hash-bound replacement withou
   assert.equal(prdPrototypeRevision({...job,questionGeneration:3},result,gate),null);
   assert.equal(prdPrototypeRevision(job,{...result,documentRequests:[{format:'md'}]},gate),null);
   assert.equal(prdPrototypeRevision(job,result,{issues:[...gate.issues,'missing source']}),null);
+});
+
+test('a structurally verified replacement PNG can be saved while the original visual requirement remains open', async t => {
+  const {dataDir}=await fixture(t);
+  const job={id:'JOB-revision',questionId:'QST-revision',taskIntent:'analysis',questionGeneration:1,prd:{auto:true,revision:1}};
+  const original=await saveArtifact(dataDir,job,'report-12345678-1234-1234-1234-123456789abc','png',png);
+  const replacement=await saveArtifact(dataDir,job,'report-12345678-1234-1234-1234-123456789abd','png',Buffer.concat([png,Buffer.from([0])]));
+  job.reportFiles=[original];
+  job.reportEvidence={status:'verified',binding:{sourceJobId:job.id,fileId:original.id,sha256:original.sha256,verificationHash:original.verificationHash}};
+  const {result}=await prepareDocumentHandoff(job,{
+    outcome:'partial',reportAssessment:{decision:'revise',fileId:original.id},documentRequests:[{format:'png'}],
+    investigation:{status:'continue',goals:[{id:'original-question',status:'open'}]},
+    handoff:{returnTo:'none',artifacts:[],risks:[],checks:[{id:'original-question',required:true,status:'failed',evidence:'原页面布局未保留'}]},
+  },dataDir,{dataDir,createFiles:async()=>[replacement]});
+  assert.equal(result.handoffGate.passed,true);
+  assert.equal(result.outcome,'partial');
+  assert.equal(result.reportReviewRequired,true);
+  assert.deepEqual(result.exportFiles,[replacement]);
+  assert.equal(result.handoff.checks.find(c=>c.id==='original-question').status,'not_run');
 });
 
 
