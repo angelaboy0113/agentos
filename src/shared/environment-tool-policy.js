@@ -3,7 +3,7 @@ import {validateWebsiteNavigationSelectors} from './website-controls.js';
 import {validateCnbQuery} from './cnb-policy.js';
 import {validateTsfQuery} from './tsf-policy.js';
 import {validateTctQuery} from './tct-policy.js';
-import {validateWebsiteReadEndpoints,validateWebsiteStaticResources,validateWebsiteStaticRoots,validateWebsiteLoginReads} from './website-policy.js';
+import {validateWebsiteReadEndpoints,validateWebsiteStaticResources,validateWebsiteStaticRoots,validateWebsiteImageRoots,validateWebsiteLoginReads} from './website-policy.js';
 const ident = x => typeof x === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(x);
 export function validateToolQuery(e, q) {
   if(q.logReadWindow!==undefined&&e.kind!=='tsf')throw Error('Log read windows require a TSF environment');
@@ -14,6 +14,10 @@ export function validateToolQuery(e, q) {
   if(q.configKeys!==undefined){if(e.kind!=='nacos'||q.mode!=='investigate'||q.reviewed!==true)throw Error('配置投影只支持审核后的Nacos只读排查');validateConfigKeys(q.configKeys);}
   if(q.staticResources!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw new Error('静态依赖仅支持审核后的网站排查');validateWebsiteStaticResources(q.staticResources,e.baseUrl);}
   if(q.staticResourceRoots!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw Error('公共静态目录仅支持审核后的网站排查');validateWebsiteStaticRoots(q.staticResourceRoots);}
+  if(q.imageResourceRoots!==undefined){
+   if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw Error('图片来源仅支持审核后的网站排查');
+   validateWebsiteImageRoots(q.imageResourceRoots);
+  }
   if(q.loginReads!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw Error('认证读取仅支持审核后的网站排查');validateWebsiteLoginReads(q.loginReads);}
   if(q.readNavigationSelectors!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw Error('导航适配仅限审核后的网站只读调查');validateWebsiteNavigationSelectors(q.readNavigationSelectors);}
   if(q.readEndpoints!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw new Error('固定只读接口仅支持审核后的网站排查');validateWebsiteReadEndpoints(q.readEndpoints);}

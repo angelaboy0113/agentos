@@ -396,3 +396,6 @@ Memory headroom and durable overload waiting: see [memory-admission.md](memory-a
 维护者用 Node 运行 `scripts/review-website-read.mjs <私有环境配置> <私有源证据记录> <私有审计输出> --apply`。证据 JSON 字段为 `environmentId`、`projectId`、`tier`、`origin`、`queryId`、`method`、`path`、`sourceCommit`、`evidence`。该入口只登记被观察且经核查的精确 POST，使命令重复运行无副作用；维护者必须审查真实实现，提交号和说明用于留痕。配置更新后重新申请原环境的受控查询，已有投递回执和原权限沿用。此入口不提供给运行任务中的模型。
 
 已由源码核实为查看明细的自定义组件，可在同一查询的 `readNavigationSelectors` 中登记最多四层、以空格连接的固定类名或 ID。可用于按父级日历范围区分数字入口与页面其它标签。控制面仍核验实际请求，控件登记不授予接口或写入权限。
+
+
+已接入网站的业务图片若托管在独立对象存储，可在同一网站 `investigate` 查询设置 `imageResourceRoots`。每项是 HTTPS 目录，可用整段 `{date}` 或 `{compactDate}` 匹配按日归档；例如 `https://media.example.com/photos/{date}/store/`。当前页面发起的 位图 图片 GET 会通过独立客户端加载，无浏览器凭据、重定向或业务接口授权。不同系统及环境各自使用自己的配置，页面新增对象时无需逐张登记。

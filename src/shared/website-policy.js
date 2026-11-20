@@ -148,6 +148,37 @@ export function validateWebsiteStaticRoots(value){
  if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return u.protocol!=='https:'||u.search||u.hash||u.href.replace(/%7Bhex%7D/gi,'{hex}')!==url||!/^\/(?:[A-Za-z0-9_-]+\/|\{hex\}\/){2,}$/.test(decodeURIComponent(u.pathname));}catch{return true;}}))throw Error('公共静态目录须为审核后的HTTPS多段目录，仅可用整段{hex}表示8至64位哈希，不能含任意通配符、查询或业务接口');
  return value;
 }
+const imageRootParts=Object.freeze({date:/^\d{4}-\d{2}-\d{2}$/,compactDate:/^\d{8}$/});
+const imageExtension=/\.(?:jpe?g|png|webp|gif|avif|bmp|ico)$/i;
+export function validateWebsiteImageRoots(roots){
+ if(!Array.isArray(roots)||roots.length>32||roots.some(root=>{
+  try{
+   const u=new URL(websiteUrl(root)),parts=decodeURIComponent(u.pathname).split('/').slice(1,-1);
+   return u.protocol!=='https:'||u.href.replace(/%7B(date|compactDate)%7D/g,'{$1}')!==root||!u.pathname.endsWith('/')
+    ||!parts.some(part=>/^[A-Za-z][A-Za-z0-9_-]*$/.test(part))
+    ||parts.some(part=>!/^(?:[A-Za-z0-9_-]+|\{date\}|\{compactDate\})$/.test(part));
+  }catch{return true;}
+ }))throw Error('图片来源须为固定HTTPS目录，仅支持整段日期占位符');
+ return roots;
+}
+
+export function websiteImageResourceAllowed(request,roots=[]){
+ if(request.method!=='GET'||request.resourceType!=='image'||!roots.length)return false;
+ try{
+  validateWebsiteImageRoots(roots);
+  const u=new URL(request.url);
+  if(u.username||u.password||u.search||u.hash||/%(?:2e|2f|5c|25)/i.test(u.pathname))return false;
+  const parts=decodeURIComponent(u.pathname).split('/');
+  if(parts.some(part=>part==='.'||part==='..'||/[\\%\x00-\x1f\x7f]/.test(part))||!imageExtension.test(parts.at(-1)))return false;
+  return roots.some(root=>{
+   const b=new URL(root),prefix=decodeURIComponent(b.pathname).split('/').slice(0,-1);
+   return u.origin===b.origin&&parts.length===prefix.length+1&&prefix.every((part,index)=>{
+    const pattern=part.startsWith('{')&&imageRootParts[part.slice(1,-1)];
+    return pattern?pattern.test(parts[index]):part===parts[index];
+   });
+  });
+ }catch{return false;}
+}
 export function validateWebsiteLoginReads(value){
  if(!Array.isArray(value)||value.some(e=>!e||Object.keys(e).some(k=>!['origin','path','types','method','reviewed','bodyParameters'].includes(k))||(()=>{try{const u=new URL(websiteUrl(e.origin));return u.protocol!=='https:'||u.origin!==e.origin;}catch{return true;}})()||(e.method!==undefined&&!['GET','POST'].includes(e.method))||e.method==='POST'&&(e.reviewed!==true||writeAction.test((e.path??'').replace(/[\/_-]/g,' '))||/register|grant|consent|revoke/i.test(e.path??'')||e.path?.endsWith('/'))||typeof e.path!=='string'||!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\/?$/.test(e.path)||!Array.isArray(e.types)||!e.types.length||e.types.some(t=>!['document','image','script','xhr','fetch'].includes(t))))throw Error('认证读取仅允许审核后的HTTPS来源、明确路径与资源类型，POST仅允许人工审核的精确认证路径，不支持业务写入');
  for(const e of value)if(e.bodyParameters!==undefined){

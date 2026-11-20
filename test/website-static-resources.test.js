@@ -48,3 +48,43 @@ test('public worker script classified as other stays constrained to the reviewed
  const roots=['https://cdn.example.test/product/{hex}/{hex}/'];const r={url:'https://cdn.example.test/product/12345678/abcdef01/worker.js',method:'GET',resourceType:'other'};assert.ok(allow('https://app.test',r,[],roots));
  for(const change of [{method:'POST'},{url:r.url+'?credential=x'},{url:r.url.replace('worker.js','records.json')},{url:r.url.replace('/product/','/api/')},{url:r.url.replace('cdn.example.test','foreign.test')},{resourceType:'document'},{resourceType:'fetch'}])assert.equal(allow('https://app.test',{...r,...change},[],roots),false);
 });
+
+test('image roots match rotating dates and only image requests under the configured path',async()=>{
+ const {websiteImageResourceAllowed:images,validateWebsiteImageRoots:validateImages}=await import('../src/shared/website-policy.js');
+ const roots=['https://photos.test/capture/{date}/facade/','https://another.test/archive/{compactDate}/'];validateImages(roots);
+ const url='https://photos.test/capture/2026-11-20/facade/store%20photo.jpeg';
+ const req={method:'GET',resourceType:'image',url};
+ assert.equal(images(req,roots),true);
+ assert.equal(images({...req,url:'https://another.test/archive/20251104/photo.png'},roots),true);
+ for(const delta of [{method:'POST'},{resourceType:'script'},{resourceType:'fetch'}, {url:url+'?token=hidden'},
+  {url:url.replace('2026-11-20','static')},{url:url.replace('facade/','other/')},{url:url.replace('store%20photo.jpeg','%252e%252e.jpg')},
+  {url:url.replace('store%20photo.jpeg','../other.jpg')},{url:url.replace('.jpeg','.svg')},{url:url.replace('photos.test','unknown.test')}]){
+  assert.equal(images({...req,...delta},roots),false);
+ }
+ for(const root of ['https://photos.test/','https://photos.test/{date}/','https://photos.test/*/','http://photos.test/photos/','https://photos.test/photos/../other/'])assert.throws(()=>validateImages([root]));
+});
+
+test('configured photo actually decodes and misleading MIME is rejected without forwarding headers',async t=>{
+ const photo='https://photos.test/capture/2026-11-20/facade/store.png', blocked=photo.replace('store.png','no.png');
+ const pixel=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64');
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'reviewed-images-'));
+ const server=http.createServer((req,res)=>{res.setHeader('content-type','text/html');res.end(`<h1>store photos</h1><img id="photo" src="${photo}"><img id="bad" src="${blocked}">`);});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP image-app.test 127.0.0.1']})};
+ const calls=[],b=new WebsiteBrowser(dir,driver,async()=>true,{publicFetch:async(url,options)=>{
+  calls.push({url,options});
+  return new Response(pixel,{headers:{'content-type':url===photo?'image/png':'text/html','set-cookie':'private=ignored'}});
+ }});
+ t.after(async()=>{await b.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
+ const e={projectId:'fixture',tier:'uat',baseUrl:`http://image-app.test:${server.address().port}/`,
+  queries:{inspect:{imageResourceRoots:['https://photos.test/capture/{date}/facade/']}}};
+ const job={id:'photo',environmentAccess:{queryId:'inspect'}};
+ await b.run(job,e,'connection');
+ const {page,session}=b.pages.get(job.id);
+ await page.waitForFunction(()=>[...document.images].every(img=>img.complete));
+ assert.equal(await page.locator('#photo').evaluate(img=>img.naturalWidth),1);
+ assert.equal(await page.locator('#bad').evaluate(img=>img.naturalWidth),0);
+ assert.equal(calls.length,2);
+ assert.ok(calls.every(c=>c.options.redirect==='manual'&&!c.options.headers));
+ assert.deepEqual(await session.context.cookies(),[]);
+});

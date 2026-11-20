@@ -14,7 +14,7 @@ import {BrowserInputError,validateBrowserTool,websitePageLocation,websitePageRou
 import { chromium } from 'playwright';
 import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, websiteImageResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
 
 export function routePrdWebsiteBrowser(shared, isolated) {
  const browser=job=>job.prd?.auto?isolated:shared;
@@ -48,13 +48,15 @@ export class WebsiteBrowser {
    await context.route('**/*',async route=>{
     const r=route.request();let page;try{page=r.frame().page();}catch{}
     const state=[...this.pages.values()].find(s=>s.page===page),target=state?.environment??e;
-    const request={url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()},resources=target.queries?.[state?.job?.environmentAccess?.queryId]?.staticResources??[];
-    if(state&&websiteStaticResourceAllowed(target.baseUrl,request,resources,target.queries?.[state?.job?.environmentAccess?.queryId]?.staticResourceRoots??[],{identityPage:loginPageAllowed(state.page.url(),target.loginNavigation)})){
+    const request={url:r.url(),method:r.method(),body:r.postData(),resourceType:r.resourceType()};
+    const policy=target.queries?.[state?.job?.environmentAccess?.queryId];
+    const image=state&&websiteImageResourceAllowed(request,policy?.imageResourceRoots);
+    if(state&&(image||websiteStaticResourceAllowed(target.baseUrl,request,policy?.staticResources??[],policy?.staticResourceRoots??[],{identityPage:loginPageAllowed(state.page.url(),target.loginNavigation)}))){
      // Public GET via an independent client: no browser cookies, tokens, referer,
      // post body, authentication, redirects or response Set-Cookie cross the boundary.
      let permitted=false;try{permitted=await this.authorize(state.job,state.waiting,r);}catch{}
      if(!permitted){await route.abort().catch(()=>{});return;}
-     try{const response=await this.publicFetch(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const headers={'content-type':response.headers.get('content-type')??'application/octet-stream','cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
+     try{const response=await this.publicFetch(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const contentType=response.headers.get('content-type')??'application/octet-stream';if(image&&!/^image\/(?:jpeg|png|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)(?:;|$)/i.test(contentType)){await response.body?.cancel();throw new Error('IMAGE_CONTENT_TYPE');}const headers={'content-type':contentType,'cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
     }
     let allow=false,boundary;try{boundary=websiteRequestBoundary(target.baseUrl,request,state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);allow=boundary.allowed;}catch{}
     const loginReads=target.queries?.[state?.job?.environmentAccess?.queryId]?.loginReads??[];
@@ -250,7 +252,7 @@ export class WebsiteBrowser {
   let before=await this.loginStatus(s);
   if(!before.pageReady&&e.loginNavigation){const navigation=validateLoginNavigation(e.loginNavigation);for(const step of navigation.steps){const result=await s.page.evaluate(loginNavigationPage,{baseUrl:e.baseUrl,usernameLabel:navigation.usernameLabel,entryUrl:navigation.entryUrl,step});if(result.error)throw Error(result.error);if(result.ready)break;await s.page.waitForTimeout(150);}const result=await s.page.evaluate(loginNavigationPage,{baseUrl:e.baseUrl,usernameLabel:navigation.usernameLabel});if(!result.ready)throw Error(result.error??'登录账号身份入口尚未就绪，未填写凭据');before=await this.loginStatus(s);}
   if(before.pageReady)return {...before,authenticated:true,attempted:false};
-  const policy=createHash('sha256').update(JSON.stringify([e.projectId,e.tier,e.baseUrl,e.credentialRef,job.environmentAccess?.queryId,e.queries?.[job.environmentAccess?.queryId]?.readEndpoints??[]])).digest('hex');
+  const policy=createHash('sha256').update(JSON.stringify([e.projectId,e.tier,e.baseUrl,e.credentialRef,job.environmentAccess?.queryId,e.queries?.[job.environmentAccess?.queryId]?.readEndpoints??[],e.queries?.[job.environmentAccess?.queryId]?.imageResourceRoots??[]])).digest('hex');
   const correctedPolicy=s.authAttemptPolicy!==undefined&&s.authAttemptPolicy!==policy;
   if(!force&&(before.rateLimited||s.credentialAttempted&&(before.credentialRejected||!correctedPolicy)))return {...before,authenticated:false,attempted:false};
   if(before.passwordChangeRequired)return {...before,authenticated:false,attempted:false};
