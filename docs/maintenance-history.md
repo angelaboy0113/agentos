@@ -2240,3 +2240,7 @@ Shared browser metadata recognizes start/execute query labels in genuine search 
 ## 1.138.3 · PRD 分应用交付
 
 以原卡所属助手的飞书应用和授权账号创建文档；按应用分别检测待投递稿件的授权恢复，继续核对原卡群编辑权限。
+
+## 1.138.4 · 飞书协作者权限
+
+发布预检使用协作者列表接口的权限标识 docs:permission.member:retrieve。

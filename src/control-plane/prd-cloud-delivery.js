@@ -7,7 +7,7 @@ import { prdDocumentTitle, prdIntentDigest } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
 import { questionJob, publishQuestion } from './questions.js';
 
-const publishingScopes = 'docx:document docs:document.media:upload docs:permission.member:create docs:permission.member:read';
+const publishingScopes = 'docx:document docs:document.media:upload docs:permission.member:create docs:permission.member:retrieve';
 const validToken = /^[a-zA-Z0-9_-]{6,150}$/;
 const hasNativeTable = xml => /<table(?:\s|>)/i.test(xml);
 const authError = error => /no user logged in|app_scope_not_applied|user_scope_not_granted|missing_scope|missing required scope|99991672|99991679/i.test(error.message);
