@@ -6,6 +6,7 @@ import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { questionView } from '../src/control-plane/questions.js';
 import { savePrdDesignReference } from '../src/control-plane/website-evidence.js';
 import { generateNativeImage, nativeImageReferences } from '../src/shared/image-generation.js';
+import { producePrdPrototype } from '../src/shared/prd-prototype.js';
 import { routePrdWebsiteBrowser } from '../src/control-plane/website-browser.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,7 +18,7 @@ import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
 import { prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
-import { prdRevisionSection } from '../src/shared/prd-revision.js';
+import { prdHighlightChanges } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
 const chat = 'oc_team';
@@ -294,17 +295,14 @@ test('a single PRD form accepts supplements during execution and switches to rev
   assert.match(JSON.stringify((await render()).card),/对照上一版/);
 });
 
-test('PRD revision comparison shows before and after without treating every section as new when the title changes', () => {
-  const previous = { revision:1,sentAt:'2026-11-20T03:00:00Z',url:'https://unit.feishu.cn/docx/FirstDoc' };
-  const baseline = { markdown:'# PRD v1\n## 规则\n侧栏打开\n## 保留\n沿用权限\n## 临时\n旧说明', prototypeHash:'old' };
-  const text=prdRevisionSection(previous,baseline,'# PRD v2\n## 规则\n弹窗打开\n## 保留\n沿用权限\n## 新规则\n只读', 'new');
-  assert.match(text,/本次变更/);
-  assert.match(text,/规则 \| 修改 \| 侧栏打开 \| 弹窗打开/);
-  assert.match(text,/新规则 \| 新增/);
-  assert.match(text,/临时 \| 删除/);
-  assert.match(text,/原型图 \| 更新/);
-  assert.doesNotMatch(text,/保留 \|/);
-  assert.match(prdRevisionSection(previous,null,'','new'),/上一版交付快照已不可读/);
+test('PRD revision highlights changed text in place and preserves the native table source', () => {
+  const baseline = {markdown:'# PRD\n## 规则\n多笔点查看全部打开\n|编号|验收|\n|---|---|\n|AC03|仅查看全部|\n沿用权限'};
+  const rendered = prdHighlightChanges(baseline,baseline.markdown.replaceAll('查看全部','查看补贴明细'));
+  assert.match(rendered,/多笔点查看<span background-color="light-yellow">补贴明细<\/span>打开/);
+  assert.match(rendered,/\|AC03\|仅查看<span background-color="light-yellow">补贴明细<\/span>\|/);
+  assert.match(rendered,/\n沿用权限$/);
+  assert.doesNotMatch(rendered,/本次变更/);
+  assert.equal(prdHighlightChanges(null,'正文'),'正文');
 });
 
 test('a PRD display rule about rejection reasons is not a request to investigate a live incident', () => {
@@ -322,6 +320,59 @@ async function saveScreenshot(dataDir, job) {
   await savePrdDesignReference(dataDir,job,item);
   return item;
 }
+test('existing-page prototype keeps the captured pixels outside the marked region', async t => {
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({headless:true});
+  t.after(() => browser.close());
+  const page = await browser.newPage({viewport:{width:320,height:180}});
+  await page.setContent('<body style="background:rgb(20,60,80)"></body>');
+  const base = await page.screenshot();
+  const { store,send,dataDir } = await fixture(t, async()=>{});
+  await send('om_prototype','我要做 PRD：订单详情增加按钮');
+  const job = (await store.read()).jobs[0], dir=path.join(dataDir,'website-evidence',job.id);
+  const item={name:'a-6.png',sha256:hash(base),bytes:base.length,pageUrl:'https://test.example/target'};
+  await fs.mkdir(dir,{recursive:true});
+  await fs.writeFile(path.join(dir,item.name),base);
+  await savePrdDesignReference(dataDir,job,item);
+  const recipe = {mode:'existing-page',areas:[{x:.25,y:.4,width:.5,height:.2,text:'查看明细'}]};
+  const actual = await producePrdPrototype(dataDir,job,JSON.stringify(recipe),{generate:()=>assert.fail('page should not be redrawn')});
+  const result = await page.evaluate(async images => {
+    async function pixels(data) {
+      const img=new Image(); img.src='data:image/png;base64,'+data; await img.decode();
+      const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
+      const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);
+      return ctx.getImageData(0,0,img.width,img.height).data;
+    }
+    const [before,after]=await Promise.all(images.map(pixels));
+    let outside=0,inside=0;
+    for(let y=0;y<180;y++)for(let x=0;x<320;x++){
+      const n=(y*320+x)*4;
+      if (before.slice(n,n+4).some((value,k)=>value!==after[n+k])) {
+        if(x>=80&&x<240&&y>=72&&y<108)inside++; else outside++;
+      }
+    }
+    return {outside,inside};
+  },[base.toString('base64'),actual.bytes.toString('base64')]);
+  assert.equal(result.outside,0);
+  assert.ok(result.inside>0);
+  assert.equal(actual.provenance.inputHashes[0],item.sha256);
+  assert.equal(actual.provenance.provider,'prd-screenshot-composite');
+  const sideBySide=await producePrdPrototype(dataDir,job,JSON.stringify({mode:'new-page',prompt:'Use existing order UI for a new detail.'}),{
+    generate:async ({references})=>{
+      assert.equal(references[0].sha256,item.sha256);
+      const file=path.join(dataDir,'new-page-proposal.png');
+      await fs.writeFile(file,base);
+      return {file,root:dataDir,threadId:'test-proposal'};
+    }
+  });
+  assert.equal(sideBySide.bytes.readUInt32BE(16),656);
+  assert.equal(sideBySide.bytes.readUInt32BE(20),212);
+  assert.equal(sideBySide.provenance.proposedImage.inputHashes[0],item.sha256);
+
+  await assert.rejects(producePrdPrototype(dataDir,job,JSON.stringify({...recipe,areas:[{...recipe.areas[0],width:1}]}),{}),{code:'IMAGE_PROMPT'});
+  await assert.rejects(producePrdPrototype(dataDir,{...job,prd:{...job.prd,revision:2}},JSON.stringify(recipe),{}),{code:'IMAGE_LIVE_SCREEN_REQUIRED'});
+});
+
 async function saveArtifact(dataDir, job, id, format, bytes, screenshot, generation = job.prd.revision) {
   const dir = path.join(dataDir, 'exports', job.id), item = { id, filename: id + '.' + format, format, kind: 'document',
     sha256: hash(bytes), bytes: bytes.length, rowCount: 0, complete: true, questionGeneration: job.prd.revision };
@@ -357,7 +408,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
       return { data: { document_id: token, url: 'https://unit.feishu.cn/docx/' + token } };
     }
     if (args[1] === '+fetch') return { data: { content: '<h1>订单补贴状态</h1><table/><table><tr><td>TPM</td></tr></table>'
-      + (drafts.length>1?'<h2>本次变更</h2>':'') + (image ? '<img href="owned.png"/>' : '') } };
+      + (drafts.length>1?'<span background-color="rgba(255,246,122,0.8)">弹窗</span>':'') + (image ? '<img href="owned.png"/>' : '') } };
     if (args[1] === '+media-insert') { image = true; assert.deepEqual(await fs.readFile(path.join(opts.cwd, 'prototype.png')), png); return {}; }
     if (args[1] === '+member-add') { assert.ok(args.includes(chat)); assert.ok(args.includes('openchat')); assert.ok(args.includes('edit')); return {}; }
     if (args[1] === '+member-list') return { data: { items: [{ member_id: chat, member_type: 'openchat', perm: 'edit' }] } };
@@ -414,9 +465,8 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   assert.equal(after.delivery.phase,'delivered',after.delivery.notice);
   assert.equal(after.delivery.revision,2);
   assert.equal(after.deliveryHistory[1].url,d.url);
-  assert.match(drafts[1],/本次变更/);
-  assert.match(drafts[1],/LTX／展示.*LTX／弹窗/);
-  assert.match(drafts[1],new RegExp(d.url));
+  assert.doesNotMatch(drafts[1],/本次变更/);
+  assert.match(drafts[1],/LTX\|<span background-color="light-yellow">弹窗<\/span>/);
   assert.throws(() => prdMarkdown(md + '![remote](https://example.com/pixel.png)'));
 });
 

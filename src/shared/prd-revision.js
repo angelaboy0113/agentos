@@ -36,54 +36,75 @@ export function revisionBody(markdown) {
   return markdown.replace(/!\[[^\]\r\n]*\]\(data:image\/[\w+.-]+;base64,[A-Za-z0-9+/]+={0,2}\)/gi, '').trim();
 }
 
-function sections(markdown) {
-  const collected = new Map();
-  const headings = [];
-  let firstTitle = true;
-  let section = { label: '开篇', lines: [] };
-  collected.set('开篇', section);
-  for (const line of revisionBody(markdown).split(/\r?\n/)) {
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line.trim());
-    if (heading) {
-      headings.length = heading[1].length;
-      const isTitle = firstTitle && heading[1].length === 1;
-      if (isTitle) firstTitle = false;
-      headings[heading[1].length - 1] = isTitle ? '' : heading[2].trim();
-      const label = isTitle ? '文档标题' : headings.filter(Boolean).join(' / ');
-      let key = label;
-      for (let occurrence = 2; collected.has(key); occurrence++) key = label + ' (' + occurrence + ')';
-      section = { label: key, lines: isTitle ? [heading[2].trim()] : [] };
-      collected.set(key, section);
-    } else if (line.trim() && !/^\s*\|?[\s:|-]+\|?\s*$/.test(line)) {
-      section.lines.push(line.trim().replace(/\s+/g, ' '));
+const plain = /[\[\]<>*_`~\\]/;
+const highlight = text => '<span background-color="light-yellow">' +
+  text.replaceAll('&', '&amp;') + '</span>';
+
+function inlineChange(before, after) {
+  if (before === after || !after.trim()) return after;
+  const [start, end] = [after.match(/^\s*/)[0], after.match(/\s*$/)[0]];
+  const next = after.trim(), old = before.trim();
+  if (plain.test(next)) {
+    const formatted = /^(\*\*|__)(.+)\1$/.exec(next);
+    if (formatted && !plain.test(formatted[2])) {
+      return start + formatted[1] + inlineChange(old.replace(/^(\*\*|__)(.*)\1$/, '$2'), formatted[2]) + formatted[1] + end;
     }
+    // Keep links, code, and existing emphasis syntactically intact; compare
+    // the text before and after them when the markup did not move.
+    const split = /(`[^`]+`|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__)/;
+    const chunks = next.split(split), prior = old.split(split);
+    if (chunks.length > 1 && chunks.length === prior.length && chunks.every((text,i)=>i%2===0||text===prior[i])) {
+      return start + chunks.map((text,i)=>i%2?text:inlineChange(prior[i],text)).join('') + end;
+    }
+    return after;
   }
-  return collected;
+  let left = 0, right = 0;
+  const a = [...old], b = [...next];
+  while (left < a.length && left < b.length && a[left] === b[left]) left++;
+  while (right < a.length - left && right < b.length - left && a.at(-1 - right) === b.at(-1 - right)) right++;
+  if (left + right === b.length) return start + highlight(next) + end;
+  return start + b.slice(0,left).join('') + highlight(b.slice(left,b.length-right).join('')) + b.slice(b.length-right).join('') + end;
 }
 
-function excerpt(lines) {
-  const text = lines.join('；').replace(/[|]/g, '／').replace(/[<>\[\]`*_]/g, '').replace(/\\/g, '／');
-  const chars = Array.from(text);
-  return chars.length > 180 ? chars.slice(0, 179).join('') + '…' : text || '—';
-}
-
-export function prdRevisionSection(previous, baseline, markdown, prototypeHash) {
-  const url = prdDeliveryLink(previous);
-  if (!url) return '';
-  const heading = '## 本次变更\n\n对照 [上一版 v0.' + previous.revision + '](' + url + ')。\n\n';
-  if (!baseline) return heading + '上一版交付快照已不可读，请打开上方版本核对内容。\n\n';
-  const old = sections(baseline.markdown);
-  const next = sections(markdown);
-  const rows = [];
-  for (const key of new Set([...next.keys(), ...old.keys()])) {
-    const before = old.get(key)?.lines ?? [], after = next.get(key)?.lines ?? [];
-    if (old.has(key) === next.has(key) && JSON.stringify(before) === JSON.stringify(after)) continue;
-    const removed = before.filter(line => !after.includes(line)), added = after.filter(line => !before.includes(line));
-    rows.push([excerpt([key]), !old.has(key) ? '新增' : !next.has(key) ? '删除' : '修改',
-      excerpt(removed.length || added.length ? removed : before), excerpt(removed.length || added.length ? added : after)]);
+export function prdHighlightChanges(baseline, markdown) {
+  if (!baseline) return markdown;
+  const prior = new Map(), seen = new Map();
+  const lines = input => {
+    let section = '开篇', heading = false, code = false;
+    const headings = [];
+    return revisionBody(input).split(/\r?\n/).map(line => {
+      if (/^\s*(?:`{3,}|~{3,})/.test(line)) { code = !code; return { line }; }
+      if (code || !line.trim() || /^\s*\|?[\s:|-]+\|?\s*$/.test(line)) return { line };
+      const h = /^(#{1,6})\s+(.+)$/.exec(line);
+      if (h) {
+        headings.length = h[1].length;
+        headings[h[1].length-1] = !heading && h[1].length === 1 ? '' : h[2];
+        heading = true;
+        section = headings.filter(Boolean).join('/') || '标题';
+      }
+      const kind = h ? 'heading' : /^\s*\|.+\|\s*$/.test(line) ? 'table' : 'text';
+      return { line, section, kind };
+    });
+  };
+  for (const item of lines(baseline.markdown)) {
+    if (!item.kind) continue;
+    const key = JSON.stringify([item.section,item.kind]);
+    if (!prior.has(key)) prior.set(key, []);
+    prior.get(key).push(item.line);
   }
-  if (baseline.prototypeHash !== prototypeHash) rows.push(['原型图', '更新', '上一版原型', '当前版原型见文末']);
-  if (!rows.length) return heading + '本轮交付内容与上一版快照一致。\n\n';
-  return heading + '| 位置 | 变化 | 上一版 | 本版 |\n|---|---|---|---|\n'
-    + rows.map(row => '| ' + row.join(' | ') + ' |').join('\n') + '\n\n';
+  return lines(markdown).map(({line,section,kind})=>{
+    if (!kind) return line;
+    const key = JSON.stringify([section,kind]), index = seen.get(key) ?? 0;
+    seen.set(key,index+1);
+    const previous = prior.get(key) ?? [];
+    if (previous.includes(line)) return line;
+    const old = previous[index] ?? '';
+    if (kind === 'table' && !/\\\|/.test(line)) {
+      const oldCells = old.split('|');
+      return line.split('|').map((cell,i)=>inlineChange(oldCells[i]??'',cell)).join('|');
+    }
+    const syntax = /^(\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)?)(.*)$/.exec(line);
+    const oldText = old.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)?/,'');
+    return syntax[1] + inlineChange(oldText,syntax[2]);
+  }).join('\n');
 }

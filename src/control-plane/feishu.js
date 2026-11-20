@@ -116,6 +116,9 @@ export class FeishuClient {
     catch(error){if(options.strictGroup||error.feishuCode!==18053||!/chat can not be thread/.test(error.feishuMessage??''))throw error;
       const result=await this.cardRequest('POST','/im/v1/messages?receive_id_type=open_id',{receive_id:openId,msg_type:'interactive',content:JSON.stringify(card)});return {...result,private_delivery_kind:'dm'};}
   }
+  async recallMessage(messageId, options = {}) {
+    return this.cardRequest('DELETE', '/im/v1/messages/' + encodeURIComponent(messageId), {});
+  }
   async deletePrivateCard(messageId){try{return await this.cardRequest('POST','/ephemeral/v1/delete',{message_id:messageId});}catch(e){if(!/18051/.test(e.message))throw e;}}
   async replyCard(messageId, card, options = {}) {
     return this.cardRequest('POST', `/im/v1/messages/${encodeURIComponent(messageId)}/reply`,

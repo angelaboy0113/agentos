@@ -177,6 +177,9 @@ export class LarkCliFeishuClient {
     catch(error){if(options.strictGroup||!/18053/.test(error.message)||!/chat can not be thread/.test(error.message))throw error;
       const result=await this.cardRequest('POST','/open-apis/im/v1/messages',{receive_id:openId,msg_type:'interactive',content:JSON.stringify(card)},{...options,params:{receive_id_type:'open_id'}});return {...result,private_delivery_kind:'dm'};}
   }
+  async recallMessage(messageId, options = {}) {
+    return this.cardRequest('DELETE', '/open-apis/im/v1/messages/' + encodeURIComponent(messageId), {}, options);
+  }
   async deletePrivateCard(messageId,options={}){try{return await this.cardRequest('POST','/open-apis/ephemeral/v1/delete',{message_id:messageId},options);}catch(e){if(!/18051/.test(e.message))throw e;}}
   async replyCard(messageId, card, options = {}) {
     await mkdir(this.cwd, { recursive: true });

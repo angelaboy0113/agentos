@@ -1,3 +1,4 @@
+import {producePrdPrototype} from './prd-prototype.js';
 import {htmlImageRequested,creativeImageRequested,generateNativeImage} from './image-generation.js';
 import {currentUserQuestion} from './user-request-scope.js';
 import {mkdir,writeFile,readFile,lstat,realpath,rm} from 'node:fs/promises';
@@ -110,7 +111,7 @@ export async function createDocuments(dataDir,job,requests,options={}){
  if(requests==null)return [];
  if(!Array.isArray(requests)||!requests.length)fail('documentRequests需要非空数组或null');
  const directory=await documentDirectory(dataDir,job.id),files=[];
- try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'&&(job.prd?.auto||!htmlImageRequested(job))?await generateNativeImage(dataDir,job,request.content,options):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;if(request.format==='png')audit.generation=image?'codex-native':'explicit-html-screenshot';
+ try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'?(job.prd?.auto?await producePrdPrototype(dataDir,job,request.content,options):!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;if(request.format==='png')audit.generation=image?.provenance.provider??'explicit-html-screenshot';
  const item={id,filename,format:request.format,kind:'document',title:request.title,contentType:documentMime[request.format],bytes:bytes.length,sha256:hash(bytes),rowCount:0,complete:true};
  const {officePreview}=await import('./office-preview.js');const preview=await officePreview(bytes,request.format,directory);if(preview)audit.preview=preview;
  if(request.worksheetAudit){

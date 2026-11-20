@@ -20,3 +20,35 @@ test('restored rejected outboxes for two systems deliver in place without changi
 test('platform table rejection persists textual fallback; next retry delivers and then notifies',async t=>{let updates=0,mentions=0;const{store,cards}=await setup(t,{updateCard:async(id,c)=>{updates++;if(updates===1)throw Error('230099 ErrCode: 11310; card table number over limit');assert.equal(count(c),0);assert.equal(id,'peer-original');},reply:async()=>{mentions++;}});await seed(store,'peer',card(1));await assert.rejects(cards.flush('peer',true),/11310/);let e=(await store.read()).cardMessages.peer;assert.equal(e.deliveryRepair.kind,'card_table_limit');assert.equal(count(e.card),0);assert.equal(mentions,0);await cards.flush('peer',true);e=(await store.read()).cardMessages.peer;assert.equal(e.revision,e.deliveredRevision);assert.equal(mentions,1);assert.equal(updates,2);});
 test('network failures keep the same evidence and use normal delivery retry without rewriting',async t=>{const{store,cards}=await setup(t,{updateCard:async()=>{throw Error('network temporarily disconnected');}});await seed(store,'network',card(1));const before=(await store.read()).cardMessages.network;await assert.rejects(cards.flush('network',true),/network/);const after=(await store.read()).cardMessages.network;assert.deepEqual(after.card,before.card);assert.equal(after.revision,before.revision);assert.ok(after.retryAt>Date.now());assert.equal(after.mentionDelivered,false);});
 test('a late table rejection cannot rewrite a newer card generation',async t=>{let storeRef;const{store,cards}=await setup(t,{updateCard:async()=>{await storeRef.transact(s=>{const e=s.cardMessages.race;e.card=card(0);e.generation=3;e.revision=20;});throw Error('11310 card table number over limit');}});storeRef=store;await seed(store,'race',card(1));await assert.rejects(cards.flush('race',true),/11310/);const e=(await store.read()).cardMessages.race;assert.equal(e.revision,20);assert.equal(e.generation,3);assert.equal(e.deliveryRepair,undefined);assert.deepEqual(e.card,card(0));});
+
+test('PRD recall retries only submitted reminder receipts, leaving the root and card intact', async t=>{
+  const calls=[];
+  const {store,cards}=await setup(t,{recallMessage:async (id,o)=>{
+    calls.push([id,o.profile]);
+    if(calls.length===1)throw Error('temporary network');
+  }});
+  const key='question:prd-test';
+  await seed(store,key);
+  await store.transact(s=>{
+    const c=s.cardMessages[key];
+    c.destination={replyTo:'om_root',profile:'knowledge-ltx'};
+    c.messageId='om_card';
+    c.deliveredRevision=c.revision;
+    c.terminalMention=null;
+    c.prdReminders={
+      'prd:1':{messageId:'om_botnotice',submitted:true},
+      'prd:2':{messageId:'om_waiting'},
+      'prd:3':{messageId:'om_root',submitted:true},
+      'prd:4':{messageId:'om_card',submitted:true}
+    };
+  });
+  await cards.flush(key,true);
+  await store.transact(s=>{s.cardMessages[key].prdReminders['prd:1'].retryAt=0;});
+  await cards.flush(key,true);
+  await cards.flush(key,true);
+  assert.deepEqual(calls,[['om_botnotice','knowledge-ltx'],['om_botnotice','knowledge-ltx']]);
+  const c=(await store.read()).cardMessages[key];
+  assert.ok(c.prdReminders['prd:1'].recalledAt);
+  assert.equal(c.prdReminders['prd:2'].recalledAt,undefined);
+  assert.equal(c.messageId,'om_card');
+});

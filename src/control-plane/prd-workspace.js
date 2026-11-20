@@ -93,6 +93,14 @@ export class PrdWorkspace {
       const message = { id: event.message_id, turnId: id, text, attachments: event.attachments ?? [] };
       q.prd.messages.push(message);
       if (j?.status === 'cancelling' || j?.status === 'cancelled') return { ignored: true, reason: 'prd_cancelled' };
+      if (form) {
+        const card = state.cardMessages['question:' + q.id];
+        const key = 'prd:' + form.version;
+        if (card.terminalMention?.requestKey === key || card.prdReminders?.[key]) {
+          card.prdReminders ??= {};
+          card.prdReminders[key] = { ...card.prdReminders[key], submitted: true };
+        }
+      }
       if (draftLinks.length) {
         message.draftLinks = draftLinks;
         delete q.prd.intake;

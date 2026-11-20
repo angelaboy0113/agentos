@@ -4,7 +4,7 @@ import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { runLarkCli } from './lark-cli.js';
 import { reportFile } from '../shared/report-files.js';
 import { readPrdDesignReference } from '../shared/image-generation.js';
-import { previousPrdDelivery, prdRevisionSection, readPrdRevisionBaseline } from '../shared/prd-revision.js';
+import { previousPrdDelivery, prdHighlightChanges, readPrdRevisionBaseline } from '../shared/prd-revision.js';
 import { reportEligible } from '../shared/report-acceptance.js';
 import { prdDocumentTitle, prdIntentDigest } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
@@ -165,7 +165,7 @@ export class PrdCloudDelivery {
       const matchingGeneration = binding?.generation === q.generation
         || (binding?.generation === null && revision === q.generation
           && binding.questionHash === createHash('sha256').update(String(currentUserQuestion(job))).digest('hex'));
-      if (!reference || provenance?.status !== 'verified' || provenance.provider !== 'codex-native'
+      if (!reference || provenance?.status !== 'verified' || !['codex-native','prd-screenshot-composite'].includes(provenance.provider)
         || provenance.sha256 !== files[1].sha256 || provenance.inputHashes?.[0] !== reference.sha256
         || provenance.referenceKinds?.[0] !== 'website-design-reference'
         || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id
@@ -179,8 +179,9 @@ export class PrdCloudDelivery {
         .map(a => a.source.sha256);
       const raw = content.toString('utf8');
       const baseline = previous ? await readPrdRevisionBaseline(dir, job, previous).catch(() => null) : null;
-      const comparison = prdRevisionSection(previous, baseline, raw, files[1].sha256);
-      const markdown = comparison + prdMarkdown(raw, { prototypeHash: files[1].sha256, referenceHashes });
+      const body = prdMarkdown(raw, { prototypeHash: files[1].sha256, referenceHashes });
+      const markdown = prdHighlightChanges(baseline, body);
+      const hasHighlights = markdown.includes('<span background-color=');
       const parent = path.join(dir, 'prd-delivery');
       await mkdir(parent, { recursive: true, mode: 0o700 });
       const cwd = await mkdtemp(path.join(parent, 'export-'));
@@ -200,7 +201,7 @@ export class PrdCloudDelivery {
             await save('authorization_required', { notice: '已保留稿件。飞书账号尚未授权创建文档、上传图片及设置本群协作者。授权后会自动继续原卡交付。' });
             return;
           }
-          await save('creating', { publisherProfile:config.profile });
+          await save('creating', { publisherProfile:config.profile, inlineHighlights:hasHighlights });
           const created = await call(['docs', '+create', '--as', 'user', '--parent-position', 'my_library',
             '--doc-format', 'markdown', '--title', prdDocumentTitle(q, revision), '--content', '-'], { input: markdown, timeoutMs: 90_000 });
           await save('created', documentIdentity(created));
@@ -212,7 +213,7 @@ export class PrdCloudDelivery {
         };
         if (delivery.phase === 'created') {
           const xml = await render();
-          if (!hasNativeTable(xml) || !/<h[1-6](?:\s|>)/i.test(xml) || previous && !xml.includes('本次变更')) throw Error('PRD_NATIVE_BLOCK_READBACK');
+          if (!hasNativeTable(xml) || !/<h[1-6](?:\s|>)/i.test(xml) || hasHighlights && !/<span[^>]*background-color="(?:(?:light-)?yellow|rgba\(255,\s*246,\s*122,\s*0\.8\))"/i.test(xml) && !(delivery.inlineHighlights === undefined && xml.includes('本次变更'))) throw Error('PRD_NATIVE_BLOCK_READBACK');
           await save('body_verified');
         }
         if (delivery.phase === 'body_verified') {

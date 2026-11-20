@@ -93,7 +93,7 @@ export class LiveCards {
     if (this.closed) return;
     if(this.retrying)return this.retrying;
     const work=(async()=>{
-      const keys=await stateView(this.store,s=>Object.entries(s.cardMessages??{}).filter(([key,v])=>!deliveryHeld('cardMessages',v)&&!withdrawnCardInert(s,key,v)&&v.error!=='原消息已撤回，停止更新'&&(v.retiredMessageIds?.length||v.revision!==v.deliveredRevision||(v.terminalMention&&!v.mentionDelivered))&&Date.now()>=(v.retryAt??0)).map(([key])=>key));
+      const keys=await stateView(this.store,s=>Object.entries(s.cardMessages??{}).filter(([key,v])=>!deliveryHeld('cardMessages',v)&&!withdrawnCardInert(s,key,v)&&v.error!=='原消息已撤回，停止更新'&&(v.retiredMessageIds?.length||Object.values(v.prdReminders??{}).some(r=>r.submitted&&r.messageId&&!r.recalledAt&&!deliveryHeld('prdReminder',r)&&Date.now()>=(r.retryAt??0))||v.revision!==v.deliveredRevision||(v.terminalMention&&!v.mentionDelivered))&&Date.now()>=(v.retryAt??0)).map(([key])=>key));
       if(this.afterRetry)this.afterRetry().catch(()=>{});
       for(const key of keys)this.flush(key).catch(()=>{});
     })();this.retrying=work;try{await work;}finally{this.retrying=null;}
@@ -117,8 +117,37 @@ export class LiveCards {
       }catch{return;} // Retain cleanup outbox. Never publish or rerun the business task.
     }
   }
+  async recallPrdReminder(key) {
+    const entry = await stateView(this.store, s => s.cardMessages?.[key]);
+    for (const [requestKey, reminder] of Object.entries(entry?.prdReminders ?? {})) {
+      if (!reminder.submitted || !/^om_[A-Za-z0-9]+$/.test(reminder.messageId ?? '') || reminder.recalledAt
+        || deliveryHeld('prdReminder',reminder) || Date.now() < (reminder.retryAt??0)
+        || reminder.messageId === entry.messageId || reminder.messageId === entry.destination.replyTo) continue;
+      try {
+        await this.feishu.recallMessage(reminder.messageId, { profile: entry.destination.profile });
+      } catch (error) {
+        // A previously completed recall is idempotent across crash recovery.
+        if (!/\b230011\b|message was withdrawn/i.test(String(error.message))) {
+          await this.store.transact(state => {
+            const current = state.cardMessages[key]?.prdReminders?.[requestKey];
+            if (current?.messageId !== reminder.messageId) return;
+            if (deliveryFailure('prdReminder',current,reminder,error)) {
+              current.retryAt = Date.now() + Math.min(15*60_000, 1000*2**current.deliveryRetry.attempts);
+            }
+          });
+          continue;
+        }
+      }
+      await this.store.transact(state => {
+        const current = state.cardMessages[key]?.prdReminders?.[requestKey];
+        if (current?.messageId === reminder.messageId) current.recalledAt = new Date().toISOString();
+      });
+    }
+  }
+
   async deliver(key, force) {
     await this.cleanupPrivate(key);
+    if (key.startsWith('question:')) await this.recallPrdReminder(key);
     let entry = await stateView(this.store,s=>withdrawnCardInert(s,key,s.cardMessages?.[key])?null:s.cardMessages?.[key]);
     if(deliveryHeld('cardMessages',entry))return entry.messageId;
     if (entry?.error==='原消息已撤回，停止更新') return entry.messageId;
@@ -182,15 +211,22 @@ export class LiveCards {
         &&!fresh.conversations.some(t=>t.questionId===question.id&&['queued','thinking','decided'].includes(t.status))
         &&!fresh.jobs.some(j=>j.questionId===question.id&&['queued','running','cancelling','awaiting_approval',...(['browser_login','clarification'].includes(entry.terminalMention?.kind)?[]:['awaiting_clarification']),...(entry.terminalMention?.kind==='environment_approval'?[]:['awaiting_environment_approval'])].includes(j.status)))};
       });
-      if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady && (entry.terminalMention.kind!=='clarification'||await stateView(this.store,s=>{const jobs=(s.jobs??[]).filter(j=>key.startsWith('question:')?j.questionId===key.slice(9):j.id===entry.terminalMention.jobId),j=jobs.at(-1);const m=entry.terminalMention,q=key.startsWith('question:')?s.questions?.[key.slice(9)]:null;if(m.requestKey?.startsWith('prd:')){const version=q?.prd?.intake?.version??(q?.prd&&needsPrdAnswer(j)?String(q.generation):null);return (j?.id??null)===m.jobId&&version!==null&&m.requestKey==='prd:'+version;}return j?.id===m.jobId&&jobTerminalMention(j)?.requestKey===m.requestKey;}))) {
+      if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady && (entry.terminalMention.kind!=='clarification'||await stateView(this.store,s=>{const jobs=(s.jobs??[]).filter(j=>key.startsWith('question:')?j.questionId===key.slice(9):j.id===entry.terminalMention.jobId),j=jobs.at(-1);const m=entry.terminalMention,q=key.startsWith('question:')?s.questions?.[key.slice(9)]:null;if(m.requestKey?.startsWith('prd:')){const version=q?.prd?.intake?.version??(q?.prd&&needsPrdAnswer(j)?String(q.generation):null);return (j?.id??null)===m.jobId&&version!==null&&m.requestKey==='prd:'+version&&!s.cardMessages[key]?.prdReminders?.[m.requestKey]?.submitted;}return j?.id===m.jobId&&jobTerminalMention(j)?.requestKey===m.requestKey;}))) {
         if(entry.publicCompletionMention)await this.authorizeDestination?.(entry.destination,entry);
-        await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
+        const notice = await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile, replyInThread: entry.terminalMention.replyInThread ?? entry.destination.replyInThread,
           idempotencyKey: `aos-mention-${createHash('sha256').update(entry.terminalMention.kind==='clarification'?`${key}:${entry.generation}:clarification:${entry.terminalMention.requestKey}`:entry.generation ? `${key}:${entry.generation}` : key).digest('hex').slice(0, 32)}`,
         });
         await this.store.transact((state) => {
-          if (state.cardMessages[key].generation === entry.generation) Object.assign(state.cardMessages[key], { mentionDelivered: true, failures: 0, retryAt: 0 });
+          const current = state.cardMessages[key], requestKey = entry.terminalMention.requestKey;
+          const messageId = messageIdOf(notice);
+          if (requestKey?.startsWith('prd:') && messageId && messageId !== entry.terminalMention.replyTo) {
+            current.prdReminders ??= {};
+            current.prdReminders[requestKey] = { ...current.prdReminders[requestKey], messageId };
+          }
+          if (current.generation === entry.generation) Object.assign(state.cardMessages[key], { mentionDelivered: true, failures: 0, retryAt: 0 });
         });
+        if (entry.terminalMention.requestKey?.startsWith('prd:')) await this.recallPrdReminder(key);
       }
       // Long reports stay in the same card. Never resume legacy plaintext overflow on restart.
       await this.store.transact(s=>{const c=s.cardMessages[key];if(c&&deliveryFingerprint('cardMessages',c)===deliveryFingerprint('cardMessages',entry))delete c.deliveryRetry;});
