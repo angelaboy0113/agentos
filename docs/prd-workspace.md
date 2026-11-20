@@ -10,7 +10,7 @@ Assistant 使用现有只读调查能力，按需核对本系统固定源码与�
 
 ## 配置
 
-现有实例 data 目录的同级目录放私有 `prd-workspace.local.json`，参考 `config/prd-workspace.example.json`。chatIds 只列获准启用的群。文档发布 profile 需配置用户 OAuth，并由维护者登记该 profile 下准确的用户 open_id 和允许共享的群。OAuth 由飞书 CLI 持有，配置不包含令牌。缺用户授权时，仍可继续分析并保留已核验文件。授权完成后，程序从原卡自动续投已核验稿件。超时导致创建、插入或分享结果未知时保留阶段，维护者核对回执后接续，避免重复创建。
+现有实例 data 目录的同级目录放私有 `prd-workspace.local.json`，参考 `config/prd-workspace.example.json`。chatIds 只列获准启用的群。在 publishers 中按发起助手的 CLI profile 分别登记用户 OAuth、该应用下的所有者 open_id 和允许共享的群。每个应用单独授权，交付和恢复使用原卡的应用。旧 publisher 配置继续支持它自身的助手及已有文档接续。OAuth 由飞书 CLI 持有，配置不包含令牌。缺用户授权时，仍可继续分析并保留已核验文件。授权完成后，程序从原卡自动续投已核验稿件。超时导致创建、插入或分享结果未知时保留阶段，维护者核对回执后接续，避免重复创建。
 
 新任务使用本实例现有 `native-tools-v1`。同一需求跨补充保留原任务、问题和工作区检查点；Codex 读工具仍核对原项目、环境、群和身份。不同需求分别拥有自己的线程。普通任务沿原流程运行。
 

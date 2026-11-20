@@ -1,3 +1,4 @@
+import { PrdCloudDelivery } from '../src/control-plane/prd-cloud-delivery.js';
 import { prdPrototypeRevision } from '../src/runner/document-handoff.js';
 import { runInNewContext } from 'node:vm';
 import { chromeDesignStyle } from '../src/control-plane/shared-chrome-browser.js';
@@ -264,4 +265,27 @@ test('a visually rejected PRD can construct just a hash-bound replacement withou
   assert.equal(prdPrototypeRevision({...job,questionGeneration:3},result,gate),null);
   assert.equal(prdPrototypeRevision(job,{...result,documentRequests:[{format:'md'}]},gate),null);
   assert.equal(prdPrototypeRevision(job,result,{issues:[...gate.issues,'missing source']}),null);
+});
+
+
+test('each assistant uses its app-specific owner and only its group for automatic authorization recovery', async () => {
+  const group='oc_team';
+  const profiles=['knowledge-ltx','knowledge-oltx','knowledge-tpm','knowledge-salesclub'];
+  const publishers=Object.fromEntries(profiles.map((profile,n)=>[profile,{ownerOpenId:'ou_owner'+n,chatIds:[group]}]));
+  const questions=Object.fromEntries(profiles.map((profile,n)=>['q'+n,{id:'q'+n,profile,chatId:group,
+    prd:{delivery:{phase:'authorization_required',revision:1}}}]));
+  questions.q4={id:'q4',profile:profiles[0],chatId:'oc_other',prd:{delivery:{phase:'authorization_required',revision:1}}};
+  const state={questions,jobs:Object.keys(questions).map(questionId=>({questionId,status:'completed',
+    result:{outcome:'ready'},prd:{auto:true,revision:1,exportRevision:1}}))};
+  const calls=[], resumed=[];
+  const delivery=new PrdCloudDelivery({store:{read:async()=>state},config:{}},null,{publishers,cli:async (_,args)=>{
+    calls.push(args.profile);
+    return {ok:args.profile==='knowledge-tpm'};
+  }});
+  delivery.wake=id=>resumed.push(id);
+  await delivery.recover();
+  assert.deepEqual(calls.sort(),profiles.toSorted());
+  assert.deepEqual(resumed,['q2']);
+  assert.equal(delivery.publisherFor(questions.q3,1).ownerOpenId,'ou_owner3');
+  assert.equal(delivery.publisherFor(questions.q4,1),null);
 });

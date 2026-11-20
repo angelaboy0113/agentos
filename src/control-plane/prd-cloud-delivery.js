@@ -31,14 +31,24 @@ export function prdMarkdown(body) {
 }
 
 export class PrdCloudDelivery {
-  constructor(context, publisher, { cli = runLarkCli, onPublished } = {}) {
+  constructor(context, publisher, { cli = runLarkCli, onPublished, publishers = {} } = {}) {
     this.context = context;
     this.config = publisher;
+    this.publishers = publishers;
     this.cli = cli;
     this.onPublished = onPublished;
     this.workers = new Map();
     this.closed = false;
     this.authorizationTimer = null;
+  }
+
+  publisherFor(q, revision) {
+    const delivery = q.prd?.delivery?.revision === revision ? q.prd.delivery : null;
+    const profile = delivery?.token ? delivery.publisherProfile ?? this.config?.profile : q.profile;
+    const config = Object.hasOwn(this.publishers, profile) ? this.publishers[profile]
+      : this.config?.profile === profile ? this.config : null;
+    if (!config?.chatIds?.includes(q.chatId) || !/^ou_[A-Za-z0-9]+$/.test(config.ownerOpenId ?? '')) return null;
+    return { ...config, profile };
   }
 
   wake(questionId) {
@@ -56,21 +66,28 @@ export class PrdCloudDelivery {
 
   async recover() {
     const { ready, waiting } = await stateView(this.context.store, state => {
-      const ready = [], waiting = [];
+      const ready = [], waiting = new Map();
       for (const q of Object.values(state.questions ?? {})) {
         if (!q.prd || q.withdrawnAt) continue;
         const job = questionJob(state,q.id), phase = q.prd.delivery?.phase;
         if (job?.status !== 'completed' || job.result?.outcome !== 'ready' || job.prd?.exportRevision !== job.prd?.revision) continue;
-        if (phase === 'authorization_required' && job.prd.auto) waiting.push(q.id);
+        if (phase === 'authorization_required' && job.prd.auto) {
+          const config = this.publisherFor(q, job.prd.revision);
+          if (!config) continue;
+          if (!waiting.has(config.profile)) waiting.set(config.profile,[]);
+          waiting.get(config.profile).push(q.id);
+        }
         if (['pending','created','body_verified','image_verified','shared',undefined].includes(phase)) ready.push(q.id);
       }
       return {ready,waiting};
     });
     for (const id of ready) this.wake(id);
-    if (!waiting.length || !this.config?.profile || this.closed) return;
-    const scopes = await this.cli(['auth','check','--scope',publishingScopes],
-      {profile:this.config.profile,cliEntry:this.context.config.feishu?.cliEntry}).catch(() => null);
-    if (scopes?.ok && !scopes.missing?.length) for (const id of waiting) this.wake(id);
+    if (this.closed) return;
+    await Promise.allSettled([...waiting].map(async ([profile, ids]) => {
+      const scopes = await this.cli(['auth','check','--scope',publishingScopes],
+        {profile,cliEntry:this.context.config.feishu?.cliEntry});
+      if (scopes?.ok && !scopes.missing?.length) for (const id of ids) this.wake(id);
+    }));
   }
 
   async close() {
@@ -80,7 +97,7 @@ export class PrdCloudDelivery {
   }
 
   async deliver(id) {
-    const config = this.config, { store } = this.context;
+    const { store } = this.context;
     const snapshot = await stateView(store, state => {
       const q = state.questions[id], job = questionJob(state, id);
       if (!q?.prd || q.withdrawnAt || job?.status !== 'completed' || job.result?.outcome !== 'ready'
@@ -89,6 +106,7 @@ export class PrdCloudDelivery {
     });
     if (!snapshot) return;
     const { q, job } = snapshot, revision = job.prd.revision;
+    const config = this.publisherFor(q, job.prd.revision);
     if (q.prd.delivery?.revision === revision && q.prd.delivery.sentAt) return;
     if (q.prd.delivery && q.prd.delivery.revision !== revision && !q.prd.delivery.sentAt) return;
     const files = ['md', 'png'].map(format => job.reportFiles?.findLast(file => file.format === format
@@ -109,7 +127,7 @@ export class PrdCloudDelivery {
     };
     try {
       if (['creating', 'inserting', 'sharing', 'unknown'].includes(delivery.phase)) return;
-      if (!config || !config.profile || !/^ou_[A-Za-z0-9]+$/.test(config.ownerOpenId ?? '') || !config.chatIds?.includes(q.chatId)) {
+      if (!config) {
         await save('authorization_required', { notice: '已保留稿件，等待配置指定飞书账号与本群授权。' });
         return;
       }
@@ -139,7 +157,7 @@ export class PrdCloudDelivery {
             await save('authorization_required', { notice: '已保留稿件。飞书账号尚未授权创建文档、上传图片及设置本群协作者。授权后会自动继续原卡交付。' });
             return;
           }
-          await save('creating');
+          await save('creating', { publisherProfile:config.profile });
           const created = await call(['docs', '+create', '--as', 'user', '--parent-position', 'my_library',
             '--doc-format', 'markdown', '--title', prdDocumentTitle(q, revision), '--content', '-'], { input: markdown, timeoutMs: 90_000 });
           await save('created', documentIdentity(created));
@@ -177,6 +195,8 @@ export class PrdCloudDelivery {
         }
       } finally { await rm(cwd, { recursive: true, force: true }); }
     } catch (error) {
+      const code = String(error.message).match(/\b(PRD_[A-Z_]+|999[0-9]{5}|missing_scope|app_scope_not_applied|user_scope_not_granted)\b/)?.[0];
+      if (code) console.error('[prd-doc]', id, delivery.phase, code);
       const authorization = authError(error);
       const uncertain = ['creating', 'inserting', 'sharing'].includes(delivery.phase);
       const phase = authorization && delivery.phase === 'creating' ? 'authorization_required' : uncertain ? 'unknown' : delivery.phase;

@@ -21,6 +21,10 @@ export async function loadPrdWorkspace(config) {
     throw error;
   });
   if (!Array.isArray(value.chatIds ?? []) || (value.chatIds ?? []).some(id => !/^oc_[a-zA-Z0-9]+$/.test(id))) throw Error('PRD workspace group scope is invalid');
+  if (value.publishers !== undefined && (!value.publishers || typeof value.publishers !== 'object' || Array.isArray(value.publishers)
+    || Object.entries(value.publishers).some(([profile,publisher]) => !/^[A-Za-z0-9_-]+$/.test(profile)
+      || !/^ou_[A-Za-z0-9]+$/.test(publisher?.ownerOpenId ?? '') || !Array.isArray(publisher.chatIds)
+      || publisher.chatIds.some(id => !value.chatIds?.includes(id))))) throw Error('PRD workspace publishers are invalid');
   return value;
 }
 
@@ -28,7 +32,7 @@ export class PrdWorkspace {
   constructor(context, settings = {}, dependencies = {}) {
     this.context = context;
     this.chatIds = new Set(settings.chatIds ?? []);
-    this.publisher = new PrdCloudDelivery(context, settings.publisher, {...dependencies, onPublished: id => this.resumePending(id)});
+    this.publisher = new PrdCloudDelivery(context, settings.publisher, {publishers:settings.publishers,...dependencies, onPublished: id => this.resumePending(id)});
   }
 
   async handle(event, { agent, addressed, content, form }) {
