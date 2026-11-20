@@ -132,7 +132,7 @@ export class PrdCloudDelivery {
         return;
       }
       if (files.some(f => !f)) {
-        await save('artifacts_missing', { notice: '需要已核验的 Markdown 和 PNG 原型。请在原话题补齐所缺的原型依据。' });
+        await save('artifacts_missing', { notice: '完整交付仍缺少已核验的正文或原型图。如需补充原型依据，可填写这张需求卡。' });
         return;
       }
       const dir = this.context.config.dataDir;

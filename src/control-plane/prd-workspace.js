@@ -5,7 +5,7 @@ import { createId } from '../shared/protocol.js';
 import { createJobRecord } from '../shared/store.js';
 import { resolveProjectId } from '../shared/project-scope.js';
 import { confirmedSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict } from '../shared/source-environments.js';
-import { prdStart, prdExport, needsPrdAnswer } from '../shared/prd-workspace.js';
+import { prdStart, prdExport, prdFormVersion } from '../shared/prd-workspace.js';
 import { requestsPrivateCard } from './private-cards.js';
 import { publishQuestion, questionJob } from './questions.js';
 import { stateView } from '../shared/state-view.js';
@@ -75,7 +75,7 @@ export class PrdWorkspace {
       }
       if (form) {
         const saved = state.cardMessages?.['question:' + q.id];
-        const revision = q.prd.intake?.version ?? (needsPrdAnswer(questionJob(state, q.id)) ? String(q.generation) : null);
+        const revision = prdFormVersion(q, questionJob(state, q.id));
         if (q.id !== form.questionId || saved?.messageId !== form.cardId || revision !== form.version) return { ignored: true, reason: 'prd_form_stale' };
       }
       const opening = !q.rootTurnId;
@@ -116,7 +116,7 @@ export class PrdWorkspace {
       return { questionId: q.id };
     });
     if (accepted.draftLinks) return this.readDrafts(accepted, event);
-    if (accepted.questionId && !accepted.pending) await publishQuestion(this.context, accepted.questionId).catch(() => {});
+    if (accepted.questionId && (!accepted.pending || form)) await publishQuestion(this.context, accepted.questionId).catch(() => {});
     if (accepted.retryPublish) this.publisher.wake(accepted.questionId);
     return accepted;
   }
@@ -137,6 +137,16 @@ export class PrdWorkspace {
         event: { agent_profile: q.profile, chat_id: q.chatId, message_id: m.id },
       }))));
     await Promise.allSettled(pending.map(({ input, event }) => this.readDrafts(input, event)));
+  }
+
+  async refreshOpenForms() {
+    const ids = await stateView(this.context.store, state => Object.values(state.questions ?? {}).flatMap(q => {
+      if (!q.prd || !this.chatIds.has(q.chatId) || !prdFormVersion(q, questionJob(state, q.id))) return [];
+      const saved = state.cardMessages?.['question:' + q.id];
+      if (!saved?.messageId || saved.card?.body?.elements?.some(e => e.name === 'prd_answers')) return [];
+      return [q.id];
+    }));
+    for (const id of ids) await publishQuestion(this.context, id).catch(() => {});
   }
 
   async importDrafts({ questionId, draftLinks, projectId }, event) {

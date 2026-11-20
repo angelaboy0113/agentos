@@ -217,6 +217,57 @@ test('PRD as a document name does not collide with a later SIT environment clari
   assert.match(job.originalQuestion, /补贴状态 PRD/);
 });
 
+test('a single PRD form stays open through execution and partial results, then closes on verified delivery', async t => {
+  const { cards, store, workspace, send } = await fixture(t);
+  const { questionId } = await send('om_live_form', '我想做一个需求，订单详情增加补贴状态');
+  await store.transact(s => {
+    const job = s.jobs[0];
+    job.status = 'running';
+    job.analysisContinuation = { questionId, threadId: 'prd-fixed-thread', workspace: '/fixed/workspace' };
+    s.cardMessages = { ['question:'+questionId]: { messageId: 'om_card' } };
+  });
+  const render = async () => questionView(await store.read(), questionId);
+  const formIn = view => view.card.body.elements.filter(e => e.tag === 'form');
+  const refreshed = [];
+  cards.upsert = async (key, card) => { refreshed.push(key); return 'om_card'; };
+  await workspace.refreshOpenForms();
+  assert.deepEqual(refreshed, ['question:'+questionId]);
+  const active = await render();
+  assert.equal(active.card.header.template, 'blue');
+  assert.equal(active.mention, null);
+  assert.equal(formIn(active).length, 1);
+  const version = formIn(active)[0].elements[1].name.slice(4);
+  const args = { form: { questionId, cardId: 'om_card', version } };
+  const submitted = await send('prd-form:active', '只做 PC 端', 'om_live_form', args);
+  assert.equal(submitted.pending, true);
+  const pending = await render();
+  assert.match(JSON.stringify(pending.card), /已收到补充，当前轮结束后/);
+  assert.equal(formIn(pending)[0].elements[1].name.slice(4), version);
+  assert.equal((await send('prd-form:active', '只做 PC 端', 'om_live_form', args)).duplicate, true);
+  await store.transact(s => {
+    s.jobs[0].status = 'completed';
+    s.jobs[0].result = { outcome: 'partial', finalMessage: '待定稿' };
+  });
+  const partial = await render();
+  assert.equal(formIn(partial).length, 1);
+  await workspace.resumePending(questionId);
+  const updated = (await store.read()).jobs[0];
+  assert.equal(updated.analysisContinuation.threadId, 'prd-fixed-thread');
+  assert.equal(updated.prd.revision, 2);
+  assert.equal(updated.currentQuestion, '只做 PC 端');
+  assert.equal((await send('prd-form:stale', '错误补充', 'om_live_form', args)).reason, 'prd_form_stale');
+  await store.transact(s => {
+    const job = s.jobs[0];
+    job.status = 'completed';
+    job.result = { outcome: 'ready', finalMessage: '已完成' };
+    s.questions[questionId].prd.delivery = { revision: 2, phase: 'delivered', sentAt: new Date().toISOString(),
+      url: 'https://unit.feishu.cn/docx/FinalDoc' };
+  });
+  const delivered = await render();
+  assert.equal(formIn(delivered).length, 0);
+  assert.match(JSON.stringify(delivered.card), /https:\/\/unit\.feishu\.cn\/docx\/FinalDoc/);
+});
+
 test('a PRD display rule about rejection reasons is not a request to investigate a live incident', () => {
   const prd = { revision: 1 };
   assert.equal(requiresCausalEvidence({ prd, originalQuestion: '增加状态字段，不展示驳回原因' }), false);

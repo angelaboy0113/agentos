@@ -1,4 +1,4 @@
-import { needsPrdAnswer } from '../shared/prd-workspace.js';
+import { needsPrdAnswer, prdDelivered, prdFormVersion } from '../shared/prd-workspace.js';
 import {isPendingEnrollment} from '../shared/enrollment-lifecycle.js';
 import {addressCard} from './reply-addressing.js';
 import { addQuestionProgress, enrollmentNotice } from './enrollment-cards.js';
@@ -97,25 +97,33 @@ export function questionView(state, questionId, projects = {}) {
   const label = card.header.title.content;
   card.header.title.content = questionTitle(q.title);
   card.header.subtitle.content = `${q.id} · ${label}`;
-  const prdAnswerVersion = q.prd?.intake?.version ?? (q.prd && needsPrdAnswer(job) ? String(q.generation) : null);
+  const prdAnswerVersion = prdFormVersion(q, job);
+  const prdClarification = Boolean(prdAnswerVersion && (q.prd.intake || needsPrdAnswer(job)));
+  const prdDeliveryComplete = prdDelivered(q, job);
   if (q.prd) {
     const d = q.prd.delivery;
-    card.header.subtitle.content = `${q.id} · PRD 需求工作台${d?.sentAt ? ' · 飞书评审稿已送达' : ''}`;
+    card.header.subtitle.content = `${q.id} · PRD 需求工作台${prdDeliveryComplete ? ' · 飞书评审稿已送达' : ''}`;
     const elements = card.body?.elements;
-    if (!d?.sentAt && card.header.template === 'green') card.header.template = d?.notice ? 'orange' : 'blue';
-    if (elements && d?.notice) elements.push({tag:'markdown',content:d.notice});
-    if (elements && d?.sentAt && d.url) elements.push({tag:'markdown',content:`[打开飞书 PRD 评审稿 · v0.${d.revision}](${d.url})`});
+    const currentDelivery = d?.revision === job?.prd?.revision ? d : null;
+    if (!prdDeliveryComplete && card.header.template === 'green') card.header.template = currentDelivery?.notice ? 'orange' : 'blue';
+    if (elements && currentDelivery?.notice) elements.push({tag:'markdown',content:currentDelivery.notice});
+    if (elements && prdDeliveryComplete && d.url) elements.push({tag:'markdown',content:`[打开飞书 PRD 评审稿 · v0.${d.revision}](${d.url})`});
     if (elements && prdAnswerVersion) {
-      const prompt = q.prd.intake ? null : job?.result?.investigation?.blocker?.needed;
+      const prompt = prdClarification && !q.prd.intake ? job?.result?.investigation?.blocker?.needed : null;
       if (prompt) elements.push({tag:'markdown',content:'**请确认**\n'+publicText(prompt)});
+      const hasPending = q.prd.messages.some(m => !m.applied && !m.draftLinks && (m.text || m.attachments?.length));
+      const hint = !prdClarification && hasPending && activeQuestionJob(job)
+        ? '已收到补充，当前轮结束后会沿用本需求继续。'
+        : '需要补充时直接填写此卡。信息齐备后自动交付飞书评审稿。';
+      elements.push({tag:'markdown',text_size:'notation',content:hint});
       elements.push({tag:'form',name:'prd_answers',elements:[
         {tag:'input',name:'clarification',input_type:'multiline_text',width:'fill',required:true,rows:4,max_length:1000,
-          placeholder:{tag:'plain_text',content:'按上面的要点填写，多个问题可分行回答。'}},
+          placeholder:{tag:'plain_text',content:prdClarification ? '按上面的要点填写，多个问题可分行回答。' : '填写需求补充或粘贴飞书文档链接。'}},
         {tag:'button',name:'prd_'+prdAnswerVersion,form_action_type:'submit',type:'primary_filled',width:'fill',
           text:{tag:'plain_text',content:'提交补充，继续整理'}},
       ]});
-      card.header.template = 'orange';
-    } else if (elements && !d?.sentAt) elements.push({tag:'markdown',text_size:'notation',content:'信息齐备后自动生成并交付飞书评审稿。'});
+      if (prdClarification) card.header.template = 'orange';
+    }
   }
   card.config.summary.content = `${questionTitle(q.title)} · ${label}`;
   if (useJob) {
@@ -139,10 +147,10 @@ export function questionView(state, questionId, projects = {}) {
       text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+' 排查尚未完成：需要补充本话题对应环境的接入信息或选择数据源。请查看卡片中的具体缺口；原需求和已有证据已保留。'};
   }
   if (q.prd && !enrollment && !job?.result?.browserLoginRequired) {
-    if (prdAnswerVersion) {
+    if (prdClarification) {
       const text = requesterMentionText(q.senderId, '请在上方 PRD 卡片的输入框填写，并点「提交补充，继续整理」。');
       mention = text ? {kind:'clarification',profile:q.profile,replyTo:q.messageId,text,jobId:job?.id??null,requestKey:'prd:'+prdAnswerVersion} : null;
-    } else if (q.prd.delivery?.sentAt) {
+    } else if (prdDeliveryComplete) {
       const text = requesterMentionText(q.senderId, '飞书 PRD 评审稿已就绪，本群成员可编辑。链接在上方卡片。');
       mention = text ? {profile:q.profile,replyTo:q.messageId,text} : null;
     } else if (!['blocked','failed','cancelled','awaiting_environment_approval'].includes(job?.status)) mention = null;
