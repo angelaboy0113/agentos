@@ -131,6 +131,28 @@ test('an outside-group draft never reads the body and can be replaced with text 
   assert.equal(job.originalQuestion, '订单详情加补贴状态');
 });
 
+test('a saved link read resumes on startup without a second PRD job', async t => {
+  const calls = [];
+  const { store, workspace, send } = await fixture(t, undefined, {}, draftFeishu(calls));
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  workspace.readDraft = async () => { entered.resolve(); return release.promise; };
+  const original = send('om_interrupted', '我想做一个需求 https://unit.feishu.cn/docx/DraftToken');
+  await entered.promise;
+  const saved = await store.read();
+  assert.equal(saved.conversations[0].prdDraftReading, true);
+  assert.match(JSON.stringify(questionView(saved, saved.conversations[0].questionId).card), /正在读取飞书初稿/);
+  const restarted = new PrdWorkspace(workspace.context, { chatIds: [chat] });
+  await restarted.resumeDraftImports();
+  release.resolve({ title: '不应重复使用', text: '第一轮迟到的结果' });
+  await original;
+  const done = await store.read();
+  assert.equal(done.conversations[0].prdDraftReading, undefined);
+  assert.equal(done.jobs.length, 1);
+  assert.match(done.jobs[0].originalQuestion, /LTX订单显示TPM补贴状态/);
+  assert.equal(calls.length, 2);
+});
+
 test('bare PRD trigger then unmentioned description and decisions keep one question, job and native checkpoint', async t => {
   const { store, workspace, send } = await fixture(t);
   assert.equal(await send('om_regular', '能聊聊 PRD 吗？'), null);

@@ -140,6 +140,7 @@ export async function createControlPlane(overrides = {}) {
     cards.start();context.longNotices.start();context.reception.start();
     context.websiteEvidence.retry().catch(()=>console.error('[website-evidence] recovery unavailable'));
     context.prd.publisher.start();
+    context.prd.resumeDraftImports().catch(() => console.error('[prd] Draft intake recovery failed'));
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
     repairStaleTerminalQuestionCards(context).catch((error) => console.error('[card-repair]', error.message));
     context.knowledge.recover().catch(() => console.error('[knowledge] recovery unavailable'));

@@ -96,6 +96,7 @@ export class PrdWorkspace {
         message.draftLinks = draftLinks;
         delete q.prd.intake;
         if (opening) q.title = '根据飞书初稿整理需求';
+        turn.prdDraftReading = true;
         turn.status = 'thinking';
         turn.response = '已收到飞书初稿，正在读取。';
         return { questionId: q.id, draftLinks, projectId: q.projectId };
@@ -114,34 +115,54 @@ export class PrdWorkspace {
       applyPending(state, q, this.context.projects.projects[q.projectId]);
       return { questionId: q.id };
     });
-    if (accepted.draftLinks) {
-      const key = JSON.stringify([accepted.questionId, event.message_id]);
-      if (this.draftReads.has(key)) return this.draftReads.get(key);
-      const task = this.importDrafts(accepted, event).finally(() => this.draftReads.delete(key));
-      this.draftReads.set(key, task);
-      return task;
-    }
+    if (accepted.draftLinks) return this.readDrafts(accepted, event);
     if (accepted.questionId && !accepted.pending) await publishQuestion(this.context, accepted.questionId).catch(() => {});
     if (accepted.retryPublish) this.publisher.wake(accepted.questionId);
     return accepted;
   }
 
+  readDrafts(input, event) {
+    const key = JSON.stringify([input.questionId, event.message_id]);
+    if (this.draftReads.has(key)) return this.draftReads.get(key);
+    const task = this.importDrafts(input, event).finally(() => this.draftReads.delete(key));
+    this.draftReads.set(key, task);
+    return task;
+  }
+
+  async resumeDraftImports() {
+    const pending = await stateView(this.context.store, state => Object.values(state.questions ?? {})
+      .filter(q => q.prd && !q.withdrawnAt && !q.prd.closed)
+      .flatMap(q => q.prd.messages.filter(m => m.draftLinks).map(m => ({
+        input: { questionId: q.id, projectId: q.projectId, draftLinks: m.draftLinks },
+        event: { agent_profile: q.profile, chat_id: q.chatId, message_id: m.id },
+      }))));
+    await Promise.allSettled(pending.map(({ input, event }) => this.readDrafts(input, event)));
+  }
+
   async importDrafts({ questionId, draftLinks, projectId }, event) {
     await publishQuestion(this.context, questionId).catch(() => {});
-    const results = await Promise.allSettled(draftLinks.map(url =>
-      this.readDraft({ url, projectId, profile: event.agent_profile, chatId: event.chat_id })));
+    const permitted = this.chatIds.has(event.chat_id) && this.context.projects.projects?.[projectId]
+      && resolveProjectId(this.context.projects, event.chat_id, event.agent_profile) === projectId;
+    const results = permitted ? await Promise.allSettled(draftLinks.map(async url =>
+      this.readDraft({ url, projectId, profile: event.agent_profile, chatId: event.chat_id }))) : [];
     const changed = await this.context.store.transact(state => {
       const q = state.questions[questionId];
       const message = q?.prd.messages.find(m => m.id === event.message_id);
       const turn = state.conversations.find(t => t.id === message?.turnId);
       if (!message?.draftLinks || !turn) return false;
       delete message.draftLinks;
+      delete turn.prdDraftReading;
       if (q.withdrawnAt || turn.withdrawnAt || q.prd.closed) {
         message.applied = true;
         return false;
       }
       turn.status = 'sent';
       turn.response = '';
+      if (!permitted) {
+        message.applied = true;
+        turn.response = '当前群或助手的需求工作台配置已变更，已停止读取初稿。';
+        return false;
+      }
       message.drafts = results.filter(r => r.status === 'fulfilled').map(r => r.value);
       const failure = results.find(r => r.status === 'rejected')?.reason;
       if (failure) {

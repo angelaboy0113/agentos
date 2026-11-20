@@ -64,10 +64,10 @@ export function conversationCard(turn, now = Date.now(), { prd = false } = {}) {
   const failed = turn.aiFailed || turn.actionError;
   const clarification = turn.decision?.action==='reply'&&turn.decision.replyDisposition==='clarification';
   const state = final ? (failed ? '未执行' : turn.setupCancelled ? '已停止接入' : turn.setupPending ? ({requested:'等待确认接入',scope_required:'登录成功 · 等待范围选择',opening:'正在启动登录',login_required:turn.setupLoginIssue?'登录尚未通过认证':turn.setupHasCredentials?'自动登录中 · 尚未确认成功':'等待提供登录凭据',awaiting_tls_confirmation:'等待确认连接保护'}[turn.setupStatus] ?? '等待补齐接入') : clarification ? '待补充信息 · 问题尚未完成' : '已回复') : turn.status === 'queued' ? '排队中'
-    : turn.connectionWillRetry ? '连接重试中' : '正在处理';
+    : turn.prdDraftReading ? '正在读取飞书初稿' : turn.connectionWillRetry ? '连接重试中' : '正在处理';
   const color = failed ? 'red' : turn.setupPending||final&&clarification ? 'orange' : final ? 'green' : 'blue';
   const content = final ? '' : turn.status === 'queued' ? '问题已收到，正在等待可用处理位置；排到后会自动继续，无需重复提问。'
-    : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
+    : turn.prdDraftReading ? turn.response : turn.connectionWillRetry ? '连接暂时异常，Codex 正在重试，尚未得到结果。' : turn.status==='decided'&&turn.decision?.action==='lookup_contact' ? contactProgressText(turn, now) : 'Codex 正在理解你的消息，完成后会更新在这里。';
   const primary = final ? conversationPrimaryCardElements(turn.response) : [];
   const elements = primary.length ? primary.map((element) => element.tag === 'table' ? element : block(summaryParagraphs(element.content).map(part => md(part)), color)) : [block([md(content)], color)];
   if (final && Array.from(turn.response ?? '').length > PRIMARY_RESPONSE_LIMIT) elements.push(resultPanel(resultPages(turn.response)));

@@ -76,7 +76,7 @@ export class ConversationService {
 
   async start() {
     await this.context.store.transact((state) => {
-      for (const turn of state.conversations ?? []) if (turn.status === 'thinking') turn.status = 'queued';
+      for (const turn of state.conversations ?? []) if (turn.status === 'thinking' && !turn.prdDraftReading) turn.status = 'queued';
     });
     this.engine?.start().catch(() => console.error('[conversation] Codex prewarm failed; next message will retry initialization'));
     this.wake();
@@ -172,7 +172,7 @@ export class ConversationService {
       await pollEnrollments(this.context);
       void refreshExpiredApprovalCards(this.context).catch(()=>{});
       if(this.context.websiteBrowser)void pollWebsiteLogins(this.context).catch(()=>{});
-      const state = await stateView(this.context.store,s=>({conversations:(s.conversations??[]).filter(t=>['queued','thinking','decided','ready'].includes(t.status))}));
+      const state = await stateView(this.context.store,s=>({conversations:(s.conversations??[]).filter(t=>!t.prdDraftReading&&['queued','thinking','decided','ready'].includes(t.status))}));
       const heads = new Map();
       for (const turn of state.conversations ?? []) {
         if (!['queued', 'thinking', 'decided', 'ready'].includes(turn.status)) continue;
