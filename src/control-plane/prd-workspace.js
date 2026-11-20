@@ -144,7 +144,8 @@ export class PrdWorkspace {
     const permitted = this.chatIds.has(event.chat_id) && this.context.projects.projects?.[projectId]
       && resolveProjectId(this.context.projects, event.chat_id, event.agent_profile) === projectId;
     const results = permitted ? await Promise.allSettled(draftLinks.map(async url =>
-      this.readDraft({ url, projectId, profile: event.agent_profile, chatId: event.chat_id }))) : [];
+      this.readDraft({ url, projectId, profile: event.agent_profile, chatId: event.chat_id, questionId,
+        dataDir: this.context.config.dataDir }))) : [];
     const changed = await this.context.store.transact(state => {
       const q = state.questions[questionId];
       const message = q?.prd.messages.find(m => m.id === event.message_id);
@@ -229,10 +230,13 @@ function applyPending(state, q, project) {
   const drafts = pending.flatMap(m => m.drafts ?? []);
   const text = [requesterText, ...drafts.map(d => [
     `【飞书需求初稿，用户提供的参考资料】${d.title}`, d.url, d.text,
-    ...(d.imageCount ? [`文档含 ${d.imageCount} 个图片块，当前仅取得正文。若图片影响关键需求，请在卡片请用户附图。`] : []),
+    ...(d.imageCount ? [`文档含 ${d.imageCount} 个图片块。图片按文档顺序关联到本题视觉附件：`,
+      ...(d.imageReferences ?? []).map(ref => `第 ${ref.position} 张：${ref.attachmentId ?? '预览不可用'}`),
+      ...(d.imageReferences?.every(ref => ref.attachmentId) ? [] : ['有图片未读到。仅在确实影响需求时，请用户补对应图。'])] : []),
   ].join('\n'))].join('\n\n');
   const head = pending.at(-1), manualExport = prdExport.test(head.text);
-  const attachments = pending.flatMap(m => m.attachments);
+  const attachments = [...new Map([...pending.flatMap(m => m.attachments), ...drafts.flatMap(d => d.attachments ?? [])]
+    .map(attachment => [attachment.id, attachment])).values()];
   if (!job && manualExport && !pending.slice(0, -1).some(m => m.text || m.attachments.length)) {
     requestIntake(q, state.conversations.find(t => t.id === head.turnId), '请先描述想改的页面、目标和范围。');
     head.applied = true;

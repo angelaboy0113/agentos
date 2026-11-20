@@ -61,6 +61,13 @@ export class FeishuClient {
     if(!response.ok||result.code!==0)throw new Error('Cloud document sharing unavailable');
     return result.data;
   }
+  async cloudDocumentImage(token){
+    if(!/^[A-Za-z0-9]+$/.test(token??''))throw Error('Invalid cloud image scope');
+    const response=await fetch(`${OPEN_API}/drive/v1/medias/${token}/preview_download?preview_type=16`,
+      {headers:{authorization:'Bearer '+await this.tenantToken()},signal:AbortSignal.timeout(30000)});
+    if(!response.ok)throw Error('Cloud image preview unavailable');
+    return Buffer.from(await response.arrayBuffer());
+  }
   async cloudDownload(fileToken){
     if(!/^[A-Za-z0-9]+$/.test(fileToken??''))throw new Error('Invalid cloud file scope');
     const response=await fetch(`${OPEN_API}/drive/v1/medias/${encodeURIComponent(fileToken)}/download`,{headers:{authorization:`Bearer ${await this.tenantToken()}`},signal:AbortSignal.timeout(120000)});

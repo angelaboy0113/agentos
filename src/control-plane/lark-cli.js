@@ -1,7 +1,7 @@
 import {cloudReadRoute} from '../shared/feishu-cloud-sheet.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, copyFile, readFile, mkdtemp, rm }  from 'node:fs/promises';
+import { mkdir, copyFile, readFile, readdir, mkdtemp, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import {stat} from 'node:fs/promises';
@@ -110,6 +110,18 @@ export class LarkCliFeishuClient {
     const result=await runLarkCli(['drive','+member-list','--as','bot','--type','docx','--token',token,'--json'],
       {cwd:this.cwd,cliEntry:this.cliEntry,profile});
     return result.data;
+  }
+  async cloudDocumentImage(token,{profile}={}){
+    if(!/^[A-Za-z0-9]+$/.test(token??'')||!profile)throw Error('Invalid cloud image scope');
+    await mkdir(this.cwd,{recursive:true,mode:0o700});
+    const dir=await mkdtemp(path.join(this.cwd,'cloud-image-'));
+    try{
+      await runLarkCli(['docs','+media-preview','--as','bot','--token',token,'--output','image','--json'],
+        {cwd:dir,cliEntry:this.cliEntry,profile});
+      const images=(await readdir(dir)).filter(name=>/^image\.[a-z0-9]+$/i.test(name));
+      if(images.length!==1)throw Error('Cloud image preview missing');
+      return await readFile(path.join(dir,images[0]));
+    }finally{await rm(dir,{recursive:true,force:true});}
   }
   async cloudDownload(fileToken,options={}){
     if(!/^[A-Za-z0-9]+$/.test(fileToken??'')||!options.profile)throw new Error('Invalid cloud file scope');

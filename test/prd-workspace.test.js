@@ -59,6 +59,10 @@ function draftFeishu(calls, { shared = true, environment = '参考环境：SIT' 
       calls.push(['acl', token, options.profile]);
       return { items: [{ member_type: 'openchat', member_id: shared ? chat : 'oc_elsewhere', perm: 'view' }] };
     },
+    async cloudDocumentImage(token, options) {
+      calls.push(['image', token, options.profile]);
+      return png;
+    },
     async cloudRequest(route, params, options) {
       calls.push([route, params.token, options.profile]);
       if (route.includes('/get_node')) return { node: { obj_type: 'docx', obj_token: 'DraftToken', title: '补贴状态' } };
@@ -66,7 +70,7 @@ function draftFeishu(calls, { shared = true, environment = '参考环境：SIT' 
         { block_id: 'root', block_type: 1, page: text('补贴状态') },
         { block_id: '1', text: text(environment) },
         { block_id: '2', text: text('LTX订单显示TPM补贴状态') },
-        { block_id: '3', block_type: 27 },
+        { block_id: '3', block_type: 27, image: { token: 'DraftImage' } },
         { block_id: '4', table: { cells: ['5','6'], property: { column_size: 2 } } },
         { block_id: '5', children: ['7'] }, { block_id: '6', children: ['8'] },
         { block_id: '7', text: text('TPM') }, { block_id: '8', text: text('状态来源') },
@@ -89,11 +93,17 @@ test('natural PRD request plus a wiki link alone reads the shared draft first an
   assert.match(job.originalQuestion, /LTX订单显示TPM补贴状态/);
   assert.match(job.originalQuestion, /TPM \| 状态来源/);
   assert.match(job.originalQuestion, /1 个图片块/);
+  assert.equal(job.attachments.length, 1);
+  assert.match(job.originalQuestion, new RegExp(job.attachments[0].id));
+  assert.equal(job.attachments[0].type, 'image');
+  assert.equal(job.attachments[0].source.sha256, createHash('sha256').update(png).digest('hex'));
+  assert.deepEqual(await fs.readFile(job.attachments[0].path), png);
   assert.equal((await send('om_prdlink', prompt)).duplicate, true);
   assert.deepEqual(calls, [
     ['/open-apis/wiki/v2/spaces/get_node', 'WikiToken', profile],
     ['acl', 'DraftToken', profile],
     ['/open-apis/docx/v1/documents/DraftToken/blocks', undefined, profile],
+    ['image', 'DraftImage', profile],
   ]);
 });
 
@@ -114,7 +124,7 @@ test('a follow-up draft link and environment answer in the card reuse the origin
   assert.equal(current.jobs.length, 1);
   assert.equal(current.jobs[0].sourceEnvironment, 'prd');
   assert.match(current.jobs[0].originalQuestion, /LTX订单显示TPM补贴状态/);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
 });
 
 test('an outside-group draft never reads the body and can be replaced with text in the same PRD card', async t => {
@@ -150,7 +160,19 @@ test('a saved link read resumes on startup without a second PRD job', async t =>
   assert.equal(done.conversations[0].prdDraftReading, undefined);
   assert.equal(done.jobs.length, 1);
   assert.match(done.jobs[0].originalQuestion, /LTX订单显示TPM补贴状态/);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
+});
+
+test('a denied or non-image preview leaves the document text and table available', async t => {
+  const calls = [];
+  const client = draftFeishu(calls);
+  client.cloudDocumentImage = async () => Buffer.from('{"error":"permission denied"}');
+  const { store, send } = await fixture(t, undefined, {}, client);
+  await send('om_preview_denied', '我想做一个需求 https://unit.feishu.cn/docx/DraftToken');
+  const [job] = (await store.read()).jobs;
+  assert.equal(job.attachments.length, 0);
+  assert.match(job.originalQuestion, /预览不可用/);
+  assert.match(job.originalQuestion, /TPM \| 状态来源/);
 });
 
 test('bare PRD trigger then unmentioned description and decisions keep one question, job and native checkpoint', async t => {
