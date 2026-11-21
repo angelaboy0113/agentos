@@ -20,6 +20,11 @@ test('DOM probe never treats blank/loading or password change as authenticated a
  await p.setContent('<div id="app"></div>');assert.equal((await p.evaluate(browserLoginState)).pageReady,false);
  await p.setContent('<h1>新密码 确认密码</h1><input type=password value=secret><input type=password>');const s=await p.evaluate(browserLoginState);assert.equal(s.passwordChangeRequired,true);assert.equal(s.pageReady,false);assert.doesNotMatch(JSON.stringify(s),/secret/);
  await p.setContent('<h1>订单首页</h1><nav>订单查询</nav>');assert.equal((await p.evaluate(browserLoginState)).pageReady,true);
+ await p.setContent('<h1>当前您暂无权限，请联系管理员配置</h1>');
+ const denied=await p.evaluate(browserLoginState);assert.equal(denied.loginState,'access_denied');assert.equal(denied.pageReady,false);assert.equal(denied.loginRequired,false);
+ await p.evaluate(()=>{location.hash='/error/no-access/index';document.body.innerHTML='<header>Application</header><h1>Permission required</h1>';});
+ assert.equal((await p.evaluate(browserLoginState)).loginState,'access_denied');
+ await p.evaluate(()=>{location.hash='/home';});
  await p.setContent('<h1>公开首页</h1><button>微信登录</button>');assert.equal((await p.evaluate(browserLoginState)).loginRequired,false);
  await p.setContent('<h1>页面不存在，或您暂无访问权限</h1><button>微信登录</button>');assert.equal((await p.evaluate(browserLoginState)).loginRequired,true);
  await p.setContent('<div role="dialog">欢迎登录，请扫码验证</div>');assert.equal((await p.evaluate(browserLoginState)).verificationRequired,true);

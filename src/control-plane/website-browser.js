@@ -320,6 +320,9 @@ export class WebsiteBrowser {
   if(tool==='browser_assets')return readWebsiteAsset(s,args,this.authorize,this.publicFetch);
   const login=await this.loginStatus(s);
   if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
+  if(login.loginState==='access_denied')return {stage:'站点拒绝访问，业务页面未就绪',loginState:login.loginState,
+   pageStatus:'access_denied',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),
+   partial:true,pageText:'',controls:[],diagnostic:websiteDiagnostics(s),message:'查看同任务页面诊断中的实际受阻初始化请求或应用授权；拒绝页不能作为真实业务页面截图。'};
   if(tool==='browser_screenshot')return this.screenshot(s,args);
   if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded'});}
@@ -429,7 +432,9 @@ export class WebsiteBrowser {
   const pageUrl=()=>websitePageLocation(dom.url());
   if(prd&&(!args.targetText||args.url!==pageUrl()))throw new BrowserInputError('BROWSER_ARGUMENTS','请先打开目标页面，传入当前快照的url及详情区标题targetText。');
   const readiness=await waitForCaptureReady(s);
-  if((await this.loginStatus(s)).loginRequired)return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
+  const login=await this.loginStatus(s);
+  if(login.loginRequired)return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
+  if(login.loginState==='access_denied')return {partial:true,pageStatus:'access_denied',stage:'站点拒绝访问，未保存业务截图',rows:[]};
   if(prd&&readiness.status!=='ready')return {partial:true,stage:'页面尚未稳定，未保存视觉基线',rows:[]};
   const dir=path.join(this.evidenceRoot,s.job.id);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.evidenceRoot,0o700);await chmod(dir,0o700);
   const name=randomUUID()+'.png',file=path.join(dir,name);

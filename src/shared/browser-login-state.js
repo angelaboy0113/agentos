@@ -17,7 +17,11 @@ export function browserLoginState(targetDocument){
  const qrInstructions=/扫码登录|请使用.{0,30}扫码|scan.{0,20}(?:QR|code)/i.test(text);
  const verification=challenge||!passwords.length&&(interactivePrompt&&/扫码/.test(text)||authPath&&qrInstructions);
  const loginRequired=!!(passwords.length||authPath||passwordChange||verification||denied&&loginControl||interactivePrompt);
- const loginState=passwordChange?'password_change_required':verification?'verification_required':loginRequired?(error?'rejected':'login_required'):loading?'loading':'ready';
+ const accessDenied=!loginRequired&&(
+  /(?:^|\/)error\/(?:no-access|access-denied|forbidden|unauthorized)(?:[/?#]|$)/i.test(location.pathname+location.hash)||
+  /^(?:(?:当前)?您暂无权限[，,\s]*请联系管理员(?:配置)?[。！!\s]*|(?:403[\s:：-]*)?(?:access denied|forbidden|permission denied)[.!\s]*)$/i.test(text)
+ );
+ const loginState=accessDenied?'access_denied':passwordChange?'password_change_required':verification?'verification_required':loginRequired?(error?'rejected':'login_required'):loading?'loading':'ready';
  const verificationImageReady=verification&&[...document.querySelectorAll('img')].filter(visible).some(e=>e.complete&&e.naturalWidth>0&&/qrcode|qrconnect|^data:image\//i.test(e.getAttribute('src')??''));
  const verificationFramePresent=verification&&[...document.querySelectorAll('iframe')].filter(visible).some(e=>/qrconnect|qrcode/i.test(e.getAttribute('src')??''));
  return {loginState,loginRequired,credentialFormVisible:passwords.length>0,verificationRequired:verification,verificationImageReady,verificationFramePresent,verificationExpired:verification&&/二维码.{0,8}(?:失效|过期)|(?:^|\n)刷新二维码(?:\n|$)|QR code.{0,15}expired/i.test(text),passwordChangeRequired:passwordChange,credentialRejected:loginState==='rejected',pageReady:loginState==='ready'};
