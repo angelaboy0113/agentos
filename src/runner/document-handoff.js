@@ -51,7 +51,7 @@ export async function prepareDocumentHandoff(job,result,workspace,{dataDir,emit=
  if(job.taskIntent==='analysis'&&result.documentRequests?.length&&materializable){
   try{
    if(job.prd?.businessFinal)for(const request of result.documentRequests){
-    const issue=request.format==='md'&&prdFinalContentIssue(request.content);
+    const issue=request.format==='md'&&prdFinalContentIssue(request.content, job.prd.fixedFinalSections);
     if(issue)throw Object.assign(Error(issue),{code:'PRD_FINAL_CONTENT'});
    }
    const files=await createFiles(dataDir,job,result.documentRequests,{onProgress:event=>emit({type:'progress',...event})});

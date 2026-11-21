@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdBusinessAligned, prdFinalContentIssue, prdDocumentTitle, prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
+import { prdBusinessAligned, prdFinalContentIssue, prdFinalSections, prdDocumentTitle, prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
 import { prdHighlightChanges } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
@@ -26,7 +26,43 @@ const chat = 'oc_team';
 const owner = 'ou_owner';
 const profile = 'knowledge-ltx';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2l8AAAAASUVORK5CYII=', 'base64');
-const md = '# 订单补贴状态\n\n## 摘要\n\n订单人员可直接查看**补贴状态**。\n\n## 业务分工\n\n|系统|影响|\n|---|---|\n|LTX|展示|\n|TPM|状态来源|\n\n## 原型图\n';
+const md = `# 订单补贴状态
+
+## 摘要
+
+订单人员可直接查看**补贴状态**。
+
+## 用户和使用场景
+
+订单人员查看补贴。
+
+## 业务范围
+
+仅查询。
+
+## 操作流程
+
+进入订单页查看状态。
+
+## 功能与业务规则
+
+按订单权限显示。
+
+## 业务口径对齐
+
+仅展示状态，已在卡片确认。
+
+## 跨系统分工
+
+|系统|影响|
+|---|---|
+|LTX|展示|
+|TPM|状态来源|
+
+## 页面设计与原型
+
+无
+`;
 
 test('PRD publisher removes byte-matched prototype and input image duplicates from Markdown', () => {
   const source = Buffer.concat([png, Buffer.from([0])]);
@@ -415,12 +451,47 @@ test('unanswered PRD decisions return to the form before creating files', async 
 });
 
 test('PRD final body starts with a prose summary and excludes QA and development sections', () => {
-  assert.equal(prdFinalContentIssue(md), null);
+  assert.equal(prdFinalContentIssue(md, true), null);
+  assert.equal(prdFinalSections.length, 8);
+  assert.match(prdFinalContentIssue(md.replace('## 业务口径对齐\n',''), true), /保留全部/);
+  assert.match(prdFinalContentIssue(md.replace('仅展示状态，已在卡片确认。', ''), true), /写「无」/);
+  assert.match(prdFinalContentIssue(md.replace('## 页面设计与原型\n\n无', '## 页面设计与原型\n\n弹窗'), true), /登记原型/);
+  assert.equal(prdFinalContentIssue(md.replace('## 页面设计与原型\n\n无',
+    '## 页面设计与原型\n\n### 弹窗\n\n[[PROTOTYPE:dialog]]'), true), null);
   assert.equal(prdDocumentTitle({ title: '订单跟踪 · 需求初稿' }, 3, true), '订单跟踪 · 需求文档');
   assert.match(prdFinalContentIssue('# 订单跟踪\n\n## 摘要\n\n## 业务规则'), /摘要/);
   for (const text of ['## 验收标准', '## 待确认事项', '## 研发实现', '## 版本记录', '|编号|测试用例|']) {
     assert.match(prdFinalContentIssue(md + '\n' + text), /移除/);
   }
+});
+
+test('PRD without UI changes retains its prototype section and shares without an image', async t => {
+  const calls = [];
+  const { workspace, store, send, dataDir } = await fixture(t, async (args, options) => {
+    calls.push(args[1]);
+    if (args[0] === 'api') return { data: { open_id: owner } };
+    if (args[0] === 'auth') return { ok: true, missing: [] };
+    if (args[1] === '+create') {
+      assert.match(options.input, /## 页面设计与原型\n\n无$/);
+      return { data: { document_id: 'NoUiPrototype', url: 'https://unit.feishu.cn/docx/NoUiPrototype' } };
+    }
+    if (args[1] === '+fetch') return '<h2>摘要</h2><table></table>';
+    if (args[1] === '+member-add') return {};
+    if (args[1] === '+member-list') return { data: { items: [{ member_id: chat, member_type: 'openchat', perm: 'edit' }] } };
+    assert.fail('No image or other cloud writes are needed');
+  });
+  const { questionId } = await send('om_noui', '我要做一个PRD：变更取数口径');
+  const [job] = (await store.read()).jobs;
+  const document = await saveArtifact(dataDir, job, 'report-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'md', Buffer.from(md));
+  await store.transact(s => {
+    Object.assign(s.jobs[0], { status: 'completed', result: alignedPrdResult, reportFiles: [document],
+      reportReviews: { [document.id]: { status: 'accepted', verificationHash: document.verificationHash } } });
+  });
+  await workspace.publisher.deliver(questionId);
+  const delivery = (await store.read()).questions[questionId].prd.delivery;
+  assert.equal(delivery.phase, 'delivered', delivery.notice);
+  assert.deepEqual(delivery.artifacts.prototypeIds, []);
+  assert(!calls.includes('+media-insert'));
 });
 
 test('cross-system PRD delivers styled cloud review draft as the owner with native table/image and scoped editable ACL', async t => {
@@ -586,7 +657,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,inlinePrototypes:true,nativePrototypeEdits:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
@@ -817,7 +888,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     figures.push({...artifact,verificationHash:hash(updated)});
   }
   const markdown=await saveArtifact(dataDir,{...job,prd:{...job.prd,revision:1}},'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2','md',
-    Buffer.from(md.replace('## 原型图\n','## 菜单\n\n[[PROTOTYPE:menu]]\n\n## 列表\n\n[[PROTOTYPE:list]]\n')));
+    Buffer.from(md.replace('## 页面设计与原型\n\n无','## 页面设计与原型\n\n### 菜单\n\n[[PROTOTYPE:menu]]\n\n### 列表\n\n[[PROTOTYPE:list]]')));
   const files=[markdown,...figures];
   await store.transact(s=>Object.assign(s.jobs[0],{status:'completed',result:alignedPrdResult,reportFiles:files,
     reportReviews:Object.fromEntries(files.map(f=>[f.id,{status:'accepted',verificationHash:f.verificationHash}]))}));

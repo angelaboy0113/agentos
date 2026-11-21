@@ -13,6 +13,7 @@ import { questionJob, publishQuestion } from './questions.js';
 
 const publishingScopes = 'docx:document docs:document.media:upload docs:permission.member:create docs:permission.member:retrieve';
 const validToken = /^[a-zA-Z0-9_-]{6,150}$/;
+const hasMarkdownTable = body => /^\s*\|.+\|\s*$/m.test(body);
 const hasNativeTable = xml => /<table(?:\s|>)/i.test(xml);
 const authError = error => /no user logged in|app_scope_not_applied|user_scope_not_granted|missing_scope|missing required scope|99991672|99991679/i.test(error.message);
 const prototypeAnchors = body => [...body.matchAll(/^\[\[PROTOTYPE:([a-z][a-z0-9-]{0,63})\]\][ \t]*$/gm)].map(match => match[1]);
@@ -92,7 +93,7 @@ function documentIdentity(result) {
   return { token, url: url.href };
 }
 
-export function prdMarkdown(body, { prototypeHash, referenceHashes = [] } = {}) {
+export function prdMarkdown(body, { prototypeHash, referenceHashes = [], tableRequired = true } = {}) {
   const references = new Set(referenceHashes);
   const text = body.replace(/!\[[^\]\r\n]*\]\(data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})\)/gi,
     (markup, base64) => {
@@ -103,7 +104,7 @@ export function prdMarkdown(body, { prototypeHash, referenceHashes = [] } = {}) 
       if (references.has(hash)) return '（初稿图片作为设计参考）';
       return markup;
     }).trim();
-  if (!/^#{1,3}\s+\S/m.test(text) || !/^\s*\|.+\|\s*$/m.test(text) || !/\*\*[^*]+\*\*/.test(text)
+  if (!/^#{1,3}\s+\S/m.test(text) || (tableRequired && !hasMarkdownTable(text)) || !/\*\*[^*]+\*\*/.test(text)
     || /<\/?[A-Za-z][^>]*>|!\[[^\]]*\]\(|(?:data|javascript):/i.test(text)) throw Error('PRD_NATIVE_BLOCK_CONTENT');
   return text;
 }
@@ -228,7 +229,7 @@ export class PrdCloudDelivery {
         await save('artifacts_missing', { notice: '业务口径尚未确认齐全，本轮未发布。请在当前卡片补充已确认的规则。' });
         return;
       }
-      if (files.length < 2 || files.some(f => !f)) {
+      if ((!job.prd.fixedFinalSections && files.length < 2) || files.some(f => !f)) {
         await save('artifacts_missing', { notice: '完整交付仍缺少已核验的正文或原型图。如需补充原型依据，可填写这张需求卡。' });
         return;
       }
@@ -236,8 +237,13 @@ export class PrdCloudDelivery {
       const [{ content }, ...images] = await Promise.all(files.map((f, i) =>
         reportFile(dir, job.id, f, { includeContent: i === 0, includeReceipt: i > 0 })));
       const raw = content.toString('utf8');
+      const issue = job.prd.businessFinal && prdFinalContentIssue(raw, job.prd.fixedFinalSections);
+      if (issue) {
+        await save('artifacts_missing', { notice: issue });
+        return;
+      }
       const keys = inline ? prototypeAnchors(raw) : [null];
-      if (!keys.length || new Set(keys).size !== keys.length || (inline && (raw.match(/\[\[PROTOTYPE:/g)?.length ?? 0) !== keys.length)) {
+      if ((!keys.length && (!job.prd.fixedFinalSections || images.length)) || new Set(keys).size !== keys.length || (inline && (raw.match(/\[\[PROTOTYPE:/g)?.length ?? 0) !== keys.length)) {
         await save('artifacts_missing', { notice: '正文原型位置缺失或重复。请为每张图设置唯一的对应章节。' });
         return;
       }
@@ -277,13 +283,8 @@ export class PrdCloudDelivery {
       const referenceHashes = (job.attachments ?? []).filter(a => a.source?.kind === 'authorized-prd-document-image'
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
         .map(a => a.source.sha256);
-      const issue = job.prd.businessFinal && prdFinalContentIssue(raw);
-      if (issue) {
-        await save('artifacts_missing', { notice: issue });
-        return;
-      }
       const baseline = previous ? await readPrdRevisionBaseline(dir, job, previous).catch(() => null) : null;
-      const body = prdMarkdown(raw, { prototypeHash: files[1].sha256, referenceHashes });
+      const body = prdMarkdown(raw, { prototypeHash: files[1]?.sha256, referenceHashes, tableRequired: !job.prd.fixedFinalSections });
       const highlighted = prdHighlightChanges(baseline, body);
       const markdown = inline ? highlighted.replace(/^\[\[PROTOTYPE:([a-z][a-z0-9-]{0,63})\]\][ \t]*$/gm, (_, key) => marker(key)) : highlighted;
       const hasHighlights = markdown.includes('<span background-color=');
@@ -318,9 +319,10 @@ export class PrdCloudDelivery {
         };
         if (delivery.phase === 'created') {
           const xml = await render();
-          if (!hasNativeTable(xml) || !/<h[1-6](?:\s|>)/i.test(xml) || hasHighlights && !/<span[^>]*background-color="(?:(?:light-)?yellow|rgba\(255,\s*246,\s*122,\s*0\.8\))"/i.test(xml) && !(delivery.inlineHighlights === undefined && xml.includes('本次变更'))) throw Error('PRD_NATIVE_BLOCK_READBACK');
+          if ((!job.prd.fixedFinalSections || hasMarkdownTable(body)) && !hasNativeTable(xml) || !/<h[1-6](?:\s|>)/i.test(xml) || hasHighlights && !/<span[^>]*background-color="(?:(?:light-)?yellow|rgba\(255,\s*246,\s*122,\s*0\.8\))"/i.test(xml) && !(delivery.inlineHighlights === undefined && xml.includes('本次变更'))) throw Error('PRD_NATIVE_BLOCK_READBACK');
           await save('body_verified');
         }
+        if (delivery.phase === 'body_verified' && !figures.length) await save('image_verified');
         if (delivery.phase === 'body_verified') {
           await save('inserting');
           if (inline) {
