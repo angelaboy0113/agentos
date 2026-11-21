@@ -296,3 +296,22 @@ test('host login wait discards a stale model environment handoff',async t=>{
  assert.equal(result.environmentQuery,null);assert.equal(result.websiteQuery,null);assert.equal(result.sourceEnvironmentQuery,null);
  assert.equal(result.finalMessage,'login');
 });
+
+test('incomplete PRD review stays in the native thread and can ask for business confirmation',async t=>{
+ const directory=await temp(t),app=new EventEmitter();
+ const direct={job,sourceReceipts:[],close:async()=>{}};
+ let turns=0;
+ app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.request=async()=>({thread:{id:'prd-thread'}});app.close=async()=>{};
+ app.turn=async p=>{
+  assert.equal(p.threadId,'prd-thread');
+  if(++turns===1)return{text:JSON.stringify({outcome:'ready',finalMessage:'缺依据的稿件'})};
+  assert.match(p.input[0].text,/prd-business-purpose.*prd-module-impact.*prd-page-fidelity/);
+  return{text:JSON.stringify({outcome:'needs_clarification',finalMessage:'请确认业务背景',
+    investigation:{status:'wait',blocker:{kind:'user_input',needed:'需要减少人工核对吗？'}}})};
+ };
+ const prdJob={...job,prd:{reviewBasis:true},artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}};
+ const result=await runNativeInvestigation({job:prdJob,config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({})});
+ assert.equal(turns,2);
+ assert.equal(result.outcome,'needs_clarification');
+ assert.equal(result.nativeTiming.modelSessions,1);
+});

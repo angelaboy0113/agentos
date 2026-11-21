@@ -43,7 +43,9 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
       && Number(name.split('-')[1])<job.prd.revision);
     if(prior){
      const candidate=JSON.parse((await safeBytes(path.join(dir,prior))).bytes);
-     if(candidate.item?.visualPolicy==='brand-layout-v2')receipt=candidate;
+     const sourceCacheKey=job.analysisSourceSnapshot?.cacheKey;
+     if(candidate.item?.visualPolicy==='brand-layout-v2'
+       && (!job.prd.reviewBasis || !sourceCacheKey || candidate.sourceCacheKey===sourceCacheKey))receipt=candidate;
     }
    }
   }

@@ -16,6 +16,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
   };
   if (!attribute) return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,brandRegions};
   const terms=new Set(('首页 工作台 菜单 基础信息 订单管理 订单列表 订单详情 人工订单 手工订单 代客下单 运营管理 渠道任务 活动管理 财务管理 策略管理 访销管理 门店管理 门店审核 门店未审核 商品管理 预算管理 促销管理 促销活动 活动列表 活动详情 审批管理 订单编号 商品名称 商品编码 经销商 经销商名称 组织架构 订单状态 审批状态 状态 名称 编号 类型 数量 规格 单位 操作 创建时间 更新时间 开始时间 结束时间 查询 搜索 重置 清空 新增 添加 编辑 删除 查看 详情 保存 提交 确定 取消 关闭 返回 导入 导出 上一页 下一页 标题 序号 更新日志 发货状态 DMS订单编号 SAP订单编号 DMS订单号 SAP订单号 经销商编码 订单审批记录 订单审批 订单拆单 经销商下单 订单返点量 渠道量小店返量 保证金下单检查白名单 收起导航 选项管理 新建 更多 搜索菜单或功能 页 前往 暂无数据 今天 最近7天') .split(' '));
+  const fieldTerms = new Set(('方案管理 方案列表 方案详情 方案名称 方案编号 方案状态 方案类型 申请人 申请日期 申请金额 预算来源 预算组织 下发预算 可用额度 可用金额 已用额度 占用额度 分配额度 分配总额 分配金额 活动大类 费用类型 使用组织 分配组织 生效日期 失效日期 审核人 提交人 操作时间 优惠类型 补贴金额 补贴状态 促销规则').split(' '));
   for(const label of brandedLabels??[])terms.add(label);
   const shapeTags=new Set(['path','g','use','circle','rect','line','polyline','polygon','ellipse','defs','clippath','symbol','title','desc']);
   const approvedBrand = (element, rect) => {
@@ -60,7 +61,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       }
     }
     const placeholder=element.matches('input:not([type=password])')?element.getAttribute('placeholder')?.trim():null;
-    if(placeholder && (terms.has(placeholder)||terms.has(placeholder.replace(/^(?:请输入|请选择|输入|选择)/,'')))){
+    if(placeholder && (terms.has(placeholder)||terms.has(placeholder.replace(/^(?:请输入|请选择|输入|选择)/,'')) || fieldTerms.has(placeholder.replace(/^(?:请输入|请选择|输入|选择)/,'')))){
       element.setAttribute(attribute+'-placeholder',String(placeholders.length));
       placeholders.push(getComputedStyle(element,'::placeholder').color);
     }
@@ -72,7 +73,9 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     if(element.closest('td,[role=cell]')&&!rowAction)continue;
     const brandTitle=element.closest('[class*="app-logo" i],[class*="brand-name" i],[class*="logo-title" i],.shell-brand')
       && geometry.y<100&&/^[\p{L}\p{M}][\p{L}\p{M} .&-]{1,24}$/u.test(text);
-    if(!terms.has(text.replace(/\s+/g,'').replace(/[:：]$/,''))&&!brandTitle)continue;
+    const normalized = text.replace(/\s+/g,'').replace(/[:：]$/,'');
+    const fieldLabel = element.closest('label,legend,th,h1,h2,h3,[role="heading"],[role="columnheader"],[class*="form-item__label"],[class*="form-item-label"]');
+    if(!terms.has(normalized)&&!(fieldLabel&&fieldTerms.has(normalized))&&!brandTitle)continue;
     const range=document.createRange();
     range.selectNodeContents(direct[0]);
     const box=bounds(range);

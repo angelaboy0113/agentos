@@ -25,7 +25,8 @@ export async function savePrdDesignReference(dataDir, job, item) {
  const target=path.join(dir,'prd-'+job.prd.revision+(job.prd.inlinePrototypes?'-'+referenceId:'')+'.json');
  const temp=path.join(dir,item.name+'.ref');
  await writeFile(temp,JSON.stringify({capture:'live-page-v1',jobId:job.id,questionId:job.questionId,projectId:job.projectId,
-  profile:job.originProfile??job.agentProfile,environment:job.sourceEnvironment,revision:job.prd.revision,item}),{mode:0o600,flag:'wx'});
+  profile:job.originProfile??job.agentProfile,environment:job.sourceEnvironment,revision:job.prd.revision,
+  sourceCacheKey:job.analysisSourceSnapshot?.cacheKey??null,item}),{mode:0o600,flag:'wx'});
  await rename(temp,target);
  return referenceId;
 }

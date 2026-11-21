@@ -37,6 +37,11 @@ export function prdGuidance(job) {
     ? `业务口径包括会改变范围、角色权限、数据含义、计算规则、状态流转或关键交互的决定。初稿中互相矛盾、留空、有多个候选、或要求确认的规则必须逐项问清。不能把自己的建议、行业惯例或泛泛的“继续、导出”当作用户确认。用 outcome=needs_clarification、investigation.status=wait、blocker.kind=user_input；needed 直接写给用户，逐条编号，一条只问一个决定；尽可能给出选项和它们的区别。核心目标保持 open，不请求生成或交付任何定稿文件。部分回答后只追问余项。已明确的规则无需重复确认。尚未知的工程实现细节留在技术依据或卡片，不作为用户业务待确认项，不写进定稿。
 最终正文从一级标题和“## 摘要”开始，摘要第一段用大白话说清谁遇到什么问题、要做什么、做完能怎么用。后面写已确认的业务范围、用户和场景、操作流程、功能与业务规则、跨系统分工及原型。不要写待确认口径、测试用例、验收标准、测试边界、版本号或变更记录、研发实现方案、代码位置、路由、接口契约、源码提交和内部规则编码。页面截图来源只写系统、环境、页面名称。内部门禁、核验依据和技术证据留在卡片。最终 ready 时，handoff.checks 必须给出 status=passed、id=prd-business-alignment，evidence 逐项引用原始需求或用户在本卡确认的决定。还有业务决定未确认时这个检查项不能通过。`
     : '非关键未知项列待确认。';
+  const reviewPolicy = job.prd.reviewBasis ? `
+先把需求背景与业务目标写清楚：谁在什么场景遇到什么问题，为什么现在要做，改完希望有什么效果。只把原话、初稿及卡片确认能支持的内容写成业务事实。可以据初稿反推可能的动机，把它作为待确认的理解提出。初稿只描述了做法、业务动机又无法可靠归纳时，在原卡问具体业务原因；用户只确认「业务要求」时照实写，不补造指标、损失或历史。
+从选定环境本次核验的远端分支固定源码定位现有入口、规则及调用，上线行为另由现场证据确认。按实际链路列清涉及模块，写明现状、拟改、联动方向和与现有行为的关系。跨系统逐侧说明责任、传递内容、状态变化及例外。需要用户确认范围时，先把受影响的模块和可选改法列在卡片中，让用户确认或补充；初稿已明确覆盖的选择直接记录，不重问。缺源码或现场证据由助手继续只读核查，不能让用户确认猜测的技术实现。
+操作流程写清角色、入口、操作顺序、点击后的可见结果和对应业务规则。把条件、计算、状态、权限和失败分支写进功能说明；技术实现细节继续留在卡片。原型先核对目标页面现有控件和实际交互，保留真实字段、导航和当前状态。新页面用同系统同环境最接近的实际页面取样，复用其真实控件结构与已经存在的交互，逐块说明哪里改、怎么沿用；没有现场组件证据时继续找同类控件，不补造被遮挡内容。
+最终 ready 同时填写三个 required=true、status=passed 的 handoff.check：prd-business-purpose（原话或本卡确认的背景、问题和预期效果）、prd-module-impact（固定源码或已核验现状、受影响模块和业务范围确认依据）、prd-page-fidelity（逐张按目标页核对现有控件与拟议改动；确无界面变更时说明依据）。这些证据留在卡片，不增加正文二级章节。` : '';
   const structure = job.prd.businessFinal
     ? job.prd.fixedFinalSections
       ? `按以下顺序使用二级标题，不得省略或另加二级标题：${prdFinalSections.join('、')}。各章节无适用内容时正文写「无」。可用三级标题细分。业务口径对齐逐条列出初稿已明确和本卡确认的业务决定及最终采用的口径，可用「事项／确认口径／依据」表格；依据只写需求初稿或卡片确认等业务来源。没有适用的口径才写「无」。页面设计与原型内按功能分三级小节，图放在对应说明下；确实无界面改动时该节写「无」，不提交 PNG。涉及界面改动但截图未取得时不能写「无」交付。`
@@ -50,7 +55,8 @@ ${revising}
 从本系统界面、接口、权限、字段、状态追到相关系统。每项标记系统、环境、固定提交或受控证据。对方仓库或环境不可用时，写清缺口和需确认的团队，不能自行扩大权限或声称已查。
 有跨系统关联时核对双方影响、失败、延迟、重复、存量和责任方。定稿仅写清业务影响与确认后的分工。
 ${finalPolicy}
-仅在缺少会改变范围、权限或关键交互的业务决定时，outcome=needs_clarification，investigation.status=wait，blocker.kind=user_input，needed 写清要用户在卡片回答的具体问题，核心目标标 open，问题由原需求卡输入框收集，本轮不提交文件。信息足够则立即制作评审稿，无需用户说导出或确认发布。已核对所有工件和截图后，提交 deliver 需同时给出 required=true、status=passed、id=original-question 的 handoff.check，写入关键验收依据。
+${reviewPolicy}
+仅在缺少需要用户确认的业务背景或会改变范围、权限或关键交互的业务决定时，outcome=needs_clarification，investigation.status=wait，blocker.kind=user_input，needed 写清要用户在卡片回答的具体问题，核心目标标 open，问题由原需求卡输入框收集，本轮不提交文件。信息足够则立即制作评审稿，无需用户说导出或确认发布。已核对所有工件和截图后，提交 deliver 需同时给出 required=true、status=passed、id=original-question 的 handoff.check，写入关键验收依据。
 ${exporting ? `用户授权信息齐备后自动交付飞书评审稿。用 documentRequests 实际提交${job.prd.inlinePrototypes ? '一个 md 和所需的 png' : '一个 md 和一个 png'}。所有工件都须登记到当前轮；即使正文内容未变，也要以本轮请求提交同一份已确认正文，不能仅引用旧轮工件。md 使用一级/二级标题和重点加粗，需要表格时用原生可转换的管道表格，${structure}。不得宣称未完成的同版评审已通过。${job.prd.nativePrototypeEdits && job.prd.inlinePrototypes ? `每个需要原型的模块，在对应说明后单独成段写 [[PROTOTYPE:lowercase-slug]]，并分别提交 PNG。每张 PNG 先在对应系统和环境打开目标页面截图，调用 browser_screenshot 传当前 URL 和视口可见的 targetText；新页面取最接近的现有同环境真实页面。JSON content 为 {"mode":"existing-page","prototypeKey":"order-menu","referenceId":"真实截图返回的referenceId","prompt":"用这张图直接编辑，新增订单进度查询，保留原有控件和视觉风格","areas":[{"x":0.02,"y":0.40,"width":0.17,"height":0.16}]}。mode 也能填 new-page；坐标按真实截图视口归一化，必须覆盖所有需要修改的区域而避开 Logo、页眉和其他无关区域。新增菜单，保留旧菜单并在同区域内插入、顺延；新页面保留真实导航和品牌，只修改标题、筛选控件、列表等必要区域。Image 2 原生编辑收到真实脱敏截图及 prompt，原截图中识别出的品牌区域和其他改动区外原像素由程序保留。每张图核对真实 Logo、导航、确认过的文案和正常用到的按钮，发现缺失在同卡自行改 prompt 或区域并重新生图。不要提供 H5、画布指令或拼接两张设计。与正文对应注明系统、环境、页面与拟议改动。` : job.prd.inlinePrototypes ? `每个需要原型的需求模块，在对应说明后单独成段写 [[PROTOTYPE:lowercase-slug]]。每个 slug 唯一并对应当前轮一张 PNG。先用源码核对真实页面路由及组件，再打开对应环境的真实页面调用 browser_screenshot，提供当前 URL 和视口内可见的 targetText。PNG 的 content 是 JSON，示例 {"mode":"existing-page","prototypeKey":"order-menu","referenceId":"截图返回的referenceId","areas":[{"x":0.03,"y":0.42,"width":0.16,"height":0.04,"text":"促销查询","sample":{"x":0.03,"y":0.37,"width":0.16,"height":0.04}}]}。根据该图 designLayout 的视口尺寸和坐标归一化，示例坐标不得照抄。每个改动区的 sample 指向现场同类控件，沿用其背景和边框；可在 sample 中填入对应 designLayout.controls 的 fontFamily 和 color。只复用原版控件时可以省略 text。新增菜单使用原菜单以下的另一行，保留原行。需要顺延下面原菜单时，PNG JSON 顶层填写 shifts:[{x,y,width,height,dy}]，数值按视口归一化，范围仅覆盖插入起点到可滚动菜单底部，dy 为新增行高。再用 areas 在腾出的行填入菜单标签；inset 是相对该行宽度的文字左缩进（0 到 1）。instructions 或其它自由文字不会改图，所有视觉编辑必须写入有效的 areas 和 shifts；文本改动按一个真实控件或单元格分别取样，sample 选择没有原标签的同样式区，避免叠字或丢边框。优先保留 Logo、导航、筛选控件和分页。新增菜单时在真实侧栏插入同层级菜单，保留其余界面。全新页面用 mode=new-page，以同系统同环境最接近的真实表格或表单页面为底稿，沿用导航和控件，按需求逐块替换标题、字段或表头。新增弹窗尽量以真实同类弹窗为底稿并替换对应区域。最终图是单张界面的截图局部改造，勿画新框架或拼对照图；业务数据遵循截图脱敏。交付器将图插入对应模块，无需在末尾设原型汇总。每张图在原处注明系统、环境、参考页及拟议改动。` : `末章标题为「原型图」，标注示意图和对应界面改动，图片由交付器插入。PNG 使用截图合成请求。先用对应环境的固定源码定位真实前端路由和组件，再沿授权只读入口打开对应系统及环境的目标页面，进入具体详情、弹窗或模块，取得当前快照。调用 browser_screenshot，传当前快照的 url 和视口内实际看见的目标标题 targetText。截图必须成功保存真实页面脱敏参考。现有页面优先进入真实目标页面，PNG 的 content 填 JSON 字符串 {"mode":"existing-page","areas":[{"x":0.03,"y":0.42,"width":0.34,"height":0.05,"text":"拟新增 · 查看明细"}]}，根据 browser_screenshot 返回的 designLayout.sections 像素位置，除以 viewportWidth 和 viewportHeight，定位到真实拟改区域，示例坐标不得照抄；程序保留截图原像素，只在标注区域画建议，文字应短且不得补猜已遮挡的值。全新页面或目标页尚无入口时，先截同系统和同环境最接近的真实页面，在正文说清参考关系；全新页面可填 {"mode":"new-page","prompt":"说明从真实截图沿用的组件、布局及新页面的独有改动"}，程序会把真实参考截图与拟议设计并列，生图内容只画一个新页面，不再画参考页、对照栏或列标题。`} 已上传原型、初稿图、源码、样式数据或其它环境页面均不能代替现场截图。截图失败时核对授权入口、登录和实际页面状态，保留已确认的业务内容，说明具体缺口，保持核心项 open。涉及界面改动时，取得真实截图前不要生成原型或提交最终文档。正文用系统、环境和页面名说明截图来源，区分页面现状和拟议改动。实际文件都要通过核验。若真实原型偏离源页面，自行以 partial + continue 和 reportAssessment.decision=revise 进入修订，可同轮修订多张 PNG，无需用户补技术或视觉意见；复用同一任务同环境已核验的截图引用和已确认正文，下一轮实际查看每张图；保持核心项 open，待新图核验前不得交付。文字清单和图片只能用已确认信息及明确标为示意的内容。Markdown 仅填写原型说明，PNG 独立交付。不要把初稿图片或原型 PNG 通过 base64、data URI 或其他图片链接写入 Markdown。不要把账号、凭据、个人资料或生产明文样本写入群共享文档；以脱敏示例和可共享证据定位说明。` : '未要求导出时仅给出本轮影响、决策和待确认事项，不生成最终附件。需要用户补充时，请用户在当前 PRD 卡片的输入框填写。'}`;
 }
 
@@ -70,6 +76,14 @@ export function prdBusinessAligned(job, result) {
     && result.investigation.goals.every(goal => !goal.required || goal.status === 'verified')
     && result.handoff?.checks?.some(check => check.id === 'prd-business-alignment'
       && check.status === 'passed' && check.evidence?.trim());
+}
+
+export function prdReviewBasisMissing(job, result) {
+  if (!job.prd?.reviewBasis) return [];
+  const checks = result?.handoff?.checks ?? [];
+  return ['prd-business-purpose', 'prd-module-impact', 'prd-page-fidelity'].filter(id =>
+    !checks.some(check => check?.id === id && check.required === true
+      && check.status === 'passed' && check.evidence?.trim()));
 }
 
 export function prdBusinessWait(job, result) {

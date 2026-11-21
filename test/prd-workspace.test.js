@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdBusinessAligned, prdFinalContentIssue, prdFinalSections, prdDocumentTitle, prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
+import { prdBusinessAligned, prdFinalContentIssue, prdFinalSections, prdDocumentTitle, prdGuidance, prdIntentDigest, prdReviewBasisMissing } from '../src/shared/prd-workspace.js';
 import { prdHighlightChanges } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
@@ -319,6 +319,8 @@ test('a single PRD form accepts supplements during execution and switches to rev
     const job = s.jobs[0];
     job.status = 'running';
     job.analysisContinuation = { questionId, threadId: 'prd-fixed-thread', workspace: '/fixed/workspace' };
+    job.analysisSourceSnapshot = { workspace: '/fixed/workspace' };
+    job.analysisSourceSnapshots = { prd: job.analysisSourceSnapshot };
     s.cardMessages = { ['question:'+questionId]: { messageId: 'om_card' } };
   });
   const render = async () => questionView(await store.read(), questionId);
@@ -349,6 +351,8 @@ test('a single PRD form accepts supplements during execution and switches to rev
   const updated = (await store.read()).jobs[0];
   assert.equal(updated.analysisContinuation.threadId, 'prd-fixed-thread');
   assert.equal(updated.prd.revision, 2);
+  assert.equal(updated.analysisSourceSnapshot.workspace, '/fixed/workspace');
+  assert.equal(updated.prd.refreshSource, undefined);
   assert.equal(updated.currentQuestion, '只做 PC 端');
   assert.equal((await send('prd-form:stale', '错误补充', 'om_live_form', args)).reason, 'prd_form_stale');
   await store.transact(s => {
@@ -367,6 +371,9 @@ test('a single PRD form accepts supplements during execution and switches to rev
   const next=await store.read();
   assert.equal(next.jobs.length,1);
   assert.equal(next.jobs[0].prd.previousRevision.revision,2);
+  assert.equal(next.jobs[0].prd.refreshSource,true);
+  assert.equal(next.jobs[0].analysisSourceSnapshot,undefined);
+  assert.equal(next.jobs[0].analysisSourceSnapshots,undefined);
   assert.equal(next.jobs[0].analysisContinuation.threadId,'prd-fixed-thread');
   assert.match(JSON.stringify((await render()).card),/对照上一版/);
 });
@@ -467,14 +474,19 @@ async function saveArtifact(dataDir, job, id, format, bytes, screenshot, generat
 const alignedPrdResult = {
   outcome: 'ready',
   investigation: { status: 'complete', goals: [{ id: 'original-question', required: true, status: 'verified' }] },
-  handoff: { checks: [{ id: 'prd-business-alignment', required: false, status: 'passed', evidence: '发起人确认仅在订单详情显示状态' }] },
+  handoff: { checks: [
+    { id: 'prd-business-alignment', required: false, status: 'passed', evidence: '发起人确认仅在订单详情显示状态' },
+    { id: 'prd-business-purpose', required: true, status: 'passed', evidence: '初稿说明人员核对状态需跨系统；原卡确认在详情查询' },
+    { id: 'prd-module-impact', required: true, status: 'passed', evidence: '依据固定源码核对了模块及显示状态的范围，原卡已确认' },
+    { id: 'prd-page-fidelity', required: true, status: 'passed', evidence: '已核对适用界面和改动边界' },
+  ] },
 };
 
 test('unanswered PRD decisions return to the form before creating files', async t => {
   const { store, send, dataDir } = await fixture(t, () => assert.fail('No cloud writes'));
   await send('om_waiting', '我要做一个 PRD：订单详情显示状态');
   const [job] = (await store.read()).jobs;
-  const needed = '状态以订单记录还是审批结果为准？';
+  const needed = '是为了减少跨系统核对，还是另有业务原因？状态以订单记录还是审批结果为准？';
   const result = { ...alignedPrdResult, summary: needed, finalMessage: needed,
     documentRequests: [{ format: 'md', content: md }],
     investigation: { ...alignedPrdResult.investigation, blocker: { kind: 'user_input', needed, evidence: '初稿列了两个来源' } },
@@ -487,6 +499,18 @@ test('unanswered PRD decisions return to the form before creating files', async 
   assert.equal(prepared.result.investigation.goals[0].status, 'open');
   assert.equal(prdBusinessAligned(job, prepared.result), false);
   assert.equal(prdBusinessAligned(job, alignedPrdResult), true);
+});
+
+test('PRD review requires evidence for purpose, module impact and page fitness', () => {
+  const job = { prd: { businessFinal: true, reviewBasis: true } };
+  const guidance = prdGuidance(job);
+  assert.match(guidance, /业务要求/);
+  assert.match(guidance, /让用户确认或补充/);
+  assert.match(guidance, /点击后的可见结果/);
+  assert.deepEqual(prdReviewBasisMissing(job, alignedPrdResult), []);
+  const missing = { handoff: { checks: alignedPrdResult.handoff.checks.filter(c=>c.id!=='prd-module-impact') } };
+  assert.deepEqual(prdReviewBasisMissing(job, missing), ['prd-module-impact']);
+  assert.deepEqual(prdReviewBasisMissing({ prd: { businessFinal: true } }, missing), []);
 });
 
 test('PRD final body starts with a prose summary and excludes QA and development sections', () => {
@@ -526,6 +550,11 @@ test('PRD without UI changes retains its prototype section and shares without an
     Object.assign(s.jobs[0], { status: 'completed', result: alignedPrdResult, reportFiles: [document],
       reportReviews: { [document.id]: { status: 'accepted', verificationHash: document.verificationHash } } });
   });
+  await store.transact(s => { s.jobs[0].result = {...alignedPrdResult, handoff:{ checks:[] }}; });
+  await workspace.publisher.deliver(questionId);
+  assert.equal((await store.read()).questions[questionId].prd.delivery.phase,'artifacts_missing');
+  assert(!calls.includes('+create'));
+  await store.transact(s => { s.jobs[0].result = alignedPrdResult; });
   await workspace.publisher.deliver(questionId);
   const delivery = (await store.read()).questions[questionId].prd.delivery;
   assert.equal(delivery.phase, 'delivered', delivery.notice);
@@ -696,7 +725,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,reviewBasis:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
@@ -875,12 +904,15 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
       body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>'}));
     await page.route(url,route=>route.fulfill({contentType:'text/html; charset=utf-8',
       body:'<header><img src="/assets/logoImg.8f1f5.svg"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
-        +'<button style="padding:8px 20px;background:'+color+'">查询</button><div id="business">AA123456</div>'}));
+        +'<button style="padding:8px 20px;background:'+color+'">查询</button>'
+        + (n ? '<table><tr><th>分配金额</th></tr><tr><td id="business">AA123456</td></tr></table>'
+          : '<label for="budget">预算来源：</label><input id="budget" value="DEMO-PRIVATE"><div id="business">AA123456</div>')}));
     await page.goto(url);
     const capture = () => website.screenshot({page,job},{url,targetText:'查询'});
     const snapshot = await capture();
     assert.equal(snapshot.designLayout.controls[0].text,'查询');
-    assert.equal(snapshot.designLayout.controls.length,1);
+    assert.deepEqual(snapshot.designLayout.controls.map(control=>control.text),['查询',n?'分配金额':'预算来源：']);
+    assert.doesNotMatch(JSON.stringify(snapshot.designLayout.controls),/DEMO-PRIVATE|AA123456/);
     assert.equal(snapshot.designLayout.assets.length,2);
     assert.equal(snapshot.designLayout.brandRegions.length,1);
     const base = await fs.readFile(path.join(dir,snapshot.designReference.name));
@@ -892,6 +924,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     const future={...job,prd:{...job.prd,revision:job.prd.revision+1}};
     const reused=await readPrdDesignReference(dataDir,future,referenceId);
     assert.equal(reused?.sha256,hash(base));
+    assert.equal(await readPrdDesignReference(dataDir,{...future,analysisSourceSnapshot:{cacheKey:'new-source'}},referenceId),undefined);
     const actual = await producePrdPrototype(dataDir,job,JSON.stringify({
       mode:n?'new-page':'existing-page', prototypeKey:key, referenceId,
       prompt:'保留真实界面，在修改区增加查看活动入口',

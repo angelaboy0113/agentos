@@ -6,6 +6,7 @@ import {codexEnvironment,loadCodexRuntimeSettings,resolveCodexBinary,conversatio
 import {artifactPermissionArgs,artifactPolicy} from '../shared/artifact-workspace.js';
 import {failureDiagnostic} from '../shared/failure-diagnostic.js';
 import {continuousReviewDecision} from '../shared/investigation-review.js';
+import {prdReviewBasisMissing} from '../shared/prd-workspace.js';
 import {ToolResultStore} from './tool-result-store.js';
 import {InvestigationDirectTools,investigationDynamicTools} from './investigation-direct-tools.js';
 
@@ -79,7 +80,7 @@ export async function runNativeInvestigation(options,adapters={}) {
   // Host receipts live outside the model-writable artifact working directory.
   const journalDirectory=await store.root();
   let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer,modelTurns=0,hostContinuations=0,checkedLogFallback=false;const began=Date.now();
-  const pendingTools=new Set(),deferredTools=new Set(),deferredResults=[];
+  const pendingTools=new Set(),deferredTools=new Set(),deferredResults=[],prdReviewAttempts=new Set();
   const onToolCall=async params=>{
     if(!active||params.threadId!==threadId||!turnId||params.turnId!==turnId||params.namespace!==null||!investigationDynamicTools.some(x=>x.name===params.tool)&&params.tool!=='agentos_read_result')throw failure('NATIVE_TOOL_SCOPE');
     const run=()=>journal.call(params.callId,{tool:params.tool,arguments:params.arguments},async()=>{
@@ -147,6 +148,17 @@ export async function runNativeInvestigation(options,adapters={}) {
     // that observation to the same model instead of opening a second source or
     // waiting indefinitely during teardown.
     if(!direct.channel){
+      const reviewMissing=result.outcome==='ready'&&!continuation?prdReviewBasisMissing(job,result):[];
+      const reviewKey=reviewMissing.join(',');
+      if(reviewKey&&!prdReviewAttempts.has(reviewKey)){
+        prdReviewAttempts.add(reviewKey);
+        hostContinuations++;
+        await emit({type:'progress',phase:'native_analysis_continuing',message:'正在核对需求背景、模块范围及页面依据'});
+        input=[{type:'text',text:'交付前还缺以下 PRD 核验项：'+reviewMissing.join('、')
+          +'。按本题需求工作台流程实际核对，检查依据来自初稿、原卡确认、固定源码和真实页面。用户需做决定时在原卡问清；不要为了通过检查补造依据。信息齐备后回到同一会话提交。'}];
+        active=true;
+        continue;
+      }
       if(continuation)observation=await journal.call('host-continuation-'+turnId,continuation,()=>direct.call(continuation.name,continuation.args));
       else if(!result.documentRequests?.length&&continuousReviewDecision(direct.job,result.outcome==='needs_clarification'&&result.investigation?.status==='continue'&&!result.investigation?.blocker&&!result.browserLoginRequired&&result.investigation?.nextStep?.trim()?{...result,outcome:'partial'}:result).continue){
         // A normal work-in-progress result belongs to this live thread. Sending

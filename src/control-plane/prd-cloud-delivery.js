@@ -6,7 +6,7 @@ import { reportFile } from '../shared/report-files.js';
 import { readPrdDesignReference } from '../shared/image-generation.js';
 import { previousPrdDelivery, prdHighlightChanges, readPrdRevisionBaseline } from '../shared/prd-revision.js';
 import { reportEligible } from '../shared/report-acceptance.js';
-import { prdBusinessAligned, prdDocumentTitle, prdFinalContentIssue, prdIntentDigest } from '../shared/prd-workspace.js';
+import { prdBusinessAligned, prdDocumentTitle, prdFinalContentIssue, prdIntentDigest, prdReviewBasisMissing } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
 import { currentUserQuestion } from '../shared/user-request-scope.js';
 import { questionJob, publishQuestion } from './questions.js';
@@ -238,6 +238,10 @@ export class PrdCloudDelivery {
       }
       if (!prdBusinessAligned(job, job.result)) {
         await save('artifacts_missing', { notice: '业务口径尚未确认齐全，本轮未发布。请在当前卡片补充已确认的规则。' });
+        return;
+      }
+      if (prdReviewBasisMissing(job, job.result).length) {
+        await save('artifacts_missing', { notice: '需求背景、模块影响或页面依据尚未核验齐全，本轮未发布。' });
         return;
       }
       if ((!job.prd.fixedFinalSections && files.length < 2) || files.some(f => !f)) {

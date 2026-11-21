@@ -41,7 +41,9 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
   const visibleRegions = areas.map(({x,y,width,height})=>({x,y,width,height}));
   const firstEdit = nativeEdit ? [
     'Edit the attached real UI screenshot in place. Preserve its aspect ratio, viewport framing, branding and layout outside the edit rectangles.',
-    'Use the same visual language and existing components for the requested changes. Do not invent business records, user identifiers, or hidden content.',
+    'Inside the edit rectangles preserve all unchanged components, exact labels, alignment, colors, row heights, button styles and layout seen in the screenshot.',
+    'Reuse the visible reference controls for new fields, rows or actions. Keep visible workflow states and existing terminology. Leave masked fields and records masked; do not reconstruct them.',
+    'If the requirement calls for a new page, adapt the reference page structure in the rectangles rather than redesigning the application shell.',
     'Return one full edited screenshot with no margins, captions, split panels, or annotations. The allowed rectangles use x, y, width and height as fractions of the screenshot.',
     JSON.stringify(visibleRegions),
     spec.prompt,

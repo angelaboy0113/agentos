@@ -303,3 +303,17 @@ test('snapshot failure retains repository, stage and safe diagnostic through the
  assert.equal(result.outcome,'blocked');assert.equal(result.sourceFailure.repository,'business');assert.equal(result.sourceFailure.stage,'核对远端分支');assert.equal(result.sourceFailure.code,'SOURCE_GIT_REMOTE_UNAVAILABLE');assert.equal(result.sourceFailure.attempts,1);
  assert.match(result.finalMessage,/核对远端分支/);assert.doesNotMatch(result.finalMessage,/远端可能在同步中变化/);
 });
+
+test('a published PRD revision checks the remote again and fixes the refreshed source for later clarifications', async t => {
+  const f = await fixture(t);
+  const project = {...f.project,analysisSourceMode:'isolated',analysisSnapshotRoot:path.join(f.base,'snapshots'),
+    analysisEnvironments:{prd:{repositories:[{path:'business',branch:f.branch}]}}};
+  const job = {stage:'developer',questionId:'prd',sourceEnvironment:'prd'};
+  const before = await prepareAnalysisSources(job,project);
+  await commit(f.writer,'latest formal requirement baseline'); await git(f.writer,'push');
+  const revised = {...job,prd:{refreshSource:true},context:[{result:{sourceSync:before}}]};
+  const after = await prepareAnalysisSources(revised,project);
+  assert.notEqual(after.repositories[0].commit,before.repositories[0].commit);
+  assert.equal(after.repositories[0].commit,await git(f.writer,'rev-parse','HEAD'));
+  assert.equal((await prepareAnalysisSources({...revised,analysisSourceSnapshot:after},project)).workspace,after.workspace);
+});
