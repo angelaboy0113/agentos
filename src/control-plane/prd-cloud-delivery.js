@@ -247,14 +247,23 @@ export class PrdCloudDelivery {
         const artifact = images[index];
         const provenance = artifact?.receipt.request?.imageGeneration;
         const reference = await readPrdDesignReference(dir, job, provenance?.referenceId);
+        const imageEdit = provenance?.proposedImage;
+        const providerVerified = inline && job.prd.nativePrototypeEdits
+          ? provenance?.provider === 'prd-native-image-edit' && imageEdit?.provider === 'codex-native'
+            && imageEdit.status === 'verified' && imageEdit.inputHashes?.[0] === reference?.sha256
+            && imageEdit.referenceKinds?.[0] === 'website-design-reference'
+            && imageEdit.binding?.jobId === job.id && imageEdit.binding?.questionId === id
+            && imageEdit.binding?.projectId === q.projectId && imageEdit.binding?.profile === q.profile
+            && imageEdit.binding?.environment === job.sourceEnvironment && imageEdit.binding?.generation === q.generation
+          : inline ? provenance?.provider === 'prd-screenshot-composite'
+            : ['codex-native','prd-screenshot-composite'].includes(provenance?.provider);
         // Older runners omitted the generation. A current-generation accepted file,
         // exact request digest and revision-scoped live screenshot still bind it.
         const binding = provenance?.binding;
         const matchingGeneration = binding?.generation === q.generation
           || (binding?.generation === null && revision === q.generation
             && binding.questionHash === createHash('sha256').update(String(currentUserQuestion(job))).digest('hex'));
-        if (!reference || provenance?.status !== 'verified' || !['codex-native','prd-screenshot-composite'].includes(provenance.provider)
-          || (inline && provenance.provider !== 'prd-screenshot-composite')
+        if (!reference || provenance?.status !== 'verified' || !providerVerified
           || provenance.sha256 !== files[index+1]?.sha256 || provenance.inputHashes?.[0] !== reference.sha256
           || provenance.referenceKinds?.[0] !== 'website-design-reference'
           || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id

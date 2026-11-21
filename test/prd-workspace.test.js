@@ -586,7 +586,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,inlinePrototypes:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,inlinePrototypes:true,nativePrototypeEdits:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
@@ -754,6 +754,9 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   const dir = path.join(dataDir,'website-evidence',job.id);
   const website = new WebsiteBrowser(dataDir);
   website.loginStatus = async () => ({loginRequired:false});
+  const editor = await browser.newPage({viewport:{width:360,height:220}});
+  await editor.setContent('<body style="background:#0a62b0"></body>');
+  const modelOutput=path.join(dataDir,'native-editor.png');
   const figures = [];
   for (const [n,key] of ['menu','list'].entries()) {
     const color = n ? '#f3f4f6' : '#e9f1ff';
@@ -769,6 +772,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     assert.equal(snapshot.designLayout.controls[0].text,'查询');
     assert.equal(snapshot.designLayout.controls.length,1);
     assert.equal(snapshot.designLayout.assets.length,2);
+    assert.equal(snapshot.designLayout.brandRegions.length,1);
     const base = await fs.readFile(path.join(dir,snapshot.designReference.name));
     if (!n) {
       await page.locator('#business').evaluate(el=>{el.textContent='BB999999';});
@@ -780,11 +784,20 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     assert.equal(reused?.sha256,hash(base));
     const actual = await producePrdPrototype(dataDir,job,JSON.stringify({
       mode:n?'new-page':'existing-page', prototypeKey:key, referenceId,
-      areas:[{x:.25,y:.4,width:.5,height:.2,sample:{x:0,y:0,width:.25,height:.16},text:'查看活动'}],
-    }),{generate:()=>assert.fail('must reuse the screenshot')});
+      prompt:'保留真实界面，在修改区增加查看活动入口',
+      areas:[{x:.25,y:.4,width:.5,height:.2},snapshot.designLayout.brandRegions[0]],
+    }),{generate:async ({references,editReference,prompt})=>{
+      assert.equal(editReference,true);
+      assert.equal(references[0].sha256,hash(base));
+      assert.match(prompt,/查看活动入口/);
+      await editor.screenshot({path:modelOutput});
+      return {file:modelOutput,root:dataDir,threadId:'test-native-editor',model:'gpt-image-2'};
+    }});
     assert.equal(actual.bytes.readUInt32BE(16),360);
     assert.equal(actual.bytes.readUInt32BE(20),220);
     assert.equal(actual.provenance.inputHashes[0],hash(base));
+    assert.equal(actual.provenance.provider,'prd-native-image-edit');
+    assert.equal(actual.provenance.proposedImage.model,'gpt-image-2');
     const outsideUnchanged=await page.evaluate(async images=>{
       const outside=async bytes=>{
         const img=new Image();img.src='data:image/png;base64,'+bytes;await img.decode();

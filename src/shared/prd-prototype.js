@@ -9,26 +9,28 @@ function layoutError(message) {
   return Object.assign(new Error(message), { code: 'IMAGE_PROMPT' });
 }
 
-export async function producePrdPrototype(dataDir, job, content, options) {
+export async function producePrdPrototype(dataDir, job, content, options = {}) {
   let spec;
   try { spec = JSON.parse(content); }
   catch { throw layoutError('PRD 原型须提供截图上的改动区域，或新页面的参考设计描述'); }
   const inline = job.prd.inlinePrototypes === true;
+  const nativeEdit = inline && job.prd.nativePrototypeEdits === true;
   if (inline && !prdPrototypeKey.test(spec?.prototypeKey ?? '')) throw layoutError('每张原型须填写对应正文的 prototypeKey');
   const reference = await readPrdDesignReference(dataDir, job, spec?.referenceId);
   if (!reference) throw Object.assign(new Error('请先截取当前轮真实目标或同系统参考页面'), { code: 'IMAGE_LIVE_SCREEN_REQUIRED' });
   const existing = spec?.mode === 'existing-page';
   const composite = inline || existing;
-  if (!existing && (spec?.mode !== 'new-page' || !inline && (typeof spec.prompt !== 'string' || !spec.prompt.trim()))) {
+  if ((!existing && spec?.mode !== 'new-page') ||
+      ((nativeEdit || !composite) && (typeof spec.prompt !== 'string' || !spec.prompt.trim()))) {
     throw layoutError('请选择 existing-page 或 new-page 并给出对应内容');
   }
   const areas = composite ? spec.areas : [];
-  const shifts = inline ? spec.shifts ?? [] : [];
+  const shifts = inline && !nativeEdit ? spec.shifts ?? [] : [];
   const withinScreenshot = a => a && [a.x,a.y,a.width,a.height].every(n => typeof n === 'number' && Number.isFinite(n))
     && a.x >= 0 && a.y >= 0 && a.width > 0 && a.height > 0 && a.x+a.width <= 1 && a.y+a.height <= 1;
   if (!Array.isArray(shifts) || shifts.some(s=>!withinScreenshot(s)||typeof s.dy!=='number'||s.dy<=0||s.dy>=s.height)
     || !Array.isArray(areas) || composite && (!areas.length || areas.some(a =>
-    !withinScreenshot(a) || (inline && !withinScreenshot(a.sample))
+    !withinScreenshot(a) || (inline && !nativeEdit && !withinScreenshot(a.sample))
     || (a.inset!==undefined&&(!Number.isFinite(a.inset)||a.inset<0||a.inset>=1))
     || ((!inline || a.text !== undefined) && (typeof a.text !== 'string' || !a.text.trim() || /[\r\n]/.test(a.text)))
   ) || !inline && areas.reduce((sum,a) => sum+a.width*a.height,0) >= 0.75)) {
@@ -36,7 +38,16 @@ export async function producePrdPrototype(dataDir, job, content, options) {
   }
   const base = await readFile(reference.path);
   if (hash(base) !== reference.sha256) throw layoutError('截图已变化，请重新捕获');
-  const proposed = composite ? null : await generateNativeImage(dataDir, job, spec.prompt, options);
+  const visibleRegions = areas.map(({x,y,width,height})=>({x,y,width,height}));
+  const firstEdit = nativeEdit ? [
+    'Edit the attached real UI screenshot in place. Preserve its aspect ratio, viewport framing, branding and layout outside the edit rectangles.',
+    'Use the same visual language and existing components for the requested changes. Do not invent business records, user identifiers, or hidden content.',
+    'Return one full edited screenshot with no margins, captions, split panels, or annotations. The allowed rectangles use x, y, width and height as fractions of the screenshot.',
+    JSON.stringify(visibleRegions),
+    spec.prompt,
+  ].join('\n') : spec.prompt;
+  const proposed = !composite || nativeEdit ? await generateNativeImage(dataDir, job, firstEdit,
+    {...options,referenceId:spec.referenceId,editReference:nativeEdit}) : null;
   const encode = bytes => 'data:image/png;base64,' + bytes.toString('base64');
   const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
@@ -45,7 +56,7 @@ export async function producePrdPrototype(dataDir, job, content, options) {
     const context = await browser.newContext({ acceptDownloads: false });
     await context.route('**/*', r => r.abort());
     const page = await context.newPage();
-    const output = await page.evaluate(async ({ original, proposal, areas, shifts }) => {
+    const output = await page.evaluate(async ({ original, proposal, areas, shifts, nativeEdit, brandRegions }) => {
       async function load(src) {
         const picture = new Image();
         picture.src = src;
@@ -56,6 +67,27 @@ export async function producePrdPrototype(dataDir, job, content, options) {
       const design = proposal ? await load(proposal) : null;
       const canvas = document.createElement('canvas');
       const w = source.naturalWidth, h = source.naturalHeight;
+      if (nativeEdit) {
+        if (Math.abs(design.naturalWidth/design.naturalHeight/(w/h)-1)>0.03) throw Error(`生图比例与底图不一致（${design.naturalWidth}×${design.naturalHeight}，底图 ${w}×${h}）`);
+        canvas.width=w;
+        canvas.height=h;
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(source,0,0);
+        ctx.beginPath();
+        for(const {x,y,width,height} of areas){
+          const left=Math.round(x*w),top=Math.round(y*h),right=Math.round((x+width)*w),bottom=Math.round((y+height)*h);
+          ctx.rect(left,top,right-left,bottom-top);
+        }
+        ctx.save();
+        ctx.clip();
+        ctx.drawImage(design,0,0,w,h);
+        ctx.restore();
+        for(const {x,y,width,height} of brandRegions){
+          const left=Math.floor(x*w),top=Math.floor(y*h),widthPx=Math.ceil((x+width)*w)-left,heightPx=Math.ceil((y+height)*h)-top;
+          ctx.drawImage(source,left,top,widthPx,heightPx,left,top,widthPx,heightPx);
+        }
+        return canvas.toDataURL().split(',')[1];
+      }
       const header = design ? 32 : 0, gap = design ? 16 : 0;
       canvas.width = design ? w*2+gap : w;
       canvas.height = h+header;
@@ -124,16 +156,17 @@ export async function producePrdPrototype(dataDir, job, content, options) {
         ctx.fillText(label,x+5,y+height/2+5);
       });
       return canvas.toDataURL().split(',')[1];
-    }, { original:encode(base), proposal:proposed && encode(proposed.bytes), areas, shifts });
+    }, { original:encode(base), proposal:proposed && encode(proposed.bytes), areas, shifts, nativeEdit,
+      brandRegions:(reference.brandRegions??[]).filter(withinScreenshot) });
     bytes = Buffer.from(output,'base64');
   } catch (error) {
-    const detail=error.message.match(/(?:菜单顺移区域太小|第 \d+ 个[^\r\n]+|标注文字超出改动区域)/)?.[0];
+    const detail=error.message.match(/(?:生图比例与底图不一致[^\r\n]*|菜单顺移区域太小|第 \d+ 个[^\r\n]+|标注文字超出改动区域)/)?.[0];
     if (detail) throw layoutError(`原型「${spec.prototypeKey??spec.mode}」：${detail}`);
     throw error;
   } finally {
     await browser.close();
   }
-  return { bytes, provenance: { status:'verified', provider:'prd-screenshot-composite', mode:spec.mode,
+  return { bytes, provenance: { status:'verified', provider:nativeEdit?'prd-native-image-edit':'prd-screenshot-composite', mode:spec.mode,
     ...(inline ? { prototypeKey:spec.prototypeKey, referenceId:spec.referenceId } : {}),
     sha256:hash(bytes), inputHashes:[reference.sha256], referenceKinds:[reference.kind],
     binding:{ jobId:job.id, questionId:job.questionId, projectId:job.projectId,

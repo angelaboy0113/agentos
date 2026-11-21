@@ -9,8 +9,12 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
   const sections=[...document.querySelectorAll('header, nav, aside, [role="menu"], table, [role="table"], [role="grid"], [role="dialog"], [role="tabpanel"], form, footer')]
     .map(element=>({kind:element.matches('[role=dialog]')?'dialog':element.matches('[role=tabpanel]')?'tabpanel':element.matches('[role=table],[role=grid]')?'table':element.tagName.toLowerCase(),...bounds(element)}))
     .filter(visible).slice(0,40);
-  const controls=[], placeholders=[], assets=[], glyphs=[];
-  if (!attribute) return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs};
+  const controls=[], placeholders=[], assets=[], glyphs=[], brandRegions=[];
+  const protect = ({x,y,width,height})=>{
+    const left=Math.max(0,x),top=Math.max(0,y),right=Math.min(innerWidth,x+width),bottom=Math.min(innerHeight,y+height);
+    if(right>left&&bottom>top)brandRegions.push({x:left/innerWidth,y:top/innerHeight,width:(right-left)/innerWidth,height:(bottom-top)/innerHeight});
+  };
+  if (!attribute) return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,brandRegions};
   const terms=new Set(('首页 工作台 菜单 基础信息 订单管理 订单列表 订单详情 人工订单 手工订单 代客下单 运营管理 渠道任务 活动管理 财务管理 策略管理 访销管理 门店管理 门店审核 门店未审核 商品管理 预算管理 促销管理 促销活动 活动列表 活动详情 审批管理 订单编号 商品名称 商品编码 经销商 经销商名称 组织架构 订单状态 审批状态 状态 名称 编号 类型 数量 规格 单位 操作 创建时间 更新时间 开始时间 结束时间 查询 搜索 重置 清空 新增 添加 编辑 删除 查看 详情 保存 提交 确定 取消 关闭 返回 导入 导出 上一页 下一页 标题 序号 更新日志 发货状态 DMS订单编号 SAP订单编号 DMS订单号 SAP订单号 经销商编码 订单审批记录 订单审批 订单拆单 经销商下单 订单返点量 渠道量小店返量 保证金下单检查白名单 收起导航 选项管理 新建 更多 搜索菜单或功能 页 前往 暂无数据 今天 最近7天') .split(' '));
   for(const label of brandedLabels??[])terms.add(label);
   const shapeTags=new Set(['path','g','use','circle','rect','line','polyline','polygon','ellipse','defs','clippath','symbol','title','desc']);
@@ -41,9 +45,11 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     if(element.closest(secretSelector)||element.matches('script,style,textarea,option,[contenteditable]'))continue;
     const geometry=bounds(element), style=getComputedStyle(element);
     if(!visible(geometry)||style.visibility!=='visible')continue;
-    if(approvedBrand(element,geometry)||approvedIcon(element,geometry)){
+    const brandImage=approvedBrand(element,geometry);
+    if(brandImage||approvedIcon(element,geometry)){
       element.setAttribute(attribute+'-asset',String(assets.length));
       assets.push(style.color);
+      if(brandImage)protect(geometry);
       continue;
     }
     if(geometry.width<=48&&geometry.height<=48 && !element.closest('td,[role=cell],[class*="avatar" i]')){
@@ -71,11 +77,12 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     range.selectNodeContents(direct[0]);
     const box=bounds(range);
     if(!visible(box))continue;
+    if(brandTitle)protect(box);
     const positioned=style.position!=='static';
     element.setAttribute(attribute,String(controls.length));
     controls.push({text,...geometry,color:style.color,fontFamily:style.fontFamily,fontSize:style.fontSize,
       left:box.x-geometry.x+element.scrollLeft-element.clientLeft,
       top:box.y-geometry.y+element.scrollTop-element.clientTop,positioned});
   }
-  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs};
+  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,brandRegions};
 }
