@@ -258,6 +258,14 @@ export class PrdCloudDelivery {
         await save('artifacts_missing', { notice: '正文原型位置缺失或重复。请为每张图设置唯一的对应章节。' });
         return;
       }
+      const requestHash = createHash('sha256').update(String(currentUserQuestion(job))).digest('hex');
+      // A login resume advances the card generation without advancing the PRD
+      // revision. Files are still selected by the current card generation.
+      const matchesGeneration = (binding, legacyNull = false) => binding?.generation === q.generation
+        || (binding?.questionHash === requestHash && (
+          (job.questionGeneration === undefined && binding.generation === revision && revision < q.generation)
+          || (legacyNull && binding.generation === null && revision === q.generation)
+        ));
       const figures = [];
       for (const key of keys) {
         const index = inline ? images.findLastIndex(a => a.receipt.request?.imageGeneration?.prototypeKey === key) : 0;
@@ -271,21 +279,15 @@ export class PrdCloudDelivery {
             && imageEdit.referenceKinds?.[0] === 'website-design-reference'
             && imageEdit.binding?.jobId === job.id && imageEdit.binding?.questionId === id
             && imageEdit.binding?.projectId === q.projectId && imageEdit.binding?.profile === q.profile
-            && imageEdit.binding?.environment === job.sourceEnvironment && imageEdit.binding?.generation === q.generation
+            && imageEdit.binding?.environment === job.sourceEnvironment && matchesGeneration(imageEdit.binding)
           : inline ? provenance?.provider === 'prd-screenshot-composite'
             : ['codex-native','prd-screenshot-composite'].includes(provenance?.provider);
-        // Older runners omitted the generation. A current-generation accepted file,
-        // exact request digest and revision-scoped live screenshot still bind it.
-        const binding = provenance?.binding;
-        const matchingGeneration = binding?.generation === q.generation
-          || (binding?.generation === null && revision === q.generation
-            && binding.questionHash === createHash('sha256').update(String(currentUserQuestion(job))).digest('hex'));
         if (!reference || provenance?.status !== 'verified' || !providerVerified
           || provenance.sha256 !== files[index+1]?.sha256 || provenance.inputHashes?.[0] !== reference.sha256
           || provenance.referenceKinds?.[0] !== 'website-design-reference'
           || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id
           || provenance.binding?.projectId !== q.projectId || provenance.binding?.profile !== q.profile
-          || provenance.binding?.environment !== job.sourceEnvironment || !matchingGeneration) {
+          || provenance.binding?.environment !== job.sourceEnvironment || !matchesGeneration(provenance.binding, true)) {
           await save('artifacts_missing', { notice: '原型缺少本轮真实目标页面截图的生成凭据。请先取得对应系统和环境的截图，再重做原型。' });
           return;
         }

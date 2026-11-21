@@ -837,7 +837,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   const { store,send,dataDir,workspace } = await fixture(t,cli);
   const { questionId } = await send('om_inline','我想做一个需求，新增 LTX 菜单和 TPM 查询列表');
   await store.transact(s=>{
-    s.questions[questionId].generation=2;
+    s.questions[questionId].generation=3;
     Object.assign(s.jobs[0].prd,{revision:2,exportRevision:2});
   });
   const [job] = (await store.read()).jobs;
@@ -899,7 +899,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
       return before.every((value,index)=>value===after[index]);
     },[base.toString('base64'),actual.bytes.toString('base64')]);
     assert.ok(outsideUnchanged);
-    const artifact = await saveArtifact(dataDir,job,'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'.slice(0,-1)+n,'png',actual.bytes);
+    const artifact = await saveArtifact(dataDir,{...job,prd:{...job.prd,revision:3}},'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'.slice(0,-1)+n,'png',actual.bytes);
     const receiptPath=path.join(dataDir,'exports',job.id,artifact.id+'.verification.json');
     const receipt=JSON.parse(await fs.readFile(receiptPath,'utf8'));
     const updated=Buffer.from(JSON.stringify({...receipt,request:{imageGeneration:actual.provenance}}));
@@ -922,9 +922,15 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
       reportInspections:[{status:'verified',contentAudit:{structure:'passed'},
         binding:{sourceJobId:job.id,fileId:markdown.id,sha256:markdown.sha256,verificationHash:markdown.verificationHash}}]};
   });
+  await store.transact(s=>{s.jobs[0].currentQuestion='不同的业务要求';});
+  await workspace.publisher.deliver(questionId);
+  assert.equal((await store.read()).questions[questionId].prd.delivery.phase,'artifacts_missing');
+  assert.equal(blocks.length,0);
+  await store.transact(s=>{s.jobs[0].currentQuestion=job.currentQuestion;});
   await workspace.publisher.deliver(questionId);
   const delivered=(await store.read()).questions[questionId].prd.delivery;
   assert.equal(delivered.phase,'delivered');
+  assert.equal(delivered.artifacts.generation,3);
   assert.equal(delivered.artifacts.markdownGeneration,1);
   assert.notEqual(delivered.digest,pending.digest);
   assert.deepEqual(blocks.map(b=>b.image?.token??b.block_id),['anchor1',figures[0].sha256,'heading2','anchor2',figures[1].sha256]);
