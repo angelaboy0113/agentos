@@ -508,6 +508,12 @@ test('PRD review requires evidence for purpose, module impact and page fitness',
   assert.match(guidance, /让用户确认或补充/);
   assert.match(guidance, /点击后的可见结果/);
   assert.deepEqual(prdReviewBasisMissing(job, alignedPrdResult), []);
+  const supplemental = { handoff: { checks: alignedPrdResult.handoff.checks.map(check=>({...check,required:false})) } };
+  assert.deepEqual(prdReviewBasisMissing(job, supplemental), []);
+  const failed = { handoff: { checks: supplemental.handoff.checks.map(check=>
+    check.id==='prd-page-fidelity'?{...check,status:'failed'}:check.id==='prd-business-purpose'?{...check,evidence:' '}:check) } };
+  assert.deepEqual(prdReviewBasisMissing(job, failed), ['prd-business-purpose','prd-page-fidelity']);
+
   const missing = { handoff: { checks: alignedPrdResult.handoff.checks.filter(c=>c.id!=='prd-module-impact') } };
   assert.deepEqual(prdReviewBasisMissing(job, missing), ['prd-module-impact']);
   assert.deepEqual(prdReviewBasisMissing({ prd: { businessFinal: true } }, missing), []);

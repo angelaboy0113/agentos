@@ -41,7 +41,7 @@ export function prdGuidance(job) {
 先把需求背景与业务目标写清楚：谁在什么场景遇到什么问题，为什么现在要做，改完希望有什么效果。只把原话、初稿及卡片确认能支持的内容写成业务事实。可以据初稿反推可能的动机，把它作为待确认的理解提出。初稿只描述了做法、业务动机又无法可靠归纳时，在原卡问具体业务原因；用户只确认「业务要求」时照实写，不补造指标、损失或历史。
 从选定环境本次核验的远端分支固定源码定位现有入口、规则及调用，上线行为另由现场证据确认。按实际链路列清涉及模块，写明现状、拟改、联动方向和与现有行为的关系。跨系统逐侧说明责任、传递内容、状态变化及例外。需要用户确认范围时，先把受影响的模块和可选改法列在卡片中，让用户确认或补充；初稿已明确覆盖的选择直接记录，不重问。缺源码或现场证据由助手继续只读核查，不能让用户确认猜测的技术实现。
 操作流程写清角色、入口、操作顺序、点击后的可见结果和对应业务规则。把条件、计算、状态、权限和失败分支写进功能说明；技术实现细节继续留在卡片。原型先核对目标页面现有控件和实际交互，保留真实字段、导航和当前状态。新页面用同系统同环境最接近的实际页面取样，复用其真实控件结构与已经存在的交互，逐块说明哪里改、怎么沿用；没有现场组件证据时继续找同类控件，不补造被遮挡内容。
-最终 ready 同时填写三个 required=true、status=passed 的 handoff.check：prd-business-purpose（原话或本卡确认的背景、问题和预期效果）、prd-module-impact（固定源码或已核验现状、受影响模块和业务范围确认依据）、prd-page-fidelity（逐张按目标页核对现有控件与拟议改动；确无界面变更时说明依据）。这些证据留在卡片，不增加正文二级章节。` : '';
+最终交付时三个业务核验项须实际通过，分别填写 status=passed 和具体依据；整体交付仍由 original-question 承担。三个 handoff.check 分别为：prd-business-purpose（原话或本卡确认的背景、问题和预期效果）、prd-module-impact（固定源码或已核验现状、受影响模块和业务范围确认依据）、prd-page-fidelity（逐张按目标页核对现有控件与拟议改动；确无界面变更时说明依据）。这些证据留在卡片，不增加正文二级章节。` : '';
   const structure = job.prd.businessFinal
     ? job.prd.fixedFinalSections
       ? `按以下顺序使用二级标题，不得省略或另加二级标题：${prdFinalSections.join('、')}。各章节无适用内容时正文写「无」。可用三级标题细分。业务口径对齐逐条列出初稿已明确和本卡确认的业务决定及最终采用的口径，可用「事项／确认口径／依据」表格；依据只写需求初稿或卡片确认等业务来源。没有适用的口径才写「无」。页面设计与原型内按功能分三级小节，图放在对应说明下；确实无界面改动时该节写「无」，不提交 PNG。涉及界面改动但截图未取得时不能写「无」交付。`
@@ -83,8 +83,8 @@ export function prdReviewBasisMissing(job, result) {
   if (!job.prd?.reviewBasis) return [];
   const checks = result?.handoff?.checks ?? [];
   return ['prd-business-purpose', 'prd-module-impact', 'prd-page-fidelity'].filter(id =>
-    !checks.some(check => check?.id === id && check.required === true
-      && check.status === 'passed' && check.evidence?.trim()));
+    !checks.some(check => check?.id === id && check.status === 'passed'
+      && typeof check.evidence === 'string' && check.evidence.trim()));
 }
 
 export function prdBusinessWait(job, result) {
