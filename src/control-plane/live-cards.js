@@ -27,6 +27,9 @@ function sameBrowserLoginRecipient(previous,next){
 }
 
 // Durable delivery outbox: a failed update NEVER reruns Codex or creates another task.
+const prdMention = notice => notice?.kind === 'prd_delivery'
+  || (notice?.kind === 'clarification' && notice.requestKey?.startsWith('prd:'));
+
 export class LiveCards {
   constructor(store, feishu, { intervalMs = 3000, authorizeDestination } = {}) {
     this.authorizeDestination=authorizeDestination;
@@ -57,6 +60,12 @@ export class LiveCards {
       guard?.(state);
       state.cardMessages ??= {};
       let existing = state.cardMessages[key];
+      if (key.startsWith('question:') && state.questions?.[key.slice(9)]?.prd
+        && existing?.terminalMention && !prdMention(existing.terminalMention)) {
+        const alreadyDelivered = terminalMention?.kind === 'prd_delivery'
+          && existing.mentionDelivered && existing.terminalMention.text === terminalMention.text;
+        existing = {...existing, terminalMention: alreadyDelivered ? terminalMention : null, mentionDelivered: Boolean(alreadyDelivered)};
+      }
       // A resolved/manual wait can become automatic recovery before dispatch.
       // Do not keep an obsolete waiting mention when the latest view needs none.
       if(['browser_login','clarification','environment_approval'].includes(existing?.terminalMention?.kind)&&!terminalMention)existing={...existing,terminalMention:null,mentionDelivered:false};
@@ -67,7 +76,7 @@ export class LiveCards {
       if (deliveryToken && existing?.deliveryToken === deliveryToken && existing.terminal && terminal && !reopening) return;
       if (existing?.terminal && !terminal && !reopening) return; // Late progress cannot overwrite a conclusion.
       const replacingWaitingMention = !reopening && terminal && ['browser_login', 'environment_approval', 'environment_setup_missing','clarification'].includes(existing?.terminalMention?.kind)
-        && terminalMention && (!terminalMention.kind||existing.terminalMention.kind==='clarification'&&terminalMention.kind==='clarification'&&existing.terminalMention.requestKey!==terminalMention.requestKey);
+        && terminalMention && (!terminalMention.kind||terminalMention.kind==='prd_delivery'||existing.terminalMention.kind==='clarification'&&terminalMention.kind==='clarification'&&existing.terminalMention.requestKey!==terminalMention.requestKey);
       const refreshLoginNotice=!reopening&&sameBrowserLoginRecipient(existing?.terminalMention,terminalMention);
       if (!reopening && !replacingWaitingMention && !refreshLoginNotice && existing?.terminalMention && terminalMention
         && JSON.stringify(existing.terminalMention) !== JSON.stringify(terminalMention)) throw new Error('Requester mention identity cannot change');
@@ -205,13 +214,17 @@ export class LiveCards {
         if(state.cardMessages[key].revision===entry.revision)delete state.cardMessages[key].error;
       });
       if(privateCard)await this.cleanupPrivate(key);
-      const {latest,questionReady}=await stateView(this.store,fresh=>{
+      const {latest,questionReady,suppressPrdNotice}=await stateView(this.store,fresh=>{
        const question=key.startsWith('question:')?fresh.questions?.[key.slice(9)]:null;
-       return {latest:fresh.cardMessages[key],questionReady:!question||(question.generation<=entry.generation
+       return {latest:fresh.cardMessages[key],suppressPrdNotice: Boolean(question?.prd && entry.terminalMention && !prdMention(entry.terminalMention)),questionReady:!question||(question.generation<=entry.generation
         &&!fresh.conversations.some(t=>t.questionId===question.id&&['queued','thinking','decided'].includes(t.status))
         &&!fresh.jobs.some(j=>j.questionId===question.id&&['queued','running','cancelling','awaiting_approval',...(['browser_login','clarification'].includes(entry.terminalMention?.kind)?[]:['awaiting_clarification']),...(entry.terminalMention?.kind==='environment_approval'?[]:['awaiting_environment_approval'])].includes(j.status)))};
       });
-      if ((!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady && (entry.terminalMention.kind!=='clarification'||await stateView(this.store,s=>{const jobs=(s.jobs??[]).filter(j=>key.startsWith('question:')?j.questionId===key.slice(9):j.id===entry.terminalMention.jobId),j=jobs.at(-1);const m=entry.terminalMention,q=key.startsWith('question:')?s.questions?.[key.slice(9)]:null;if(m.requestKey?.startsWith('prd:')){const version=q?.prd?.intake?.version??(q?.prd&&needsPrdAnswer(j)?String(q.generation):null);return (j?.id??null)===m.jobId&&version!==null&&m.requestKey==='prd:'+version&&!s.cardMessages[key]?.prdReminders?.[m.requestKey]?.submitted;}return j?.id===m.jobId&&jobTerminalMention(j)?.requestKey===m.requestKey;}))) {
+      if (suppressPrdNotice && !entry.mentionDelivered) await this.store.transact(state => {
+        const current=state.cardMessages[key];
+        if (current?.revision===entry.revision) current.terminalMention=null;
+      });
+      if (!suppressPrdNotice && (!privateCard || entry.publicCompletionMention) && entry.terminalMention && !entry.mentionDelivered && latest.revision === entry.revision && questionReady && (entry.terminalMention.kind!=='clarification'||await stateView(this.store,s=>{const jobs=(s.jobs??[]).filter(j=>key.startsWith('question:')?j.questionId===key.slice(9):j.id===entry.terminalMention.jobId),j=jobs.at(-1);const m=entry.terminalMention,q=key.startsWith('question:')?s.questions?.[key.slice(9)]:null;if(m.requestKey?.startsWith('prd:')){const version=q?.prd?.intake?.version??(q?.prd&&needsPrdAnswer(j)?String(q.generation):null);return (j?.id??null)===m.jobId&&version!==null&&m.requestKey==='prd:'+version&&!s.cardMessages[key]?.prdReminders?.[m.requestKey]?.submitted;}return j?.id===m.jobId&&jobTerminalMention(j)?.requestKey===m.requestKey;}))) {
         if(entry.publicCompletionMention)await this.authorizeDestination?.(entry.destination,entry);
         const notice = await this.feishu.reply(entry.terminalMention.replyTo, entry.terminalMention.text, {
           profile: entry.terminalMention.profile, replyInThread: entry.terminalMention.replyInThread ?? entry.destination.replyInThread,

@@ -91,7 +91,7 @@ export function questionView(state, questionId, projects = {}) {
   const shown = useJob ? job : displayTurn;
   let card = useJob ? jobCard(job, Date.now(), { startAt: q.createdAt }) : conversationCard(displayTurn, Date.now(), { prd: !!q.prd });
   if (!useJob) card = addQuestionProgress(card, state, q, enrollment);
-  const recovery=Object.values(state.recoveryEvents??{}).filter(e=>e.questionId===q.id&&e.jobId===job?.id&&e.profile===q.profile&&e.projectId===q.projectId&&e.chatId===q.chatId&&['blocked','failed','awaiting_clarification'].includes(job?.status)&&e.failureAt===job.updatedAt&&['maintenance_required','delegated','diagnosing'].includes(e.status)).at(-1);
+  const recovery=!q.prd&&Object.values(state.recoveryEvents??{}).filter(e=>e.questionId===q.id&&e.jobId===job?.id&&e.profile===q.profile&&e.projectId===q.projectId&&e.chatId===q.chatId&&['blocked','failed','awaiting_clarification'].includes(job?.status)&&e.failureAt===job.updatedAt&&['maintenance_required','delegated','diagnosing'].includes(e.status)).at(-1);
   if(recovery&&card.body?.elements)card.body.elements.push({tag:'markdown',content:'**接续核查**\n'+recovery.diagnosis.message+(recovery.status==='maintenance_required'?'\n已登记维护复核；尚未自动确认修复。':'')});
   const stoppedJob = useJob && ['completed','blocked','failed','cancelled'].includes(job.status) && !job.nextJobId;
   const terminal = !enrollment && (!turn.setupPending || stoppedJob) && !outstanding && (useJob ? !['queued', 'running', 'cancelling'].includes(job.status) : ['ready', 'sent'].includes(turn.status));
@@ -151,16 +151,17 @@ export function questionView(state, questionId, projects = {}) {
     if(ids.length) mention={kind:'environment_setup_missing',profile:q.profile,replyTo:q.messageId,
       text:ids.map(id=>`<at user_id="${id}"></at>`).join(' ')+' 排查尚未完成：需要补充本话题对应环境的接入信息或选择数据源。请查看卡片中的具体缺口；原需求和已有证据已保留。'};
   }
-  if (q.prd && !enrollment && !job?.result?.browserLoginRequired) {
-    if (prdClarification) {
+  if (q.prd) {
+    mention = null;
+    if (prdClarification && !enrollment && !job?.result?.browserLoginRequired) {
       const text = requesterMentionText(q.senderId, '请在上方 PRD 卡片的输入框填写，并点「提交补充，继续整理」。');
       mention = text ? {kind:'clarification',profile:q.profile,replyTo:q.messageId,text,jobId:job?.id??null,requestKey:'prd:'+prdAnswerVersion} : null;
     } else if (prdDeliveryComplete) {
       const text = requesterMentionText(q.senderId, '飞书 PRD 评审稿已就绪，本群成员可编辑。链接在上方卡片。');
-      mention = text ? {profile:q.profile,replyTo:q.messageId,text} : null;
-    } else if (!['blocked','failed','cancelled','awaiting_environment_approval'].includes(job?.status)) mention = null;
+      mention = text ? {kind:'prd_delivery',profile:q.profile,replyTo:q.messageId,text} : null;
+    }
   }
-  mention=failureNotice(mention,{card,terminal,profile:q.profile,chatType:root.chatType,visibility:q.visibility,occurredAt:useJob?job.updatedAt:turn.completedAt??turn.aiCompletedAt??turn.createdAt},projects);
+  if (!q.prd) mention=failureNotice(mention,{card,terminal,profile:q.profile,chatType:root.chatType,visibility:q.visibility,occurredAt:useJob?job.updatedAt:turn.completedAt??turn.aiCompletedAt??turn.createdAt},projects);
   if (mention && q.replyInThread) mention.replyInThread = true;
   const currentResult=useJob ? shown.result?.finalMessage ?? '' : shown.response ?? '';
   const priorJobs=state.jobs.filter(j=>j.questionId===q.id && j.id!== (useJob?job.id:null) && j.result?.finalMessage);

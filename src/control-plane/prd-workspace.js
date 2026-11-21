@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createId } from '../shared/protocol.js';
 import { createJobRecord } from '../shared/store.js';
 import { resolveProjectId } from '../shared/project-scope.js';
-import { confirmedSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict } from '../shared/source-environments.js';
+import { confirmedSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict, sourceEnvironmentForTier } from '../shared/source-environments.js';
 import { prdStart, prdExport, prdDelivered, prdFormVersion } from '../shared/prd-workspace.js';
 import { previousPrdDelivery } from '../shared/prd-revision.js';
 import { requestsPrivateCard } from './private-cards.js';
@@ -270,12 +270,16 @@ function applyPending(state, q, project) {
         const value = /^(?:参考环境|源码环境|环境)\s*[：:]\s*(.+)$/.exec(line.trim())?.[1];
         return value ? [prdSourceEnvironment(project, [{ text: value }])] : [];
       })).filter(Boolean));
-      const declared = declaredEnvironments.size === 1 ? [...declaredEnvironments][0] : undefined;
-      sourceEnvironment = selectSourceEnvironment(project, prdSourceEnvironment(project, pending) ?? declared);
+      const selected = prdSourceEnvironment(project, pending);
+      if (!selected && declaredEnvironments.size > 1) throw Error('Conflicting PRD source environments');
+      const declared = [...declaredEnvironments][0];
+      sourceEnvironment = selected || declared
+        ? selectSourceEnvironment(project, selected ?? declared)
+        : sourceEnvironmentForTier(project, 'prd');
     }
     catch {
       const prompt = drafts.length
-        ? '飞书初稿已读并保留。请确认要参考生产环境还是 SIT 等测试环境。'
+        ? '飞书初稿已读并保留。请确认需要参考的环境；未指定时默认正式环境，请核对项目的正式环境配置。'
         : '请确认要参考的源码环境，例如生产环境或 SIT。前面的需求已保留。';
       requestIntake(q, state.conversations.find(t => t.id === head.turnId), prompt);
       return false;

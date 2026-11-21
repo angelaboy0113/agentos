@@ -20,7 +20,7 @@ export class ReceptionService{
   if(addressed&&!this.owner(event))return null;
   const otherBots=Object.values(this.context.agents.agents??{}).flatMap(a=>[a.openId,a.appId]).filter(Boolean);if(!this.owner(event)&&mentionIds.some(id=>otherBots.includes(id)))return null;
   const known=await this.context.store.select(s=>topicQuestion(s,event));if(!known)return null;
-  return this.context.store.transact(s=>{const q=topicQuestion(s,event);if(!q)return null;
+  return this.context.store.transact(s=>{const q=topicQuestion(s,event);if(!q||q.prd)return null;
    if(this.owner(event)){for(const e of Object.values(s.receptionInbox??{}))if(e.questionId===q.id&&e.profile===q.profile&&['queued','waiting'].includes(e.status)&&!e.notice?.messageId){e.status='cancelled';e.cancelReason='owner_replied';}return null;}
    if(addressed)return null;
    // A different bot mention belongs to that bot, not this topic receptionist.
@@ -48,14 +48,14 @@ export class ReceptionService{
   let state=await this.view();const now=this.now();
   for(const entry of Object.values(state.receptionInbox??{})){
    if(!['queued','waiting','reminding'].includes(entry.status)||entry.retryAt>now)continue;
-   if(!this.valid(state,entry)){await this.patchInbox(entry.key,{status:'cancelled',cancelReason:'scope_closed_or_changed'});continue;}
+   if(!this.valid(state,entry)||state.questions[entry.questionId]?.prd){await this.patchInbox(entry.key,{status:'cancelled',cancelReason:'scope_closed_or_changed'});continue;}
    if(entry.status==='queued'){
     try{const kind=await this.classify(entry);await this.context.store.transact(s=>{const e=s.receptionInbox?.[entry.key];if(!e||e.status!=='queued'||!this.valid(s,e))return;const others=Object.values(s.receptionInbox??{}).filter(x=>x.key!==e.key&&x.profile===e.profile&&x.questionId===e.questionId);if(kind==='ignore'){e.status='ignored';return;}if(kind==='owner_help'){if(others.some(x=>x.status==='waiting'||x.kind==='owner_help'&&x.notice?.messageId&&now-Date.parse(x.notice.deliveredAt)<this.policy.reminderCooldownMs)){e.status='coalesced';return;}e.kind=kind;e.status='waiting';e.dueAt=Date.parse(e.createdAt)+this.policy.helpDelayMs;}else{if(others.some(x=>x.kind==='needs_mention'&&x.notice?.messageId&&now-Date.parse(x.notice.deliveredAt)<this.policy.reminderCooldownMs)){e.status='coalesced';return;}e.kind='needs_mention';e.status='reminding';e.dueAt=now;}});}catch{await this.patchInbox(entry.key,{retryAt:now+15000,error:'接待分类暂不可用，未执行任何业务动作'});}
    }
   }
   state=await this.view();
   for(const entry of Object.values(state.receptionInbox??{}))if(['waiting','reminding'].includes(entry.status)&&entry.dueAt<=now&&!entry.notice?.messageId&&!(entry.retryAt>now)){
-   if(!this.valid(state,entry)){await this.patchInbox(entry.key,{status:'cancelled'});continue;}
+   if(!this.valid(state,entry)||state.questions[entry.questionId]?.prd){await this.patchInbox(entry.key,{status:'cancelled'});continue;}
    const jobs=state.jobs.filter(j=>j.questionId===entry.questionId),latest=jobs.at(-1);
    if(entry.kind==='owner_help'&&latest?.status==='completed'&&latest.result?.outcome==='ready'&&Date.parse(latest.updatedAt)>Date.parse(entry.createdAt)){await this.patchInbox(entry.key,{status:'cancelled',cancelReason:'task_resolved'});continue;}
    const presence=this.statusInput(state),text=this.text(entry.kind==='needs_mention'?'reminder':entry.kind==='recovery'?'recovery':'help',entry.key)+(presence&&!presence.available&&presence.publicText?`\n老大已提前说明：${presence.publicText}`:'');
@@ -88,7 +88,7 @@ export class ReceptionService{
  async patchInbox(key,fields){await this.context.store.transact(s=>{if(s.receptionInbox?.[key])Object.assign(s.receptionInbox[key],fields);});}
  async patchRecovery(key,fields){await this.context.store.transact(s=>{if(s.recoveryEvents?.[key])Object.assign(s.recoveryEvents[key],fields);});}
  async sendInbox(entry,text){
-  const fresh=await stateView(this.context.store,s=>{const e=s.receptionInbox?.[entry.key];return {receptionInbox:e?{[entry.key]:e}:{},questions:e?{[e.questionId]:s.questions?.[e.questionId]}:{}};}),e=fresh.receptionInbox?.[entry.key];if(!e||!this.valid(fresh,e)||!['waiting','reminding'].includes(e.status)||e.notice?.messageId)return;
+  const fresh=await stateView(this.context.store,s=>{const e=s.receptionInbox?.[entry.key];return {receptionInbox:e?{[entry.key]:e}:{},questions:e?{[e.questionId]:s.questions?.[e.questionId]}:{}};}),e=fresh.receptionInbox?.[entry.key];if(!e||!this.valid(fresh,e)||fresh.questions[e.questionId]?.prd||!['waiting','reminding'].includes(e.status)||e.notice?.messageId)return;
   const name=e.notice?'':await this.context.replyAddressing?.forTurn({...e,chatType:'group'})??'';
   const addressed=addressText(text,name);
   const notice=e.notice??{text:requesterMentionText(e.senderId,addressed),replyTo:e.replyTo,idempotencyKey:'aos-reception-'+e.key.slice(0,32),firstAttemptAt:this.now()};
@@ -98,7 +98,7 @@ export class ReceptionService{
   try{const r=await this.context.feishu.reply(notice.replyTo,notice.text,{profile:e.profile,replyInThread:true,idempotencyKey:notice.idempotencyKey}),id=messageIdOf(r);if(!id)throw Error('No receipt');await this.patchInbox(e.key,{status:'sent',notice:{...notice,messageId:id,deliveredAt:iso(this.now())}});}catch(error){if(/(?:\b230011\b|message was withdrawn)/i.test(String(error?.message??'')))await this.patchInbox(e.key,{status:'cancelled',cancelReason:'reply_target_withdrawn',error:'原回复目标已撤回，停止接待重试'});else await this.patchInbox(e.key,{retryAt:this.now()+15000,error:'接待投递失败，仅重试同一消息'});}
  }
  async recoveryNotice(e,diagnosis,resumed){
-  const state=await this.view(),job=state.jobs.find(j=>j.id===e.jobId);if(!job||!this.valid(state,e))return;
+  const state=await this.view(),job=state.jobs.find(j=>j.id===e.jobId);if(!job||!this.valid(state,e)||state.questions[e.questionId]?.prd)return;
   const key=receptionKey(['recovery',e.profile,e.questionId,e.failureGeneration??e.generation,diagnosis.kind]);
   if(state.receptionInbox?.[key])return;
   const text=this.text('recovery',key)+'\n'+diagnosis.message+(resumed?'\n已接回原任务继续执行。':diagnosis.action==='maintenance_required'?'\n这次已登记为待维护复核，尚未声称修复完成。':'');

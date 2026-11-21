@@ -163,23 +163,18 @@ test('natural PRD request plus a wiki link alone reads the shared draft first an
   ]);
 });
 
-test('a follow-up draft link and environment answer in the card reuse the original PRD question', async t => {
+test('an environment-free draft link defaults to production even with a test project default', async t => {
   const calls = [];
   const { store, send } = await fixture(t, undefined, { analysisSourceMode: 'isolated',
-    analysisEnvironments: { sit: {}, prd: {} } }, draftFeishu(calls, { environment: '' }));
+    defaultSourceEnvironment: 'sit', analysisEnvironments: { sit: {}, release: {runtimeTier:'prd'} } },
+    draftFeishu(calls, { environment: '' }));
   const { questionId } = await send('om_prdroot', '我想做个需求');
   await send('om_link', 'https://unit.feishu.cn/docx/DraftToken', 'om_prdroot');
-  const first = await store.read();
-  const view = questionView(first, questionId);
-  assert.equal(first.jobs.length, 0);
-  assert.match(JSON.stringify(view.card), /飞书初稿已读并保留/);
-  const { version } = first.questions[questionId].prd.intake;
-  await store.transact(s => { s.cardMessages = { ['question:'+questionId]: { messageId: 'om_card' } }; });
-  await send('om_form', '生产环境', 'om_prdroot', { form: { questionId, cardId: 'om_card', version } });
-  const current = await store.read();
-  assert.equal(current.jobs.length, 1);
-  assert.equal(current.jobs[0].sourceEnvironment, 'prd');
-  assert.match(current.jobs[0].originalQuestion, /LTX订单显示TPM补贴状态/);
+  const state = await store.read();
+  assert.equal(state.jobs.length, 1);
+  assert.equal(state.jobs[0].questionId, questionId);
+  assert.equal(state.jobs[0].sourceEnvironment, 'release');
+  assert.match(state.jobs[0].originalQuestion, /LTX订单显示TPM补贴状态/);
   assert.equal(calls.length, 3);
 });
 
@@ -279,17 +274,42 @@ test('bare PRD trigger then unmentioned description and decisions keep one quest
   assert.equal(await send('om_another', '另一条普通消息', 'om_unrelated'), null);
 });
 
-test('PRD as a document name does not collide with a later SIT environment clarification', async t => {
+test('production is the PRD default and explicit SIT still takes priority', async t => {
   const { store, send } = await fixture(t, undefined, { analysisSourceMode: 'isolated',
     analysisEnvironments: { sit: {}, prd: {} } });
-  const { questionId } = await send('om_prd', '我要做prd');
+  await send('om_prd', '我要做prd');
   await send('om_request', '【补贴状态 PRD】输出订单详情的需求设计', 'om_prd');
-  assert.equal((await store.read()).jobs.length, 0);
-  await send('om_environment', '明确使用 SIT 环境核对 LTX 和 TPM 源码', 'om_prd');
-  const [job] = (await store.read()).jobs;
-  assert.equal(job.questionId, questionId);
-  assert.equal(job.sourceEnvironment, 'sit');
-  assert.match(job.originalQuestion, /补贴状态 PRD/);
+  const { questionId } = await send('om_sit', '我想做个 PRD：使用 SIT 环境设计方案列表');
+  const [production,test] = (await store.read()).jobs;
+  assert.equal(production.sourceEnvironment, 'prd');
+  assert.equal(test.questionId, questionId);
+  assert.equal(test.sourceEnvironment, 'sit');
+});
+
+test('PRD automatically recovering or stopped updates its card without an escalation', async t => {
+  const { store, send } = await fixture(t);
+  const {questionId}=await send('om_silent','我要做一个PRD：新增状态');
+  const occurredAt=new Date().toISOString();
+  await store.transact(state=>{
+    const job=state.jobs[0];
+    Object.assign(job,{status:'blocked',updatedAt:occurredAt,result:{outcome:'blocked',finalMessage:'需要复核原型'}});
+    state.recoveryEvents={demo:{questionId,jobId:job.id,profile:profile,projectId:'ltx',chatId:chat,
+      failureAt:occurredAt,status:'maintenance_required',diagnosis:{message:'失败接续文案'}}};
+  });
+  const projects={humanIdentities:{admin:{[profile]:owner}},failureNotice:{
+    enabled:true,humanId:'admin',message:'找我处理',since:'2026-01-01T00:00:00Z'}};
+  let view=questionView(await store.read(),questionId,projects);
+  assert.equal(view.mention,null);
+  assert.doesNotMatch(JSON.stringify(view.card),/接续核查|失败接续文案|找我处理/);
+  await store.transact(s=>Object.assign(s.jobs[0],{status:'awaiting_clarification',
+    result:{outcome:'needs_clarification',browserLoginRequired:true,browserLoginState:'rejected'}}));
+  view=questionView(await store.read(),questionId,projects);
+  assert.equal(view.mention,null);
+  await store.transact(s=>Object.assign(s.jobs[0],{status:'awaiting_clarification',
+    result:{outcome:'needs_clarification',investigation:{blocker:{kind:'user_input',needed:'确认业务规则'}}}}));
+  view=questionView(await store.read(),questionId,projects);
+  assert.equal(view.mention?.kind,'clarification');
+  assert.match(view.mention.text,/卡片的输入框/);
 });
 
 test('a single PRD form accepts supplements during execution and switches to revision after delivery', async t => {
