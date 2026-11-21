@@ -61,8 +61,12 @@ async function insertInlineImages(call, cwd, doc, figures) {
     const images = blocks.filter(b => !existing.has(b.block_id) && b.block_type === 27 && b.image?.token);
     if (images.length !== 1 || !validToken.test(images[0].block_id)) throw Error('PRD_IMAGE_READBACK');
     const image = images[0].block_id;
-    await call(['docs','+update','--as','user','--doc',doc,'--command','block_move_after','--block-id',anchor,'--src-block-ids',image]);
-    blocks = await documentChildren(call, doc);
+    const insertedAt = blocks.findIndex(b => b.block_id === anchor);
+    if (insertedAt < 0) throw Error('PRD_IMAGE_ANCHOR');
+    if (blocks[insertedAt+1]?.block_id !== image) {
+      await call(['docs','+update','--as','user','--doc',doc,'--command','block_move_after','--block-id',anchor,'--src-block-ids',image]);
+      blocks = await documentChildren(call, doc);
+    }
     const index = blocks.findIndex(b => b.block_id === anchor);
     if (index < 0 || blocks[index+1]?.block_type !== 27 || blocks[index+1]?.image?.token !== images[0].image.token) {
       throw Error('PRD_IMAGE_POSITION');

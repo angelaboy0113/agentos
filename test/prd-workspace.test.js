@@ -717,7 +717,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     if (args[0] === 'api') return {data: args[2].includes('user_info') ? {open_id:owner} : {items:structuredClone(blocks)}};
     if (args[1] === '+create') {
       assert.match(options.input, /## 菜单[\s\S]*AGENTOSPRDFIGURE-menu[\s\S]*## 列表[\s\S]*AGENTOSPRDFIGURE-list/);
-      blocks.push(text('anchor1','AGENTOSPRDFIGURE-menu'),text('heading2','列表'),text('anchor2','AGENTOSPRDFIGURE-list'),text('closing1','业务范围'));
+      blocks.push(text('anchor1','AGENTOSPRDFIGURE-menu'),text('heading2','列表'),text('anchor2','AGENTOSPRDFIGURE-list'));
       return {data:{document_id:doc,url:'https://unit.feishu.cn/docx/'+doc}};
     }
     if (args[1] === '+fetch') return {data:{content:'<h1>需求</h1><table></table><img />'}};
@@ -730,7 +730,9 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     if (args[1] === '+update') {
       const arg = key => args[args.indexOf(key)+1];
       if (arg('--command') === 'block_move_after') {
-        const [image] = blocks.splice(blocks.findIndex(b=>b.block_id===arg('--src-block-ids')),1);
+        const index=blocks.findIndex(b=>b.block_id===arg('--src-block-ids'));
+        assert.notEqual(blocks[index-1]?.block_id,arg('--block-id'),'Feishu rejects moves to the existing position');
+        const [image] = blocks.splice(index,1);
         blocks.splice(blocks.findIndex(b=>b.block_id===arg('--block-id'))+1,0,image);
       } else {
         const anchor = blocks.find(b=>b.text?.elements[0].text_run.content===arg('--pattern'));
@@ -822,6 +824,6 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   assert.equal(delivered.phase,'delivered');
   assert.equal(delivered.artifacts.markdownGeneration,1);
   assert.notEqual(delivered.digest,pending.digest);
-  assert.deepEqual(blocks.map(b=>b.image?.token??b.block_id),['anchor1',figures[0].sha256,'heading2','anchor2',figures[1].sha256,'closing1']);
+  assert.deepEqual(blocks.map(b=>b.image?.token??b.block_id),['anchor1',figures[0].sha256,'heading2','anchor2',figures[1].sha256]);
   assert.equal(blocks[0].text.elements[0].text_run.content,'界面原型（拟议）');
 });
