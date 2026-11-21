@@ -34,7 +34,9 @@ export class PrdWorkspace {
   constructor(context, settings = {}, dependencies = {}) {
     this.context = context;
     this.chatIds = new Set(settings.chatIds ?? []);
-    this.readDraft = dependencies.readDraft ?? (input => readPrdDraft(context.feishu, input));
+    this.readDraft = dependencies.readDraft ?? (input => readPrdDraft(context.feishu, {
+      ...input, readOwnerMembers: token => this.publisher.readDraftMembers(input, token),
+    }));
     this.draftReads = new Map();
     this.publisher = new PrdCloudDelivery(context, settings.publisher, {publishers:settings.publishers,...dependencies, onPublished: id => this.resumePending(id)});
   }

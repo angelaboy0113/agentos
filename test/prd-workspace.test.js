@@ -183,6 +183,25 @@ test('a follow-up draft link and environment answer in the card reuse the origin
   assert.equal(calls.length, 3);
 });
 
+test('PRD can verify a shared draft through the bound publisher when the bot can only read it', async t => {
+  for (const mode of ['shared', 'wrong-group', 'wrong-owner']) {
+    const calls = [];
+    const client = draftFeishu(calls);
+    client.cloudDocumentMembers = async () => { throw Error('{"code":1063004}'); };
+    const { send, store } = await fixture(t, async args => {
+      assert.ok(args.includes('user'));
+      if (args[0] === 'api') return { data: { open_id: mode === 'wrong-owner' ? 'ou_elsewhere' : owner } };
+      assert.notEqual(mode, 'wrong-owner');
+      assert.equal(args[1], '+member-list');
+      return { data: { items: [{ member_type: 'openchat', member_id: mode === 'shared' ? chat : 'oc_elsewhere', perm: 'view' }] } };
+    }, { analysisSourceMode: 'isolated', analysisEnvironments: { sit: {}, prd: {} } }, client);
+    await send('om_acl_owner', '我要做一个PRD https://unit.feishu.cn/wiki/DraftWiki');
+    const state = await store.read();
+    assert.equal(state.jobs.length, mode === 'shared' ? 1 : 0);
+    assert.equal(calls.some(([route]) => route.startsWith('/open-apis/docx/')), mode === 'shared');
+  }
+});
+
 test('an outside-group draft never reads the body and can be replaced with text in the same PRD card', async t => {
   const calls = [];
   const { store, send } = await fixture(t, undefined, {}, draftFeishu(calls, { shared: false }));

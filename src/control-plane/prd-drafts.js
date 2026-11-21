@@ -18,13 +18,18 @@ export function normalizePrdDraftLinks(text) {
   return { canonical, plainText, links: [...links] };
 }
 
-export async function readPrdDraft(client, { url, profile, projectId, chatId, questionId, dataDir }) {
+export async function readPrdDraft(client, { url, profile, projectId, chatId, questionId, dataDir, readOwnerMembers }) {
   const doc = await readCloudSheet(client, { projectId, originProfile: profile },
     { kind: 'website', projectId, baseUrl: url }, 'read_cloud_document', {}, {
       authorizeDocument: async ({ token, documentType }) => {
         if (documentType !== 'docx') throw new CloudSheetError('PRD_DRAFT_FORMAT', '此链接指向的内容不是飞书在线文档。请贴在线文档链接，或在卡片填入需求初稿。');
         const members = await client.cloudDocumentMembers(token, { profile })
-          .catch(() => { throw new CloudSheetError('PRD_DRAFT_PERMISSIONS', '助手暂时无法核验文档的共享权限。可以先在卡片贴需求初稿。'); });
+          .catch(error => {
+            if (readOwnerMembers && /"code"\s*:\s*1063004\b/.test(error.message)) return readOwnerMembers(token);
+            throw error;
+          }).catch(() => {
+            throw new CloudSheetError('PRD_DRAFT_PERMISSIONS', '助手暂时无法核验文档的共享权限。可以在卡片重新提交链接或贴需求初稿。');
+          });
         if (!members.items?.some(({ member_type, member_id, perm }) =>
           member_type === 'openchat' && member_id === chatId && ['view', 'edit', 'full_access'].includes(perm))) {
           throw new CloudSheetError('PRD_DRAFT_SHARE', '请把初稿共享给本群并保留助手的阅读权限，再在卡片中提交链接。也可以直接贴初稿。');

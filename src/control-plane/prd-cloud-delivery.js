@@ -122,12 +122,23 @@ export class PrdCloudDelivery {
   }
 
   publisherFor(q, revision) {
-    const delivery = q.prd?.delivery?.revision === revision ? q.prd.delivery : null;
+    const prior = q.prd?.delivery;
+    const delivery = prior?.revision === revision ? prior : null;
     const profile = delivery?.token ? delivery.publisherProfile ?? this.config?.profile : q.profile;
     const config = Object.hasOwn(this.publishers, profile) ? this.publishers[profile]
       : this.config?.profile === profile ? this.config : null;
     if (!config?.chatIds?.includes(q.chatId) || !/^ou_[A-Za-z0-9]+$/.test(config.ownerOpenId ?? '')) return null;
     return { ...config, profile };
+  }
+
+  async readDraftMembers({ profile, chatId }, token) {
+    const publisher = this.publisherFor({ profile, chatId });
+    if (!publisher || !validToken.test(token)) throw Error('PRD_DRAFT_OWNER_NOT_CONFIGURED');
+    const options = { profile: publisher.profile, cliEntry: this.context.config.feishu?.cliEntry };
+    const user = await this.cli(['api', 'GET', '/open-apis/authen/v1/user_info', '--as', 'user', '--json'], options);
+    if ((user.data?.open_id ?? user.open_id) !== publisher.ownerOpenId) throw Error('PRD_DRAFT_OWNER_MISMATCH');
+    const acl = await this.cli(['drive', '+member-list', '--as', 'user', '--type', 'docx', '--token', token, '--json'], options);
+    return acl.data;
   }
 
   wake(questionId) {
