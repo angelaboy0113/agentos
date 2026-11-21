@@ -4,8 +4,9 @@ import { runInNewContext } from 'node:vm';
 import { chromeDesignStyle } from '../src/control-plane/shared-chrome-browser.js';
 import { handleCardAction } from '../src/control-plane/card-actions.js';
 import { questionView } from '../src/control-plane/questions.js';
+import { jobCard } from '../src/control-plane/message-cards.js';
 import { savePrdDesignReference } from '../src/control-plane/website-evidence.js';
-import { generateNativeImage, nativeImageReferences } from '../src/shared/image-generation.js';
+import { generateNativeImage, nativeImageReferences, readPrdDesignReference } from '../src/shared/image-generation.js';
 import { producePrdPrototype } from '../src/shared/prd-prototype.js';
 import { routePrdWebsiteBrowser, WebsiteBrowser } from '../src/control-plane/website-browser.js';
 import test from 'node:test';
@@ -662,16 +663,22 @@ test('a structurally verified replacement PNG can be saved while the original vi
   const replacement=await saveArtifact(dataDir,job,'report-12345678-1234-1234-1234-123456789abd','png',Buffer.concat([png,Buffer.from([0])]));
   job.reportFiles=[original];
   job.reportEvidence={status:'verified',binding:{sourceJobId:job.id,fileId:original.id,sha256:original.sha256,verificationHash:original.verificationHash}};
+  job.prd.inlinePrototypes=true;
+  const second=await saveArtifact(dataDir,job,'report-12345678-1234-1234-1234-123456789abe','png',Buffer.concat([png,Buffer.from([1])]));
+  const events=[];
   const {result}=await prepareDocumentHandoff(job,{
-    outcome:'partial',reportAssessment:{decision:'revise',fileId:original.id},documentRequests:[{format:'png'}],
+    outcome:'partial',reportAssessment:{decision:'revise',fileId:original.id},documentRequests:[{format:'png'},{format:'png'}],
     investigation:{status:'continue',goals:[{id:'original-question',status:'open'}]},
     handoff:{returnTo:'none',artifacts:[],risks:[],checks:[{id:'original-question',required:true,status:'failed',evidence:'原页面布局未保留'}]},
-  },dataDir,{dataDir,createFiles:async()=>[replacement]});
+  },dataDir,{dataDir,createFiles:async()=>[replacement,second],emit:async e=>events.push({...e,at:new Date().toISOString()})});
   assert.equal(result.handoffGate.passed,true);
   assert.equal(result.outcome,'partial');
   assert.equal(result.reportReviewRequired,true);
-  assert.deepEqual(result.exportFiles,[replacement]);
+  assert.deepEqual(result.exportFiles,[replacement,second]);
   assert.equal(result.handoff.checks.find(c=>c.id==='original-question').status,'not_run');
+  const card=jobCard({...job,status:'running',createdAt:events[0].at,events});
+  assert.equal(card.header.template,'blue');
+  assert.match(JSON.stringify(card),/原型正在修订/);
 });
 
 
@@ -749,19 +756,26 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   for (const [n,key] of ['menu','list'].entries()) {
     const color = n ? '#f3f4f6' : '#e9f1ff';
     const url = 'https://test.example/'+key;
+    await page.route('https://test.example/assets/logo.svg',route=>route.fulfill({contentType:'image/svg+xml',
+      body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>'}));
     await page.route(url,route=>route.fulfill({contentType:'text/html; charset=utf-8',
-      body:'<button style="padding:8px 20px;background:'+color+'">查询</button><div id="business">AA123456</div>'}));
+      body:'<header><img src="/assets/logo.svg"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
+        +'<button style="padding:8px 20px;background:'+color+'">查询</button><div id="business">AA123456</div>'}));
     await page.goto(url);
     const capture = () => website.screenshot({page,job},{url,targetText:'查询'});
     const snapshot = await capture();
     assert.equal(snapshot.designLayout.controls[0].text,'查询');
     assert.equal(snapshot.designLayout.controls.length,1);
+    assert.equal(snapshot.designLayout.assets.length,2);
     const base = await fs.readFile(path.join(dir,snapshot.designReference.name));
     if (!n) {
       await page.locator('#business').evaluate(el=>{el.textContent='BB999999';});
       assert.equal((await capture()).designReference.sha256,hash(base),'business text remains redacted');
     }
     const referenceId = await savePrdDesignReference(dataDir,job,snapshot.designReference);
+    const future={...job,prd:{...job.prd,revision:job.prd.revision+1}};
+    const reused=await readPrdDesignReference(dataDir,future,referenceId);
+    assert.equal(reused?.sha256,hash(base));
     const actual = await producePrdPrototype(dataDir,job,JSON.stringify({
       mode:n?'new-page':'existing-page', prototypeKey:key, referenceId,
       areas:[{x:.25,y:.4,width:.5,height:.2,sample:{x:0,y:0,width:.25,height:.16},text:'查看活动'}],

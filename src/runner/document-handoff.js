@@ -26,7 +26,8 @@ export async function bindReviewedReportArtifacts(job,result,dataDir){
 export function prdPrototypeRevision(job,result,gate) {
  if(!job.prd?.auto||result.outcome!=='partial'||result.reportAssessment?.decision!=='revise'
    ||result.investigation?.status!=='continue'||result.investigation?.blocker
-   ||result.documentRequests?.length!==1||result.documentRequests[0].format!=='png'
+   ||(!job.prd.inlinePrototypes && result.documentRequests?.length!==1)
+   ||result.documentRequests?.some(request=>request.format!=='png')
    ||!gate.issues.length||gate.issues.some(issue=>issue!=='必需验收项失败：original-question'
       &&issue!=='部分分析必须有可核验工件、已通过的检查及明确证据缺口'))return null;
  const file=job.reportFiles?.find(f=>f.id===result.reportAssessment.fileId&&f.format==='png'
@@ -46,6 +47,7 @@ export async function prepareDocumentHandoff(job,result,workspace,{dataDir,emit=
  let current=job,gate=await validateHandoff(current,result,workspace,{dataDir});
  const candidate=prdPrototypeRevision(job,result,gate);
  const materializable=candidate||gate.issues.every(issue=>issue==='部分分析必须有可核验工件、已通过的检查及明确证据缺口');
+ if(candidate)await emit({type:'progress',phase:'prd_prototype_revision'});
  if(job.taskIntent==='analysis'&&result.documentRequests?.length&&materializable){
   try{
    if(job.prd?.businessFinal)for(const request of result.documentRequests){
@@ -54,15 +56,33 @@ export async function prepareDocumentHandoff(job,result,workspace,{dataDir,emit=
    }
    const files=await createFiles(dataDir,job,result.documentRequests,{onProgress:event=>emit({type:'progress',...event})});
    if(candidate&&files.some(f=>f.sha256===candidate.sha256))throw Object.assign(Error('修订原型与待修订文件一致'),{code:'PRD_IMAGE_UNCHANGED'});
-   if(candidate)result={...result,reportReviewRequired:true,handoff:{...result.handoff,
-    risks:[...(result.handoff.risks??[]),'修订图已生成，仍需对照现场截图验收。'],
-    checks:[...result.handoff.checks.filter(check=>check.id!=='prd-prototype-file').map(check=>
-     check.id==='original-question'&&check.status==='failed'?{...check,status:'not_run'}:check),
-    {id:'prd-prototype-file',required:false,status:'passed',evidence:'新 PNG 已完成文件生成与结构校验，文件 '+files[0].id}]}};
    current={...job,reportFiles:[...(job.reportFiles??[]),...files]};
    result={...result,exportFiles:[...(result.exportFiles??[]),...files],handoff:{...result.handoff,artifacts:[...(result.handoff?.artifacts??[]),...files.map(f=>({kind:'report',path:f.id}))]}};
    gate=await validateHandoff(current,result,workspace,{dataDir});
-  }catch(error){result=documentFailureResult(result,error);gate=await validateHandoff(current,result,workspace,{dataDir});}
+  }catch(error){
+   result=documentFailureResult(result,error);
+   gate=await validateHandoff(current,result,workspace,{dataDir});
+   if(!candidate && job.prd?.inlinePrototypes && ['IMAGE_PROMPT','IMAGE_LIVE_SCREEN_REQUIRED'].includes(error.code)
+     && gate.issues.every(issue=>['必需验收项失败：original-question','部分分析必须有可核验工件、已通过的检查及明确证据缺口'].includes(issue))){
+    await emit({type:'progress',phase:'prd_prototype_revision'});
+    return {job:current,result:{...result,reportReviewRequired:true,handoffGate:{passed:false,issues:gate.issues},
+     investigation:{...result.investigation,status:'continue',blocker:null,
+      nextStep:'沿用已确认业务口径，核对截图引用和区域几何，按实际画面重试原型。需要现场取证时自行打开同环境授权页面。'}}};
+   }
+  }
+ }
+ if(candidate && !gate.issues.some(issue=>!['必需验收项失败：original-question','部分分析必须有可核验工件、已通过的检查及明确证据缺口'].includes(issue))){
+   const files=result.exportFiles??[];
+   const message=files.length?'修订图已生成，正在逐张与现场截图核对。':'原型仍需修订，正在沿本轮现场截图和已有正文继续处理。';
+   result={...result,outcome:'partial',reportReviewRequired:true,handoff:{...result.handoff,
+    artifacts:[...(result.handoff.artifacts??[]),{kind:'report',path:candidate.id}],
+    risks:[...(result.handoff.risks??[]),message],
+    checks:[...result.handoff.checks.filter(check=>check.id!=='prd-prototype-file').map(check=>
+     check.id==='original-question'&&check.status==='failed'?{...check,status:'not_run'}:check),
+    {id:'prd-prototype-file',required:false,status:'passed',evidence:'已核验的原型文件 '+[candidate,...files].map(f=>f.id).join('、')}]},
+    investigation:{...result.investigation,status:'continue',blocker:null,
+     nextStep:'沿用已确认业务口径和可用现场截图，修正具体原型缺口并逐张回看。保留其他已通过文件；核对通过后明确选择正文及最终每张原型交付。'}};
+   gate=await validateHandoff(current,result,workspace,{dataDir});
  }
  return {job:current,result:enforceHandoff(result,gate)};
 }

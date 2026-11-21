@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {mkdir,readFile,writeFile,lstat,realpath,open} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,lstat,realpath,open,readdir} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';import {createHash} from 'node:crypto';
 import {currentUserQuestion} from './user-request-scope.js';
 import {prepareArtifactWorkspace} from './artifact-workspace.js';
@@ -35,11 +35,21 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
  if(job.prd?.auto&&/^[A-Za-z0-9_-]+$/.test(job.id)&&Number.isSafeInteger(job.prd.revision)){
   const dir=path.join(dataDir,'website-evidence',job.id),manifest=path.join(dir,'prd-'+job.prd.revision+(job.prd.inlinePrototypes?'-'+referenceId:'')+'.json');
   let receipt;
-  try{receipt=JSON.parse((await safeBytes(manifest)).bytes);}catch(error){if(error.code!=='ENOENT')throw error;}
+  try{receipt=JSON.parse((await safeBytes(manifest)).bytes);}catch(error){
+   if(error.code!=='ENOENT')throw error;
+   if(job.prd.inlinePrototypes){
+    const names=await readdir(dir).catch(e=>{if(e.code==='ENOENT')return [];throw e;});
+    const prior=names.find(name=>name.endsWith('-'+referenceId+'.json')&&/^prd-\d+-/.test(name)
+      && Number(name.split('-')[1])<job.prd.revision);
+    if(prior)receipt=JSON.parse((await safeBytes(path.join(dir,prior))).bytes);
+   }
+  }
   if(receipt?.capture==='live-page-v1'){
    if(receipt.jobId!==job.id||receipt.questionId!==job.questionId||receipt.projectId!==job.projectId||
     receipt.profile!==(job.originProfile??job.agentProfile)||receipt.environment!==job.sourceEnvironment||
-    receipt.revision!==job.prd.revision||!/^[-a-f0-9]+\.png$/.test(receipt.item?.name)||
+    (!job.prd.inlinePrototypes ? receipt.revision!==job.prd.revision
+      : !Number.isSafeInteger(receipt.revision)||receipt.revision>job.prd.revision||receipt.item?.name!==referenceId+'.png')||
+    !/^[-a-f0-9]+\.png$/.test(receipt.item?.name)||
     !/^https?:\/\//.test(receipt.item?.pageUrl??''))throw failure('IMAGE_INPUT','原型参考截图的任务、系统或环境不匹配');
    const file=path.join(dir,receipt.item.name),actual=await safeBytes(file),digest=sha(actual.bytes);
    if(digest!==receipt.item.sha256||actual.bytes.length!==receipt.item.bytes||!actual.bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))throw failure('IMAGE_INPUT','原型参考截图校验失败');

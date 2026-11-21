@@ -384,7 +384,10 @@ export class JsonStore {
       if(result.exportFiles?.length)recordReportFiles(job,result.exportFiles,state.questions?.[job.questionId]?.generation);
       const decision = continuousReviewDecision(job, result);
       if (!decision.continue) {
-        const terminalResult = decision.reason ? {...result,investigation:{...result.investigation,status:'wait',
+        const repairStalled = job.prd?.inlinePrototypes && (result.reportAssessment?.decision==='revise'
+          || ['IMAGE_PROMPT','IMAGE_LIVE_SCREEN_REQUIRED'].includes(result.documentFailure?.code));
+        const terminalResult = decision.reason ? {...result,...(repairStalled?{outcome:'blocked',summary:'原型自动修订未取得新进展'}:{}),
+          investigation:{...result.investigation,status:'wait',
           blocker:{kind:'unavailable',needed:'修正当前文件验收缺口后继续',evidence:decision.reason},nextStep:decision.reason},
           finalMessage:[result.finalMessage,decision.reason].filter(Boolean).join('\n\n')} : result;
         return { job: structuredClone(job), continued: false, terminalResult: structuredClone(terminalResult), reason: decision.reason ?? null };

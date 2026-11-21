@@ -82,7 +82,7 @@ export async function producePrdPrototype(dataDir, job, content, options) {
           ctx.clip();
           ctx.drawImage(source,sx,sy,sw,sh,x,y,width,height);
           if (area.text) {
-            const inset = Math.max(5, Math.round(width * 0.08));
+            const inset = Math.max(5, Math.min(12, Math.round(width * 0.08)));
             const fontSize = Math.min(parseFloat(area.sample.fontSize) || 14, height - 8);
             const edgeWidth = Math.max(1, Math.round(sw * 0.04));
             const font = area.sample.fontFamily || 'system-ui, sans-serif';
@@ -90,7 +90,7 @@ export async function producePrdPrototype(dataDir, job, content, options) {
             if (ctx.measureText(area.text).width > width-2*inset) throw Error('标注文字超出改动区域');
             // Extend the sampled control background across its label slot.
             ctx.drawImage(source,sx+sw-edgeWidth-2,sy+3,edgeWidth,sh-6,
-              x+inset,y+3,width-2*inset,height-6);
+              x+2,y+3,width-4,height-6);
             ctx.fillStyle = area.sample.color || '#303133';
             ctx.textBaseline = 'middle';
             ctx.fillText(area.text,x+inset,y+height/2);

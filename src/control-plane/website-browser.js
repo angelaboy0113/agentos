@@ -1,3 +1,4 @@
+import {describePrdCapture} from './prd-capture.js';
 import { passivePublicImage, fetchPassivePublicImage } from './public-website-image.js';
 import {loginPageAllowed} from '../shared/website-sso.js';
 import {websiteFrames,websiteDOM,assertWebsiteFrame} from './website-frames.js';
@@ -450,46 +451,33 @@ export class WebsiteBrowser {
    let pixels, layout, labelAttribute;
    try {
     labelAttribute = s.job.prd.inlinePrototypes ? 'data-agentos-label-'+randomUUID() : null;
-    layout = await dom.evaluate(({ labelAttribute, secretSelector }) => {
-      const rect = element => {
-       const r = element.getBoundingClientRect();
-       return { x:Math.round(r.x), y:Math.round(r.y), width:Math.round(r.width), height:Math.round(r.height) };
-      };
-      const sections = [...document.querySelectorAll('header, nav, aside, [role="menu"], table, [role="table"], [role="grid"], [role="dialog"], [role="tabpanel"], form, footer')]
-        .map(element => ({ kind:element.matches('[role=dialog]')?'dialog':element.matches('[role=tabpanel]')?'tabpanel':element.matches('[role=table],[role=grid]')?'table':element.tagName.toLowerCase(), ...rect(element) }))
-        .filter(r=>r.width>0&&r.height>0&&r.x<innerWidth&&r.y<innerHeight&&r.x+r.width>0&&r.y+r.height>0)
-        .slice(0,40);
-      const controls = [];
-      if (labelAttribute) {
-       // Keep public interface vocabulary visible. Business values and original
-       // text stay hidden even if a framework updates the DOM during capture.
-       const uiLabels = new Set('首页 菜单 基础信息 订单管理 订单列表 订单详情 人工订单 手工订单 代客下单 运营管理 渠道任务 活动管理 财务管理 策略管理 访销管理 门店管理 门店审核 门店未审核 商品管理 预算管理 促销管理 促销活动 活动列表 活动详情 审批管理 订单编号 商品名称 商品编码 经销商 经销商名称 组织架构 订单状态 审批状态 状态 名称 编号 类型 数量 规格 单位 操作 创建时间 更新时间 开始时间 结束时间 查询 搜索 重置 清空 新增 添加 编辑 删除 查看 详情 保存 提交 确定 取消 关闭 返回 导入 导出 上一页 下一页'.split(' '));
-       for (const element of document.querySelectorAll('body *')) {
-        if (element.childElementCount || !uiLabels.has(element.textContent.trim()) || element.closest(secretSelector)
-          || element.matches('script,style,textarea,option,[contenteditable]')) continue;
-        const bounds = rect(element), style = getComputedStyle(element);
-        if (!bounds.width || !bounds.height || bounds.x >= innerWidth || bounds.y >= innerHeight
-          || bounds.x+bounds.width<=0 || bounds.y+bounds.height<=0 || style.visibility !== 'visible') continue;
-        const text = element.textContent.trim();
-        element.setAttribute(labelAttribute, text);
-        controls.push({ text, ...bounds, color:style.color, fontFamily:style.fontFamily, fontSize:style.fontSize });
-       }
-      }
-      return { viewportWidth:innerWidth, viewportHeight:innerHeight, sections, controls };
-    }, { labelAttribute, secretSelector:screenshotSecretSelector });
+    layout = await dom.evaluate(describePrdCapture,{attribute:labelAttribute,secretSelector:screenshotSecretSelector,
+     brandedLabels:[s.environment?.displayName].filter(Boolean)});
     if (labelAttribute) {
-     options.style += `[${labelAttribute}]{position:relative!important}
-      [${labelAttribute}]::after{content:attr(${labelAttribute})!important;position:absolute!important;inset:0!important;
-       visibility:visible!important;display:block!important;font:inherit!important;text-align:inherit!important;pointer-events:none!important}`;
-     for (const control of layout.controls) {
-      options.style += `[${labelAttribute}="${control.text}"]::after{color:${control.color}!important;-webkit-text-fill-color:${control.color}!important}`;
+     options.style += `[${labelAttribute}]::after{position:absolute!important;inset:auto!important;line-height:normal!important;
+       visibility:visible!important;display:block!important;font-family:inherit!important;font-size:inherit!important;
+       font-weight:inherit!important;letter-spacing:inherit!important;white-space:nowrap!important;pointer-events:none!important}`;
+     for (const [index,control] of layout.controls.entries()) {
+      const selector=`[${labelAttribute}="${index}"]`;
+      if(!control.positioned)options.style+=selector+'{position:relative!important}';
+      options.style+=`${selector}::after{content:${JSON.stringify(control.text)}!important;left:${control.left}px!important;
+       top:${control.top}px!important;color:${control.color}!important;-webkit-text-fill-color:${control.color}!important}`;
      }
+     for(const [index,color] of layout.placeholders.entries())options.style+=
+      `[${labelAttribute}-placeholder="${index}"]::placeholder{color:${color}!important;-webkit-text-fill-color:${color}!important}`;
+     for(const [index,color] of layout.assets.entries()){
+      const selector=`[${labelAttribute}-asset="${index}"]`;
+      options.style+=`${selector}{visibility:visible!important;color:${color}!important}${selector} *{color:inherit!important}`;
+     }
+     for(const [index,color] of layout.glyphs.entries())options.style+=
+      `[${labelAttribute}-glyph="${index}"]::before{color:${color}!important;-webkit-text-fill-color:${color}!important}`;
     }
     pixels=await (frameElement?frameElement.screenshot(options):s.page.screenshot(options));
    }
    finally{
     if(labelAttribute)await dom.evaluate(attribute=>{
-     for(const element of document.querySelectorAll('['+attribute+']'))element.removeAttribute(attribute);
+     for(const name of [attribute,attribute+'-asset',attribute+'-placeholder',attribute+'-glyph'])
+      for(const element of document.querySelectorAll('['+name+']'))element.removeAttribute(name);
     },labelAttribute).catch(()=>{});
     await frameElement?.dispose();
    }

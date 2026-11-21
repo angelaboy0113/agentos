@@ -754,7 +754,7 @@ export async function notifyJobEvent(context, { job, event }) {
   if(event.type==='completed'&&!job.prd)await context.reports?.enqueue(await context.store.getJob(job.id));
   if (context.cards?.enabled) {
     if (!['queued', 'started', 'completed', 'failed', 'cancelled', 'cancel_requested', 'progress'].includes(event.type)) return;
-    if (event.type === 'progress' && !['codex_waiting', 'codex_working', 'connection_retry', 'model_capacity_retry', 'verification', 'tool_activity'].includes(event.phase)) return;
+    if (event.type === 'progress' && !['codex_waiting', 'codex_working', 'connection_retry', 'model_capacity_retry', 'verification', 'tool_activity', 'prd_prototype_revision'].includes(event.phase)) return;
     // Always re-read authoritative state; HTTP event notifications may arrive out of order.
     const current = await context.store.getJob(job.id);
     if (current.questionId) { await publishQuestion(context, current.questionId); return; }
