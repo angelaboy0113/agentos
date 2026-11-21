@@ -471,7 +471,7 @@ async function route(context) {
     if(body.tool==='browser_screenshot'&&job.prd?.auto&&result.designReference){
       const current=await store.getJob(job.id);
       if(current?.status!=='running'||current.lease?.id!==job.lease.id||current.prd?.revision!==job.prd.revision)throw new Error('PRD design reference lease changed');
-      await savePrdDesignReference(config.dataDir,job,result.designReference);
+      result.referenceId=await savePrdDesignReference(config.dataDir,job,result.designReference);
       delete result.designReference;
     }
     result=await recoverWebsiteToolLogin(context,job,e,result);

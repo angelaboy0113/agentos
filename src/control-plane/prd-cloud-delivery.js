@@ -15,6 +15,54 @@ const publishingScopes = 'docx:document docs:document.media:upload docs:permissi
 const validToken = /^[a-zA-Z0-9_-]{6,150}$/;
 const hasNativeTable = xml => /<table(?:\s|>)/i.test(xml);
 const authError = error => /no user logged in|app_scope_not_applied|user_scope_not_granted|missing_scope|missing required scope|99991672|99991679/i.test(error.message);
+const prototypeAnchors = body => [...body.matchAll(/^\[\[PROTOTYPE:([a-z][a-z0-9-]{0,63})\]\][ \t]*$/gm)].map(match => match[1]);
+const marker = key => 'AGENTOSPRDFIGURE-'+key;
+const paragraph = block => block?.text?.elements?.map(e => e.text_run?.content ?? '').join('').trim();
+
+async function documentChildren(call, doc) {
+  const items = [];
+  let pageToken;
+  do {
+    const result = await call(['api','GET',`/open-apis/docx/v1/documents/${doc}/blocks/${doc}/children`,
+      '--as','user','--params',JSON.stringify({page_size:100, ...(pageToken ? {page_token:pageToken} : {})})]);
+    if (!Array.isArray(result.data?.items)) throw Error('PRD_IMAGE_READBACK');
+    items.push(...result.data.items);
+    const next = result.data.has_more ? result.data.page_token : undefined;
+    if (result.data.has_more && (!next || next === pageToken)) throw Error('PRD_IMAGE_READBACK');
+    pageToken = next;
+  } while (pageToken);
+  return items;
+}
+
+async function insertInlineImages(call, cwd, doc, figures) {
+  let blocks = await documentChildren(call, doc);
+  for (const { key, artifact: { file } } of figures) {
+    const anchors = blocks.filter(block => paragraph(block) === marker(key));
+    if (anchors.length !== 1 || !validToken.test(anchors[0].block_id)) throw Error('PRD_IMAGE_ANCHOR');
+    const anchor = anchors[0].block_id;
+    const filename = 'prototype.png';
+    await copyFile(file, path.join(cwd, filename));
+    await call(['docs','+media-insert','--as','user','--doc',doc,'--file',filename,'--type','image']);
+    const existing = new Set(blocks.map(b => b.block_id));
+    blocks = await documentChildren(call, doc);
+    const images = blocks.filter(b => !existing.has(b.block_id) && b.block_type === 27 && b.image?.token);
+    if (images.length !== 1 || !validToken.test(images[0].block_id)) throw Error('PRD_IMAGE_READBACK');
+    const image = images[0].block_id;
+    await call(['docs','+update','--as','user','--doc',doc,'--command','block_move_after','--block-id',anchor,'--src-block-ids',image]);
+    blocks = await documentChildren(call, doc);
+    const index = blocks.findIndex(b => b.block_id === anchor);
+    if (index < 0 || blocks[index+1]?.block_type !== 27 || blocks[index+1]?.image?.token !== images[0].image.token) {
+      throw Error('PRD_IMAGE_POSITION');
+    }
+    await call(['docs','+update','--as','user','--doc',doc,'--command','str_replace','--pattern',marker(key),
+      '--doc-format','markdown','--content','界面原型（拟议）']);
+    blocks = await documentChildren(call, doc);
+    if (blocks[index+1]?.image?.token !== images[0].image.token || paragraph(blocks[index]) !== '界面原型（拟议）'
+      || blocks.some(b => paragraph(b) === marker(key))) {
+      throw Error('PRD_IMAGE_POSITION');
+    }
+  }
+}
 
 function documentIdentity(result) {
   const d = result.data ?? result;
@@ -123,8 +171,10 @@ export class PrdCloudDelivery {
     const config = this.publisherFor(q, job.prd.revision);
     if (q.prd.delivery?.revision === revision && q.prd.delivery.sentAt) return;
     if (q.prd.delivery && q.prd.delivery.revision !== revision && !q.prd.delivery.sentAt) return;
-    const files = ['md', 'png'].map(format => job.reportFiles?.findLast(file => file.format === format
-      && file.questionGeneration === q.generation && reportEligible(job, file)));
+    const inline = job.prd.inlinePrototypes === true;
+    const eligible = (job.reportFiles ?? []).filter(file => file.questionGeneration === q.generation && reportEligible(job, file));
+    const prototypes = eligible.filter(f => f.format === 'png');
+    const files = [eligible.findLast(f => f.format === 'md'), ...(inline ? prototypes : [prototypes.at(-1)])];
     const previous = previousPrdDelivery(q, revision);
     const digest = prdIntentDigest([id, q.chatId, revision, q.generation, ...files.map(f => f?.sha256)]);
     let delivery = q.prd.delivery?.revision === revision ? q.prd.delivery : { revision, digest, phase: 'pending' };
@@ -154,34 +204,46 @@ export class PrdCloudDelivery {
         await save('artifacts_missing', { notice: '业务口径尚未确认齐全，本轮未发布。请在当前卡片补充已确认的规则。' });
         return;
       }
-      if (files.some(f => !f)) {
+      if (files.length < 2 || files.some(f => !f)) {
         await save('artifacts_missing', { notice: '完整交付仍缺少已核验的正文或原型图。如需补充原型依据，可填写这张需求卡。' });
         return;
       }
       const dir = this.context.config.dataDir;
-      const [{ content }, { file: image, receipt }] = await Promise.all(files.map((f, i) =>
-        reportFile(dir, job.id, f, { includeContent: i === 0, includeReceipt: i === 1 })));
-      const reference = await readPrdDesignReference(dir, job);
-      const provenance = receipt.request?.imageGeneration;
-      // Older runners omitted the generation. A current-generation accepted file,
-      // exact request digest and revision-scoped live screenshot still bind it.
-      const binding = provenance?.binding;
-      const matchingGeneration = binding?.generation === q.generation
-        || (binding?.generation === null && revision === q.generation
-          && binding.questionHash === createHash('sha256').update(String(currentUserQuestion(job))).digest('hex'));
-      if (!reference || provenance?.status !== 'verified' || !['codex-native','prd-screenshot-composite'].includes(provenance.provider)
-        || provenance.sha256 !== files[1].sha256 || provenance.inputHashes?.[0] !== reference.sha256
-        || provenance.referenceKinds?.[0] !== 'website-design-reference'
-        || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id
-        || provenance.binding?.projectId !== q.projectId || provenance.binding?.profile !== q.profile
-        || provenance.binding?.environment !== job.sourceEnvironment || !matchingGeneration) {
-        await save('artifacts_missing', { notice: '原型缺少本轮真实目标页面截图的生成凭据。请先取得对应系统和环境的截图，再重做原型。' });
+      const [{ content }, ...images] = await Promise.all(files.map((f, i) =>
+        reportFile(dir, job.id, f, { includeContent: i === 0, includeReceipt: i > 0 })));
+      const raw = content.toString('utf8');
+      const keys = inline ? prototypeAnchors(raw) : [null];
+      if (!keys.length || new Set(keys).size !== keys.length || (inline && (raw.match(/\[\[PROTOTYPE:/g)?.length ?? 0) !== keys.length)) {
+        await save('artifacts_missing', { notice: '正文原型位置缺失或重复。请为每张图设置唯一的对应章节。' });
         return;
+      }
+      const figures = [];
+      for (const key of keys) {
+        const index = inline ? images.findLastIndex(a => a.receipt.request?.imageGeneration?.prototypeKey === key) : 0;
+        const artifact = images[index];
+        const provenance = artifact?.receipt.request?.imageGeneration;
+        const reference = await readPrdDesignReference(dir, job, provenance?.referenceId);
+        // Older runners omitted the generation. A current-generation accepted file,
+        // exact request digest and revision-scoped live screenshot still bind it.
+        const binding = provenance?.binding;
+        const matchingGeneration = binding?.generation === q.generation
+          || (binding?.generation === null && revision === q.generation
+            && binding.questionHash === createHash('sha256').update(String(currentUserQuestion(job))).digest('hex'));
+        if (!reference || provenance?.status !== 'verified' || !['codex-native','prd-screenshot-composite'].includes(provenance.provider)
+          || (inline && provenance.provider !== 'prd-screenshot-composite')
+          || provenance.sha256 !== files[index+1]?.sha256 || provenance.inputHashes?.[0] !== reference.sha256
+          || provenance.referenceKinds?.[0] !== 'website-design-reference'
+          || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id
+          || provenance.binding?.projectId !== q.projectId || provenance.binding?.profile !== q.profile
+          || provenance.binding?.environment !== job.sourceEnvironment || !matchingGeneration) {
+          await save('artifacts_missing', { notice: '原型缺少本轮真实目标页面截图的生成凭据。请先取得对应系统和环境的截图，再重做原型。' });
+          return;
+        }
+        figures.push({ key, artifact });
       }
       const referenceHashes = (job.attachments ?? []).filter(a => a.source?.kind === 'authorized-prd-document-image'
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
         .map(a => a.source.sha256);
-      const raw = content.toString('utf8');
       const issue = job.prd.businessFinal && prdFinalContentIssue(raw);
       if (issue) {
         await save('artifacts_missing', { notice: issue });
@@ -189,7 +251,8 @@ export class PrdCloudDelivery {
       }
       const baseline = previous ? await readPrdRevisionBaseline(dir, job, previous).catch(() => null) : null;
       const body = prdMarkdown(raw, { prototypeHash: files[1].sha256, referenceHashes });
-      const markdown = prdHighlightChanges(baseline, body);
+      const highlighted = prdHighlightChanges(baseline, body);
+      const markdown = inline ? highlighted.replace(/^\[\[PROTOTYPE:([a-z][a-z0-9-]{0,63})\]\][ \t]*$/gm, (_, key) => marker(key)) : highlighted;
       const hasHighlights = markdown.includes('<span background-color=');
       const parent = path.join(dir, 'prd-delivery');
       await mkdir(parent, { recursive: true, mode: 0o700 });
@@ -226,10 +289,14 @@ export class PrdCloudDelivery {
           await save('body_verified');
         }
         if (delivery.phase === 'body_verified') {
-          const filename = 'prototype.png';
-          await copyFile(image, path.join(cwd, filename));
           await save('inserting');
-          await call(['docs', '+media-insert', '--as', 'user', '--doc', doc, '--file', filename, '--type', 'image', '--caption', '需求原型图（评审用）']);
+          if (inline) {
+            await insertInlineImages(call, cwd, doc, figures);
+          } else {
+            const filename = 'prototype.png';
+            await copyFile(figures[0].artifact.file, path.join(cwd, filename));
+            await call(['docs', '+media-insert', '--as', 'user', '--doc', doc, '--file', filename, '--type', 'image', '--caption', '需求原型图（评审用）']);
+          }
           const xml = await render();
           if (!/<(?:img|image)(?:\s|>)/i.test(xml)) throw Error('PRD_IMAGE_READBACK');
           await save('image_verified');
@@ -245,7 +312,8 @@ export class PrdCloudDelivery {
           const items = acl.data?.items ?? acl.data?.members ?? acl.items ?? [];
           if (!items.some(m => m.member_id === q.chatId && m.perm === 'edit' && m.member_type === 'openchat')) throw Error('PRD_ACL_READBACK');
           await save('delivered', { sentAt: new Date().toISOString(), notice: '飞书评审稿已创建，本群成员可编辑。',
-            artifacts:{ generation:q.generation, markdownId:files[0].id, prototypeId:files[1].id } });
+            artifacts:{ generation:q.generation, markdownId:files[0].id,
+              ...(inline ? { prototypeIds:files.slice(1).map(f => f.id) } : { prototypeId:files[1].id }) } });
         }
       } finally { await rm(cwd, { recursive: true, force: true }); }
     } catch (error) {

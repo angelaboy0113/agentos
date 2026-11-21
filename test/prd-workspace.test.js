@@ -7,7 +7,7 @@ import { questionView } from '../src/control-plane/questions.js';
 import { savePrdDesignReference } from '../src/control-plane/website-evidence.js';
 import { generateNativeImage, nativeImageReferences } from '../src/shared/image-generation.js';
 import { producePrdPrototype } from '../src/shared/prd-prototype.js';
-import { routePrdWebsiteBrowser } from '../src/control-plane/website-browser.js';
+import { routePrdWebsiteBrowser, WebsiteBrowser } from '../src/control-plane/website-browser.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -330,6 +330,7 @@ test('existing-page prototype keeps the captured pixels outside the marked regio
   const { store,send,dataDir } = await fixture(t, async()=>{});
   await send('om_prototype','我要做 PRD：订单详情增加按钮');
   const job = (await store.read()).jobs[0], dir=path.join(dataDir,'website-evidence',job.id);
+  delete job.prd.inlinePrototypes;
   const item={name:'a-6.png',sha256:hash(base),bytes:base.length,pageUrl:'https://test.example/target'};
   await fs.mkdir(dir,{recursive:true});
   await fs.writeFile(path.join(dir,item.name),base);
@@ -450,7 +451,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   };
   const { store, workspace, send, dataDir } = await fixture(t, cli);
   const { questionId } = await send('om_start', '我要写 PRD：LTX 订单详情增加 TPM 补贴状态');
-  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; });
+  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; delete s.jobs[0].prd.inlinePrototypes; });
   const exportJob = (await store.read()).jobs[0];
   const screenshot = await saveScreenshot(dataDir, exportJob);
   assert.match(prdGuidance(exportJob), /提交一个 md 和一个 png/);
@@ -483,6 +484,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   assert.equal(calls.filter(([a]) => a[1] === '+member-add').length, 1);
   assert.equal(drafts[0],md.trim());
   await send('om_revision','请把 LTX 的展示改成弹窗','om_start');
+  await store.transact(s => { delete s.jobs[0].prd.inlinePrototypes; });
   const next = (await store.read()).jobs[0];
   const secondScreenshot=await saveScreenshot(dataDir,next);
   const revised=await Promise.all([
@@ -510,7 +512,7 @@ test('missing owner authorization never creates a document or expands sharing', 
     return { data: { open_id: 'ou_wrong_account' } };
   });
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
-  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; });
+  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; delete s.jobs[0].prd.inlinePrototypes; });
   const j = (await store.read()).jobs[0];
   const screenshot = await saveScreenshot(dataDir, j);
   const files = await Promise.all([
@@ -531,7 +533,7 @@ test('an ungranted document scope leaves a retryable draft before any create req
     assert.fail('Document creation must wait for user consent');
   });
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
-  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; });
+  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; delete s.jobs[0].prd.inlinePrototypes; });
   const [job] = (await store.read()).jobs;
   const screenshot = await saveScreenshot(dataDir, job);
   const files = await Promise.all([
@@ -583,7 +585,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,inlinePrototypes:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
@@ -603,6 +605,7 @@ test('website design references are hash-bound to the real page capture, job, en
 test('Feishu delivery does not accept a prototype made without the current screenshot receipt', async t => {
   const {store,workspace,send,dataDir}=await fixture(t,()=>assert.fail('Never create a cloud draft without verified visual evidence'));
   const {questionId}=await send('om_unsourced','我想做一个需求，新增订单状态');
+  await store.transact(s => { delete s.jobs[0].prd.inlinePrototypes; });
   const [job]=(await store.read()).jobs;
   await saveScreenshot(dataDir,job);
   const files=await Promise.all([
@@ -692,4 +695,101 @@ test('each assistant uses its app-specific owner and only its group for automati
   assert.deepEqual(resumed,['q2']);
   assert.equal(delivery.publisherFor(questions.q3,1).ownerOpenId,'ou_owner3');
   assert.equal(delivery.publisherFor(questions.q4,1),null);
+});
+
+test('PRD keeps a separate screenshot and places each prototype under its own requirement', async t => {
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless:true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({viewport:{width:360,height:220}});
+  const doc = 'NativeDocumentToken';
+  const blocks = [];
+  const text = (id, content) => ({block_id:id, text:{elements:[{text_run:{content}}]}});
+  const cli = async (args, options) => {
+    if (args[0] === 'auth') return {ok:true};
+    if (args[0] === 'api') return {data: args[2].includes('user_info') ? {open_id:owner} : {items:structuredClone(blocks)}};
+    if (args[1] === '+create') {
+      assert.match(options.input, /## 菜单[\s\S]*AGENTOSPRDFIGURE-menu[\s\S]*## 列表[\s\S]*AGENTOSPRDFIGURE-list/);
+      blocks.push(text('anchor1','AGENTOSPRDFIGURE-menu'),text('heading2','列表'),text('anchor2','AGENTOSPRDFIGURE-list'),text('closing1','业务范围'));
+      return {data:{document_id:doc,url:'https://unit.feishu.cn/docx/'+doc}};
+    }
+    if (args[1] === '+fetch') return {data:{content:'<h1>需求</h1><table></table><img />'}};
+    if (args[1] === '+media-insert') {
+      const bytes = await fs.readFile(path.join(options.cwd,'prototype.png'));
+      const image = hash(bytes);
+      blocks.push({block_id:image,block_type:27,image:{token:image}});
+      return {};
+    }
+    if (args[1] === '+update') {
+      const arg = key => args[args.indexOf(key)+1];
+      if (arg('--command') === 'block_move_after') {
+        const [image] = blocks.splice(blocks.findIndex(b=>b.block_id===arg('--src-block-ids')),1);
+        blocks.splice(blocks.findIndex(b=>b.block_id===arg('--block-id'))+1,0,image);
+      } else {
+        const anchor = blocks.find(b=>b.text?.elements[0].text_run.content===arg('--pattern'));
+        anchor.text.elements[0].text_run.content=arg('--content');
+      }
+      return {};
+    }
+    if (args[1] === '+member-add') return {};
+    if (args[1] === '+member-list') return {data:{items:[{member_id:chat,member_type:'openchat',perm:'edit'}]}};
+    assert.fail('unexpected CLI');
+  };
+  const { store,send,dataDir,workspace } = await fixture(t,cli);
+  const { questionId } = await send('om_inline','我想做一个需求，新增 LTX 菜单和 TPM 查询列表');
+  const [job] = (await store.read()).jobs;
+  const dir = path.join(dataDir,'website-evidence',job.id);
+  const website = new WebsiteBrowser(dataDir);
+  website.loginStatus = async () => ({loginRequired:false});
+  const figures = [];
+  for (const [n,key] of ['menu','list'].entries()) {
+    const color = n ? '#f3f4f6' : '#e9f1ff';
+    const url = 'https://test.example/'+key;
+    await page.route(url,route=>route.fulfill({contentType:'text/html; charset=utf-8',
+      body:'<button style="padding:8px 20px;background:'+color+'">查询</button><div id="business">AA123456</div>'}));
+    await page.goto(url);
+    const capture = () => website.screenshot({page,job},{url,targetText:'查询'});
+    const snapshot = await capture();
+    assert.equal(snapshot.designLayout.controls[0].text,'查询');
+    assert.equal(snapshot.designLayout.controls.length,1);
+    const base = await fs.readFile(path.join(dir,snapshot.designReference.name));
+    if (!n) {
+      await page.locator('#business').evaluate(el=>{el.textContent='BB999999';});
+      assert.equal((await capture()).designReference.sha256,hash(base),'business text remains redacted');
+    }
+    const referenceId = await savePrdDesignReference(dataDir,job,snapshot.designReference);
+    const actual = await producePrdPrototype(dataDir,job,JSON.stringify({
+      mode:n?'new-page':'existing-page', prototypeKey:key, referenceId,
+      areas:[{x:.25,y:.4,width:.5,height:.2,sample:{x:0,y:0,width:.25,height:.16},text:'查看活动'}],
+    }),{generate:()=>assert.fail('must reuse the screenshot')});
+    assert.equal(actual.bytes.readUInt32BE(16),360);
+    assert.equal(actual.bytes.readUInt32BE(20),220);
+    assert.equal(actual.provenance.inputHashes[0],hash(base));
+    const outsideUnchanged=await page.evaluate(async images=>{
+      const outside=async bytes=>{
+        const img=new Image();img.src='data:image/png;base64,'+bytes;await img.decode();
+        const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
+        const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);
+        return ctx.getImageData(0,0,img.width,88).data;
+      };
+      const [before,after]=await Promise.all(images.map(outside));
+      return before.every((value,index)=>value===after[index]);
+    },[base.toString('base64'),actual.bytes.toString('base64')]);
+    assert.ok(outsideUnchanged);
+    const artifact = await saveArtifact(dataDir,job,'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'.slice(0,-1)+n,'png',actual.bytes);
+    const receiptPath=path.join(dataDir,'exports',job.id,artifact.id+'.verification.json');
+    const receipt=JSON.parse(await fs.readFile(receiptPath,'utf8'));
+    const updated=Buffer.from(JSON.stringify({...receipt,request:{imageGeneration:actual.provenance}}));
+    await fs.writeFile(receiptPath,updated);
+    figures.push({...artifact,verificationHash:hash(updated)});
+  }
+  const markdown=await saveArtifact(dataDir,job,'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2','md',
+    Buffer.from(md.replace('## 原型图\n','## 菜单\n\n[[PROTOTYPE:menu]]\n\n## 列表\n\n[[PROTOTYPE:list]]\n')));
+  const files=[markdown,...figures];
+  await store.transact(s=>Object.assign(s.jobs[0],{status:'completed',result:alignedPrdResult,reportFiles:files,
+    reportReviews:Object.fromEntries(files.map(f=>[f.id,{status:'accepted',verificationHash:f.verificationHash}]))}));
+  await workspace.publisher.deliver(questionId);
+  assert.equal((await store.read()).questions[questionId].prd.delivery.phase,'delivered');
+  assert.deepEqual(blocks.map(b=>b.image?.token??b.block_id),['anchor1',figures[0].sha256,'heading2','anchor2',figures[1].sha256,'closing1']);
+  assert.equal(blocks[0].text.elements[0].text_run.content,'界面原型（拟议）');
 });

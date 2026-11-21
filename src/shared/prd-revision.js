@@ -21,6 +21,14 @@ export async function readPrdRevisionBaseline(dataDir, job, previous) {
   if (!prdDeliveryLink(previous) || previous.revision >= job.prd.revision) return null;
   const generation = previous.artifacts?.generation ?? previous.revision;
   const files = (job.reportFiles ?? []).filter(f => f.questionGeneration === generation);
+  if (Array.isArray(previous.artifacts?.prototypeIds)) {
+    const markdown = files.find(f => f.format === 'md' && f.id === previous.artifacts.markdownId);
+    const prototypes = previous.artifacts.prototypeIds.map(id => files.find(f => f.format === 'png' && f.id === id));
+    if (!markdown || prototypes.some(f => !f) ||
+      previous.digest !== prdIntentDigest([job.questionId,job.chatId,previous.revision,generation,markdown.sha256,...prototypes.map(f=>f.sha256)])) return null;
+    const { content } = await reportFile(dataDir,job.id,markdown);
+    return { markdown:content.toString('utf8') };
+  }
   for (const markdown of files.filter(f => f.format === 'md')) {
     for (const prototype of files.filter(f => f.format === 'png')) {
       if (previous.artifacts && (markdown.id !== previous.artifacts.markdownId || prototype.id !== previous.artifacts.prototypeId)) continue;

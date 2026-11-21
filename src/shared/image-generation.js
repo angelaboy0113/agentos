@@ -30,9 +30,10 @@ async function safeBytes(file,root=null){
  let p=path.parse(resolved).root;for(const part of resolved.slice(p.length).split(path.sep)){p=path.join(p,part);if((await lstat(p)).isSymbolicLink())throw failure('IMAGE_PATH','图片路径不能包含符号链接');}
  const handle=await open(resolved,'r');try{const a=await handle.stat(),b=await lstat(resolved);if(!a.isFile()||a.nlink!==1||a.ino!==b.ino||a.dev!==b.dev||await realpath(resolved)!==resolved)throw failure('IMAGE_PATH','图片必须是独立普通文件');const bytes=await handle.readFile(),after=await handle.stat();if(after.size!==a.size||after.mtimeMs!==a.mtimeMs)throw failure('IMAGE_PATH','图片读取时发生变化');return {bytes,mtimeMs:a.mtimeMs};}finally{await handle.close();}
 }
-export async function readPrdDesignReference(dataDir,job){
+export async function readPrdDesignReference(dataDir,job,referenceId){
+ if(job.prd?.inlinePrototypes && !/^[a-f0-9-]{36}$/.test(referenceId ?? '')) return;
  if(job.prd?.auto&&/^[A-Za-z0-9_-]+$/.test(job.id)&&Number.isSafeInteger(job.prd.revision)){
-  const dir=path.join(dataDir,'website-evidence',job.id),manifest=path.join(dir,'prd-'+job.prd.revision+'.json');
+  const dir=path.join(dataDir,'website-evidence',job.id),manifest=path.join(dir,'prd-'+job.prd.revision+(job.prd.inlinePrototypes?'-'+referenceId:'')+'.json');
   let receipt;
   try{receipt=JSON.parse((await safeBytes(manifest)).bytes);}catch(error){if(error.code!=='ENOENT')throw error;}
   if(receipt?.capture==='live-page-v1'){

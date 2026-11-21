@@ -21,11 +21,13 @@ export async function savePrdDesignReference(dataDir, job, item) {
  if(!/^https?:\/\//.test(item.pageUrl??'')||!job.projectId||!(job.originProfile??job.agentProfile))throw new Error('Invalid PRD screenshot scope');
  await websiteEvidenceFile(dataDir,job.id,item);
  const dir=path.join(dataDir,'website-evidence',job.id);
- const target=path.join(dir,'prd-'+job.prd.revision+'.json');
+ const referenceId=item.name.slice(0,-4);
+ const target=path.join(dir,'prd-'+job.prd.revision+(job.prd.inlinePrototypes?'-'+referenceId:'')+'.json');
  const temp=path.join(dir,item.name+'.ref');
  await writeFile(temp,JSON.stringify({capture:'live-page-v1',jobId:job.id,questionId:job.questionId,projectId:job.projectId,
   profile:job.originProfile??job.agentProfile,environment:job.sourceEnvironment,revision:job.prd.revision,item}),{mode:0o600,flag:'wx'});
  await rename(temp,target);
+ return referenceId;
 }
 export class WebsiteEvidenceDelivery {
  constructor(context){this.context=context;this.workers=new Map();this.closed=false;}
