@@ -1,3 +1,4 @@
+import { prdBusinessWait, prdFinalContentIssue } from '../shared/prd-workspace.js';
 import {createDocuments,documentFailureResult} from '../shared/document-artifacts.js';
 import {validateHandoff,enforceHandoff} from './harness.js';
 import {reportFile} from '../shared/report-files.js';
@@ -41,12 +42,16 @@ export function prdPrototypeRevision(job,result,gate) {
 // A partial analysis may need its first artifact constructed before the ordinary
 // handoff can verify it. Never waive unrelated gate failures or final checks.
 export async function prepareDocumentHandoff(job,result,workspace,{dataDir,emit=async()=>{},createFiles=createDocuments}){
- result=await bindReviewedReportArtifacts(job,result,dataDir);
+ result=await bindReviewedReportArtifacts(job,prdBusinessWait(job,result),dataDir);
  let current=job,gate=await validateHandoff(current,result,workspace,{dataDir});
  const candidate=prdPrototypeRevision(job,result,gate);
  const materializable=candidate||gate.issues.every(issue=>issue==='部分分析必须有可核验工件、已通过的检查及明确证据缺口');
  if(job.taskIntent==='analysis'&&result.documentRequests?.length&&materializable){
   try{
+   if(job.prd?.businessFinal)for(const request of result.documentRequests){
+    const issue=request.format==='md'&&prdFinalContentIssue(request.content);
+    if(issue)throw Object.assign(Error(issue),{code:'PRD_FINAL_CONTENT'});
+   }
    const files=await createFiles(dataDir,job,result.documentRequests,{onProgress:event=>emit({type:'progress',...event})});
    if(candidate&&files.some(f=>f.sha256===candidate.sha256))throw Object.assign(Error('修订原型与待修订文件一致'),{code:'PRD_IMAGE_UNCHANGED'});
    if(candidate)result={...result,reportReviewRequired:true,handoff:{...result.handoff,

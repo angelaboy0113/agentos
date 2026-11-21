@@ -6,7 +6,7 @@ import { reportFile } from '../shared/report-files.js';
 import { readPrdDesignReference } from '../shared/image-generation.js';
 import { previousPrdDelivery, prdHighlightChanges, readPrdRevisionBaseline } from '../shared/prd-revision.js';
 import { reportEligible } from '../shared/report-acceptance.js';
-import { prdDocumentTitle, prdIntentDigest } from '../shared/prd-workspace.js';
+import { prdBusinessAligned, prdDocumentTitle, prdFinalContentIssue, prdIntentDigest } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
 import { currentUserQuestion } from '../shared/user-request-scope.js';
 import { questionJob, publishQuestion } from './questions.js';
@@ -150,6 +150,10 @@ export class PrdCloudDelivery {
         await save('authorization_required', { notice: '已保留稿件，等待配置指定飞书账号与本群授权。' });
         return;
       }
+      if (!prdBusinessAligned(job, job.result)) {
+        await save('artifacts_missing', { notice: '业务口径尚未确认齐全，本轮未发布。请在当前卡片补充已确认的规则。' });
+        return;
+      }
       if (files.some(f => !f)) {
         await save('artifacts_missing', { notice: '完整交付仍缺少已核验的正文或原型图。如需补充原型依据，可填写这张需求卡。' });
         return;
@@ -178,6 +182,11 @@ export class PrdCloudDelivery {
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
         .map(a => a.source.sha256);
       const raw = content.toString('utf8');
+      const issue = job.prd.businessFinal && prdFinalContentIssue(raw);
+      if (issue) {
+        await save('artifacts_missing', { notice: issue });
+        return;
+      }
       const baseline = previous ? await readPrdRevisionBaseline(dir, job, previous).catch(() => null) : null;
       const body = prdMarkdown(raw, { prototypeHash: files[1].sha256, referenceHashes });
       const markdown = prdHighlightChanges(baseline, body);
@@ -203,7 +212,7 @@ export class PrdCloudDelivery {
           }
           await save('creating', { publisherProfile:config.profile, inlineHighlights:hasHighlights });
           const created = await call(['docs', '+create', '--as', 'user', '--parent-position', 'my_library',
-            '--doc-format', 'markdown', '--title', prdDocumentTitle(q, revision), '--content', '-'], { input: markdown, timeoutMs: 90_000 });
+            '--doc-format', 'markdown', '--title', prdDocumentTitle(q, revision, job.prd.businessFinal), '--content', '-'], { input: markdown, timeoutMs: 90_000 });
           await save('created', documentIdentity(created));
         }
         const doc = delivery.token;

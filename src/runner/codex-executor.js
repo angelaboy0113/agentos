@@ -1,4 +1,4 @@
-import { prdGuidance } from '../shared/prd-workspace.js';
+import { prdBusinessWait, prdGuidance } from '../shared/prd-workspace.js';
 import { readPrdRevisionBaseline, revisionBody } from '../shared/prd-revision.js';
 import {pendingPartialReportReview} from '../shared/report-acceptance.js';
 import {countAnswerOnly} from '../shared/count-answer.js';
@@ -128,7 +128,7 @@ export async function executeJob(job, config, emit, adapters = {}) {
   if(sourceSync)job={...job,sourceReferenceScope:sourceSync,sourceEvidenceReceipts:generated.sourceEvidenceReceipts??[]};
   // Normalize a reliable blocked/wait result to partial before restoring prior
   // environment records; otherwise blocked model output drops earlier evidence.
-  const scopedResult = preserveEnvironmentEvidence(job, assessInvestigation(job, generated));
+  const scopedResult = preserveEnvironmentEvidence(job, assessInvestigation(job, prdBusinessWait(job, generated)));
   const rawResult = normalizeSelfContinuation(job,requireComparisonContinuation(job,project,assessInvestigation(job, preserveAnalysisGaps(job, scopedResult))));
   let sourceVerificationMs=0;
   if (sourceSync) {

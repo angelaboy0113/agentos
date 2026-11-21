@@ -1,3 +1,4 @@
+import { prdBusinessAligned } from '../shared/prd-workspace.js';
 import{sourceCommitMetadataArtifact}from './source-commit-metadata.js';
 import{sourceReferenceArtifact}from './source-reference.js';
 import{requiresTabularFile}from '../shared/count-answer.js';
@@ -142,6 +143,7 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
     && result.investigation?.goals?.some(goal => goal.id === QUESTION_GOAL_ID)
     && !h.checks.some(check => check?.id === QUESTION_GOAL_ID && check.required && check.status === 'passed' && nonempty(check.evidence)))
     issues.push('原问题验收项缺少通过依据');
+  if (result.outcome === 'ready' && !prdBusinessAligned(job, result)) issues.push('PRD 业务口径尚缺逐项确认依据');
   if (['ready', 'partial'].includes(result.outcome)) {
     // A read-only partial result may identify who must provide missing evidence.
     // This is not approval, completion, or permission to perform that role's work.

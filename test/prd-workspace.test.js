@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
+import { prdBusinessAligned, prdFinalContentIssue, prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
 import { prdHighlightChanges } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
@@ -25,7 +25,7 @@ const chat = 'oc_team';
 const owner = 'ou_owner';
 const profile = 'knowledge-ltx';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2l8AAAAASUVORK5CYII=', 'base64');
-const md = '# 订单补贴状态\n\n**评审稿**\n\n|系统|影响|\n|---|---|\n|LTX|展示|\n|TPM|状态来源|\n\n## 原型图\n';
+const md = '# 订单补贴状态\n\n## 摘要\n\n订单人员可直接查看**补贴状态**。\n\n## 业务分工\n\n|系统|影响|\n|---|---|\n|LTX|展示|\n|TPM|状态来源|\n\n## 原型图\n';
 
 test('PRD publisher removes byte-matched prototype and input image duplicates from Markdown', () => {
   const source = Buffer.concat([png, Buffer.from([0])]);
@@ -387,6 +387,39 @@ async function saveArtifact(dataDir, job, id, format, bytes, screenshot, generat
   return { ...item, verificationHash: hash(receipt) };
 }
 
+const alignedPrdResult = {
+  outcome: 'ready',
+  investigation: { status: 'complete', goals: [{ id: 'original-question', required: true, status: 'verified' }] },
+  handoff: { checks: [{ id: 'prd-business-alignment', required: true, status: 'passed', evidence: '发起人确认仅在订单详情显示状态' }] },
+};
+
+test('unanswered PRD decisions return to the form before creating files', async t => {
+  const { store, send, dataDir } = await fixture(t, () => assert.fail('No cloud writes'));
+  await send('om_waiting', '我要做一个 PRD：订单详情显示状态');
+  const [job] = (await store.read()).jobs;
+  const needed = '状态以订单记录还是审批结果为准？';
+  const result = { ...alignedPrdResult, summary: needed, finalMessage: needed,
+    documentRequests: [{ format: 'md', content: md }],
+    investigation: { ...alignedPrdResult.investigation, blocker: { kind: 'user_input', needed, evidence: '初稿列了两个来源' } },
+    handoff: { artifacts: [], risks: [], returnTo: 'none', checks: [] } };
+  const prepared = await prepareDocumentHandoff(job, result, dataDir, {
+    dataDir, createFiles: () => assert.fail('Unanswered business decisions cannot create a final file'),
+  });
+  assert.equal(prepared.result.outcome, 'needs_clarification');
+  assert.equal(prepared.result.investigation.blocker.needed, needed);
+  assert.equal(prepared.result.investigation.goals[0].status, 'open');
+  assert.equal(prdBusinessAligned(job, prepared.result), false);
+  assert.equal(prdBusinessAligned(job, alignedPrdResult), true);
+});
+
+test('PRD final body starts with a prose summary and excludes QA and development sections', () => {
+  assert.equal(prdFinalContentIssue(md), null);
+  assert.match(prdFinalContentIssue('# 订单跟踪\n\n## 摘要\n\n## 业务规则'), /摘要/);
+  for (const text of ['## 验收标准', '## 待确认事项', '## 研发实现', '## 版本记录', '|编号|测试用例|']) {
+    assert.match(prdFinalContentIssue(md + '\n' + text), /移除/);
+  }
+});
+
 test('cross-system PRD delivers styled cloud review draft as the owner with native table/image and scoped editable ACL', async t => {
   const calls = [];
   let image = false;
@@ -416,7 +449,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   };
   const { store, workspace, send, dataDir } = await fixture(t, cli);
   const { questionId } = await send('om_start', '我要写 PRD：LTX 订单详情增加 TPM 补贴状态');
-  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
+  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; });
   const exportJob = (await store.read()).jobs[0];
   const screenshot = await saveScreenshot(dataDir, exportJob);
   assert.match(prdGuidance(exportJob), /提交一个 md 和一个 png/);
@@ -427,7 +460,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   await store.transact(s => {
     const j = s.jobs[0];
     j.status = 'completed';
-    j.result = { outcome: 'ready' };
+    j.result = alignedPrdResult;
     j.reportFiles = files;
     j.reportReviews = Object.fromEntries(files.map(f => [f.id, { status: 'accepted', verificationHash: f.verificationHash }]));
     s.questions[questionId].prd.delivery = { revision: exportJob.prd.revision, phase: 'artifacts_missing',
@@ -456,7 +489,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
     saveArtifact(dataDir,next,'report-99999999-9999-9999-9999-999999999992','png',png,secondScreenshot),
   ]);
   await store.transact(s=>{
-    const j=s.jobs[0];j.status='completed';j.result={outcome:'ready'};
+    const j=s.jobs[0];j.status='completed';j.result=alignedPrdResult;
     j.reportFiles.push(...revised);
     for(const f of revised)j.reportReviews[f.id]={status:'accepted',verificationHash:f.verificationHash};
   });
@@ -476,14 +509,14 @@ test('missing owner authorization never creates a document or expands sharing', 
     return { data: { open_id: 'ou_wrong_account' } };
   });
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
-  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
+  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; });
   const j = (await store.read()).jobs[0];
   const screenshot = await saveScreenshot(dataDir, j);
   const files = await Promise.all([
     saveArtifact(dataDir, j, 'report-33333333-3333-3333-3333-333333333333', 'md', Buffer.from(md)),
     saveArtifact(dataDir, j, 'report-44444444-4444-4444-4444-444444444444', 'png', png, screenshot),
   ]);
-  await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: { outcome: 'ready' }, reportFiles: files }); });
+  await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: alignedPrdResult, reportFiles: files }); });
   await workspace.publisher.deliver(questionId);
   assert.equal((await store.read()).questions[questionId].prd.delivery.phase, 'authorization_required');
 });
@@ -497,14 +530,14 @@ test('an ungranted document scope leaves a retryable draft before any create req
     assert.fail('Document creation must wait for user consent');
   });
   const { questionId } = await send('om_start', '我要做PRD：新增状态');
-  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = { outcome: 'ready' }; });
+  await store.transact(s => { s.jobs[0].status = 'completed'; s.jobs[0].result = alignedPrdResult; });
   const [job] = (await store.read()).jobs;
   const screenshot = await saveScreenshot(dataDir, job);
   const files = await Promise.all([
     saveArtifact(dataDir, job, 'report-55555555-5555-5555-5555-555555555555', 'md', Buffer.from(md)),
     saveArtifact(dataDir, job, 'report-66666666-6666-6666-6666-666666666666', 'png', png, screenshot),
   ]);
-  await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: { outcome: 'ready' }, reportFiles: files }); });
+  await store.transact(s => { Object.assign(s.jobs[0], { status: 'completed', result: alignedPrdResult, reportFiles: files }); });
   await workspace.publisher.deliver(questionId);
   assert.deepEqual(calls, ['api', 'auth']);
   assert.equal((await store.read()).questions[questionId].prd.delivery.phase, 'authorization_required');
@@ -549,7 +582,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
@@ -575,7 +608,7 @@ test('Feishu delivery does not accept a prototype made without the current scree
     saveArtifact(dataDir,job,'report-77777777-7777-7777-7777-777777777777','md',Buffer.from(md)),
     saveArtifact(dataDir,job,'report-88888888-8888-8888-8888-888888888888','png',png),
   ]);
-  await store.transact(s=>Object.assign(s.jobs[0],{status:'completed',result:{outcome:'ready'},reportFiles:files}));
+  await store.transact(s=>Object.assign(s.jobs[0],{status:'completed',result:alignedPrdResult,reportFiles:files}));
   await workspace.publisher.deliver(questionId);
   assert.match((await store.read()).questions[questionId].prd.delivery.notice,/真实目标页面截图/);
 });
