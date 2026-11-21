@@ -91,7 +91,9 @@ export async function validateHandoff(job, result, workspace, {dataDir} = {}) {
         verifiedArtifacts.push({kind:item.kind,namespace:'task-working-evidence',path:'task-artifacts/'+taskRelative,sourceJobId:job.id,sha256:file.sha256,bytes:file.bytes.length});
         continue;
       }
-      const registered = item.kind === 'report' && job.reportFiles?.find(f => item.path === f.filename || item.path === f.id);
+      const registered = job.reportFiles?.find(f => (item.path === f.filename || item.path === f.id)
+        && (item.kind === 'report' || item.kind === 'prd' && job.prd?.auto === true
+          && f.kind === 'document' && f.format === 'md' && f.sourceJobId === job.id));
       if (registered) {
         if (!dataDir) throw new Error('REPORT_LOCATION');
         if (job.questionGeneration !== undefined && registered.questionGeneration !== undefined && job.questionGeneration !== registered.questionGeneration) throw new Error('REPORT_GENERATION');

@@ -159,7 +159,8 @@ export class PrdCloudDelivery {
       const ready = [], waiting = new Map();
       for (const q of Object.values(state.questions ?? {})) {
         if (!q.prd || q.withdrawnAt) continue;
-        const job = questionJob(state,q.id), phase = q.prd.delivery?.phase;
+        const job = questionJob(state,q.id);
+        const phase = q.prd.delivery?.revision === job?.prd?.revision ? q.prd.delivery?.phase : undefined;
         if (job?.status !== 'completed' || job.result?.outcome !== 'ready' || job.prd?.exportRevision !== job.prd?.revision) continue;
         if (phase === 'authorization_required' && job.prd.auto) {
           const config = this.publisherFor(q, job.prd.revision);

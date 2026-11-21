@@ -1,3 +1,7 @@
+## 1.153.7
+
+- Resolve PRD handoff labels against verified same-task Markdown. Recover the current PRD revision independently from the previously delivered document.
+
 ## 1.153.6
 
 - Require visible result rows for PRD list captures, except for deliberate empty-state views. Preserve actual row structure and standard state styling with visibly labeled synthetic cell values.

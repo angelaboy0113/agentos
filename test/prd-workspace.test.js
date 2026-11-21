@@ -999,3 +999,35 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   assert.deepEqual(blocks.map(b=>b.image?.token??b.block_id),['anchor1',figures[0].sha256,'heading2','anchor2',figures[1].sha256]);
   assert.equal(blocks[0].text.elements[0].text_run.content,'界面原型（拟议）');
 });
+
+test('registered Markdown may be handed off as a PRD without looking in the source checkout', async t => {
+  const { dataDir } = await fixture(t);
+  const workspace=path.join(dataDir,'source-fixture');
+  await fs.mkdir(workspace,{recursive:true});
+  const { validateHandoff } = await import('../src/runner/harness.js');
+  const job={id:'JOB-prd-handoff',questionGeneration:2,prd:{auto:true,revision:2}};
+  const bytes=Buffer.from('# PRD\n\nBusiness requirement.');
+  const id='report-00000000-0000-4000-8000-000000000001';
+  job.reportFiles=[{...await saveArtifact(dataDir,job,id,'md',bytes),sourceJobId:job.id}];
+  const result={outcome:'partial',handoff:{artifacts:[{kind:'prd',path:id+'.md'}],checks:[{id:'original-question',required:true,status:'passed',evidence:'Verified Markdown'}],risks:['Prototype pending'],returnTo:'none'}};
+  const probe={...job,stage:'developer',taskIntent:'analysis',questionId:'q'};
+  const pass=await validateHandoff(probe,result,workspace,{dataDir});
+  assert.deepEqual(pass.issues,[]);
+  assert.equal(pass.verifiedArtifacts[0].fileId,id);
+  for(const other of [{...probe,questionGeneration:3},{...probe,prd:undefined},{...probe,id:'other-job'}]){
+    assert((await validateHandoff(other,result,workspace,{dataDir})).issues.length);
+  }
+});
+
+test('publisher startup recovers a completed revision even when the preceding revision was delivered', async () => {
+  const q={id:'q',prd:{delivery:{phase:'delivered',revision:1}}};
+  const job={questionId:'q',status:'completed',result:{outcome:'ready'},prd:{revision:2,exportRevision:2,auto:true}};
+  const delivery=new PrdCloudDelivery({store:{read:async()=>({questions:{q},jobs:[job]})}},null);
+  const resumed=[];
+  delivery.wake=id=>resumed.push(id);
+  await delivery.recover();
+  assert.deepEqual(resumed,['q']);
+  q.prd.delivery.revision=2;
+  await delivery.recover();
+  assert.deepEqual(resumed,['q']);
+});
