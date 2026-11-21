@@ -47,7 +47,7 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
      const candidate=JSON.parse((await safeBytes(path.join(dir,prior))).bytes);
      const sourceCacheKey=job.analysisSourceSnapshot?.cacheKey;
      const visualPolicy=candidate.item?.visualPolicy;
-     if((visualPolicy==='brand-layout-v4'||!job.prd.nativeUiCapture&&['brand-layout-v2','brand-layout-v3'].includes(visualPolicy))
+     if((visualPolicy==='brand-layout-v5'||!job.prd.nativeUiCapture&&['brand-layout-v2','brand-layout-v3','brand-layout-v4'].includes(visualPolicy))
        && (!job.prd.reviewBasis || !sourceCacheKey || candidate.sourceCacheKey===sourceCacheKey))receipt=candidate;
     }
    }

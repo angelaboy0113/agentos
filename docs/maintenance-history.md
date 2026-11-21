@@ -1,3 +1,7 @@
+## 1.153.6
+
+- Require visible result rows for PRD list captures, except for deliberate empty-state views. Preserve actual row structure and standard state styling with visibly labeled synthetic cell values.
+
 ## 1.153.5
 
 - Allow PRDs to obtain visual evidence independently from explicitly authorized related application websites. Bind each capture to its target site, original task, and current read scope.

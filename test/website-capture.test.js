@@ -54,3 +54,40 @@ test('PRD captures a real browser PNG only for the confirmed visible target',asy
  assert.equal(framed.designReference.pageUrl,pane.url);
  assert.ok(framed.designReference.bytes>100);
 });
+
+test('PRD list captures require actual rows and replace sensitive cells without flattening state', async t => {
+ const driver=await chromium.launch({headless:true});
+ t.after(()=>driver.close());
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'prd-list-evidence-'));
+ t.after(()=>rm(dir,{recursive:true,force:true}));
+ const page=await driver.newPage({viewport:{width:800,height:450}});
+ const browser=new WebsiteBrowser(dir);
+ browser.loginStatus=async()=>({loginRequired:false});
+ browser.snapshot=async()=>({controls:[]});
+ const job={id:'prd-list',prd:{auto:true,inlinePrototypes:true}};
+ const url='https://example.test/activity';
+ const capture=(args={})=>browser.screenshot({page,job},{url,targetText:'活动查询',...args});
+ const html=(cells)=>`<h1>活动查询</h1><input aria-label="活动编号"><button>查询</button>
+ <div class="ant-table">
+ <table style="width:100%;table-layout:fixed"><thead><tr><th>活动编号</th><th>客户名称</th><th>活动状态</th></tr></thead></table>
+ <table style="width:100%;table-layout:fixed"><tbody>${cells}</tbody></table></div>`;
+ const empty='<tr class="ant-table-placeholder"><td colspan="3">没有数据</td></tr>';
+ await page.route(url,route=>route.fulfill({contentType:'text/html;charset=utf-8',body:html(empty)}));
+ await page.goto(url);
+ const initial=await capture();
+ assert.equal(initial.pageStatus,'list_requires_rows');
+ assert.equal(initial.designReference,undefined);
+ assert.equal((await capture({emptyState:true})).designReference.tableCapture.visibleRows,0);
+ await page.locator('tbody').evaluate(box=>{
+  box.innerHTML='<tr><td>PRD-PRIVATE-A</td><td>PRIVATE CUSTOMER A</td><td><span style="color:red;background:#fee">审批中</span></td></tr>';
+ });
+ const populated=await capture();
+ assert.deepEqual(populated.designReference.tableCapture,{tables:1,visibleRows:1,sampleFields:2,preservedStates:1});
+ assert.deepEqual(populated.designLayout.samples.map(x=>x.text),['ACT-DEMO-001','示例单位 001']);
+ assert(populated.designLayout.controls.some(c=>c.text==='审批中'&&c.color==='rgb(255, 0, 0)'));
+ assert.doesNotMatch(JSON.stringify(populated),/PRD-PRIVATE-A|PRIVATE CUSTOMER A/);
+ await page.locator('td').nth(0).evaluate(cell=>{cell.textContent='PRD-PRIVATE-B';});
+ await page.locator('td').nth(1).evaluate(cell=>{cell.textContent='PRIVATE CUSTOMER B';});
+ assert.equal((await capture()).designReference.sha256,populated.designReference.sha256);
+ assert.equal(await page.locator('td').evaluateAll(cells=>cells.some(cell=>cell.getAttributeNames().some(name=>name.includes('agentos-label')))),false);
+});

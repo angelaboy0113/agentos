@@ -8,12 +8,64 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
   const sections=[...document.querySelectorAll('header, nav, aside, [role="menu"], table, [role="table"], [role="grid"], [role="dialog"], [role="tabpanel"], form, footer')]
     .map(element=>({kind:element.matches('[role=dialog]')?'dialog':element.matches('[role=tabpanel]')?'tabpanel':element.matches('[role=table],[role=grid]')?'table':element.tagName.toLowerCase(),...bounds(element)}))
     .filter(visible).slice(0,40);
-  const controls=[], placeholders=[], assets=[], glyphs=[], backgrounds=[], brandRegions=[];
+  const controls=[], placeholders=[], assets=[], glyphs=[], backgrounds=[], brandRegions=[], samples=[];
   const protect = ({x,y,width,height})=>{
     const left=Math.max(0,x),top=Math.max(0,y),right=Math.min(innerWidth,x+width),bottom=Math.min(innerHeight,y+height);
     if(right>left&&bottom>top)brandRegions.push({x:left/innerWidth,y:top/innerHeight,width:(right-left)/innerWidth,height:(bottom-top)/innerHeight});
   };
   if (!attribute) return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions};
+  const gridSelector='table,[role="grid"],[role="table"],.el-table,.ant-table,.vxe-table';
+  const cellSelector='td,th[scope=row],[role="rowheader"],[role="cell"],[role="gridcell"]';
+  const headerSelector='th:not([scope=row]),[role="columnheader"]';
+  const rowSelector='tr,[role="row"]';
+  const grids=[...document.querySelectorAll(gridSelector)].filter(grid=>{
+    if(grid.parentElement?.closest(gridSelector)||grid.closest(secretSelector))return false;
+    return visible(bounds(grid))&&[...grid.querySelectorAll(headerSelector)].some(header=>{
+      const box=bounds(header);
+      if(!visible(box))return false;
+      const x=Math.min(innerWidth-1,Math.max(0,box.x+box.width/2));
+      const y=Math.min(innerHeight-1,Math.max(0,box.y+box.height/2));
+      return header.contains(document.elementFromPoint(x,y));
+    });
+  });
+  const rowCells=new Map();
+  let visibleRows=0;
+  for(const grid of grids){
+    const headers=[...grid.querySelectorAll(headerSelector)].map(el=>el.textContent.trim());
+    for(const row of grid.querySelectorAll(rowSelector)){
+      if(row.closest('thead')||row.matches('.ant-table-placeholder,.ant-table-measure-row,.el-table__empty-block')||!visible(bounds(row)))continue;
+      const cells=[...row.children].filter(cell=>cell.matches(cellSelector));
+      if(!cells.length||cells.length===1&&headers.length>1&&Number(cells[0].getAttribute('colspan')??cells[0].getAttribute('aria-colspan'))>1)continue;
+      if(!cells.some(cell=>cell.textContent.trim()&&!/^(?:暂无数据|没有数据|无数据|No data|No results)$/i.test(cell.textContent.trim())))continue;
+      visibleRows++;
+      let column=0;
+      for(const cell of cells){
+        const ariaColumn=Number(cell.getAttribute('aria-colindex'));
+        const header=headers[ariaColumn>0?ariaColumn-1:column]??'';
+        rowCells.set(cell,{header,number:visibleRows});
+        column+=Number(cell.getAttribute('colspan'))||1;
+      }
+    }
+  }
+  const tableCapture={tables:grids.length,visibleRows,sampleFields:0,preservedStates:0};
+  const states=new Set(('启用 停用 已启用 已停用 有效 无效 待审核 待审批 审批中 审核中 待执行 执行中 进行中 已执行 已审核 已审批 已发布 已批准 已生效 未生效 未开始 已完成 未完成 待提交 草稿 已提交 已驳回 已拒绝 已关闭 已取消 已撤销 已过期 已结束 已上账 待上账 已匹配 未匹配 可申请 已结案 Active Inactive Pending Approved Rejected Completed Draft Open Closed').split(' '));
+  const sampleValue=({header,number})=>{
+    const code=String(number).padStart(3,'0');
+    if(/序号|^#$/i.test(header))return String(number);
+    if(/手机号|电话|联系号码|phone|mobile/i.test(header))return '000-0000-0000';
+    if(/邮箱|email/i.test(header))return 'example@example.invalid';
+    if(/订单.*(?:号|码)|order.*(?:id|no|number)/i.test(header))return 'ORDER-DEMO-'+code;
+    if(/活动.*(?:号|码)|activity.*(?:id|code)/i.test(header))return 'ACT-DEMO-'+code;
+    if(/编号|编码|代码|识别码|号$|码$|\b(?:id|code|number)\b/i.test(header))return 'DEMO-'+code;
+    if(/金额|额度|余额|单价|amount|price/i.test(header))return '100.00';
+    if(/日期|时间|date|time/i.test(header))return '2026-01-01';
+    if(/数量|件数|quantity/i.test(header))return String(number+1);
+    if(/活动名|活动标题/i.test(header))return '示例活动 '+code;
+    if(/客户|经销商|门店|供应商|组织|customer|dealer/i.test(header))return '示例单位 '+code;
+    if(/账号|申请人|联系人|负责人|创建人|姓名|owner|user/i.test(header))return '示例人员 '+code;
+    return '示例 '+code;
+  };
+  const sampled=new Set();
   const terms=new Set(('首页 工作台 菜单 基础信息 订单管理 订单列表 订单详情 人工订单 手工订单 代客下单 运营管理 渠道任务 活动管理 财务管理 策略管理 访销管理 门店管理 门店审核 门店未审核 商品管理 预算管理 促销管理 促销活动 活动列表 活动详情 审批管理 订单编号 商品名称 商品编码 经销商 经销商名称 组织架构 订单状态 审批状态 状态 名称 编号 类型 数量 规格 单位 操作 创建时间 更新时间 开始时间 结束时间 查询 搜索 重置 清空 新增 添加 编辑 删除 查看 详情 保存 提交 确定 取消 关闭 返回 导入 导出 上一页 下一页 标题 序号 更新日志 发货状态 DMS订单编号 SAP订单编号 DMS订单号 SAP订单号 经销商编码 订单审批记录 订单审批 订单拆单 经销商下单 订单返点量 渠道量小店返量 保证金下单检查白名单 收起导航 选项管理 新建 更多 搜索菜单或功能 页 前往 暂无数据 今天 最近7天') .split(' '));
   const fieldTerms = new Set(('方案管理 方案列表 方案详情 方案名称 方案编号 方案状态 方案类型 申请人 申请日期 申请金额 预算来源 预算组织 下发预算 可用额度 可用金额 已用额度 占用额度 分配额度 分配总额 分配金额 活动大类 费用类型 使用组织 分配组织 生效日期 失效日期 审核人 提交人 操作时间 优惠类型 补贴金额 补贴状态 促销规则').split(' '));
   for(const label of brandedLabels??[])terms.add(label);
@@ -49,7 +101,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     return target && safeShape(target) && [...target.querySelectorAll('*')].every(e=>safeShape(e)&&e.localName!=='use');
   };
   const approvedIcon=(element,rect)=>element.matches('svg')&&rect.width<=48&&rect.height<=48
-    && !element.closest('td,[role=cell],[class*="avatar" i]')
+    && !element.closest(cellSelector+', [class*="avatar" i]')
     && [...element.querySelectorAll('*')].every(node=>safeShape(node)&&(node.localName!=='use'||localShape(node)));
   for(const element of document.querySelectorAll('body *')){
     if(element.closest(secretSelector)||element.matches('script,style,textarea,option,[contenteditable]'))continue;
@@ -68,7 +120,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       if(brandImage)protect(geometry);
       continue;
     }
-    if(geometry.width<=48&&geometry.height<=48 && !element.closest('td,[role=cell],[class*="avatar" i]')){
+    if(geometry.width<=48&&geometry.height<=48 && !element.closest(cellSelector+', [class*="avatar" i]')){
       const icon=getComputedStyle(element,'::before');
       if(/^(?:"[\uE000-\uF8FF]"|'[\uE000-\uF8FF]')$/.test(icon.content)&&/icon/i.test(icon.fontFamily)){
         element.setAttribute(attribute+'-glyph',String(glyphs.length));
@@ -85,7 +137,24 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     if(direct.length!==1)continue;
     const text=direct[0].textContent.trim();
     const rowAction=element.closest('button,a,[role=button]')&&['查看','详情','编辑','删除'].includes(text);
-    if(element.closest('td,[role=cell]')&&!rowAction)continue;
+    const cell=element.closest(cellSelector);
+    const row=rowCells.get(cell);
+    const visibleState=row&&/状态|进度|\bstatus\b/i.test(row.header)&&states.has(text);
+    if(cell&&!rowAction&&!visibleState){
+      if(row&&!sampled.has(cell)&&!element.closest('button,[role="button"]')){
+        sampled.add(cell);
+        element.setAttribute(attribute+'-sample',String(samples.length));
+        const ink=document.createRange();
+        ink.selectNodeContents(direct[0]);
+        const inkBox=bounds(ink);
+        const lineHeight=parseFloat(style.lineHeight)||parseFloat(style.fontSize)*1.2;
+        samples.push({text:sampleValue(row),color:style.color,ink:style.webkitTextFillColor||style.color,
+          left:Math.max(0,inkBox.x-geometry.x),
+          top:Math.max(0,inkBox.y-geometry.y-Math.round(Math.max(0,lineHeight-inkBox.height)/2))});
+      }
+      continue;
+    }
+    if(visibleState)tableCapture.preservedStates++;
     const brandTitle=element.closest('[class*="app-logo" i],[class*="brand-name" i],[class*="logo-title" i],.shell-brand')
       && geometry.y<100&&/^[\p{L}\p{M}][\p{L}\p{M} .&-]{1,24}$/u.test(text);
     const normalized = text.replace(/\s+/g,'').replace(/[:：]$/,'');
@@ -94,7 +163,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     const actionLabel = element.closest('button,[role="button"]')&&/^(?:查看|关闭|返回|刷新|导出|查询|搜索|展开|收起|确认|取消|应用|下载)[\p{L} ]{1,16}$/u.test(text);
     // Cells, selection values and account badges stay covered. Ordinary
     // menu, collapse and table-header labels keep their original typography.
-    if(!terms.has(normalized)&&!brandTitle&&!(
+    if(!terms.has(normalized)&&!brandTitle&&!visibleState&&!(
       ((fieldLabel||semanticChrome||actionLabel)&&staticLabel(text)) || (element.closest('h1,h2,h3,[role="heading"]')&&fieldTerms.has(normalized))))continue;
     const range=document.createRange();
     range.selectNodeContents(direct[0]);
@@ -105,5 +174,6 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     controls.push({text,...geometry,color:style.color,ink:style.webkitTextFillColor||style.color,
       fontFamily:style.fontFamily,fontSize:style.fontSize});
   }
-  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions};
+  tableCapture.sampleFields=samples.length;
+  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,samples,tableCapture};
 }
