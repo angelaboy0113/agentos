@@ -91,6 +91,7 @@ export class InvestigationDirectTools {
       const out={sourceHistory:result.sourceHistory,sourceEvidenceReceipts:result.sourceEvidenceReceipts};this.sourceResults.set(key,out);return out;
     }
     if(name==='agentos_environment_open') {
+      if(this.waiting)return {state:'waiting',result:this.waiting};
       if(this.channel)throw new Error('Close the current environment before opening another');
       if(typeof args.website!=='boolean')throw new Error('Invalid environment request');
       const query=parse(args.request);

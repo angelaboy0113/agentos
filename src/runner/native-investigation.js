@@ -17,6 +17,12 @@ export const presentNativeToolResult=(store,tool,result)=>store.present(tool,res
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const failure=code=>Object.assign(new Error(code),{code});
 
+// A host-owned wait retains the active read grant. A model's proposed next
+// source is still unexecuted and cannot supersede it while that grant is held.
+const preserveEnvironmentWait=(result,waiting)=>({...result,...waiting,
+  environmentQuery:null,websiteQuery:null,sourceEnvironmentQuery:null,sourceHistoryQuery:null,environmentSetup:null});
+
+
 // A tool response is acknowledged only after it is durable. A crash between
 // execution and receipt publication is uncertain, never permission to replay.
 export class InvestigationCallJournal {
@@ -125,7 +131,7 @@ export async function runNativeInvestigation(options,adapters={}) {
       await emit({type:'progress',phase:'native_pending_tools',message:'只读工具仍在执行，等待真实结果后在同一会话继续核验'});
       await toolQueue;
       const completed=deferredResults.splice(0);deferredTools.clear();
-      if(direct.waiting){result={...result,...direct.waiting};break;}
+      if(direct.waiting)break;
       hostContinuations++;
       input=[{type:'text',text:'刚才结束时仍有已接受的工具调用正在执行；现在已完成并持久化，结果如下。不要重复执行，也不要把本机工具运行中说成需要用户配合。保留原需求与范围，继续本会话审阅真实结果、制作和交付；有真实外部缺口才等待。\n'+JSON.stringify(completed)}];
       active=true;continue;
@@ -164,7 +170,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     active=true;
     }
     if(direct.channel){await direct.call('agentos_environment_close',{summary:'外层结束前保存已有证据；本来源尚未声明完成。',complete:false});result={...result,outcome:'partial',summary:'已有取证已保存，仍需完成原问题核验'};}
-    if(direct.waiting)result={...result,...direct.waiting};
+    if(direct.waiting)result=preserveEnvironmentWait(result,direct.waiting);
     return {...result,threadId,executionEngine:nativeInvestigationEngine,model:runtime.model,reasoningEffort:runtime.reasoningEffort,artifactPolicy,hostCurrentJob:direct.job,sourceHistory:direct.lastSourceHistory??null,sourceEvidenceReceipts:direct.sourceReceipts,nativeTiming:{totalMs:Date.now()-began,toolCalls,modelSessions:1,modelTurns,hostContinuations,environmentModelSessions:0}};
   } catch(error) {if(threadId)error.threadId=threadId;throw error;}
   finally {active=false;clearInterval(progressTimer);app.off('notification',observe);try{await direct.close();}finally{await app.close();}}

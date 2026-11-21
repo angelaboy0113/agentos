@@ -41,6 +41,17 @@ test('real browser navigates framework/ARIA menus, retains concrete refs and cap
  // DOM order changes must not redirect the original input ref onto another input.
  await page.evaluate(()=>{const x=document.createElement('input');x.placeholder='搜索其它';x.id='decoy';document.body.prepend(x);});
  snapshot=await browser.run(job,e,'browser_search',{ref:query.ref,text:'synthetic-private-value'});assert.equal(await page.locator('#query').inputValue(),'synthetic-private-value');assert.equal(await page.locator('#decoy').inputValue(),'');
+ // Some controlled inputs restore state after a bulk edit but accept normal
+ // keystrokes. Retry the field edit only, with no search submission.
+ await page.locator('#query').evaluate(el=>{
+   el.addEventListener('input',event=>{if(event.data?.length>1)el.value='previous';});
+ });
+ snapshot=await browser.run(job,e,'browser_search',{ref:snapshot.controls.find(c=>c.label==='搜索名称').ref,text:'next filter'});
+ assert.equal(await page.locator('#query').inputValue(),'next filter');
+ assert.equal(await page.locator('#decoy').inputValue(),'');
+ await page.locator('#query').evaluate(el=>el.addEventListener('input',()=>{el.value='previous';}));
+ await assert.rejects(browser.run(job,e,'browser_search',{ref:snapshot.controls.find(c=>c.label==='搜索名称').ref,text:'rejected'}),e=>e.code==='BROWSER_CONTENT_CHANGED');
+ snapshot=await browser.run(job,e,'browser_snapshot');
  await assert.rejects(browser.run(job,e,'browser_search',{ref:snapshot.controls.find(c=>c.label==='查询').ref,text:'x'}),e=>e.code==='BROWSER_CONTROL_TYPE');
  const stale=snapshot.controls.find(c=>c.label==='搜索名称').ref;await page.locator('#query').evaluate(el=>el.remove());await assert.rejects(browser.run(job,e,'browser_search',{ref:stale,text:'x'}),e=>e.code==='BROWSER_REF_STALE');
  await page.evaluate(()=>{const button=document.createElement('button');button.textContent='查看';button.onclick=()=>{document.querySelector('#view').textContent='订单详情';};document.body.append(button);});

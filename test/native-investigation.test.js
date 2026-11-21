@@ -85,7 +85,9 @@ test('two environments use existing grant and persistence endpoints, no environm
 });
 test('login and failed reads preserve formal waiting instead of publishing successful environment evidence',async()=>{
   const calls=[];const direct=new InvestigationDirectTools({job,config:{},emit:async()=>{}},{post:async route=>{calls.push(route);return {planned:true,job};},execute:async()=>({outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:{saved:true},finalMessage:'login'})});
-  const result=await direct.call('agentos_environment_open',{request:'{}',website:false});assert.equal(result.state,'waiting');assert.equal(direct.waiting.browserLoginRequired,true);assert.equal(calls.length,1);await direct.close();
+  const result=await direct.call('agentos_environment_open',{request:'{}',website:false});assert.equal(result.state,'waiting');assert.equal(direct.waiting.browserLoginRequired,true);
+  assert.equal((await direct.call('agentos_environment_open',{request:'{}',website:false})).state,'waiting');
+  assert.equal(calls.length,1);await direct.close();
 });
 test('rejected scope never creates an environment executor',async()=>{
   let executions=0;const direct=new InvestigationDirectTools({job},{post:async()=>({planned:false,job,diagnostic:{code:'APPROVAL_REQUIRED'}}),execute:async()=>executions++});
@@ -279,4 +281,18 @@ test('catalog fallback selects only the original project and tier and skips a so
  tools.job={...scoped,originalQuestion:'只看代码，不要查日志'};
  assert.deepEqual(await tools.untriedLogSources(result),[]);
  assert.deepEqual(await tools.untriedLogSources({...result,investigation:{status:'wait',blocker:{kind:'approval',needed:'待核对日志'}}}),[]);
+});
+
+test('host login wait discards a stale model environment handoff',async t=>{
+ const directory=await temp(t),app=new EventEmitter();
+ const waiting={outcome:'needs_clarification',browserLoginRequired:true,browserCheckpoint:{saved:true},finalMessage:'login'};
+ const direct={job,sourceReceipts:[],waiting,openInitial:async()=>({state:'waiting',result:waiting}),call:async()=>assert.fail('must not reopen while waiting'),close:async()=>{}};
+ app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.request=async()=>({thread:{id:'wait-thread'}});app.close=async()=>{};
+ app.turn=async()=>({text:JSON.stringify({outcome:'needs_clarification',finalMessage:'change source',
+  environmentQuery:{environmentId:'db-next'},websiteQuery:{tier:'prd'},sourceEnvironmentQuery:{environmentId:'sit'}})});
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async()=>{}},{app,direct,runtime:async()=>({})});
+ assert.equal(result.browserLoginRequired,true);
+ assert.deepEqual(result.browserCheckpoint,{saved:true});
+ assert.equal(result.environmentQuery,null);assert.equal(result.websiteQuery,null);assert.equal(result.sourceEnvironmentQuery,null);
+ assert.equal(result.finalMessage,'login');
 });

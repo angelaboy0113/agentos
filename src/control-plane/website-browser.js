@@ -363,7 +363,20 @@ export class WebsiteBrowser {
   try{
    if(tool==='browser_key')await ref.el.press(args.key,{timeout:8000});
    else if(tool==='browser_scroll')await ref.el.evaluate((el,direction)=>{let p=el;const horizontal=['left','right'].includes(direction);while(p&&!(horizontal?p.scrollWidth>p.clientWidth:p.scrollHeight>p.clientHeight))p=p.parentElement;(p??document.scrollingElement).scrollBy(horizontal?(direction==='left'?-600:600):0,horizontal?0:(direction==='up'?-600:600));},args.direction);
-   else if(tool==='browser_search')await ref.el.fill(args.text,{timeout:8000});
+   else if(tool==='browser_search'){
+    const textControl=await ref.el.evaluate(el=>el.tagName==='TEXTAREA'||el.tagName==='INPUT'&&['text','search','tel','url','email'].includes(el.type));
+    await ref.el.fill(args.text,{timeout:8000});
+    if(textControl&&await ref.el.inputValue({timeout:8000})!==args.text){
+     // Controlled inputs may ignore insertText and only reconcile after native
+     // delete/typing events. Stay on this exact approved field, never submit.
+     if(!/[\x00-\x1f\x7f]/.test(args.text)){
+      await ref.el.selectText({timeout:8000});
+      await ref.el.press('Backspace',{timeout:8000});
+      if(args.text)await ref.el.type(args.text,{timeout:8000});
+     }
+     if(await ref.el.inputValue({timeout:8000})!==args.text)throw new BrowserInputError('BROWSER_CONTENT_CHANGED','页面没有保留本次输入，查询尚未提交。请先查看最新页面快照，避免按旧条件查询。');
+    }
+   }
    else if(tool==='browser_select')await ref.el.selectOption(args.value,{timeout:8000});
    else {
     const link=await ref.el.evaluate(el=>{const a=el.closest('a[href]');return a?.target==='_blank'?a.href:null;});
