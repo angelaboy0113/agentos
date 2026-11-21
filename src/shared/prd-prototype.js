@@ -23,10 +23,13 @@ export async function producePrdPrototype(dataDir, job, content, options) {
     throw layoutError('请选择 existing-page 或 new-page 并给出对应内容');
   }
   const areas = composite ? spec.areas : [];
+  const shifts = inline ? spec.shifts ?? [] : [];
   const withinScreenshot = a => a && [a.x,a.y,a.width,a.height].every(n => typeof n === 'number' && Number.isFinite(n))
     && a.x >= 0 && a.y >= 0 && a.width > 0 && a.height > 0 && a.x+a.width <= 1 && a.y+a.height <= 1;
-  if (!Array.isArray(areas) || composite && (!areas.length || areas.some(a =>
+  if (!Array.isArray(shifts) || shifts.some(s=>!withinScreenshot(s)||typeof s.dy!=='number'||s.dy<=0||s.dy>=s.height)
+    || !Array.isArray(areas) || composite && (!areas.length || areas.some(a =>
     !withinScreenshot(a) || (inline && !withinScreenshot(a.sample))
+    || (a.inset!==undefined&&(!Number.isFinite(a.inset)||a.inset<0||a.inset>=1))
     || ((!inline || a.text !== undefined) && (typeof a.text !== 'string' || !a.text.trim() || /[\r\n]/.test(a.text)))
   ) || !inline && areas.reduce((sum,a) => sum+a.width*a.height,0) >= 0.75)) {
     throw layoutError('改动区需要在实际截图内填写 x、y、width、height（0 到 1）和拟新增的界面文案');
@@ -42,7 +45,7 @@ export async function producePrdPrototype(dataDir, job, content, options) {
     const context = await browser.newContext({ acceptDownloads: false });
     await context.route('**/*', r => r.abort());
     const page = await context.newPage();
-    const output = await page.evaluate(async ({ original, proposal, areas }) => {
+    const output = await page.evaluate(async ({ original, proposal, areas, shifts }) => {
       async function load(src) {
         const picture = new Image();
         picture.src = src;
@@ -68,6 +71,14 @@ export async function producePrdPrototype(dataDir, job, content, options) {
         ctx.drawImage(design,w+gap,header,design.naturalWidth*scale,design.naturalHeight*scale);
       }
       ctx.drawImage(source,0,header);
+      // Copy only the scrollable remainder of the existing menu. The new
+      // row is painted separately in the slot opened by this shift.
+      for (const shift of shifts) {
+        const x=Math.round(shift.x*w), y=Math.round(shift.y*h), width=Math.round(shift.width*w);
+        const dy=Math.round(shift.dy*h), height=Math.round(shift.height*h)-dy;
+        if(dy<1||height<1)throw Error('标注区域太小');
+        ctx.drawImage(source,x,y,width,height,x,y+dy,width,height);
+      }
       areas.forEach((area,index) => {
         const x = Math.round(area.x*w), y = Math.round(area.y*h);
         const width = Math.min(w-x,Math.round(area.width*w)), height = Math.min(h-y,Math.round(area.height*h));
@@ -82,7 +93,7 @@ export async function producePrdPrototype(dataDir, job, content, options) {
           ctx.clip();
           ctx.drawImage(source,sx,sy,sw,sh,x,y,width,height);
           if (area.text) {
-            const inset = Math.max(5, Math.min(12, Math.round(width * 0.08)));
+            const inset = area.inset===undefined?Math.max(5,Math.min(12,Math.round(width*0.08))):Math.round(width*area.inset);
             const fontSize = Math.min(parseFloat(area.sample.fontSize) || 14, height - 8);
             const edgeWidth = Math.max(1, Math.round(sw * 0.04));
             const font = area.sample.fontFamily || 'system-ui, sans-serif';
@@ -109,7 +120,7 @@ export async function producePrdPrototype(dataDir, job, content, options) {
         ctx.fillText(label,x+5,y+height/2+5);
       });
       return canvas.toDataURL().split(',')[1];
-    }, { original:encode(base), proposal:proposed && encode(proposed.bytes), areas });
+    }, { original:encode(base), proposal:proposed && encode(proposed.bytes), areas, shifts });
     bytes = Buffer.from(output,'base64');
   } catch (error) {
     if (/标注区域太小|标注文字超出/.test(error.message)) throw layoutError('请调整截图上的局部改动区域或缩短标注文案');

@@ -23,7 +23,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       if(src.protocol==='data:') return element.matches('[class*="logo" i],[class*="brand" i] img,[class*="logo" i] img')
         && /^data:image\/(?:png|webp|gif);base64,/i.test(src.href);
       return src.origin===location.origin && !src.search && !src.hash
-        && /(?:^|[\/_.-])(?:logo|brand|favicon)(?:[\/_.-]|$)/i.test(src.pathname)
+        && /(?:^|[\/_.-])(?:logo(?:img|image|icon|mark|type)?|brand(?:logo|mark)?|favicon)(?:[\/_.-]|$)/i.test(src.pathname)
         && /\.(?:png|svg|gif|webp|jpe?g|ico)$/i.test(src.pathname);
     }catch{return false;}
   };
@@ -58,15 +58,17 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       element.setAttribute(attribute+'-placeholder',String(placeholders.length));
       placeholders.push(getComputedStyle(element,'::placeholder').color);
     }
-    if(element.childElementCount||element.closest('[class*="avatar" i]'))continue;
-    const text=element.textContent.trim();
+    if(element.closest('[class*="avatar" i]'))continue;
+    const direct=[...element.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim());
+    if(direct.length!==1)continue;
+    const text=direct[0].textContent.trim();
     const rowAction=element.closest('button,a,[role=button]')&&['查看','详情','编辑','删除'].includes(text);
     if(element.closest('td,[role=cell]')&&!rowAction)continue;
-    const brandTitle=element.closest('[class*="app-logo" i],[class*="brand-name" i],[class*="logo-title" i]')
+    const brandTitle=element.closest('[class*="app-logo" i],[class*="brand-name" i],[class*="logo-title" i],.shell-brand')
       && geometry.y<100&&/^[\p{L}\p{M}][\p{L}\p{M} .&-]{1,24}$/u.test(text);
-    if(!terms.has(text)&&!brandTitle)continue;
+    if(!terms.has(text.replace(/\s+/g,'').replace(/[:：]$/,''))&&!brandTitle)continue;
     const range=document.createRange();
-    range.selectNodeContents(element);
+    range.selectNodeContents(direct[0]);
     const box=bounds(range);
     if(!visible(box))continue;
     const positioned=style.position!=='static';

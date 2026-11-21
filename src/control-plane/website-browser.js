@@ -484,7 +484,7 @@ export class WebsiteBrowser {
    await chmod(file,0o600);
    if(!await targetVisible().catch(()=>false)){await rm(file,{force:true});throw new BrowserInputError('BROWSER_CONTENT_CHANGED','截图期间目标已变化，请重新打开目标界面。');}
    return {designReference:{name,sha256:createHash('sha256').update(pixels).digest('hex'),bytes:pixels.length,
-    capturedAt:new Date().toISOString(),pageUrl:args.url},designLayout:layout,rows:[],stage:'已截取真实目标页面脱敏截图，designLayout 提供实际视口及结构坐标'};
+    capturedAt:new Date().toISOString(),pageUrl:args.url,visualPolicy:'brand-layout-v2'},designLayout:layout,rows:[],stage:'已截取真实目标页面脱敏截图，designLayout 提供实际视口及结构坐标'};
   }
   const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:s.page.frames().map(frame=>frame.locator(screenshotSecretSelector)),maskColor:'#6b7280',...(readiness.status==='ready'?{}:{style:'body::after{content:"页面加载尚未完成 · 现场截图";position:fixed;top:8px;right:12px;z-index:2147483647;background:#fff3cd;color:#704d00;padding:6px 10px;border:1px solid #e6ce81;border-radius:4px;font:13px sans-serif;pointer-events:none}'})});await chmod(file,0o600);
   return {...await this.snapshot(s),...(readiness.status==='ready'?{}:{pageStatus:'loading',partial:true}),stage:readiness.status==='ready'?'已保存稳定网页截图':'已保存加载未完成的现场截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),readiness},rows:[],note:'已等待接口、加载指示和页面稳定；正常业务字段保留，凭据及显式敏感区用灰色遮挡。readiness.status为ready仅代表渲染稳定，不代表业务正常；其它状态是加载未完成的现场证据。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};

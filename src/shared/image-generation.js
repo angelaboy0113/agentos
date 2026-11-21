@@ -41,7 +41,10 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
     const names=await readdir(dir).catch(e=>{if(e.code==='ENOENT')return [];throw e;});
     const prior=names.find(name=>name.endsWith('-'+referenceId+'.json')&&/^prd-\d+-/.test(name)
       && Number(name.split('-')[1])<job.prd.revision);
-    if(prior)receipt=JSON.parse((await safeBytes(path.join(dir,prior))).bytes);
+    if(prior){
+     const candidate=JSON.parse((await safeBytes(path.join(dir,prior))).bytes);
+     if(candidate.item?.visualPolicy==='brand-layout-v2')receipt=candidate;
+    }
    }
   }
   if(receipt?.capture==='live-page-v1'){

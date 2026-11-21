@@ -756,10 +756,10 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   for (const [n,key] of ['menu','list'].entries()) {
     const color = n ? '#f3f4f6' : '#e9f1ff';
     const url = 'https://test.example/'+key;
-    await page.route('https://test.example/assets/logo.svg',route=>route.fulfill({contentType:'image/svg+xml',
+    await page.route('https://test.example/assets/logoImg.8f1f5.svg',route=>route.fulfill({contentType:'image/svg+xml',
       body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>'}));
     await page.route(url,route=>route.fulfill({contentType:'text/html; charset=utf-8',
-      body:'<header><img src="/assets/logo.svg"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
+      body:'<header><img src="/assets/logoImg.8f1f5.svg"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
         +'<button style="padding:8px 20px;background:'+color+'">查询</button><div id="business">AA123456</div>'}));
     await page.goto(url);
     const capture = () => website.screenshot({page,job},{url,targetText:'查询'});
