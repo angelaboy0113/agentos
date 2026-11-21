@@ -23,3 +23,46 @@ test('static JS fallback HTML is diagnosed rather than accepted as deployment co
 
 test('navigation-context loss retries an idempotent read after scope recheck, never an unrelated fault',async()=>{let waits=0,reads=0,checks=0;const b=new WebsiteBrowser('/unused',{},async()=>{checks++;return true;}),s={job:{id:'one'},waiting:false,initialTarget:'https://app.test/detail',page:{waitForLoadState:async()=>waits++}};assert.equal(await b.readAcrossNavigation(s,async()=>{if(++reads===1)throw Error('Execution context was destroyed, most likely because of a navigation');return 'ready';}),'ready');assert.equal(reads,2);assert.equal(checks,1);assert.equal(waits,1);await assert.rejects(b.readAcrossNavigation(s,async()=>{throw Error('authentication denied');}));assert.equal(waits,1);});
 test('base login keeps the application landing page; explicit task target restores once',async()=>{let reads=0;const b=new WebsiteBrowser('/unused',{},async()=>true),s={job:{id:'login'},initialTarget:'https://app.test/',environment:{baseUrl:'https://app.test/'},waiting:true,sawLogin:true,restoreTarget:false,blockedLoginReads:new Set(),page:{url:()=> 'https://app.test/dashboard',evaluate:async()=>{reads++;return {loginRequired:false,pageReady:true,loginState:'ready'};}}};await b.loginStatus(s);assert.equal(s.reloadAfterLogin,false);s.restoreTarget=true;s.waiting=true;s.initialTarget='https://app.test/detail?object=1';await b.loginStatus(s);assert.equal(s.reloadAfterLogin,true);assert.equal(reads,2);});
+
+test('a quiet authenticated startup automatically opens its reviewed read-only list and supports detail inspection',async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'web-read-landing-'));
+ let writes=0;
+ const server=http.createServer((req,res)=>{
+  if(req.method==='POST'){writes++;res.end('{}');return;}
+  res.setHeader('content-type','text/html;charset=utf-8');
+  if(req.url==='/app/login'){res.end('<input type=password>');return;}
+  res.end(`<script>
+  function show(){if(location.hash==='#/records/list'){document.body.innerHTML='<h1>审核列表</h1><button>查看详情</button>';document.querySelector('button').onclick=()=>document.body.innerHTML='<h1>记录详情</h1>';}}
+  addEventListener('DOMContentLoaded',show);addEventListener('hashchange',show);
+  </script><body></body>`);
+ });
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP landing.test 127.0.0.1']})};
+ const b=new WebsiteBrowser(dir,driver);
+ t.after(async()=>{await b.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});
+ const baseUrl=`http://landing.test:${server.address().port}/app/`;
+ const target=baseUrl+'#/records/list';
+ const e={kind:'website',projectId:'warehouse',tier:'prd',baseUrl,queries:{investigate:{readRecoveryTarget:target}}};
+ const job={id:'cold',environmentAccess:{queryId:'investigate'}};
+ const s=await b.run(job,e,'connection');
+ assert.equal(s.recovery.kind,'verified-read-landing');
+ assert.equal(s.url,target);
+ const detail=s.controls.find(c=>c.label==='查看详情');
+ assert.ok(detail);
+ assert.match((await b.run(job,e,'browser_click',{ref:detail.ref})).pageText,/记录详情/);
+ assert.equal((await b.run({...job,id:'auth',environmentAccess:{...job.environmentAccess,websiteTarget:baseUrl+'login'}},e,'connection')).loginRequired,true);
+ assert.equal(b.pages.get('auth').readLandingAttempt,undefined);
+ assert.equal(writes,0);
+});
+
+test('read-only recovery config rejects login, mutation, queries and another application',async()=>{
+ const {validateToolQuery}=await import('../src/shared/environment-tool-policy.js');
+ const baseUrl='https://app.test/app/';
+ const e={kind:'website',baseUrl};
+ const q={mode:'investigate',reviewed:true,browser:true,parameters:[{name:'purpose',type:'string'}]};
+ assert.equal(validateToolQuery(e,{...q,readRecoveryTarget:baseUrl+'#/orders/list'}),true);
+ for(const url of [baseUrl+'#/orders/create',baseUrl+'#/login',baseUrl+'#/orders/list?id=1',
+   'https://app.test/other/list','https://other.test/app/#/orders/list']){
+  assert.throws(()=>validateToolQuery(e,{...q,readRecoveryTarget:url}));
+ }
+});

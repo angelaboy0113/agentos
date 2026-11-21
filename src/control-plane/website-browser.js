@@ -16,7 +16,7 @@ import {BrowserInputError,validateBrowserTool,websitePageLocation,websitePageRou
 import { chromium } from 'playwright';
 import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteSessionKey, websiteNavigationTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, websiteImageResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteNavigationTarget, websiteReadRecoveryTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, websiteImageResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
 
 export function routePrdWebsiteBrowser(shared, isolated) {
  const browser=job=>job.prd?.auto?isolated:shared;
@@ -288,6 +288,33 @@ export class WebsiteBrowser {
   const operation=previous.catch(()=>{}).then(async()=>{if(tool!=='browser_frames'&&tool!=='browser_frame'&&tool!=='browser_recover'&&tool!=='browser_diagnostics'&&tool!=='browser_navigate')await assertWebsiteFrame(s);const result=await (['connection','browser_open','browser_snapshot','browser_read','browser_assets','browser_inspect','browser_frames'].includes(tool)?this.readAcrossNavigation(s,()=>this.perform(s,tool,args)):this.perform(s,tool,args));if(tool!=='browser_frames'&&tool!=='browser_recover'&&tool!=='browser_diagnostics'&&tool!=='browser_navigate')await assertWebsiteFrame(s);return result;});s.operation=operation;
   try{return await operation;}finally{if(s.operation===operation)s.operation=null;}
  }
+ async recoverReadLanding(s, login) {
+  const query = s.environment.queries?.[s.job.environmentAccess?.queryId];
+  if (!query?.readRecoveryTarget || login.loginState !== 'loading' || s.readLandingAttempt || s.lastReadAction
+    || s.currentReadTarget || s.blockedResources.size || s.resourceFailures.size) return login;
+  const target = websiteReadRecoveryTarget(query.readRecoveryTarget,s.environment.baseUrl,query.readEndpoints);
+  if (target === s.page.url() || target === s.initialTarget) return login;
+  const ready = await waitForCaptureReady(s,{timeoutMs:5000});
+  login = await this.loginStatus(s);
+  if (ready.status!=='blank_timeout' || login.loginState!=='loading' || s.pendingReads.size
+    || s.blockedResources.size || s.resourceFailures.size
+    || !await this.authorize(s.job,false,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'})) return login;
+
+  s.readLandingAttempt=target;
+  s.currentReadTarget=target;s.restoreTarget=true;
+  const documentStart=await s.page.evaluate(()=>performance.timeOrigin);
+  s.dom=null;s.frameRefs?.clear();
+  await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
+  login=await this.loginStatus(s);
+  // A hash-only change can leave the same stalled application shell in place.
+  // Reload the approved read view only when it has not started new reads.
+  if(login.loginState==='loading' && s.page.url()===target && !s.pendingReads.size
+    && await s.page.evaluate(()=>performance.timeOrigin)===documentStart){
+   await s.page.reload({waitUntil:'domcontentloaded',timeout:30000});
+  }
+  s.lastRecovery={at:new Date().toISOString(),kind:'verified-read-landing',target:websitePageLocation(target)};
+  return this.loginStatus(s);
+ }
  async perform(s,tool,args){
   if(tool==='browser_diagnostics')return websiteDiagnostics(s);
   if(tool==='browser_frames')return websiteFrames(s);
@@ -310,21 +337,24 @@ export class WebsiteBrowser {
    return {...await this.snapshot(s),...await this.loginStatus(s),navigation:{requested:websitePageLocation(target),requestedRoute:websitePageRoute(target),actual:websitePageLocation(s.page.url()),actualRoute:websitePageRoute(s.page.url()),targetMatched:s.page.url()===target,readOnly:true,documentChanged,...(documentChanged?s.lastReadDetach:{})}};
   }
   const blank=s.page.url()==='about:blank';
+  let login;
   if(blank||tool==='browser_recover'){
    if(!await this.authorize(s.job,s.waiting,{url:()=>s.initialTarget,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('当前任务没有有效恢复范围');
-   const status=blank?null:await this.loginStatus(s);
+   const status=blank?null:await this.recoverReadLanding(s,await this.loginStatus(s));
+   if(s.lastRecovery?.kind==='verified-read-landing')login=status;
    if(!blank&&status?.loginRequired)return {...status,stage:'页面在等待认证，沿用已有登录恢复；本次不重新提交凭据'};
-   if(blank||!status.pageReady&&!s.pendingReads.size&&!s.blockedResources.size&&!s.resourceFailures.size){s.dom=null;s.frameRefs?.clear();s.assets?.clear();s.observedScripts.clear();await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});s.lastRecovery={at:new Date().toISOString(),kind:blank?'blank-reopened':'quiet-empty-reloaded',target:websitePageLocation(s.currentReadTarget??s.initialTarget)};}
-   else if(!status.pageReady)return {stage:'保留当前加载与故障证据，尚未重复导航',pageStatus:'loading',partial:true,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size},next:s.pendingReads.size?'当前有读取进行中，检查后续快照，不重复点击或打开':'核对实际静态依赖或使用browser_assets继续部署源码取证；不把资源失败当作密码错误'};
+   if(!login&&(blank||status.loginState==='loading'&&!s.pendingReads.size&&!s.blockedResources.size&&!s.resourceFailures.size)){s.dom=null;s.frameRefs?.clear();s.assets?.clear();s.observedScripts.clear();await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});s.lastRecovery={at:new Date().toISOString(),kind:blank?'blank-reopened':'quiet-empty-reloaded',target:websitePageLocation(s.currentReadTarget??s.initialTarget)};}
+   else if(!login&&status.loginState==='loading')return {stage:'保留当前加载与故障证据，尚未重复导航',pageStatus:'loading',partial:true,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size},next:s.pendingReads.size?'当前有读取进行中，检查后续快照，不重复点击或打开':'核对实际静态依赖或使用browser_assets继续部署源码取证；不把资源失败当作密码错误'};
   }
   if(tool==='browser_assets')return readWebsiteAsset(s,args,this.authorize,this.publicFetch);
-  const login=await this.loginStatus(s);
+  login??=await this.loginStatus(s);
+  if(['connection','browser_open','browser_snapshot'].includes(tool))login=await this.recoverReadLanding(s,login);
   if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
   if(login.loginState==='access_denied')return {stage:'站点拒绝访问，业务页面未就绪',loginState:login.loginState,
    pageStatus:'access_denied',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),
    partial:true,pageText:'',controls:[],diagnostic:websiteDiagnostics(s),message:'查看同任务页面诊断中的实际受阻初始化请求或应用授权；拒绝页不能作为真实业务页面截图。'};
   if(tool==='browser_screenshot')return this.screenshot(s,args);
-  if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),partial:true,pageText:'',controls:[],message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
+  if(!login.pageReady)return {diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size,readOnly:true},loginState:login.loginState,stage:'页面尚未就绪',pageStatus:'loading',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),partial:true,pageText:'',controls:[],...(s.lastRecovery?{recovery:s.lastRecovery}:{}),message:'尚未取得可见业务内容，不能认定登录成功或页面正常。'};
   if(s.reloadAfterLogin){s.reloadAfterLogin=false;await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded'});}
   if(tool==='browser_read')return this.readVisible(s,args);
   if(tool==='connection'||tool==='browser_open'||tool==='browser_snapshot'||tool==='browser_recover')return {...await this.snapshot(s),...(s.lastRecovery?{recovery:s.lastRecovery}:{})};

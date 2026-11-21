@@ -22,6 +22,15 @@ export function websiteNavigationTarget(input,base,readEndpoints=[]) {
   return u.href;
  }catch{throw reject();}
 }
+export function websiteReadRecoveryTarget(input, base, readEndpoints=[]) {
+ const target = websiteNavigationTarget(input, base, readEndpoints);
+ const url = new URL(target);
+ if (target !== input || url.search || url.hash.includes('?') ||
+   /(?:^|\/)(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[\/#]|$)/i.test(url.pathname + url.hash)) {
+  throw new Error('空白页恢复仅允许本应用固定、无参数的已审核只读业务页');
+ }
+ return target;
+}
 export const websiteSessionKey = (project,tier,url) => 'web-'+createHash('sha256').update(JSON.stringify([project,tier,new URL(websiteUrl(url)).origin])).digest('hex').slice(0,24);
 // Registration identifies the requested application entry; session storage remains origin-scoped.
 export const websiteKey = (project,tier,url) => 'web-entry-'+createHash('sha256').update(JSON.stringify([project,tier,websiteUrl(url)])).digest('hex').slice(0,24);
