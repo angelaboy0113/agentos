@@ -22,7 +22,9 @@ export async function readPrdRevisionBaseline(dataDir, job, previous) {
   const generation = previous.artifacts?.generation ?? previous.revision;
   const files = (job.reportFiles ?? []).filter(f => f.questionGeneration === generation);
   if (Array.isArray(previous.artifacts?.prototypeIds)) {
-    const markdown = files.find(f => f.format === 'md' && f.id === previous.artifacts.markdownId);
+    const markdownGeneration = previous.artifacts.markdownGeneration ?? generation;
+    const markdown = job.reportFiles?.find(f => f.format === 'md' && f.id === previous.artifacts.markdownId
+      && f.questionGeneration === markdownGeneration && (f.sourceJobId ?? job.id) === job.id);
     const prototypes = previous.artifacts.prototypeIds.map(id => files.find(f => f.format === 'png' && f.id === id));
     if (!markdown || prototypes.some(f => !f) ||
       previous.digest !== prdIntentDigest([job.questionId,job.chatId,previous.revision,generation,markdown.sha256,...prototypes.map(f=>f.sha256)])) return null;

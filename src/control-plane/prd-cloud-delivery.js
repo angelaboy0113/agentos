@@ -19,6 +19,19 @@ const prototypeAnchors = body => [...body.matchAll(/^\[\[PROTOTYPE:([a-z][a-z0-9
 const marker = key => 'AGENTOSPRDFIGURE-'+key;
 const paragraph = block => block?.text?.elements?.map(e => e.text_run?.content ?? '').join('').trim();
 
+function reviewedPrdMarkdown(job, generation) {
+  const { handoffGate, reportAssessment, reportInspections } = job.result;
+  if (!handoffGate?.passed || reportAssessment?.decision !== 'deliver' || reportAssessment.coverage !== 'complete'
+    || reportAssessment.issues?.length) return null;
+  const selected = reportAssessment.deliverables ?? [];
+  return job.reportFiles?.findLast(file => file.format === 'md' && (file.sourceJobId ?? job.id) === job.id
+    && Number.isSafeInteger(file.questionGeneration) && file.questionGeneration < generation && reportEligible(job,file)
+    && selected.some(item=>item.fileId===file.id && item.evidence?.trim())
+    && reportInspections?.some(item=>item.status==='verified' && item.contentAudit?.structure==='passed'
+      && item.binding?.sourceJobId===job.id && item.binding.fileId===file.id && item.binding.sha256===file.sha256
+      && item.binding.verificationHash===file.verificationHash));
+}
+
 async function documentChildren(call, doc) {
   const items = [];
   let pageToken;
@@ -174,22 +187,29 @@ export class PrdCloudDelivery {
     const inline = job.prd.inlinePrototypes === true;
     const eligible = (job.reportFiles ?? []).filter(file => file.questionGeneration === q.generation && reportEligible(job, file));
     const prototypes = eligible.filter(f => f.format === 'png');
-    const files = [eligible.findLast(f => f.format === 'md'), ...(inline ? prototypes : [prototypes.at(-1)])];
+    const currentMarkdown = eligible.findLast(f => f.format === 'md');
+    const reviewedMarkdown = inline && !currentMarkdown ? reviewedPrdMarkdown(job,q.generation) : null;
+    const files = [currentMarkdown ?? reviewedMarkdown, ...(inline ? prototypes : [prototypes.at(-1)])];
     const previous = previousPrdDelivery(q, revision);
     const digest = prdIntentDigest([id, q.chatId, revision, q.generation, ...files.map(f => f?.sha256)]);
     let delivery = q.prd.delivery?.revision === revision ? q.prd.delivery : { revision, digest, phase: 'pending' };
-    if (delivery.digest !== digest) return;
+    // Rebind only the pre-creation record from a missing current draft. Once
+    // cloud creation starts, the original digest remains a hard guard.
+    const missingBodyDigest = prdIntentDigest([id,q.chatId,revision,q.generation,undefined,...prototypes.map(f=>f.sha256)]);
+    const mayRebind = prior => reviewedMarkdown && prior?.phase === 'artifacts_missing' && !prior.token
+      && prior.digest === missingBodyDigest;
+    if (delivery.digest !== digest && !mayRebind(delivery)) return;
     const save = async (phase, values = {}) => {
       const changed = await store.transact(state => {
         const fresh = state.questions[id];
         if (fresh?.withdrawnAt || fresh.generation !== q.generation || questionJob(state, id)?.prd?.revision !== revision) throw Error('PRD_SCOPE_CHANGED');
         const prior = fresh.prd.delivery;
-        if (prior?.revision === revision && prior.digest !== digest) throw Error('PRD_ARTIFACT_CHANGED');
+        if (prior?.revision === revision && prior.digest !== digest && !mayRebind(prior)) throw Error('PRD_ARTIFACT_CHANGED');
         if (prior?.sentAt && prior.revision !== revision) {
           fresh.prd.deliveryHistory ??= {};
           fresh.prd.deliveryHistory[prior.revision] = prior;
         }
-        fresh.prd.delivery = { ...delivery, ...values, phase, updatedAt: new Date().toISOString() };
+        fresh.prd.delivery = { ...delivery, ...values, digest, phase, updatedAt: new Date().toISOString() };
         return fresh.prd.delivery;
       });
       delivery = changed;
@@ -313,6 +333,7 @@ export class PrdCloudDelivery {
           if (!items.some(m => m.member_id === q.chatId && m.perm === 'edit' && m.member_type === 'openchat')) throw Error('PRD_ACL_READBACK');
           await save('delivered', { sentAt: new Date().toISOString(), notice: '飞书评审稿已创建，本群成员可编辑。',
             artifacts:{ generation:q.generation, markdownId:files[0].id,
+              ...(reviewedMarkdown ? { markdownGeneration:reviewedMarkdown.questionGeneration } : {}),
               ...(inline ? { prototypeIds:files.slice(1).map(f => f.id) } : { prototypeId:files[1].id }) } });
         }
       } finally { await rm(cwd, { recursive: true, force: true }); }

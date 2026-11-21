@@ -737,6 +737,10 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   };
   const { store,send,dataDir,workspace } = await fixture(t,cli);
   const { questionId } = await send('om_inline','我想做一个需求，新增 LTX 菜单和 TPM 查询列表');
+  await store.transact(s=>{
+    s.questions[questionId].generation=2;
+    Object.assign(s.jobs[0].prd,{revision:2,exportRevision:2});
+  });
   const [job] = (await store.read()).jobs;
   const dir = path.join(dataDir,'website-evidence',job.id);
   const website = new WebsiteBrowser(dataDir);
@@ -783,13 +787,27 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     await fs.writeFile(receiptPath,updated);
     figures.push({...artifact,verificationHash:hash(updated)});
   }
-  const markdown=await saveArtifact(dataDir,job,'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2','md',
+  const markdown=await saveArtifact(dataDir,{...job,prd:{...job.prd,revision:1}},'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2','md',
     Buffer.from(md.replace('## 原型图\n','## 菜单\n\n[[PROTOTYPE:menu]]\n\n## 列表\n\n[[PROTOTYPE:list]]\n')));
   const files=[markdown,...figures];
   await store.transact(s=>Object.assign(s.jobs[0],{status:'completed',result:alignedPrdResult,reportFiles:files,
     reportReviews:Object.fromEntries(files.map(f=>[f.id,{status:'accepted',verificationHash:f.verificationHash}]))}));
   await workspace.publisher.deliver(questionId);
-  assert.equal((await store.read()).questions[questionId].prd.delivery.phase,'delivered');
+  const pending=(await store.read()).questions[questionId].prd.delivery;
+  assert.equal(pending.phase,'artifacts_missing');
+  assert.equal(blocks.length,0);
+  await store.transact(s=>{
+    s.jobs[0].result={...alignedPrdResult,handoffGate:{passed:true},
+      reportAssessment:{decision:'deliver',coverage:'complete',issues:[],
+        deliverables:[{fileId:markdown.id,evidence:'This revision reviewed the unchanged business text'}]},
+      reportInspections:[{status:'verified',contentAudit:{structure:'passed'},
+        binding:{sourceJobId:job.id,fileId:markdown.id,sha256:markdown.sha256,verificationHash:markdown.verificationHash}}]};
+  });
+  await workspace.publisher.deliver(questionId);
+  const delivered=(await store.read()).questions[questionId].prd.delivery;
+  assert.equal(delivered.phase,'delivered');
+  assert.equal(delivered.artifacts.markdownGeneration,1);
+  assert.notEqual(delivered.digest,pending.digest);
   assert.deepEqual(blocks.map(b=>b.image?.token??b.block_id),['anchor1',figures[0].sha256,'heading2','anchor2',figures[1].sha256,'closing1']);
   assert.equal(blocks[0].text.elements[0].text_run.content,'界面原型（拟议）');
 });
