@@ -1,3 +1,7 @@
+## 1.153.4
+
+- Preserve same-origin branding in explicit application logo slots even if the build renames the asset. Keep loaded logos protected during PRD image edits.
+
 ## 1.153.3
 
 PRD 截图保留真实导航、表头、标签及折叠区标题的原生文字样式。更新后的 PRD 不复用旧遮挡规则生成的截图，并按需要分别取全景和相关详情。

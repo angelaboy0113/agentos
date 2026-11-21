@@ -906,10 +906,11 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   for (const [n,key] of ['menu','list'].entries()) {
     const color = n ? '#f3f4f6' : '#e9f1ff';
     const url = 'https://test.example/'+key;
-    await page.route('https://test.example/assets/logoImg.8f1f5.svg',route=>route.fulfill({contentType:'image/svg+xml',
+    const logo = n ? 'wlBig.8f1f5.svg' : 'logoImg.8f1f5.svg';
+    await page.route('https://test.example/assets/'+logo,route=>route.fulfill({contentType:'image/svg+xml',
       body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>'}));
     await page.route(url,route=>route.fulfill({contentType:'text/html; charset=utf-8',
-      body:'<header><span class="brand-mark" style="display:inline-block;width:20px;height:20px;background-image:url(/assets/logoImg.8f1f5.svg)"></span><img src="/assets/logoImg.8f1f5.svg"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
+      body:'<header><span class="brand-mark" style="display:inline-block;width:20px;height:20px;background-image:url(/assets/'+logo+')"></span><img '+(n?'class="default-logo" ':'')+'src="/assets/'+logo+'"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
         +'<button style="padding:8px 20px;background:'+color+'">查询</button>'
         + '<nav><a>渠道经营复盘</a><span class="user-info">示例用户名</span></nav><div class="ant-collapse-header">例外处理</div>'
         + (n ? '<table><tr><th>分配金额</th></tr><tr><td id="business">AA123456</td></tr></table>'
@@ -920,7 +921,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     assert.equal(snapshot.designLayout.controls[0].text,'查询');
     assert.deepEqual(snapshot.designLayout.controls.map(control=>control.text),['查询','渠道经营复盘','例外处理',n?'分配金额':'预算来源：']);
     assert.doesNotMatch(JSON.stringify(snapshot.designLayout.controls),/DEMO-PRIVATE|AA123456|示例用户名/);
-    assert.equal(snapshot.designReference.visualPolicy,'brand-layout-v3');
+    assert.equal(snapshot.designReference.visualPolicy,'brand-layout-v4');
     assert.equal(snapshot.designLayout.assets.length,2);
     assert.equal(snapshot.designLayout.backgrounds.length,1);
     assert.equal(snapshot.designLayout.brandRegions.length,2);

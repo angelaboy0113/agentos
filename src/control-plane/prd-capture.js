@@ -23,22 +23,23 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
   const staticLabel = text => /^[\p{L}][\p{L}\p{M} /·&：:（）()—-]{0,43}$/u.test(text);
   const shapeTags=new Set(['path','g','use','circle','rect','line','polyline','polygon','ellipse','defs','clippath','symbol','title','desc']);
   const brandElement='[class*="logo" i],[class*="brand" i]';
+  const brandSlot='.default-logo,.app-logo,.brand-logo,.brand-mark,.site-logo,.header-logo,[data-role="app-logo"]';
   const isBrandBox = (element, rect) => rect.width<=360 && rect.height<=100 && rect.y<=150
     && element.closest('header,nav,aside,[role=banner],[role=navigation],[class*="header" i],'+brandElement)
     && !element.closest('[class*="avatar" i],[class*="user-info" i]');
-  const safeBrandUrl = raw => {
+  const safeBrandUrl = (raw,element) => {
     try {
       const src=new URL(raw,location.href);
       return src.origin===location.origin && !src.username && !src.password && !src.search && !src.hash
-        && /(?:^|[\/_.-])(?:logo(?:img|image|icon|mark|type)?|brand(?:logo|mark)?|favicon)(?:[\/_.-]|$)/i.test(src.pathname)
+        && (element.closest(brandSlot) || /(?:^|[\/_.-])(?:logo(?:img|image|icon|mark|type)?|brand(?:logo|mark)?|favicon)(?:[\/_.-]|$)/i.test(src.pathname))
         && /\.(?:png|svg|gif|webp|jpe?g|ico)$/i.test(src.pathname);
     }catch{return false;}
   };
   const approvedBrand = (element, rect) => {
-    if(!element.matches('img')||!isBrandBox(element,rect))return false;
+    if(!element.matches('img')||!element.complete||!element.naturalWidth||!isBrandBox(element,rect))return false;
     const src=element.currentSrc||element.src;
     return /^data:image\/(?:png|webp|gif);base64,/i.test(src)
-      ? Boolean(element.closest(brandElement)) : safeBrandUrl(src);
+      ? Boolean(element.closest(brandElement)) : safeBrandUrl(src,element);
   };
   const safeShape = node=>shapeTags.has(node.localName.toLowerCase())
     && ![...node.attributes].some(a=>/^(?:on|style)/i.test(a.name)||/url\s*\(/i.test(a.value));
@@ -56,7 +57,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     if(!visible(geometry)||style.visibility!=='visible')continue;
     const brandImage=approvedBrand(element,geometry);
     const background=style.backgroundImage.match(/^url\("([^"]+)"\)$/)?.[1];
-    if(background&&element.matches(brandElement)&&isBrandBox(element,geometry)&&safeBrandUrl(background)){
+    if(background&&element.matches(brandElement)&&isBrandBox(element,geometry)&&safeBrandUrl(background,element)){
       element.setAttribute(attribute+'-background',String(backgrounds.length));
       backgrounds.push(background);
       protect(geometry);
