@@ -44,7 +44,8 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
     if(prior){
      const candidate=JSON.parse((await safeBytes(path.join(dir,prior))).bytes);
      const sourceCacheKey=job.analysisSourceSnapshot?.cacheKey;
-     if(candidate.item?.visualPolicy==='brand-layout-v2'
+     const visualPolicy=candidate.item?.visualPolicy;
+     if((visualPolicy==='brand-layout-v3'||!job.prd.nativeUiCapture&&visualPolicy==='brand-layout-v2')
        && (!job.prd.reviewBasis || !sourceCacheKey || candidate.sourceCacheKey===sourceCacheKey))receipt=candidate;
     }
    }

@@ -731,7 +731,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,reviewBasis:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,reviewBasis:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true,nativeUiCapture:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
@@ -909,18 +909,21 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     await page.route('https://test.example/assets/logoImg.8f1f5.svg',route=>route.fulfill({contentType:'image/svg+xml',
       body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>'}));
     await page.route(url,route=>route.fulfill({contentType:'text/html; charset=utf-8',
-      body:'<header><img src="/assets/logoImg.8f1f5.svg"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
+      body:'<header><span class="brand-mark" style="display:inline-block;width:20px;height:20px;background-image:url(/assets/logoImg.8f1f5.svg)"></span><img src="/assets/logoImg.8f1f5.svg"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
         +'<button style="padding:8px 20px;background:'+color+'">查询</button>'
+        + '<nav><a>渠道经营复盘</a><span class="user-info">示例用户名</span></nav><div class="ant-collapse-header">例外处理</div>'
         + (n ? '<table><tr><th>分配金额</th></tr><tr><td id="business">AA123456</td></tr></table>'
           : '<label for="budget">预算来源：</label><input id="budget" value="DEMO-PRIVATE"><div id="business">AA123456</div>')}));
     await page.goto(url);
     const capture = () => website.screenshot({page,job},{url,targetText:'查询'});
     const snapshot = await capture();
     assert.equal(snapshot.designLayout.controls[0].text,'查询');
-    assert.deepEqual(snapshot.designLayout.controls.map(control=>control.text),['查询',n?'分配金额':'预算来源：']);
-    assert.doesNotMatch(JSON.stringify(snapshot.designLayout.controls),/DEMO-PRIVATE|AA123456/);
+    assert.deepEqual(snapshot.designLayout.controls.map(control=>control.text),['查询','渠道经营复盘','例外处理',n?'分配金额':'预算来源：']);
+    assert.doesNotMatch(JSON.stringify(snapshot.designLayout.controls),/DEMO-PRIVATE|AA123456|示例用户名/);
+    assert.equal(snapshot.designReference.visualPolicy,'brand-layout-v3');
     assert.equal(snapshot.designLayout.assets.length,2);
-    assert.equal(snapshot.designLayout.brandRegions.length,1);
+    assert.equal(snapshot.designLayout.backgrounds.length,1);
+    assert.equal(snapshot.designLayout.brandRegions.length,2);
     const base = await fs.readFile(path.join(dir,snapshot.designReference.name));
     if (!n) {
       await page.locator('#business').evaluate(el=>{el.textContent='BB999999';});
