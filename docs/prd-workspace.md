@@ -25,3 +25,7 @@ Assistant 使用现有只读调查能力，按需核对本系统固定源码与�
 ## 验收与回退
 
 检查澄清 @ 的接收者、卡片提交、旧按钮拒绝、同话题同会话继续、多助手同事件去重、同系统同环境的视觉证据绑定与无导出指令时的交付。真实交付需回读用户身份、原生样式和表格、图片、群协作者编辑权限及卡片链接。回退先等待空闲，保留正在进行的 PRD 任务、文档链接和投递阶段记录，再关闭 pilot 配置并按原部署守卫回退代码。
+
+### Related application pages
+
+For a PRD spanning multiple applications, the original card and session stay with the receiving assistant. A reciprocal related project in the same group can expose a reviewed, registered website in the same runtime tier. Add its exact environment ID to the originating project’s `integrationPeerEnvironments` list for that project. The site must permit reading for the original user. Open the target entry from the task catalog and gather screenshots independently. Capture receipts retain the originating task and the target application, and recheck the current scope before prototype generation and delivery. Ordinary cross-system database investigations keep their existing rules.

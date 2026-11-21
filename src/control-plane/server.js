@@ -12,7 +12,7 @@ import {loadReceptionPolicy} from '../shared/reception-policy.js';
 import {cloudSheetTarget,readCloudSheet,CloudSheetError,registerCloudSheetInput,registerCloudDocumentInput,restoreCloudSheetInput} from '../shared/feishu-cloud-sheet.js';
 import {LongInvestigationNotices} from './long-investigation-notices.js';
 import {SuccessStickers} from './success-stickers.js';
-import{planTaskRead}from '../shared/integration-peers.js';
+import{assertTaskReadScope,loadIntegrationProjects,planTaskRead}from '../shared/integration-peers.js';
 import {pollModelCapacity}from './model-capacity-recovery.js';
 import {requestedSourceEnvironments} from '../shared/source-comparison.js';
 import {authorizeWebsiteRequest} from './website-authorization.js';
@@ -80,7 +80,7 @@ export async function createControlPlane(overrides = {}) {
     ? new LarkCliFeishuClient({ ...config.feishu, dataDir: config.dataDir })
     : new FeishuClient({ ...config.feishu, dataDir: config.dataDir }));
 
-  const authorizeBrowser = (initial,waiting,request)=>authorizeWebsiteRequest({store,projects},initial,waiting,request);
+  const authorizeBrowser = (initial,waiting,request)=>authorizeWebsiteRequest({store,projects,projectsFile:config.projectsFile},initial,waiting,request);
   const browserMode = process.env.AGENTOS_BROWSER_MODE ?? (process.platform === 'darwin' ? 'shared-chrome' : 'isolated');
   if (!['shared-chrome','isolated'].includes(browserMode)) throw new Error('Invalid AGENTOS_BROWSER_MODE');
   const isolated = new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser);
@@ -460,10 +460,12 @@ async function route(context) {
   if(request.method==='POST'&&websiteMatch){
     requireBearer(request,config.runnerToken,'runner');const body=await readJson(request);const job=await store.getJob(decodeURIComponent(websiteMatch[1]));
     if(job?.status!=='running'||!job.lease?.id||body.leaseId!==job.lease.id||body.runnerId!==job.lease.runnerId)return json(response,409,{error:'Stale or foreign Runner lease'});
-    const e=verifyApprovedPlan(await loadEnvironments(),job.environmentAccess??{});if(e.kind!=='website')throw new Error('Not a website grant');
+    const environments=await loadEnvironments(),plan=job.environmentAccess;
+    const e=verifyApprovedPlan(environments,plan??{});if(e.kind!=='website')throw new Error('Not a website grant');
+    if(e.projectId!==job.projectId)
+      assertTaskReadScope(await loadIntegrationProjects(config.projectsFile),job,environments,plan);
     if(body.tool==='browser_screenshot'&&!screenshotAvailable(job))throw new Error('当前原问题未要求截图交付');
     if(body.tool==='browser_screenshot'&&job.prd?.auto){
-      if(e.projectId!==job.projectId)throw new Error('原型参考须来自本需求对应系统');
       if(!job.sourceEnvironment)throw new Error('原型截图前须确认对应环境');
       assertSourceRuntimeTier(context.projects.projects[job.projectId],job.sourceEnvironment,e.tier);
     }
@@ -471,7 +473,10 @@ async function route(context) {
     if(body.tool==='browser_screenshot'&&job.prd?.auto&&result.designReference){
       const current=await store.getJob(job.id);
       if(current?.status!=='running'||current.lease?.id!==job.lease.id||current.prd?.revision!==job.prd.revision)throw new Error('PRD design reference lease changed');
+      if(e.projectId!==job.projectId)
+        assertTaskReadScope(await loadIntegrationProjects(config.projectsFile),current,await loadEnvironments(),plan);
       result.referenceId=await savePrdDesignReference(config.dataDir,job,result.designReference);
+      result.subjectProjectId=e.projectId;
       delete result.designReference;
     }
     result=await recoverWebsiteToolLogin(context,job,e,result);

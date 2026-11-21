@@ -1,3 +1,7 @@
+## 1.153.5
+
+- Allow PRDs to obtain visual evidence independently from explicitly authorized related application websites. Bind each capture to its target site, original task, and current read scope.
+
 ## 1.153.4
 
 - Preserve same-origin branding in explicit application logo slots even if the build renames the asset. Keep loaded logos protected during PRD image edits.

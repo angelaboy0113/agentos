@@ -36,3 +36,78 @@ test('a peer phase may reuse only verified complete datasets captured earlier by
  const changed=structuredClone(c);changed.environments.own.database='changed';
  assert.notEqual(verifiedPriorDatasetScopes(prior,changed,plan).find(x=>x===fingerprint(ownScope)),fingerprint(ownScope));
 });
+
+test('only opted-in same-tier PRDs can read an explicitly listed peer website', () => {
+  const config = structuredClone(cfg);
+  const { investigate } = e.queries;
+  const site = { ...e, kind: 'website', baseUrl: 'https://business.example/app/',
+    queries: { investigate: { ...investigate, browser: true } } };
+  config.environments = { ...config.environments, peer_site: site,
+    peer_other: { ...site, baseUrl: 'https://other.example/app/' },
+    peer_site_test: { ...site, tier: 'uat' } };
+  const policy = structuredClone(projects);
+  const ask = { ...request, environmentId: 'peer_site' };
+  const prd = { ...job, prd: { auto: true } };
+  assert.throws(() => planTaskRead(config, policy, prd, ask));
+  policy.projects.overseas.integrationPeerEnvironments = { domestic: ['peer_site', 'peer_site_test'] };
+  assert.equal(planTaskRead(config, policy, prd, ask).projectId, 'domestic');
+  assert.equal(planTaskRead(config, policy, prd, ask).approvalProfile, 'origin');
+  assert(taskReadCatalog(config, policy, prd).environments.some(entry => entry.environmentId === 'peer_site'));
+  assert.throws(() => planTaskRead(config, policy, job, ask));
+  assert.throws(() => planTaskRead(config, policy, prd, { ...ask, environmentId: 'peer_other' }));
+  assert.throws(() => planTaskRead(config, policy, prd, { ...ask, environmentId: 'peer_site_test' }));
+  assert.throws(() => planTaskRead(config, policy, prd, { ...ask, websiteTarget: 'https://other.example/app/' }));
+  site.membersRead = false;
+  assert.throws(() => planTaskRead(config, policy, prd, ask));
+  site.ownerOpenIdsByProfile.origin = [prd.senderId];
+  assert.equal(planTaskRead(config, policy, prd, ask).projectId, 'domestic');
+  site.queries.investigate.reviewed = false;
+  assert.throws(() => planTaskRead(config, policy, prd, ask));
+});
+
+test('peer prototype references preserve task identity and recheck the source binding at reuse', async t => {
+  const { createHash } = await import('node:crypto');
+  const { mkdir, readFile, realpath } = await import('node:fs/promises');
+  const { loadEnvironments } = await import('../src/shared/environment-access.js');
+  const { savePrdDesignReference } = await import('../src/control-plane/website-evidence.js');
+  const { readPrdDesignReference } = await import('../src/shared/image-generation.js');
+  const f = await fixture(t);
+  const previousProjects = process.env.AGENTOS_PROJECTS_FILE;
+  process.env.AGENTOS_PROJECTS_FILE = f.file;
+  t.after(() => {
+    if (previousProjects === undefined) delete process.env.AGENTOS_PROJECTS_FILE;
+    else process.env.AGENTOS_PROJECTS_FILE = previousProjects;
+  });
+  const raw = structuredClone(cfg);
+  raw.environments.peer_site = {
+    projectId:'domestic',tier:'prd',kind:'website',baseUrl:'https://business.example/app/',
+    credentialRef:'website-fixture',ownerOpenIdsByProfile:{},membersRead:true,
+    queries:{investigate:{mode:'investigate',reviewed:true,browser:true,
+      description:'Read only',maxRows:20,timeoutMs:10000,parameters:[{name:'purpose',type:'string'}]}}
+  };
+  const policy = structuredClone(projects);
+  policy.projects.overseas.integrationPeerEnvironments = {domestic:['peer_site']};
+  await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(raw));
+  await writeFile(f.file,JSON.stringify(policy));
+  const prd = {...job, prd:{auto:true,revision:2,inlinePrototypes:true,nativeUiCapture:true}};
+  prd.environmentAccess = planTaskRead(await loadEnvironments(),policy,prd,{...request,environmentId:'peer_site'});
+  const dataDir=await realpath(f.dir);
+  const directory=path.join(dataDir,'website-evidence',job.id);
+  await mkdir(directory,{recursive:true});
+  const id='00000000-0000-4000-8000-000000000001';
+  const name=id+'.png';
+  const image=Buffer.from('89504e470d0a1a0a','hex');
+  const sha256=createHash('sha256').update(image).digest('hex');
+  await writeFile(path.join(directory,name),image);
+  await savePrdDesignReference(dataDir,prd,{name,bytes:image.length,sha256,visualPolicy:'brand-layout-v4',
+    pageUrl:'https://business.example/app/'});
+  const receipt=JSON.parse(await readFile(path.join(directory,'prd-2-'+id+'.json'),'utf8'));
+  assert.equal(receipt.projectId,'overseas');
+  assert.equal(receipt.websiteScope.projectId,'domestic');
+  const reference=await readPrdDesignReference(dataDir,prd,id);
+  assert.equal(reference.subjectProjectId,'domestic');
+  await assert.rejects(readPrdDesignReference(dataDir,{...prd,questionId:'other'},id),{code:'IMAGE_INPUT'});
+  policy.projects.overseas.integrationPeerEnvironments.domestic=[];
+  await writeFile(f.file,JSON.stringify(policy));
+  await assert.rejects(readPrdDesignReference(dataDir,prd,id),/未授权/);
+});

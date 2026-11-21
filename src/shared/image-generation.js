@@ -1,6 +1,8 @@
 import {spawn} from 'node:child_process';
 import {mkdir,readFile,writeFile,lstat,realpath,open,readdir} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';import {createHash} from 'node:crypto';
+import {fingerprint,loadEnvironments} from './environment-access.js';
+import {assertTaskReadScope,loadIntegrationProjects} from './integration-peers.js';
 import {currentUserQuestion} from './user-request-scope.js';
 import {prepareArtifactWorkspace} from './artifact-workspace.js';
 import {withSnapshotLock} from './snapshot-lock.js';
@@ -57,9 +59,20 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
       : !Number.isSafeInteger(receipt.revision)||receipt.revision>job.prd.revision||receipt.item?.name!==referenceId+'.png')||
     !/^[-a-f0-9]+\.png$/.test(receipt.item?.name)||
     !/^https?:\/\//.test(receipt.item?.pageUrl??''))throw failure('IMAGE_INPUT','原型参考截图的任务、系统或环境不匹配');
+   const scope=receipt.websiteScope;
+   if(scope){
+    const [environments,projects]=await Promise.all([loadEnvironments(),loadIntegrationProjects()]);
+    const environment=environments.environments[scope.environmentId];
+    if(!environment||environment.kind!=='website'||environment.tier!==scope.tier
+      ||environment.projectId===job.projectId||environment.projectId!==scope.projectId||fingerprint(environment)!==scope.configHash
+      ||new URL(environment.baseUrl).origin!==new URL(receipt.item.pageUrl).origin)
+     throw failure('IMAGE_INPUT','关联应用截图与已登记的来源不匹配');
+    assertTaskReadScope(projects,job,environments,scope);
+   }
    const file=path.join(dir,receipt.item.name),actual=await safeBytes(file),digest=sha(actual.bytes);
    if(digest!==receipt.item.sha256||actual.bytes.length!==receipt.item.bytes||!actual.bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))throw failure('IMAGE_INPUT','原型参考截图校验失败');
    return {path:file,sha256:digest,kind:'website-design-reference',
+    ...(scope?{subjectProjectId:scope.projectId}:{}),
     ...(receipt.item.brandRegions?.length?{brandRegions:receipt.item.brandRegions}:{})};
   }
  }
