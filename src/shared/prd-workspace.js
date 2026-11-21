@@ -30,7 +30,7 @@ export function prdGuidance(job) {
     : '';
   const finalPolicy = job.prd.businessFinal
     ? `业务口径包括会改变范围、角色权限、数据含义、计算规则、状态流转或关键交互的决定。初稿中互相矛盾、留空、有多个候选、或要求确认的规则必须逐项问清。不能把自己的建议、行业惯例或泛泛的“继续、导出”当作用户确认。用 outcome=needs_clarification、investigation.status=wait、blocker.kind=user_input；needed 直接写给用户，逐条编号，一条只问一个决定；尽可能给出选项和它们的区别。核心目标保持 open，不请求生成或交付任何定稿文件。部分回答后只追问余项。已明确的规则无需重复确认。尚未知的工程实现细节留在技术依据或卡片，不作为用户业务待确认项，不写进定稿。
-最终正文从一级标题和“## 摘要”开始，摘要第一段用大白话说清谁遇到什么问题、要做什么、做完能怎么用。后面仅按需求组织已确认的业务范围、用户和场景、操作流程、功能与业务规则、按需的跨系统业务分工及原型。不要写待确认口径、测试用例、验收标准、测试边界、版本号或变更记录、研发实现方案、代码位置、路由、接口契约、源码提交和内部规则编码。页面截图来源只写系统、环境、页面名称。内部门禁、核验依据和技术证据留在卡片。最终 ready 时，handoff.checks 必须给出 required=true、status=passed、id=prd-business-alignment，evidence 逐项引用原始需求或用户在本卡确认的决定。还有业务决定未确认时这个检查项不能通过。`
+最终正文从一级标题和“## 摘要”开始，摘要第一段用大白话说清谁遇到什么问题、要做什么、做完能怎么用。后面仅按需求组织已确认的业务范围、用户和场景、操作流程、功能与业务规则、按需的跨系统业务分工及原型。不要写待确认口径、测试用例、验收标准、测试边界、版本号或变更记录、研发实现方案、代码位置、路由、接口契约、源码提交和内部规则编码。页面截图来源只写系统、环境、页面名称。内部门禁、核验依据和技术证据留在卡片。最终 ready 时，handoff.checks 必须给出 status=passed、id=prd-business-alignment，evidence 逐项引用原始需求或用户在本卡确认的决定。还有业务决定未确认时这个检查项不能通过。`
     : '非关键未知项列待确认。';
   const structure = job.prd.businessFinal
     ? '按最终业务正文要求输出，以摘要开篇'
@@ -44,12 +44,13 @@ ${revising}
 有跨系统关联时核对双方影响、失败、延迟、重复、存量和责任方。定稿仅写清业务影响与确认后的分工。
 ${finalPolicy}
 仅在缺少会改变范围、权限或关键交互的业务决定时，outcome=needs_clarification，investigation.status=wait，blocker.kind=user_input，needed 写清要用户在卡片回答的具体问题，核心目标标 open，问题由原需求卡输入框收集，本轮不提交文件。信息足够则立即制作评审稿，无需用户说导出或确认发布。已核对两项工件和截图后，提交 deliver 需同时给出 required=true、status=passed、id=original-question 的 handoff.check，写入关键验收依据。
-${exporting ? `用户授权信息齐备后自动交付飞书评审稿。用 documentRequests 实际提交一个 md 和一个 png。md 使用一级/二级标题、重点加粗、原生可转换的管道表格，${structure}。不得宣称未完成的同版评审已通过。末章标题为「原型图」，标注示意图和对应界面改动，图片由交付器插入。PNG 使用截图合成请求。先用对应环境的固定源码定位真实前端路由和组件，再沿授权只读入口打开对应系统及环境的目标页面，进入具体详情、弹窗或模块，取得当前快照。调用 browser_screenshot，传当前快照的 url 和视口内实际看见的目标标题 targetText。截图必须成功保存真实页面脱敏参考。现有页面优先进入真实目标页面，PNG 的 content 填 JSON 字符串 {"mode":"existing-page","areas":[{"x":0.03,"y":0.42,"width":0.34,"height":0.05,"text":"拟新增 · 查看明细"}]}，根据 browser_screenshot 返回的 designLayout.sections 像素位置，除以 viewportWidth 和 viewportHeight，定位到真实拟改区域，示例坐标不得照抄；程序保留截图原像素，只在标注区域画建议，文字应短且不得补猜已遮挡的值。全新页面或目标页尚无入口时，先截同系统和同环境最接近的真实页面，在正文说清参考关系；全新页面可填 {"mode":"new-page","prompt":"说明从真实截图沿用的组件、布局及新页面的独有改动"}，程序会把真实参考截图与拟议设计并列，生图内容只画一个新页面，不再画参考页、对照栏或列标题。已上传原型、初稿图、源码、样式数据或其它环境页面均不能代替现场截图。截图失败时核对授权入口、登录和实际页面状态，保留已确认的业务内容，说明具体缺口，保持核心项 open。取得真实截图前不要生成原型或提交最终文档。正文用系统、环境和页面名说明截图来源，区分页面现状和拟议改动。实际文件都要通过核验。若真实原型偏离源页面，只修订有问题的 PNG 并用 reportAssessment 再审阅；保持核心项 open，待新图核验前不得交付。文字清单和图片只能用已确认信息及明确标为示意的内容。Markdown 仅填写原型说明，PNG 独立交付。不要把初稿图片或原型 PNG 通过 base64、data URI 或其他图片链接写入 Markdown。不要把账号、凭据、个人资料或生产明文样本写入群共享文档；以脱敏示例和可共享证据定位说明。` : '未要求导出时仅给出本轮影响、决策和待确认事项，不生成最终附件。需要用户补充时，请用户在当前 PRD 卡片的输入框填写。'}`;
+${exporting ? `用户授权信息齐备后自动交付飞书评审稿。用 documentRequests 实际提交一个 md 和一个 png。两项都须登记到当前轮；即使正文内容未变，也要以本轮请求提交同一份已确认正文，不能仅引用旧轮工件。md 使用一级/二级标题、重点加粗、原生可转换的管道表格，${structure}。不得宣称未完成的同版评审已通过。末章标题为「原型图」，标注示意图和对应界面改动，图片由交付器插入。PNG 使用截图合成请求。先用对应环境的固定源码定位真实前端路由和组件，再沿授权只读入口打开对应系统及环境的目标页面，进入具体详情、弹窗或模块，取得当前快照。调用 browser_screenshot，传当前快照的 url 和视口内实际看见的目标标题 targetText。截图必须成功保存真实页面脱敏参考。现有页面优先进入真实目标页面，PNG 的 content 填 JSON 字符串 {"mode":"existing-page","areas":[{"x":0.03,"y":0.42,"width":0.34,"height":0.05,"text":"拟新增 · 查看明细"}]}，根据 browser_screenshot 返回的 designLayout.sections 像素位置，除以 viewportWidth 和 viewportHeight，定位到真实拟改区域，示例坐标不得照抄；程序保留截图原像素，只在标注区域画建议，文字应短且不得补猜已遮挡的值。全新页面或目标页尚无入口时，先截同系统和同环境最接近的真实页面，在正文说清参考关系；全新页面可填 {"mode":"new-page","prompt":"说明从真实截图沿用的组件、布局及新页面的独有改动"}，程序会把真实参考截图与拟议设计并列，生图内容只画一个新页面，不再画参考页、对照栏或列标题。已上传原型、初稿图、源码、样式数据或其它环境页面均不能代替现场截图。截图失败时核对授权入口、登录和实际页面状态，保留已确认的业务内容，说明具体缺口，保持核心项 open。取得真实截图前不要生成原型或提交最终文档。正文用系统、环境和页面名说明截图来源，区分页面现状和拟议改动。实际文件都要通过核验。若真实原型偏离源页面，只修订有问题的 PNG 并用 reportAssessment 再审阅；保持核心项 open，待新图核验前不得交付。文字清单和图片只能用已确认信息及明确标为示意的内容。Markdown 仅填写原型说明，PNG 独立交付。不要把初稿图片或原型 PNG 通过 base64、data URI 或其他图片链接写入 Markdown。不要把账号、凭据、个人资料或生产明文样本写入群共享文档；以脱敏示例和可共享证据定位说明。` : '未要求导出时仅给出本轮影响、决策和待确认事项，不生成最终附件。需要用户补充时，请用户在当前 PRD 卡片的输入框填写。'}`;
 }
 
 export function prdDocumentTitle(question, revision, businessFinal = false) {
   const subject = String(question.title).replace(prdStart, '').replace(/^[\s：:，,。]+/, '');
-  const title = Array.from(subject || 'PRD').slice(0, 74).join('');
+  const finalSubject = businessFinal ? subject.replace(/(?:[\s·:：—-]+)?(?:需求初稿|PRD初稿|初稿)\s*$/i, '').trim() : subject;
+  const title = Array.from(finalSubject || 'PRD').slice(0, 74).join('');
   return businessFinal ? title + ' · 需求文档' : `[${question.id}] ${title} · 评审稿 v0.${revision}`;
 }
 
@@ -61,7 +62,7 @@ export function prdBusinessAligned(job, result) {
     && result.investigation.goals?.some(goal => goal.id === 'original-question' && goal.required && goal.status === 'verified')
     && result.investigation.goals.every(goal => !goal.required || goal.status === 'verified')
     && result.handoff?.checks?.some(check => check.id === 'prd-business-alignment'
-      && check.required === true && check.status === 'passed' && check.evidence?.trim());
+      && check.status === 'passed' && check.evidence?.trim());
 }
 
 export function prdBusinessWait(job, result) {

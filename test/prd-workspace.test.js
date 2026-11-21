@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdBusinessAligned, prdFinalContentIssue, prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
+import { prdBusinessAligned, prdFinalContentIssue, prdDocumentTitle, prdGuidance, prdIntentDigest } from '../src/shared/prd-workspace.js';
 import { prdHighlightChanges } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
@@ -390,7 +390,7 @@ async function saveArtifact(dataDir, job, id, format, bytes, screenshot, generat
 const alignedPrdResult = {
   outcome: 'ready',
   investigation: { status: 'complete', goals: [{ id: 'original-question', required: true, status: 'verified' }] },
-  handoff: { checks: [{ id: 'prd-business-alignment', required: true, status: 'passed', evidence: '发起人确认仅在订单详情显示状态' }] },
+  handoff: { checks: [{ id: 'prd-business-alignment', required: false, status: 'passed', evidence: '发起人确认仅在订单详情显示状态' }] },
 };
 
 test('unanswered PRD decisions return to the form before creating files', async t => {
@@ -414,6 +414,7 @@ test('unanswered PRD decisions return to the form before creating files', async 
 
 test('PRD final body starts with a prose summary and excludes QA and development sections', () => {
   assert.equal(prdFinalContentIssue(md), null);
+  assert.equal(prdDocumentTitle({ title: '订单跟踪 · 需求初稿' }, 3, true), '订单跟踪 · 需求文档');
   assert.match(prdFinalContentIssue('# 订单跟踪\n\n## 摘要\n\n## 业务规则'), /摘要/);
   for (const text of ['## 验收标准', '## 待确认事项', '## 研发实现', '## 版本记录', '|编号|测试用例|']) {
     assert.match(prdFinalContentIssue(md + '\n' + text), /移除/);
