@@ -1,3 +1,4 @@
+import {readWebsitePdfPreview} from './website-pdf-preview.js';
 import {describePrdCapture} from './prd-capture.js';
 import { passivePublicImage, fetchPassivePublicImage } from './public-website-image.js';
 import {loginPageAllowed} from '../shared/website-sso.js';
@@ -16,7 +17,7 @@ import {BrowserInputError,validateBrowserTool,websitePageLocation,websitePageRou
 import { chromium } from 'playwright';
 import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
-import { websiteSessionKey, websiteNavigationTarget, websiteReadRecoveryTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, websiteImageResourceAllowed, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
+import { websiteSessionKey, websiteNavigationTarget, websiteReadRecoveryTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, websiteImageResourceAllowed, websitePdfAttachmentTarget, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
 
 export function routePrdWebsiteBrowser(shared, isolated) {
  const browser=job=>job.prd?.auto?isolated:shared;
@@ -34,7 +35,7 @@ export function routePrdWebsiteBrowser(shared, isolated) {
 }
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
- constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch,passiveImageFetch=fetchPassivePublicImage}={}){this.authorize=authorize;this.publicFetch=publicFetch;this.passiveImageFetch=passiveImageFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
+ constructor(dataDir, driver=chromium, authorize=async()=>true,{publicFetch=fetch,passiveImageFetch=fetchPassivePublicImage}={}){this.dataDir=dataDir;this.authorize=authorize;this.publicFetch=publicFetch;this.passiveImageFetch=passiveImageFetch;this.evidenceRoot=path.join(dataDir,'website-evidence');this.root=path.join(dataDir,'website-sessions');this.driver=driver;this.contexts=new Map();this.pages=new Map();this.opening=new Map();}
  async session(e) {
   const key=websiteSessionKey(e.projectId,e.tier,e.baseUrl);
   if(this.contexts.has(key))return this.contexts.get(key);
@@ -361,9 +362,9 @@ export class WebsiteBrowser {
   if(tool==='browser_key'&&args.ref==='page'){await s.page.keyboard.press('Escape');return this.snapshot(s);}
   if(tool==='browser_scroll'&&args.ref==='page'){await s.page.evaluate(direction=>window.scrollBy(direction==='left'?-600:direction==='right'?600:0,direction==='up'?-600:direction==='down'?600:0),args.direction);return this.snapshot(s);}
   const ref=s.refs.get(args.ref);if(!ref)throw new BrowserInputError('BROWSER_REF_STALE','页面引用已过期；先browser_snapshot，再使用新引用。');
-  const current=await ref.el.evaluate(controlMetadata,{hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}).catch(()=>null);
+  const current=await ref.el.evaluate(controlMetadata,{bindLink:true,hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}).catch(()=>null);
   if(!current||!current.visible)throw new BrowserInputError('BROWSER_REF_STALE','原控件已移除或隐藏；先browser_snapshot，不重复旧操作。');
-  if(current.label!==ref.rawLabel||current.type!==ref.type)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
+  if(current.label!==ref.rawLabel||current.type!==ref.type||current.linkHref!==ref.linkHref)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
   if(current.blocked)throw new Error('该操作可能改变业务状态，本次未执行');
   if(tool==='browser_inspect')return {url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),label:cleanWebsiteText(current.label),...await ref.el.evaluate(inspectWebsiteControl)};
   if(tool==='browser_context_menu'){
@@ -418,9 +419,21 @@ export class WebsiteBrowser {
    }
    else if(tool==='browser_select')await ref.el.selectOption(args.value,{timeout:8000});
    else {
-    const link=await ref.el.evaluate(el=>{const a=el.closest('a[href]');return a?.target==='_blank'?a.href:null;});
+    const link=await ref.el.evaluate(el=>{
+     const anchor=el.closest('a[href]');
+     if(!anchor)return null;
+     return anchor.target==='_blank'||anchor.origin!==el.ownerDocument.location.origin?anchor.href:null;
+    });
+    if(link&&link!==ref.linkHref)throw new BrowserInputError('BROWSER_REF_STALE','附件链接已变化，请刷新快照后再查看。');
+    const policy=s.environment.queries?.[s.job?.environmentAccess?.queryId];
     if(link){
-     const target=websiteNavigationTarget(link,s.environment.baseUrl,s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readEndpoints??[]);
+     const attachment=websitePdfAttachmentTarget(link,policy?.pdfAttachmentRoots);
+     if(attachment){
+      const evidence=await readWebsitePdfPreview({dataDir:this.dataDir,jobId:s.job.id,target:attachment,fetchPdf:this.publicFetch,
+       authorize:()=>this.authorize(s.job,s.waiting,{url:()=>attachment,method:()=> 'GET',resourceType:()=> 'document'})});
+      return {...await this.snapshot(s),attachmentPreview:evidence};
+     }
+     const target=websiteNavigationTarget(link,s.environment.baseUrl,policy?.readEndpoints??[]);
      if(!await this.authorize(s.job,s.waiting,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务页面导航范围已失效');
      s.currentReadTarget=target;
      await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
@@ -443,7 +456,7 @@ export class WebsiteBrowser {
      }
     }
    }
-  }catch(error){if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}finally{if(s.queryAction){await ref.el.evaluate(()=>undefined).catch(()=>{});s.lastQueryAction.endedAt=Date.now();}s.queryAction=false;s.lastReadAction.endedAt=new Date().toISOString();}
+  }catch(error){if(error.code==='BROWSER_NAVIGATION_SCOPE'&&!(error instanceof BrowserInputError))throw new BrowserInputError(error.code,'链接不在本任务批准的页面或附件目录内。可用 browser_inspect 确认目标，原页面仍可调查。');if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','本次控件操作未确认完成；不要重复点击，先browser_snapshot核对页面是否变化，再决定下一步。不能将工具超时认定为网站故障。');throw error;}finally{if(s.queryAction){await ref.el.evaluate(()=>undefined).catch(()=>{});s.lastQueryAction.endedAt=Date.now();}s.queryAction=false;s.lastReadAction.endedAt=new Date().toISOString();}
   if(await this.needsLogin(s))return {loginRequired:true,stage:'登录已过期，等待本机重新登录'};
   const readiness=(current.kind==='navigation'||s.pendingReads.size)?await waitForCaptureReady(s):null;
   s.lastReadAction.endedAt=new Date().toISOString();
@@ -466,13 +479,13 @@ export class WebsiteBrowser {
   await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;
   const text=await websiteDOM(s).locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden],[data-sensitive],[data-agentos-secret]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
   const handles=await websiteDOM(s).locator([websiteControls,...(s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[])].join(',')).filter({visible:true}).elementHandles();
-  const metadata=await websiteDOM(s).evaluate(controlMetadataBatch,{elements:handles,limit:300,options:{hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}});
+  const metadata=await websiteDOM(s).evaluate(controlMetadataBatch,{elements:handles,limit:300,options:{bindLink:true,hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}});
   const controls=[];
   for(const [i,el]of handles.entries()){
    const info=controls.length<300?metadata[i]:null;
    if(!info?.type||info.blocked){await el.dispose();continue;}
    const label=cleanWebsiteText(info.label).slice(0,100),ref=`${s.refPrefix}-${s.generation}-${i}`;
-   s.refs.set(ref,{el,type:info.type,rawLabel:info.label});controls.push({ref,type:info.type,label,kind:info.kind,...(info.options?{options:info.options}:{})});
+   s.refs.set(ref,{el,type:info.type,rawLabel:info.label,linkHref:info.linkHref});controls.push({ref,type:info.type,label,kind:info.kind,...(info.options?{options:info.options}:{})});
   }
   const fields=await websiteDOM(s).evaluate(websiteFields,{secretSelector:screenshotSecretSelector});
   const loading=!text.trim()||s.pendingReads.size>0||await websiteDOM(s).locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));

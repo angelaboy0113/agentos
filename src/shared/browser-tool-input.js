@@ -2,7 +2,7 @@
 export class BrowserInputError extends Error {
  constructor(code,message){super(message);this.name='BrowserInputError';this.code=code;this.statusCode=400;}
 }
-export const correctableBrowserCodes=new Set(['BROWSER_ARGUMENTS','BROWSER_REF_STALE','BROWSER_CONTROL_TYPE','BROWSER_CONTROL_CHANGED','BROWSER_OPERATION_TIMEOUT','BROWSER_CONTENT_CHANGED','BROWSER_ASSET_RESPONSE','BROWSER_NAVIGATION_SCOPE']);
+export const correctableBrowserCodes=new Set(['BROWSER_ARGUMENTS','BROWSER_REF_STALE','BROWSER_CONTROL_TYPE','BROWSER_CONTROL_CHANGED','BROWSER_OPERATION_TIMEOUT','BROWSER_CONTENT_CHANGED','BROWSER_ASSET_RESPONSE','BROWSER_NAVIGATION_SCOPE','BROWSER_ATTACHMENT_UNAVAILABLE']);
 export function validateBrowserTool(tool,args={}){
  if(tool==='browser_screenshot'&&args&&Object.keys(args).length){
   if(Object.keys(args).some(key=>!['url','targetText','emptyState'].includes(key))||args.emptyState!==undefined&&typeof args.emptyState!=='boolean'||typeof args.url!=='string'||!args.url||args.url.length>2048||

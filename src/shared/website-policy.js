@@ -157,6 +157,25 @@ export function validateWebsiteStaticRoots(value){
  if(!Array.isArray(value)||value.some(url=>{try{const u=new URL(websiteUrl(url));return u.protocol!=='https:'||u.search||u.hash||u.href.replace(/%7Bhex%7D/gi,'{hex}')!==url||!/^\/(?:[A-Za-z0-9_-]+\/|\{hex\}\/){2,}$/.test(decodeURIComponent(u.pathname));}catch{return true;}}))throw Error('公共静态目录须为审核后的HTTPS多段目录，仅可用整段{hex}表示8至64位哈希，不能含任意通配符、查询或业务接口');
  return value;
 }
+export function validateWebsitePdfAttachmentRoots(roots){
+ if(!Array.isArray(roots)||roots.some(root=>{
+  try{const u=new URL(websiteUrl(root));return u.href!==root||u.protocol!=='https:'||u.port||!/^\/(?:[A-Za-z0-9_-]+\/)+$/.test(u.pathname);}
+  catch{return true;}
+ }))throw Error('PDF附件来源必须是审核后的固定HTTPS目录，不能配置整个站点或通配路径');
+ return roots;
+}
+
+export function websitePdfAttachmentTarget(input,roots=[]){
+ try{
+  const u=new URL(input),parts=decodeURIComponent(u.pathname).split('/');
+  if(u.protocol!=='https:'||u.username||u.password||u.port||u.search||u.hash
+   ||/%(?:2e|2f|5c|25)/i.test(u.pathname)||parts.some(part=>/[\\%\x00-\x1f\x7f]/.test(part))
+   ||!/\.pdf$/i.test(parts.at(-1)))return null;
+  return validateWebsitePdfAttachmentRoots(roots).some(root=>u.href.startsWith(root)
+   &&!u.pathname.slice(new URL(root).pathname.length).includes('/'))?u.href:null;
+ }catch{return null;}
+}
+
 const imageRootParts=Object.freeze({date:/^\d{4}-\d{2}-\d{2}$/,compactDate:/^\d{8}$/});
 const imageExtension=/\.(?:jpe?g|png|webp|gif|avif|bmp|ico)$/i;
 export function validateWebsiteImageRoots(roots){

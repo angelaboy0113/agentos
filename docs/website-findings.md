@@ -47,3 +47,9 @@ RestCloud某版本展开日志使用固定 `GET /restcloud/rest/core/monitor/log
 数据行的状态文案（如启用）与操作按钮分别分类。行操作未出现在快照时，隔离浏览器可对kind=row的当前引用调用browser_context_menu打开右键菜单，然后从新快照选择已允许的查看/详情；不能把数据行状态当写入授权，写按钮及实际请求仍受原权限校验。共享Chrome尚未支持该工具。
 
 无文字链接图标先提供inspect/label-trigger引用供悬停。只依据本控件关联的可见可访问性提示，或一次悬停新出现且唯一的可见tooltip建立临时观察；不借用其他图标或多个歧义提示。提示与元素均须仍连接、文字不变，执行前重新分类；编辑/删除提示仍拦截。tooltip本体不是按钮，不可点击。无可确认提示则保持不可点击，不按SVG名称猜操作。
+
+## 独立附件目录里的 PDF
+
+隔离浏览器遇到当前页面可见的 PDF 链接时，经过审核的网页只读查询可用 `pdfAttachmentRoots` 登记存储目录，例如 `["https://files.example.com/notices/"]`。每项为固定 HTTPS 目录，只匹配该目录下直接的 PDF 文件。附件从当前控件引用获取，使用独立 GET，无浏览器凭据，无跳转跟随。原页面保持打开。
+
+实际文件检查通过后，`attachmentPreview.status=verified_pdf` 表示已保存原文件和哈希。实例配置可信 PDF 栅格化程序时，`previewStatus=rendered` 表示首页已实际渲染。两种文件都归当前任务工作区，未自动对外发送。超出目录、非 PDF、带查询参数以及链接在执行前变化时，保留可继续调查的诊断。

@@ -1,3 +1,7 @@
+## 1.153.9
+
+- Read visible PDF links from reviewed attachment directories without navigating away from the active website. Save verified bytes and a first-page preview in the task work area when a trusted rasterizer is configured. Ungranted targets remain a recoverable navigation diagnostic.
+
 ## 1.153.8
 
 - Run document-only requests with supplied materials in a task artifact workspace without selecting or synchronizing a business source environment. Feishu templates retain the existing read authorization and file validation.

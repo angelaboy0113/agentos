@@ -1,7 +1,7 @@
 // Fixed DOM adapter shared by all applications; no model-supplied selectors or scripts.
 export const websiteControls='label:has(input[type="radio"]),.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,textarea,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
 export function controlMetadataBatch({elements,options,limit=Infinity}={elements:null}){
- function metadata(el,{readNavigationSelectors=[],hoverTooltip=null}={}){
+ function metadata(el,{readNavigationSelectors=[],hoverTooltip=null,bindLink=false}={}){
  const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
  if(el.matches('[role="tooltip"]'))return {visible,type:null};
  if(!visible||el.disabled||el.getAttribute('aria-disabled')==='true'||el.matches('.disabled,.is-disabled,.ant-picker-cell-disabled,.ant-calendar-disabled-cell')||el.closest('.ant-calendar-disabled-cell,.ant-picker-cell-disabled')||el.closest('[contenteditable="true"],[data-sensitive],[data-agentos-secret]'))return {visible:false};
@@ -105,7 +105,8 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  // Fields, options and date cells change local query state; server writes remain independently blocked.
  const blocked=!['field','option','calendar','pagination','picker','dismiss','panel','expansion','row','query'].includes(kind)&&(mutation.test(label)||(!navigation&&/审批/.test(label)));
  if(blocked)type=null;
- return {visible:true,label:row?'行详情：'+label:label,type,kind,blocked,...(type==='select'?{options:[...el.options].slice(0,100).map(x=>({value:x.value,label:x.textContent}))}:{})};
+ const anchor=bindLink?el.closest('a[href]'):null;
+ return {visible:true,label:row?'行详情：'+label:label,type,kind,blocked,...(bindLink?{linkHref:anchor?.href??null}:{}),...(type==='select'?{options:[...el.options].slice(0,100).map(x=>({value:x.value,label:x.textContent}))}:{})};
 }
  if(elements===null)return metadata;
  let count=0;return elements.map(el=>{if(count>=limit)return null;const value=metadata(el,options);if(value?.type&&!value.blocked)count++;return value;});

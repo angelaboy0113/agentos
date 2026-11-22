@@ -100,7 +100,7 @@ export function websiteTools(job,config,environment={}){
  {tool:'browser_hover',args:{ref:'当前快照的menu-trigger或label-trigger引用'},description:'仅悬停展开菜单或识别无文字图标的可访问性提示，然后读取新快照中的选项；不点击未知图标，不执行写入。只支持本机隔离浏览器。'},
  {tool:'browser_diagnostics',args:{},description:'读取当前授权页面最近的脱敏运行错误、资源/只读请求路径与HTTP状态，空白/loading也可用；没有控制台原文、响应正文、认证头或存储，不发新请求。仅本机隔离浏览器。'},
  {tool:'browser_read',args:{section:'page或fields',offset:0,limit:4000,contentHash:'续读填写前页摘要，首页省略',find:'可选字面文本定位，返回匹配处上下文及nextMatchOffset，不是业务记录匹配'},description:'当前可见页面或输入框完整脱敏内容分段读取；查看长日志报文时先展开行，再沿nextOffset和contentHash读完，不以snapshot预览当完整响应。无URL/选择器/代码参数，不发新业务请求。'},
- {tool:'browser_click',args:{ref:'当前read-action引用'},description:'查看详情、日志、菜单、翻页；不能启动停止或修改'},
+ {tool:'browser_click',args:{ref:'当前read-action引用'},description:'查看详情、日志、菜单、翻页。已审核的可见PDF附件返回attachmentPreview；previewStatus=rendered表示首页已渲染，file和firstPage.file是本任务产物目录内的相对路径。不能启动停止或修改'},
  {tool:'browser_key',args:{ref:'当前控件引用，或page仅用于Escape',key:'Enter/Tab/Escape/ArrowDown/ArrowUp/ArrowLeft/ArrowRight/Home/End/PageDown/PageUp/Space'},description:'日期/下拉框的键盘交互，Tab提交本地筛选输入，Escape关闭弹窗；不能执行系统快捷键'},
  {tool:'browser_scroll',args:{ref:'当前控件引用或page',direction:'up/down/left/right'},description:'滚动当前控件所在容器或页面，读取表格更多列与详情下部'},
  {tool:'browser_select',args:{ref:'当前select引用',value:'返回的选项value'},description:'选择查询筛选项'},
