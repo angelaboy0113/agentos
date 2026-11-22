@@ -1,3 +1,8 @@
+## 1.153.8
+
+- Run document-only requests with supplied materials in a task artifact workspace without selecting or synchronizing a business source environment. Feishu templates retain the existing read authorization and file validation.
+- Return recoverable browser diagnostics for hover timeouts and detached controls so read-only investigations can continue with fresh references.
+
 ## 1.153.7
 
 - Resolve PRD handoff labels against verified same-task Markdown. Recover the current PRD revision independently from the previously delivered document.

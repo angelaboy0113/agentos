@@ -1,8 +1,33 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,writeFile,readFile,symlink,link,mkdir,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {prepareArtifactWorkspace,readArtifactFile,artifactPermissionArgs,artifactPolicy} from '../src/shared/artifact-workspace.js';
 import {createDocuments,documentInputText} from '../src/shared/document-artifacts.js';
-import {buildCodexArgs,analysisThreadId} from '../src/runner/codex-executor.js';
+import {buildCodexArgs,analysisThreadId,executeJob} from '../src/runner/codex-executor.js';
 const temp=async t=>{const p=await mkdtemp(path.join(os.tmpdir(),'aos-artifact-'));t.after(()=>rm(p,{recursive:true,force:true}));return p;};
+
+test('document-only execution produces real output without touching the configured source repository', async t => {
+  const dataDir = await temp(t);
+  const projectsFile = path.join(dataDir, 'projects.json');
+  const projects = { demo: { analysisSourceMode:'isolated', repoPath:path.join(dataDir, 'absent-source') } };
+  await writeFile(projectsFile, JSON.stringify({ projects }));
+  const job = { id:'draft-file', projectId:'demo', stage:'developer', taskIntent:'analysis',
+    documentOnly:true, originalQuestion:'用已给内容生成 Markdown 文件' };
+  const result = await executeJob(job, { executor:'codex', dataDir, projectsFile, projects,
+    worktreeRoot:path.join(dataDir, 'worktrees') }, async () => {}, {
+    runModel: async ({ job: runningJob, workspace, prompt }) => {
+      assert.equal(workspace, runningJob.artifactWorkspace.directory);
+      assert.match(prompt, /处理用户给出的材料/);
+      await writeFile(path.join(workspace, 'draft.md'), '# 业务简报\n\n已核对用户提供的内容。\n');
+      return {
+        outcome:'ready', summary:'文件已制作', finalMessage:'业务简报已制作',
+        documentRequests:[{ format:'md', title:'业务简报', purpose:'整理所供材料', content:{ artifactFile:'draft.md', sourceFile:null } }],
+        investigation:{ status:'complete', blocker:null, goals:[{ id:'original-question', required:true, status:'verified', evidence:'文件已构建' }] },
+        handoff:{ artifacts:[], checks:[{ id:'original-question', required:true, status:'passed', evidence:'实际 Markdown 已构建' }], risks:[], returnTo:'none' },
+      };
+    },
+  });
+  assert.equal(result.sourceSync, undefined);
+  assert.equal(result.exportFiles[0].format, 'md');
+});
 test('native program-built 5000 row HTML uses a small result reference and preserves full actual file',async t=>{const dir=await temp(t),w=await prepareArtifactWorkspace(dir,'job-a');const html='<h1>完整目录</h1><table>'+Array.from({length:5000},(_,i)=>'<tr><td>'+i+'</td><td>接口</td></tr>').join('')+'</table>';await writeFile(path.join(w.directory,'all.html'),html);await writeFile(path.join(w.directory,'build.mjs'),'// provenance only; never executed by importer');const [f]=await createDocuments(dir,{id:'job-a'},[{format:'html',title:'目录',purpose:'完整5000条',content:{artifactFile:'all.html',sourceFile:'build.mjs'}}]);assert.equal((await readFile(path.join(dir,'exports/job-a',f.filename),'utf8')).match(/<tr>/g).length,5000);const input=JSON.parse(await documentInputText(dir,'job-a',f));assert.match(input.actualFile,/report-.*html$/);assert.match(input.buildScript,/provenance/);assert.equal(input.sourceSha256,f.sha256);assert.ok(!('content' in input));});
 test('task boundary rejects other task, traversal, symlinks, hardlinks and linked ancestor',async t=>{const dir=await temp(t),a=await prepareArtifactWorkspace(dir,'a'),b=await prepareArtifactWorkspace(dir,'b');await writeFile(path.join(b.directory,'other.txt'),'safe');for(const file of ['../b/working/other.txt',path.join(b.directory,'other.txt')])await assert.rejects(readArtifactFile(dir,'a',file),/产物路径/);for(const [name,make] of [['soft',symlink],['hard',link],['nested',symlink]]){await make(name==='nested'?b.directory:path.join(b.directory,'other.txt'),path.join(a.directory,name));await assert.rejects(prepareArtifactWorkspace(dir,'a'),/产物路径/);await assert.rejects(readArtifactFile(dir,'a',name==='nested'?'nested/other.txt':name),/产物路径/);await rm(path.join(a.directory,name));}});
 test('native files validate actual format and retain CSV independent business verification',async t=>{const dir=await temp(t),w=await prepareArtifactWorkspace(dir,'j');await writeFile(path.join(w.directory,'fake.pptx'),'just text');await assert.rejects(createDocuments(dir,{id:'j'},[{format:'pptx',title:'x',purpose:'x',content:{artifactFile:'fake.pptx',sourceFile:null}}]));await writeFile(path.join(w.directory,'money.csv'),'n,amount\na,12.30');await assert.rejects(createDocuments(dir,{id:'j',tabularDelivery:true},[{format:'csv',title:'x',purpose:'x',content:{artifactFile:'money.csv',sourceFile:null}}]),/独立核验/);});

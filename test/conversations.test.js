@@ -345,6 +345,29 @@ test('source environment is selected from local catalog, missing/unknown environ
   assert.equal(evidence.sourceEnvironment,'uat');
 });
 
+test('document requests using supplied materials do not require a source environment', async t => {
+  const project = {
+    displayName: 'Demo', analysisSourceMode: 'isolated',
+    analysisEnvironments: { uat: { repositories: [] }, prd: { repositories: [] } },
+  };
+  const { send, app, replies } = await setup(t, ({ message: text }) => decision({
+    action: 'create_task', intent: 'analysis', instruction: text, requiresSourceInspection: text.includes('查源码'),
+  }), { projects: { chatProjectMap: { group: 'demo' }, projects: { demo: project }, ownerOpenIdsByProfile: { owner: ['leader'] } } });
+  await send(message('deck', '用我给的模板制作可编辑的 PPTX 并交付文件'));
+  await send(message('markdown', '把下面的文字整理成 Markdown 文件'));
+  await send(message('mixed', '查源码并输出接口说明 HTML'));
+  await send(message('production', 'PRD 环境，请输出部署清单 HTML'));
+  const [deck, markdown, production] = (await app.store.read()).jobs;
+  for (const job of [deck, markdown]) {
+    assert.equal(job.documentOnly, true);
+    assert.equal(job.sourceEnvironment, undefined);
+    assert.equal(job.workflow, 'continuous_analysis');
+  }
+  assert.equal(production.sourceEnvironment, 'prd');
+  assert.equal(production.documentOnly, undefined);
+  assert.match(replies.map(reply => reply.text).join('\n'), /请明确本次要分析哪个源码环境/);
+});
+
 test('late mention edit accepts previously ignored message exactly once', async t => {
  const {send,app,inputs}=await setup(t,()=>decision({action:'create_task',intent:'analysis',instruction:'只读查系统逻辑'}));
  await send(message('edited-source','initial question',{mentions:[]}));assert.equal(inputs.length,0);

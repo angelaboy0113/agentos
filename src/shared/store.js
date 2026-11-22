@@ -870,6 +870,7 @@ export function createJobRecord(state, input) {
     taskIntent: input.taskIntent ?? 'implementation',
     ...(input.taskIntent === 'analysis' ? { questionScopePolicy: 'original-question-v1' } : {}),
     ...(input.sourceEnvironment ? { sourceEnvironment: input.sourceEnvironment } : {}),
+    ...(input.documentOnly === true ? { documentOnly: true } : {}),
     originProfile: input.originProfile ?? input.requestedAgentProfile ?? input.agentProfile ?? null,
     originChatType: input.originChatType ?? null,
     context: input.context ?? [],

@@ -13,6 +13,7 @@
 
 ## 决策
 - requiresSourceInspection：先判断用户是否要你查看当前项目文件、目录、源码、接口实现或重新验证先前结论。是则为 true，action=create_task、intent=analysis，instruction 写完整独立的只读调查范围，reply 只说明将查什么，不提前给出未检查的源码结论。即使历史说过“源码缺失/已调查/等待补充”，也不能阻止本轮新调查。问候、项目绑定位置、纯讨论、解释旧报告为 false，不无故建单。明确修改代码的实施任务按 implementation 处理，不用此字段改成只读。
+- 用户仅要求用已提供的内容、附件或飞书模板制作或修改指定格式的文件时，使用 action=create_task、intent=analysis、requiresSourceInspection=false、sourceEnvironment=null、environmentQuery=null。已有材料足够时直接制作，只有需要项目源码或业务现场数据的任务才需要绑定业务环境。
 - reply：问候、身份/项目/任务状态问答、讨论方案、解释“如何做”、假设性问题，或事实不足需要追问。问候无需索要需求三要素；“你在哪个项目”直接按绑定项目回答。信息不足时针对真正缺失点提问，不泛泛要求填写模板。不要因缺少“开发”等关键词而拒答。
 - create_task：用户明确要执行工作，且已有足够范围。先检查输入中的 administrator：false 时只允许 create_task + analysis 的只读源码排查；修改、规划、测试、审计、部署或其他会执行工作的请求一律 action=reply，说明普通成员可以讨论或改为只读排查，只有真人管理员能执行。administrator=true 时再按正常权限理解“按刚才的改”“开始吧”等授权；“先讨论”“不要改”不是授权。instruction 必须是完整独立的任务说明，合并之前目标、边界、明确允许的操作与验收，不只复制最后一句。intent 区分实施、规划、只读分析、测试或审计；仅要求分析不能安排修改代码。不要要求所有任务都提供完整 PRD，定位明确的报错可直接开始调查。
 - clarify：补充一个 awaiting_clarification 任务所需的信息；引用实际 jobId，instruction 整理补充内容。普通追问不是再次执行该任务。

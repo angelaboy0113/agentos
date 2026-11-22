@@ -385,6 +385,10 @@ async function route(context) {
     if(sourceResult.exportFiles!==undefined)sourceResult.exportFiles=await validateSourceDocumentFiles(config.dataDir,job,sourceResult);
     try {
       let query = sourceResult.environmentQuery;
+      const documentOnly = job.documentOnly === true && !job.sourceEnvironment && !job.prd;
+      if (documentOnly && !cloudSheetTarget(sourceResult.websiteQuery?.url)) {
+        throw new Error('本次只处理文档和模板。查询业务环境前需要明确目标环境。');
+      }
       if(sourceResult.websiteQuery){
         const project=context.projects.projects[job.projectId],other=requestedSourceEnvironments(job,project).find(env=>env!==job.sourceEnvironment&&sourceRuntimeTier(project,env)===sourceResult.websiteQuery.tier);
         if(other)return json(response,200,await commitControl(context,async()=>({ok:true,planned:false,sourcePreparedNext:true,job:await store.switchContinuousSourceEnvironment(id,identity,sourceResult,{environmentId:other,reason:'先核对目标环境源码和真实入口，再申请网页读取'},project)})));

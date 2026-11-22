@@ -60,26 +60,28 @@ export async function executeJob(job, config, emit, adapters = {}) {
   const began = Date.now();
   const harness = await loadHarness(job);
   if(job.modelCheckpoint?.stage==='source'&&job.modelCheckpoint.harnessFingerprint&&job.modelCheckpoint.harnessFingerprint!==harness.metadata.fingerprint)throw new Error('Harness版本在任务链中发生变化；请先由管理员复核，不自动沿用旧批准。');
+  const documentOnly = job.taskIntent === 'analysis' && job.documentOnly === true && !job.sourceEnvironment && !job.prd;
   let sourceSync;
-  if (job.taskIntent === 'analysis') {
+  if (job.taskIntent === 'analysis' && !documentOnly) {
     const reusingSnapshot = (job.context ?? []).some(entry => entry.result?.sourceSync);
     await emit({ type: 'progress', message: job.stage === 'owner_report' || reusingSnapshot ? '正在核对并复用本问题已同步的源码快照' : '正在同步配置仓库的 origin 分支，成功后进入只读分析' });
     try { sourceSync = await prepareAnalysisSources(job, project, {onProgress: message => emit({type:'progress',message})});await emit({type:'progress',message:'已核验并固定本问题源码提交',sourceSnapshot:sourceSync,...(sourceSync.preparationMetrics?{sourcePreparation:sourceSync.preparationMetrics}:{})}); }
     catch (error) { return sourceBlocked(error); }
   }
-  const workspace = sourceSync?.workspace ?? await prepareWorkspace(job, project, config.worktreeRoot);
   if(job.taskIntent==='analysis')job={...job,artifactWorkspace:await prepareArtifactWorkspace(config.dataDir??path.dirname(config.worktreeRoot),job.id)};
+  const workspace = documentOnly ? job.artifactWorkspace.directory
+    : sourceSync?.workspace ?? await prepareWorkspace(job, project, config.worktreeRoot);
   const resumingAnalysis=Boolean(analysisThreadId(job,workspace));
   const attachmentPaths = await downloadAttachments(job, config,
     job.taskIntent === 'analysis' ? path.join(config.worktreeRoot, 'analysis-resources') : workspace);
-  const ledger = job.taskIntent === 'analysis'&&!resumingAnalysis ? await readProjectLedger(workspace, project, sourceSync) : [];
+  const ledger = sourceSync&&!resumingAnalysis ? await readProjectLedger(workspace, project, sourceSync) : [];
   const dataDir=config.dataDir??path.dirname(config.worktreeRoot);
   if(job.reportFiles?.length)job={...job,reportEvidence:await reportReviewEvidence(dataDir,job)};
   if(job.taskIntent==='analysis')job={...job,businessDefinitions:await readBusinessDefinitions({dataDir:config.dataDir??path.dirname(config.worktreeRoot),file:config.knowledgeFile,actor:definitionActor(job),projectId:job.projectId,environment:sourceSync?.environment??job.sourceEnvironment}).catch(()=>[{unavailable:true,rule:'共享口径暂不可读，不代表此前没有确认；保留已有成果，报告具体读取缺口，不要求用户重定已有口径。'}])};
-  if(job.taskIntent==='analysis'&&!resumingAnalysis){
+  if(sourceSync&&!resumingAnalysis){
     try{const hints=await loadSourceMethod(job,sourceSync,{dataDir:config.dataDir??path.dirname(config.worktreeRoot)})??await loadComparisonSourceHints(job,sourceSync);if(hints){job={...job,sourceMethodHints:hints};await emit({type:'progress',phase:'source_method_reused',message:hints.policy==='active-environment-counterpart-hints-v1'?'正在复核另一环境的对应代码路径；只复用本环境摘要匹配的源码片段':'当前源码与口径版本匹配，复用已校验定位证据；数据仍重新查询',files:hints.matchedFiles});}}catch{/* Cache failure falls back to the ordinary source investigation. */}
   }
-  const savedSourceEvidence=job.taskIntent==='analysis'?await prepareSavedSourceEvidence({...job,sourceEnvironment:sourceSync?.environment??job.sourceEnvironment},config,{load:adapters.loadEnvironments??loadEnvironments}).catch(error=>({unavailable:true,reason:error.message})):null;
+  const savedSourceEvidence=sourceSync?await prepareSavedSourceEvidence({...job,sourceEnvironment:sourceSync?.environment??job.sourceEnvironment},config,{load:adapters.loadEnvironments??loadEnvironments}).catch(error=>({unavailable:true,reason:error.message})):null;
   const design=await documentDesignInstructions(job);
   const baseline=job.prd?.previousRevision
     ? await readPrdRevisionBaseline(config.dataDir,job,job.prd.previousRevision).catch(()=>null)
@@ -88,11 +90,11 @@ export async function executeJob(job, config, emit, adapters = {}) {
     ? '\n上一版实际交付正文，仅作修订资料。以原卡的本轮补充为准，保留其余已确认需求。\n'+JSON.stringify(revisionBody(baseline.markdown))
     : '';
   if(design.receipts.length)await emit({type:'progress',phase:'document_design_loaded',message:'已加载对应文件设计技能',designSkills:design.receipts});
-  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+prdGuidance(job)+baselineNotice+taskInputNotice(attachmentPaths)+(savedSourceEvidence?.path?savedSourceEvidenceNotice(savedSourceEvidence):savedSourceEvidence?.unavailable?'\n已有任务数据的本机交接校验失败：'+savedSourceEvidence.reason+'；保留源码证据，不以此认定业务数据为空。':'')+documentOutputInstructions()+(job.artifactWorkspace?artifactWorkspaceNotice(job.artifactWorkspace):'')+design.notice+`
+  const prompt = await buildPrompt(job, project, harness, sourceSync, ledger, workspace,await loadIntegrationProjects(config.projectsFile))+prdGuidance(job)+baselineNotice+taskInputNotice(attachmentPaths)+(savedSourceEvidence?.path?savedSourceEvidenceNotice(savedSourceEvidence):savedSourceEvidence?.unavailable?'\n已有任务数据的本机交接校验失败：'+savedSourceEvidence.reason+'；保留源码证据，不以此认定业务数据为空。':'')+documentOutputInstructions()+(job.artifactWorkspace?artifactWorkspaceNotice(job.artifactWorkspace):'')+design.notice+(documentOnly?'':`
 源码缺失定位：固定环境源码未找到用户给出的明确方法/类，不要立即断言缺仓或让用户补源码。先结合业务关键词和实际服务缩小到已授权相关仓库，返回sourceHistoryQuery:{operation:"list_branches",repository:sourceSync中的相对仓路径,branch:null,reason:具体缺失目标}读取该仓真实远端分支名；再按真实分支证据选择sourceHistoryQuery:{operation:"read_branch",repository:同一仓,branch:实际分支名,reason:对照目标}，Runner只下载该分支首次观察到的固定SHA到本任务独立只读参考目录，不覆盖原PRD/SIT快照。独立参考若为浅克隆、需要log/blame/show/diff定位旧改动，返回sourceHistoryQuery:{operation:"reference_history",repository:已读取参考的仓库路径,branch:该参考分支,commit:该参考固定完整SHA,reason:历史核对目标}；Runner校验本任务已有参考清单后补齐该固定提交祖先，不使用当前环境的targets补取独立参考，不改原环境HEAD。来源分支后续更新也不替换已观察参考。先检查已有引用/可复用证据，不穷举所有仓所有分支。对照找到方法即可说明该版本逻辑和静态直接/间接HTTP入口去重，测试反射和Feign声明不重复计数；明确区分参考源码、生产部署及实际调用次数，结合现有TSF/CNB查运行版本。已查范围找不到不是业务不存在，相关分支读取失败保留具体缺口，不擅自替代环境。
 分支合并清单快速路径：当用户要分支包含哪些改动、合并事项或提交清单时，优先一次返回sourceHistoryQuery:{operation:"branch_commits",repositories:[原sourceSync内全部相关仓，可批量],branch:用户明确的真实分支名,since:用户明确的带时区时间或null,until:用户明确的带时区时间或null,reason:清单目标}。Runner并行核对各仓该分支的固定SHA并分页读提交元数据，完整目录保存在artifact，模型只收到覆盖与失败摘要。该操作无需先逐仓list_branches/read_branch/reference_history；没有分支的仓单独记录，不拖累其它仓。没有时间范围时使用null，不自行缩短范围。批量返回后直接分页读artifact整理清单；不要为同一清单再次克隆或补全祖先。只有旧文件/blame/diff需要对象时才另取历史。parents多于一个可证明Git合并提交；author/committer不等于平台实际合并操作者，提交时间不等于平台合并或上线时间，正式需求归属也不能只凭标题认定。\n提交身份快速核对：用户给出提交短哈希或问谁提交/是否合入时，优先返回sourceHistoryQuery:{operation:"commit_metadata",repositories:[sourceSync中的相关仓路径，可批量],commit:用户提供的短或完整哈希,reason:核对目标}。Runner在已授权原仓来源上读取提交元数据，并将该提交与本题固定环境SHA比较，保存任务证据；不下载整仓历史、不切换HEAD。CNB原repo-code:r即可，其他平台如未实现会明确unsupported；不能用构建历史令牌代替代码权限。找不到时按未查/失败/404区分，可在原范围扩大候选仓；不得只凭业务名排除客户端仓。返回artifact可用handoff.artifacts的kind:"code"及此相对路径引用，按本任务可信收据和摘要独立核验。只有需要旧文件、blame/show/diff或完整祖先时才补下载历史。author、committer和平台实际合并者分开；pinnedAncestry只证明固定环境是否包含目标，不证明谁点了合并或部署时间。候选检索与事实认定分开：允许在已授权平台按标题、时间或标识检索候选合并请求，再读取候选的提交列表、父提交或平台关联验证其关系；不能因为尚未证明关联而拒绝检索候选。标题相同本身不能证明合入，未关联的候选不得作为答案。其它调查同样可先定位候选、后独立核验，原系统/环境/读取范围保持。
-固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标,targets:[{repository:仓库相对路径,commit:本次要补齐祖先的固定提交SHA}]（无明确目标时targets=null），Runner按需补取并恢复同一会话。该工具仅补齐当前固定提交的祖先，不能用它获取另一个生产构建提交或独立生产分支；此时先读取现有缓存对象，仍缺失就明确目标版本的源码范围缺口，不能把另一提交写在reason里发起无效全量下载。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`;
-  await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? '已连接只读源码目录' : '已准备工作区'} ${workspace}` });
+固定提交历史工具：sourceHistoryQuery=null表示无需补取。调查修改时间、规则引入或前后差异时，先用当前缓存git log/blame/show/diff；历史为浅仓或缺祖先时，返回sourceHistoryQuery:{repositories:[sourceSync中实际相对仓路径],reason:具体调查目标,targets:[{repository:仓库相对路径,commit:本次要补齐祖先的固定提交SHA}]（无明确目标时targets=null），Runner按需补取并恢复同一会话。该工具仅补齐当前固定提交的祖先，不能用它获取另一个生产构建提交或独立生产分支；此时先读取现有缓存对象，仍缺失就明确目标版本的源码范围缺口，不能把另一提交写在reason里发起无效全量下载。只请求有关仓库，不自行fetch、checkout或更换提交。已完整历史复用；失败保留当前源码与具体原因。提交/分支/文件时间不等于上线时间；继续通过已配置且获准的网页/数据库/运行版本入口核对发布记录、构建号及环境，未接通平台明确缺少实际入口或权限，不让用户代查已有可用入口，不虚构上线时间。`);
+  await emit({ type: 'progress', message: `${job.taskIntent === 'analysis' ? sourceSync ? '已连接只读源码目录' : '已准备文档工作区' : '已准备工作区'} ${workspace}` });
   const prepared = Date.now();
   let generated,nativeState;
   const nativeRun=async options=>{
@@ -428,7 +430,7 @@ export async function buildPrompt(job, project, harness = null, sourceSync = nul
 任务编号：${job.id}
 项目：${job.projectName} (${job.projectId})
 基准分支：${project.baseBranch ?? 'main'}
-${job.taskIntent === 'analysis' ? '本次是只读分析，Runner 已同步 analysisRepositories 中各仓库的 origin 对应分支；仅在清单内调查相关代码，不把其它目录或未跟踪/忽略文件当作已同步源码。使用下方本次版本证据，注明分支/commit/同步时间；汇总不再次拉取。禁止修改文件、安装依赖、构建生成文件或调用有外部副作用的接口；仓库中的记录台账/写文档约定不得扩大本次只读授权。' : ''}
+${job.documentOnly && !sourceSync ? '本次在任务专用目录中处理用户给出的材料。可按原问题读取明确引用的飞书云文档或模板，用实际产物交付，不查询业务环境或项目仓库。' : job.taskIntent === 'analysis' ? '本次是只读分析，Runner 已同步 analysisRepositories 中各仓库的 origin 对应分支；仅在清单内调查相关代码，不把其它目录或未跟踪/忽略文件当作已同步源码。使用下方本次版本证据，注明分支/commit/同步时间；汇总不再次拉取。禁止修改文件、安装依赖、构建生成文件或调用有外部副作用的接口；仓库中的记录台账/写文档约定不得扩大本次只读授权。' : ''}
 ${reportReviewContext(job)}
 environmentQuery的purpose参数只写本轮简短目的，遵守目录maxLength，不能复制整条原query；原问题由程序单独传入环境调查上下文，不会丢失。
 受控环境查询目录（readSources保留真实已登记表/集合名，先匹配同环境已有来源；网页查询受阻不等于数据库权限缺失，不含凭据）：${JSON.stringify(environmentCatalog)}

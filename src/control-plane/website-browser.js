@@ -374,14 +374,23 @@ export class WebsiteBrowser {
    if(ref.type!=='inspect'||!['menu-trigger','label-trigger'].includes(current.kind))throw new BrowserInputError('BROWSER_CONTROL_TYPE','只能悬停当前快照登记的菜单或图标提示触发器；不点击未知操作。');
    const prior=await websiteDOM(s).locator('[role="tooltip"]:visible').elementHandles(),owned=!!s.hoverTooltip;
    for(const handle of [s.hoverTooltip?.element,s.hoverTooltip?.tooltip])await handle?.dispose().catch(()=>{});s.hoverTooltip=null;
-   const texts=await Promise.all(prior.map(h=>h.innerText()));await ref.el.hover({timeout:8000});
-   // Wait only for the local hover animation, never replay a business request.
-   await s.page.waitForTimeout(400);
-   const tips=await websiteDOM(s).locator('[role="tooltip"]:visible').elementHandles();
-   if(tips.length===1){const label=(await tips[0].innerText()).trim();let existing=false;for(let i=0;i<prior.length;i++)if(await tips[0].evaluate((el,old)=>el===old,prior[i])&&texts[i].trim()===label)existing=true;
-    if(label&&label.length<=100&&(!existing||owned))s.hoverTooltip={element:await ref.el.evaluateHandle(el=>el),tooltip:tips[0],label};
+   let tips=[];
+   try {
+    const texts=await Promise.all(prior.map(h=>h.innerText()));
+    await ref.el.hover({timeout:8000});
+    // Wait only for the local hover animation, never replay a business request.
+    await s.page.waitForTimeout(400);
+    tips=await websiteDOM(s).locator('[role="tooltip"]:visible').elementHandles();
+    if(tips.length===1){const label=(await tips[0].innerText()).trim();let existing=false;for(let i=0;i<prior.length;i++)if(await tips[0].evaluate((el,old)=>el===old,prior[i])&&texts[i].trim()===label)existing=true;
+     if(label&&label.length<=100&&(!existing||owned))s.hoverTooltip={element:await ref.el.evaluateHandle(el=>el),tooltip:tips[0],label};
+    }
+   }catch(error){
+    if(error.name==='TimeoutError')throw new BrowserInputError('BROWSER_OPERATION_TIMEOUT','悬停未确认完成。请刷新页面快照，从当前可见菜单或其他已审核的只读入口继续。');
+    if(/Element is not attached|Execution context was destroyed/i.test(error.message))throw new BrowserInputError('BROWSER_REF_STALE','悬停期间页面或控件已变化；请刷新快照，使用新引用继续。');
+    throw error;
+   }finally{
+    for(const handle of [...prior,...tips.filter(h=>h!==s.hoverTooltip?.tooltip)])await handle.dispose().catch(()=>{});
    }
-   for(const handle of [...prior,...tips.filter(h=>h!==s.hoverTooltip?.tooltip)])await handle.dispose();
    return this.snapshot(s);
   }
   if(ref.type==='inspect')throw new BrowserInputError('BROWSER_CONTROL_TYPE','该引用只允许检查或悬停，不能点击、输入或按键执行。');

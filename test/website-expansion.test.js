@@ -16,6 +16,11 @@ test('isolated row menu hover reveals read-only actions without authorizing unkn
  const b=new WebsiteBrowser(dir,{launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP hover.test 127.0.0.1']})}),e={projectId:'people',tier:'prd',baseUrl:`http://hover.test:${server.address().port}/`},job={id:'hover-a'};
  t.after(async()=>{await b.close();await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});});let s=await b.run(job,e,'connection');const menu=s.controls.find(c=>c.kind==='menu-trigger');assert.ok(menu);await assert.rejects(b.run(job,e,'browser_click',{ref:menu.ref}),e=>e.code==='BROWSER_CONTROL_TYPE');s=await b.run(job,e,'browser_hover',{ref:menu.ref});assert.ok(s.controls.some(c=>c.label==='查看'));assert.ok(!s.controls.some(c=>c.label==='删除'));
  const latestMenu=s.controls.find(c=>c.kind==='menu-trigger');await assert.rejects(b.run(job,e,'browser_key',{ref:latestMenu.ref,key:'Enter'}),e=>e.code==='BROWSER_CONTROL_TYPE');
+ const currentHandle=b.pages.get(job.id).refs.get(latestMenu.ref).el;
+ currentHandle.hover=async()=>{throw Object.assign(new Error('Hover action timed out'),{name:'TimeoutError'});};
+ await assert.rejects(b.run(job,e,'browser_hover',{ref:latestMenu.ref}),e=>e.code==='BROWSER_OPERATION_TIMEOUT');
+ const refreshed=await b.run(job,e,'browser_snapshot');
+ assert.ok(refreshed.controls.some(c=>c.kind==='menu-trigger'));
  const handles=await pageHandles(b.pages.get(job.id).page),individual=[];for(const el of handles)individual.push(await el.evaluate(controlMetadata));
  assert.deepEqual(await b.pages.get(job.id).page.evaluate(controlMetadataBatch,{elements:handles}),individual);for(const el of handles)await el.dispose();
  const page=b.pages.get(job.id).page;await page.goto('about:blank');const diag=await b.run(job,e,'browser_diagnostics');assert.equal(diag.readOnly,true);assert.equal(page.url(),'about:blank');

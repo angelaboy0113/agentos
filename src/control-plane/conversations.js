@@ -3,6 +3,7 @@ import {directSocial} from '../shared/reception-policy.js';
 import {requesterMentionText} from './requester-mention.js';
 import {publicStickerPolicy} from './success-stickers.js';
 import {deliveredReportInputs,boundReportInput} from '../shared/report-followup.js';
+import {requestedDocumentFormats} from '../shared/document-artifacts.js';
 import {addressCard,addressText} from './reply-addressing.js';
 import {readBusinessDefinitions,recordBusinessDefinitions} from '../shared/business-definitions.js';
 import {sourceEnvironmentForTier,explicitSourceEnvironment,sourceEnvironmentConflict,confirmedSourceEnvironment} from '../shared/source-environments.js';
@@ -566,13 +567,20 @@ export class ConversationService {
         environmentAccess = planQuery(await loadEnvironments(), decision.environmentQuery, projectId, turn);
       }
       let sourceEnvironment;
+      let documentOnly = false;
       if (decision.intent === 'analysis') {
         // Environment-first investigations still return to the same source worker.
         // Preserve an explicit source choice, otherwise use the verified runtime
         // tier through this project's explicit/standard mapping, never as a branch ID.
-        try { sourceEnvironment = environmentAccess
-          ? sourceEnvironmentForTier(projects.projects[projectId],environmentAccess.tier,decision.sourceEnvironment)
-          : selectSourceEnvironment(projects.projects[projectId],decision.sourceEnvironment || explicitSourceEnvironment(projects.projects[projectId],turn.content) || (await stateView(store,s=>questionSourceContext(s,{...turn,projectId},projects.projects[projectId])))?.id);  }
+        const project = projects.projects[projectId];
+        const selected = decision.sourceEnvironment || explicitSourceEnvironment(project, turn.content);
+        documentOnly = decision.requiresSourceInspection === false && !environmentAccess && !selected
+          && requestedDocumentFormats(turn.content).length > 0;
+        try {
+          if (!documentOnly) sourceEnvironment = environmentAccess
+            ? sourceEnvironmentForTier(project, environmentAccess.tier, decision.sourceEnvironment)
+            : selectSourceEnvironment(project, selected || (await stateView(store,s=>questionSourceContext(s,{...turn,projectId},project)))?.id);
+        }
         catch (error) { return { notice: error.message }; }
         const conflict=sourceEnvironmentConflict(projects.projects[projectId],sourceEnvironment,turn.content);
         if(conflict)return {notice:conflict.message};
@@ -591,7 +599,7 @@ export class ConversationService {
         projectId, projectName: projects.projects[projectId].displayName ?? projectId,
         ...(turn.setupSourceJobId?{context:turn.investigationContext??[],missionId:turn.resumeMissionId}:{}),
         chatId: turn.chatId, senderId: turn.senderId, originProfile: turn.profile,
-        originChatType: turn.chatType, visibility:turn.visibility, questionId: turn.questionId, environmentAccess, sourceEnvironment,
+        originChatType: turn.chatType, visibility:turn.visibility, questionId: turn.questionId, environmentAccess, sourceEnvironment, documentOnly,
         connectionSourceDiscovery:turn.connectionSourceDiscovery,
         connectionEnrollmentPending: decision.environmentSetup?.kind === 'mysql' && !decision.environmentSetup.url,
         ...(environmentAccess?.approvalRequired ? { status: 'awaiting_environment_approval' } : {}),
