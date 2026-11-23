@@ -89,14 +89,19 @@ test('PRD list captures require actual rows and replace sensitive cells without 
  await page.locator('td').nth(0).evaluate(cell=>{cell.textContent='PRD-PRIVATE-B';});
  await page.locator('td').nth(1).evaluate(cell=>{cell.textContent='PRIVATE CUSTOMER B';});
  assert.equal((await capture()).designReference.sha256,populated.designReference.sha256);
- await page.locator('.ant-table').evaluate(grid=>{
+ await page.locator('.ant-table').evaluate(async grid=>{
   const icon='<svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="red"/></svg>';
+  const canvas=document.createElement('canvas');
+  canvas.width=16;canvas.height=16;
+  canvas.getContext('2d').fillRect(0,0,16,16);
+  const raster='<img width="15" height="15" src="'+canvas.toDataURL()+'">';
   grid.querySelector('thead tr').insertAdjacentHTML('beforeend','<th>操作</th>');
-  grid.querySelector('tbody tr').insertAdjacentHTML('beforeend','<td><button>'+icon+'<span>复制</span></button></td>');
-  grid.querySelector('tbody td').insertAdjacentHTML('beforeend',icon);
+  grid.querySelector('tbody tr').insertAdjacentHTML('beforeend','<td><button>'+icon+raster+'<span>复制</span></button>'+raster+'</td>');
+  grid.querySelector('tbody td').insertAdjacentHTML('beforeend',icon+raster);
+  await Promise.all([...grid.querySelectorAll('img')].map(img=>img.decode()));
  });
  const withActions=await capture();
  assert.ok(withActions.designLayout.controls.some(c=>c.text==='复制'));
- assert.equal(withActions.designLayout.assets.length,1);
+ assert.equal(withActions.designLayout.assets.length,2);
  assert.equal(await page.locator('td').evaluateAll(cells=>cells.some(cell=>cell.getAttributeNames().some(name=>name.includes('agentos-label')))),false);
 });
