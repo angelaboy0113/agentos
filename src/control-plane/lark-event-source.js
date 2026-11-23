@@ -97,7 +97,7 @@ export class LarkEventSource {
       if (event.type !== 'card.action.trigger' || !event.event_id) return;
       // Persist before HTTP forwarding: failures/restarts retry the same business effect, not a new one.
       const payload = Object.fromEntries(['type', 'event_id', 'operator_id', 'message_id', 'chat_id', 'action_tag',
-        'action_value', 'action_name', 'form_value', 'card_content'].map((field) => [field, event[field]]));
+        'action_value', 'action_name', 'form_value', 'card_content', 'timestamp'].map((field) => [field, event[field]]));
       payload.agent_profile = this.config.profile ?? null;
       payload.agent_role = this.config.role ?? null;
       await mkdir(this.callbackDirectory, { recursive: true });

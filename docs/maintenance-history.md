@@ -2458,3 +2458,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 ## 1.154.13
 
 - Verify grants for approved business-account MySQL connections using the current-session short form supported by database gateways. Keep grant validation and read-only transaction requirements for connection checks and investigations.
+
+## 1.154.14
+
+- Acknowledge accepted Feishu check-in actions once their receipts are saved. Process points and direct-message results in a restart-safe queue, preserve the original click day, and keep duplicate clicks from awarding extra points. The CLI connection uses Feishu's built-in click feedback.

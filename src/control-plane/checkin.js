@@ -83,57 +83,160 @@ function weekOf(day) {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
+
+const pendingMessage = {
+  daily_checkin: '已收到签到，正在核对积分。',
+  my_checkin_points: '正在查询积分，结果将私聊发给你。',
+  points_store: '积分商城，敬请期待。',
+};
+
 export async function handleCheckinAction(context, event, action, now = Date.now()) {
   if (!isCheckinAction(action)) return { ignored: true, reason: 'unknown_checkin_action' };
   const { operator_id: senderId, agent_profile: profile, chat_id: chat, message_id: message } = event;
-  if (!openId.test(senderId) || !chatId.test(chat) || !messageId.test(message)) return { ignored: true, reason: 'invalid_checkin_actor' };
+  if (!event.event_id || !openId.test(senderId) || !chatId.test(chat) || !messageId.test(message)) {
+    return { ignored: true, reason: 'invalid_checkin_actor' };
+  }
   const binding = await stateView(context.store, (s) => Object.values(s.checkinCards ?? {})
     .find((c) => c.profile === profile && c.messageId === message && c.chatId === chat));
   if (!binding || (binding.preview ? binding.target !== senderId : !allowedGroup(context, assistant(context, profile), chat))) {
     return { ignored: true, reason: 'checkin_card_scope_mismatch' };
   }
-  const when = new Date(now).toISOString(), day = dayFormat.format(now);
-  const actor = actorKey(context.projects, {profile, senderId});
-  const ledger = binding.preview ? 'previewCheckins' : 'checkins';
-  const id = hash(ledger, actor, day);
+  const eventAt = Number(event.timestamp);
+  const clickedAt = Number.isSafeInteger(eventAt) && eventAt >= 1e12 && eventAt <= now ? eventAt : now;
+  const day = dayFormat.format(clickedAt);
   const deliveryId = hash('checkin-receipt', profile, event.event_id, senderId, message, action);
-  const result = await context.store.transact((state) => {
+  const duplicate = await context.store.transact((state) => {
     state.checkinReceipts ??= {};
-    if (state.checkinReceipts[deliveryId]) return { ...state.checkinReceipts[deliveryId] };
-    if (action === 'points_store') {
-      const receipt = { text: '积分商城，敬请期待。', day, sent: false };
-      state.checkinReceipts[deliveryId] = receipt;
-      return receipt;
+    const prior = state.checkinReceipts[deliveryId];
+    if (prior) {
+      if (!prior.sent && !prior.profile) Object.assign(prior, { profile, senderId });
+      return true;
     }
-    state[ledger] ??= {};
-    const prior = state[ledger][id];
-    let text = prior ? '今天已签到。' : '今天还未签到。';
-    if (action === 'daily_checkin') {
-      state[ledger][id] ??= { id, chatId: chat, senderId, profile, day, createdAt: when, points: 1 };
-      text = prior ? '今天已经签到。明天可以再领 1 积分。' : '签到成功，获得 1 积分。';
-    }
-    const week = weekOf(day);
-    const signins = Object.values(state[ledger]).filter((row) => row.chatId === chat && row.day >= week.start
-      && row.day <= week.end && actorKey(context.projects, row) === actor).length;
-    const questions = binding.preview ? 0 : adminUsage({
-      conversations: (state.conversations ?? []).filter((row) => actorKey(context.projects, row) === actor),
-      questions: state.questions,
-    }, { ...week, chatId: chat, excludeAdmin: 'false' }, { projects: context.projects }).summary.points;
-    text += '\n本周 ' + (signins + questions) + ' 积分 · 签到 ' + signins + ' · 提问 ' + questions;
-    if (binding.preview) text = '【私聊体验】' + text + '\n体验积分仅在这张卡里展示。';
-    const receipt = { text, day, sent: false };
-    state.checkinReceipts[deliveryId] = receipt;
-    return { ...receipt };
+    state.checkinReceipts[deliveryId] = {
+      day, profile, senderId, chatId: chat, preview: binding.preview, action, createdAt: new Date(clickedAt).toISOString(), sent: false,
+    };
+    state.cardCallbackAudit ??= [];
+    state.cardCallbackAudit.push({ at: new Date(now).toISOString(), profile, eventId: event.event_id,
+      messageId: message, operatorId: senderId, action, cardContentPresent: !!event.card_content, outcome: 'accepted' });
+    state.cardCallbackAudit = state.cardCallbackAudit.slice(-200);
+    return false;
   });
-  if (result.sent) return { ok: true, duplicate: true };
-  await send(context, profile, senderId, 'text', { text: result.text }, deliveryId.slice(0, 32));
-  await context.store.transact((state) => {
-    const receipts = state.checkinReceipts;
-    receipts[deliveryId].sent = true;
-    const cutoff = new Date(now - 7 * 86400000).toISOString().slice(0, 10);
-    for (const [key, receipt] of Object.entries(receipts)) {
-      if (receipt.sent && receipt.day < cutoff) delete receipts[key];
+  context.checkinQueue.wake();
+  return { ok: true, duplicate, checkinQueued: true, message: pendingMessage[action], notification: 'callback_only' };
+}
+
+function settleReceipt(context, state, receipt) {
+  const { action, preview, profile, senderId, chatId, day, createdAt } = receipt;
+  if (action === 'points_store') return pendingMessage.points_store;
+  const actor = actorKey(context.projects, {profile, senderId});
+  const ledger = preview ? 'previewCheckins' : 'checkins';
+  const id = hash(ledger, actor, day);
+  state[ledger] ??= {};
+  const prior = state[ledger][id];
+  let text = prior ? '今天已签到。' : '今天还未签到。';
+  if (action === 'daily_checkin') {
+    state[ledger][id] ??= { id, chatId, senderId, profile, day, createdAt, points: 1 };
+    text = prior ? '今天已经签到。明天可以再领 1 积分。' : '签到成功，获得 1 积分。';
+  }
+  const week = weekOf(day);
+  const signins = Object.values(state[ledger]).filter((row) => row.chatId === chatId && row.day >= week.start
+    && row.day <= week.end && actorKey(context.projects, row) === actor).length;
+  const questions = preview ? 0 : adminUsage({
+    conversations: (state.conversations ?? []).filter((row) => actorKey(context.projects, row) === actor),
+    questions: state.questions,
+  }, { ...week, chatId, excludeAdmin: 'false' }, { projects: context.projects }).summary.points;
+  text += '\n本周 ' + (signins + questions) + ' 积分 · 签到 ' + signins + ' · 提问 ' + questions;
+  return preview ? '【私聊体验】' + text + '\n体验积分仅在这张卡里展示。' : text;
+}
+
+export class CheckinQueue {
+  constructor(context) {
+    this.context = context;
+    this.deliveries = new Map();
+    this.closed = false;
+  }
+
+  start() {
+    this.timer = setInterval(() => this.wake(), 3000);
+    this.timer.unref();
+    this.wake();
+  }
+
+  wake() {
+    if (this.closed) return;
+    this.wakeRequested = true;
+    if (this.scheduled || this.processing) return;
+    this.scheduled = setImmediate(() => {
+      this.scheduled = null;
+      this.wakeRequested = false;
+      this.processing = this.process().catch(() => console.error('[checkin] 积分处理暂缓，已保留回执'))
+        .finally(() => {
+          this.processing = null;
+          if (this.wakeRequested) this.wake();
+        });
+    });
+  }
+
+  async process() {
+    const { store } = this.context;
+    const pending = await stateView(store, (state) => Object.entries(state.checkinReceipts ?? {})
+      .filter(([id, receipt]) => !receipt.sent && receipt.profile && receipt.senderId && !this.deliveries.has(id)));
+    const unsettled = pending.filter(([, receipt]) => !receipt.text);
+    if (unsettled.length) {
+      await store.transact((state) => {
+        for (const [id, receipt] of unsettled) {
+          state.checkinReceipts[id].text = settleReceipt(this.context, state, receipt);
+        }
+      });
     }
-  });
-  return { ok: true, notification: 'callback_only' };
+    const now = Date.now();
+    const busyActors = new Set([...this.deliveries.values()].map(({ actor }) => actor));
+    for (const [id, receipt] of pending) {
+      if (this.closed || this.deliveries.size >= 4) break;
+      const actor = actorKey(this.context.projects, receipt);
+      if (busyActors.has(actor)) continue;
+      busyActors.add(actor);
+      if (receipt.retryAt > now) continue;
+      const work = this.deliver(id).catch(() => console.error('[checkin] 私聊回执写入暂缓'))
+        .finally(() => { this.deliveries.delete(id); this.wake(); });
+      this.deliveries.set(id, { actor, work });
+    }
+  }
+
+  async deliver(id) {
+    const { store } = this.context;
+    const receipt = await stateView(store, (state) => state.checkinReceipts[id]);
+    let delivered = false;
+    try {
+      await send(this.context, receipt.profile, receipt.senderId, 'text', { text: receipt.text }, id.slice(0, 32));
+      delivered = true;
+    } catch {
+      // Keep the same outbound UUID if delivery or its acknowledgment fails.
+      console.warn('[checkin] 私聊投递暂缓，将重试');
+    }
+    await store.transact((state) => {
+      const receipts = state.checkinReceipts;
+      const current = receipts[id];
+      if (delivered) {
+        current.sent = true;
+        delete current.retryAt;
+        delete current.failures;
+        const cutoff = dayFormat.format((current.createdAt ? Date.parse(current.createdAt) : Date.now()) - 7 * 86400000);
+        for (const [key, old] of Object.entries(receipts)) {
+          if (key !== id && old.sent && old.day < cutoff) delete receipts[key];
+        }
+      } else {
+        current.failures = (current.failures ?? 0) + 1;
+        current.retryAt = Date.now() + Math.min(60000, 3000 * 2 ** Math.min(current.failures - 1, 5));
+      }
+    });
+  }
+
+  async close() {
+    this.closed = true;
+    clearInterval(this.timer);
+    clearImmediate(this.scheduled);
+    await this.processing;
+    await Promise.all([...this.deliveries.values()].map(({work}) => work));
+  }
 }

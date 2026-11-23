@@ -41,7 +41,7 @@ export async function handleCardAction(context, event) {
   let result;
   try { result=await applyCardAction(context,event);return result; }
   finally {
-    if(!result?.duplicate)await context.store.transact(state=>{
+    if(!result?.duplicate&&!result?.checkinQueued)await context.store.transact(state=>{
       state.cardCallbackAudit??=[];
       state.cardCallbackAudit.push({at:new Date().toISOString(),profile:event.agent_profile??null,eventId:event.event_id??null,
         messageId:event.message_id??null,operatorId:typeof event.operator_id==='string'?event.operator_id:null,
