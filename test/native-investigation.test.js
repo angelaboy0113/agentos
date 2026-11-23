@@ -235,6 +235,36 @@ test('yielded host calls finish once and their durable result returns before acc
  await toolPromise;assert.equal(executed,1);assert.equal(turns,2);assert.equal(result.nativeTiming.hostContinuations,1);assert.equal(result.outcome,'ready');
 });
 
+for(const scenario of ['completed read','external blocker','repeat','no read'])test('native early blocked result with '+scenario,async t=>{
+ const directory=await temp(t),app=new EventEmitter(),events=[];
+ let turns=0,reads=0,closes=0,invoke;
+ const direct={job,sourceReceipts:[],close:async()=>{},call:async(name)=>{
+  if(name==='agentos_environment_close'){closes++;direct.channel=null;return {state:'saved'};}
+  reads++;direct.channel={};return {state:'tools',input:{results:[{tool:'schema',result:{table:'verified_dealer_metadata'}}]}};
+ }};
+ app.start=async()=>{};app.readAccount=async()=>({account:{type:'chatgpt'}});app.close=async()=>{};app.request=async()=>({thread:{id:'finished-read'}});
+ const blocked={outcome:'blocked',finalMessage:'Waiting for tool',investigation:{status:'continue',nextStep:'Read the original result',blocker:scenario==='external blocker'?{kind:'permission',needed:'Missing source authorization'}:null}};
+ app.turn=async params=>{
+  turns++;
+  const id='turn-'+turns;
+  app.emit('notification',{method:'turn/started',params:{threadId:'finished-read',turn:{id}}});
+  if(turns===2){
+   assert.equal(closes,0);
+   assert.match(params.input[0].text,/verified_dealer_metadata/);
+   if(scenario==='completed read')return {text:JSON.stringify({outcome:'ready',finalMessage:'Reviewed the tool receipt'})};
+  }
+  if(scenario!=='no read')await invoke({threadId:'finished-read',turnId:id,namespace:null,callId:'read-'+id,tool:'agentos_environment_tool',arguments:{tool:'schema',arguments:'{}'}});
+  return {text:JSON.stringify(blocked)};
+ };
+ const result=await runNativeInvestigation({job:{...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}},config:{dataDir:directory},workspace:directory,prompt:'fixture',emit:async e=>events.push(e)},{app,direct,runtime:async()=>({}),bindToolCall:fn=>invoke=fn});
+ const continued=['completed read','repeat'].includes(scenario);
+ assert.equal(turns,continued?2:1);
+ assert.equal(reads,scenario==='repeat'?2:scenario==='no read'?0:1);
+ assert.equal(result.nativeTiming.hostContinuations,continued?1:0);
+ assert.equal(events.filter(e=>e.phase==='native_analysis_continuing').length,continued?1:0);
+ assert.equal(result.outcome,scenario==='completed read'?'ready':'blocked');
+});
+
 test('controller grant refresh preserves trusted local artifact workspace for a later cloud input',async t=>{
  const directory=await temp(t),app=new EventEmitter();let handler,downloads=0,receipt;
  const original={...job,artifactWorkspace:{directory,profile:'aos_artifact_01234567890123456789'}};

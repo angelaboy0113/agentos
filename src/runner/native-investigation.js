@@ -81,6 +81,7 @@ export async function runNativeInvestigation(options,adapters={}) {
   const journalDirectory=await store.root();
   let journal,threadId,turnId,active=false,toolCalls=0,toolQueue=Promise.resolve(),progressTimer,modelTurns=0,hostContinuations=0,checkedLogFallback=false;const began=Date.now();
   const pendingTools=new Set(),deferredTools=new Set(),deferredResults=[],prdReviewAttempts=new Set();
+  let completedRead, recoveredPrematureBlock=false;
   const onToolCall=async params=>{
     if(!active||params.threadId!==threadId||!turnId||params.turnId!==turnId||params.namespace!==null||!investigationDynamicTools.some(x=>x.name===params.tool)&&params.tool!=='agentos_read_result')throw failure('NATIVE_TOOL_SCOPE');
     const run=()=>journal.call(params.callId,{tool:params.tool,arguments:params.arguments},async()=>{
@@ -97,7 +98,12 @@ export async function runNativeInvestigation(options,adapters={}) {
       }
     });
     pendingTools.add(params.callId);
-    const pending=toolQueue.then(run).then(response=>{if(deferredTools.has(params.callId))deferredResults.push({tool:params.tool,callId:params.callId,response});return response;},error=>{if(deferredTools.has(params.callId))deferredResults.push({tool:params.tool,callId:params.callId,error:failureDiagnostic(error)});throw error;}).finally(()=>pendingTools.delete(params.callId));
+    const pending=toolQueue.then(run).then(response=>{
+      const receipt={tool:params.tool,callId:params.callId,response};
+      if(deferredTools.has(params.callId))deferredResults.push(receipt);
+      if(response.success&&['agentos_environment_tool','agentos_source_history'].includes(params.tool))completedRead=receipt;
+      return response;
+    },error=>{if(deferredTools.has(params.callId))deferredResults.push({tool:params.tool,callId:params.callId,error:failureDiagnostic(error)});throw error;}).finally(()=>pendingTools.delete(params.callId));
     toolQueue=pending.catch(()=>{});return pending;
   };
   const app=adapters.app??new CodexAppServer({cwd:workspace,codexBin:await resolveCodexBinary(config.codexBin),env:await codexEnvironment(),args:[...conversationServerArgs(),...artifactPermissionArgs(job.artifactWorkspace),'-c','features.shell_tool=true'],onToolCall});
@@ -120,6 +126,7 @@ export async function runNativeInvestigation(options,adapters={}) {
     const initialInput=initial?'\n接单时已批准的首个只读来源已在同一会话内打开。先使用此目录继续取证，勿重复打开或重复查询；结束来源后再核对完整原问题：\n'+JSON.stringify(await presentNativeToolResult(store,'initial_environment',initial)):'';
     let result;let input;
     for(;;){
+    completedRead=undefined;
     modelTurns++;const answer=await app.turn({threadId,approvalPolicy:'never',effort:runtime.reasoningEffort??'low',input:input??[{type:'text',text:options.prompt+initialInput+'\n执行方式：优先直接使用agentos_*工具，保持当前会话。environment_open只申请既有范围，返回目录后用environment_tool直接执行；close保存每个来源的核验收据，再按需打开另一来源。来源结束不等于原问题完成。按用户要求的粒度交付：完整列齐对象不等于穷尽每个对象的所有内部实现、历史和副作用；未被要求且不影响结论的深挖不能升级为交付前置条件。已取得足够证据后集中核验交付，不逐个子步骤回报partial。用户基于给定前提要求方案或重做文件时，不得擅自将重查全部前提作为交付条件；未独立重查的前提如实说明，用户另行要求的代码变化/金额核验仍须取证。单个来源鉴权、范围或查询失败只约束该来源，不得重复失败操作或扩大权限；关闭并保存其缺口后，继续可独立完成的源码核对、其它已授权来源、文件制作与核验。用户要求文件时，可交付明确标注已核实范围与缺项的有用部分文件，不能因部署核验缺口而连源码接口清单都不整理；不得把源码接口冒称为线上已部署接口，亦不得将部分交付说成全部成功。无需输出中间environmentQuery/sourceHistoryQuery结束本轮；最终仍按原schema和真实证据交付。源码通过现有只读shell；业务数据库/网页/日志/历史补取必须使用受控工具。缺登录或权限保留等待；禁止自行连接数据库或绕过受控网页。'},...attachmentPaths.filter(x=>x.type==='image').map(x=>({type:'localImage',path:x.path}))],outputSchema:JSON.parse(await readFile(new URL('../../config/task-result.schema.json',import.meta.url),'utf8'))},{onEvent:method=>{if(method==='item/started')emit({type:'progress',phase:'codex_working'}).catch(()=>{});}});
     active=false;
     result=JSON.parse(answer.text);
@@ -141,6 +148,19 @@ export async function runNativeInvestigation(options,adapters={}) {
     // prompt/schema habits must not silently re-enter the nested model pipeline.
     const continuation=result.environmentQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.environmentQuery),website:false}}:result.websiteQuery?{name:'agentos_environment_open',args:{request:JSON.stringify(result.websiteQuery),website:true}}:result.sourceHistoryQuery?{name:'agentos_source_history',args:{query:JSON.stringify(result.sourceHistoryQuery)}}:null;
     if(direct.waiting||result.sourceEnvironmentQuery)break;
+    // The tool can also finish immediately before turn completion. Recover an
+    // explicit in-progress result once, before closing its authorized source.
+    if(!recoveredPrematureBlock&&completedRead&&result.outcome==='blocked'&&
+       result.investigation?.status==='continue'&&!result.investigation.blocker&&
+       result.investigation.nextStep?.trim()&&!result.browserLoginRequired&&
+       !continuation&&!result.documentRequests?.length){
+      recoveredPrematureBlock=true;
+      hostContinuations++;
+      await emit({type:'progress',phase:'native_analysis_continuing',message:'只读工具已返回，继续在当前会话核验'});
+      input=[{type:'text',text:'上一轮给出了继续执行的步骤，当前只读调用已实际返回并保存。先核对下列工具回执，复用结果，在同一会话继续原需求。只有实际外部缺口才提交等待；确认所需证据和交付格式后再提交最终结果。\n'+JSON.stringify(completedRead)}];
+      active=true;
+      continue;
+    }
     let observation;
     if(direct.channel)observation=await journal.call('host-close-'+turnId,{complete:false},()=>direct.call('agentos_environment_close',{summary:'保存本来源既有证据；继续同一调查会话核验下一来源。',complete:false}));
     if(direct.waiting)break;
