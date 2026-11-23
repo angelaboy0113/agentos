@@ -54,15 +54,20 @@ async function send(context, profile, receiveId, type, content, uuid, receiveIdT
   return { messageId: receipt.data.message_id, chatId: receipt.data.chat_id };
 }
 
-export async function publishCheckinCard(context, {profile, group} = {}) {
+export async function publishCheckinCard(context, {profile, group, previewRequestId} = {}) {
   const preview = group === undefined;
+  if (previewRequestId !== undefined && (!preview || typeof previewRequestId !== 'string' || !/^[a-zA-Z0-9_-]{8,64}$/.test(previewRequestId))) {
+    throw Object.assign(new Error('新体验卡仅支持私聊，并须提供有效的请求编号'), { statusCode: 400 });
+  }
   const agent = assistant(context, profile);
   const owner = context.projects.humanIdentities?.groupOwner?.[profile];
   if (!agent || (preview ? !openId.test(owner ?? '') : !allowedGroup(context, agent, group))) {
     throw Object.assign(new Error('签到卡的机器人或目标群未登记'), { statusCode: 400 });
   }
   const target = preview ? owner : group;
-  const key = preview ? hash('preview', profile, owner) : hash('group', group);
+  const key = previewRequestId === undefined
+    ? (preview ? hash('preview', profile, owner) : hash('group', group))
+    : hash('preview-reissue', profile, owner, previewRequestId);
   const binding = await context.store.transact((state) => {
     state.checkinCards ??= {};
     const value = state.checkinCards[key] ??= { profile, preview, target };
