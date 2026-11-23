@@ -61,9 +61,29 @@ async function resumeWebsiteLogins(context){
    if(login)await context.remoteLoginQr?.observe(job,e,login);
    if(login&&!login.pageReady){
     const state=recovery?.loginState==='interactive_login_required'?'interactive_login_required':login.loginState==='loading'?'loading':login.passwordChangeRequired?'password_change_required':login.verificationRequired?'verification_required':login.credentialRejected?'rejected':login.rateLimited?'rate_limited':login.serviceUnavailable?'service_error':login.requestFailed?'request_error':login.blockedRequests?.length?'request_blocked':recovery?.credentialState==='unavailable'?'credential_unavailable':login.loginState??'waiting';
-    const remoteQr=e.loginNavigation?.remoteQr===true;
+    const remoteBinding=['interactive_login_required','verification_required'].includes(state)
+     ?context.remoteLoginQr?.binding?.(job,e):null;
     const messages={interactive_login_required:'此页面使用本机账号、扫码或单点登录，未显示账号密码表单；请在本机页面使用已有登录入口，完成后自动继续，无需在群内发送密码。',credential_unavailable:'本机未能读取此应用的可用凭据。首次使用可在原任务卡提供账号密码；若以前已保存，请维护者检查钥匙串解锁和应用绑定，不必反复重发密码。',service_error:'登录接口服务异常，不能认定账号密码错误；原任务保留，请维护者检查网站服务。',request_error:'登录请求未通过接口检查，不能认定账号密码错误；请维护者检查请求链路。',rate_limited:'登录接口限制了请求频率，不会反复自动提交凭据；原任务保留。',password_change_required:'网站要求修改或重置密码，请由本人在本机页面完成；AgentOS不会更改密码。',verification_required:'网站正在等待验证码、短信或扫码，请在本机页面完成。',rejected:'网站明确拒绝了本次登录；请核对账号状态和凭据后，在原任务卡重新提供。',request_blocked:'登录尚未完成，发现网页请求受到限制；请维护者核对允许范围，当前不能认定密码错误。',loading:'网页仍在加载或只有空白外壳，尚不能确认登录成功。',login_required:'正在使用本机已保存的凭据恢复登录，原任务保留；无需重复发送已有账号密码。',access_denied:'网站返回访问拒绝页。请核对页面初始化请求及应用授权，原任务保留。',waiting:'尚未确认登录成功，原任务保留。'};
-    const changed=await context.store.transact(s=>{const current=s.jobs.find(j=>j.id===job.id);if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired||current.result.browserCredentialState===(recovery?.credentialState??'unknown')&&current.result.browserLoginState===state&&JSON.stringify(current.result.browserLoginDiagnostic??null)===JSON.stringify(login.diagnostic??null))return false;current.result.browserCredentialState=recovery?.credentialState??'unknown';current.result.browserLoginState=state;current.result.browserLoginDiagnostic=login.diagnostic??null;current.result.summary=remoteQr&&['interactive_login_required','verification_required'].includes(state)?'正在将本任务的扫码验证私发给已登记管理员；扫码成功后自动接续，无需在群内提供密码。':messages[state]??messages.waiting;current.result.finalMessage=current.result.summary+' 当前网站：'+e.baseUrl;if(current.availableSourceReviewPolicy==='preserve-and-review-v1')current.result=preserveAvailableEvidence(current,current.result);current.updatedAt=new Date().toISOString();return true;});
+    const changed=await context.store.transact(s=>{
+     const current=s.jobs.find(j=>j.id===job.id);
+     if(current?.status!=='awaiting_clarification'||!current.result?.browserLoginRequired)return false;
+     const credentialState=recovery?.credentialState??'unknown',diagnostic=login.diagnostic??null;
+     const challenge=remoteBinding?s.remoteLoginQr?.[remoteBinding.key]:null;
+     const remoteState=!remoteBinding?null:challenge?.jobId!==job.id?'pending':challenge.state==='sent'?'sent':challenge.state==='expired'?'expired':'pending';
+     if(current.result.browserCredentialState===credentialState&&current.result.browserLoginState===state
+       &&(current.result.browserRemoteQrState??null)===remoteState&&JSON.stringify(current.result.browserLoginDiagnostic??null)===JSON.stringify(diagnostic))return false;
+     Object.assign(current.result,{browserCredentialState:credentialState,browserLoginState:state,browserLoginDiagnostic:diagnostic,browserRemoteQrState:remoteState});
+     const privateMessages={
+      pending:'正在获取二维码，获取后会通过飞书私聊发送给管理员。扫码成功后自动接续。',
+      sent:'二维码已通过飞书私聊发送给管理员。扫码成功后自动接续，无需回复。',
+      expired:'二维码已过期。管理员可在助手私聊发送「刷新扫码」，扫描新二维码后原任务自动接续。',
+     };
+     current.result.summary=privateMessages[remoteState]??messages[state]??messages.waiting;
+     current.result.finalMessage=current.result.summary+' 当前网站：'+e.baseUrl;
+     if(current.availableSourceReviewPolicy==='preserve-and-review-v1')current.result=preserveAvailableEvidence(current,current.result);
+     current.updatedAt=new Date().toISOString();
+     return true;
+    });
     const deferred=await context.store.deferUnavailableWebsite?.(job.id,{scopeHash:job.environmentAccess.scopeHash,reason:state});
     if((changed||deferred)&&context.cards&&job.questionId){const {publishQuestion}=await import('./questions.js');await publishQuestion(context,job.questionId);}
     continue;

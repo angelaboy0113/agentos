@@ -17,6 +17,7 @@ export function jobTerminalMention(job, projects = {}) {
   if(job.connectionEnrollmentPending && !job.connectionEnrollmentHandled && job.status === 'completed' && job.result?.investigation?.status !== 'wait') return null;
   if (job?.originChatType !== 'group' || job.nextJobId) return null;
   if(job.status==='awaiting_clarification'&&job.result?.browserLoginRequired){
+    if(job.result.browserRemoteQrState&&['interactive_login_required','verification_required'].includes(job.result.browserLoginState))return null;
     // Automatic credential/session recovery is progress, not a human action.
     const humanStates=['request_blocked','access_check_failed','rejected','verification_required','credential_unavailable','password_change_required','service_error','request_error','rate_limited','interactive_login_required'];
     if(job.result.browserActionRequired!=='automation'&&job.result.browserCredentialState!=='unavailable'&&!humanStates.includes(job.result.browserLoginState))return null;

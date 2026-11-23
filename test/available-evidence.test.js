@@ -7,6 +7,7 @@ import {availableEnvironmentEvidence,preserveAvailableEvidence,canReviewAlternat
 import {JsonStore}from '../src/shared/store.js';
 import {planQuery}from '../src/shared/environment-access.js';
 import {pollWebsiteLogins}from '../src/control-plane/website-query.js';
+import {jobTerminalMention} from '../src/control-plane/requester-mention.js';
 const data=()=>({stage:'developer',kind:'environment_result',result:{outcome:'partial',summary:'完整客户集合与六期金额已核验，费用尚缺。',finalMessage:'完整原始证据',environmentEvidence:{environmentId:'db',readAt:'2026-01-01T00:00:00.000Z',businessQueryCount:2,rowCount:60,resultHash:'a'.repeat(64)}}});
 const job=()=>({status:'awaiting_clarification',taskIntent:'analysis',continuousInvestigation:true,availableSourceReviewPolicy:'preserve-and-review-v1',stage:'developer',environmentAccess:{kind:'website',environmentId:'web',configHash:'hash'},result:{outcome:'needs_clarification',browserLoginRequired:true,browserLoginState:'credential_unavailable',summary:'缺凭据',finalMessage:'网页未读'},context:[data()]});
 async function fixture(t){const dir=await mkdtemp(path.join(os.tmpdir(),'available-evidence-')),prior=process.env.AGENTOS_ENVIRONMENTS_FILE;process.env.AGENTOS_ENVIRONMENTS_FILE=path.join(dir,'env.json');t.after(async()=>{if(prior===undefined)delete process.env.AGENTOS_ENVIRONMENTS_FILE;else process.env.AGENTOS_ENVIRONMENTS_FILE=prior;await rm(dir,{recursive:true,force:true});});const cfg={version:1,environments:{web:{projectId:'a',kind:'website',tier:'prd',credentialRef:'fake-only',baseUrl:'https://report.example/report',membersRead:true,ownerOpenIdsByProfile:{'assistant-a':['ou_persona']},queries:{investigate:{reviewed:true,mode:'investigate',description:'查看报表',browser:true,maxRows:20,timeoutMs:1000,parameters:[{name:'purpose',type:'string'}]}}}}};await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(cfg));const store=new JsonStore(path.join(dir,'state.json'));const j=await store.createJob({projectId:'a',senderId:'ou_persona',originProfile:'assistant-a',questionId:'q',stage:'developer',workflow:'single_developer',taskIntent:'analysis',instruction:'找第一名并交付经营数据'});const plan=planQuery(cfg,{environmentId:'web',queryId:'investigate',parameters:['核对补充报表']},'a',{senderId:'ou_persona',profile:'assistant-a'});await store.transact(s=>{Object.assign(s.jobs[0],job(),{id:j.id,projectId:'a',senderId:'ou_persona',originProfile:'assistant-a',questionId:'q',sourceEnvironment:'prd',environmentAccess:plan});});return{dir,store,id:j.id,cfg};}
@@ -18,6 +19,33 @@ test('real store defers exact blocked website grant, retains identity/data and s
 test('same missing source is not automatically requeued again; stale scope and cancelled state rejected',async t=>{const f=await fixture(t),j=await f.store.getJob(f.id);assert.equal(await f.store.deferUnavailableWebsite(f.id,{scopeHash:'wrong',reason:'credential_unavailable'}),false);await f.store.deferUnavailableWebsite(f.id,{scopeHash:j.environmentAccess.scopeHash,reason:'credential_unavailable'});await f.store.transact(s=>Object.assign(s.jobs[0],{status:'awaiting_clarification',environmentAccess:j.environmentAccess,result:j.result}));assert.equal(await f.store.deferUnavailableWebsite(f.id,{scopeHash:j.environmentAccess.scopeHash,reason:'credential_unavailable'}),false);await f.store.transact(s=>{s.jobs[0].status='cancelled';});assert.equal(await f.store.deferUnavailableWebsite(f.id,{scopeHash:j.environmentAccess.scopeHash,reason:'credential_unavailable'}),false);});
 test('two system tasks do not share evidence; source review never grants a different system',async t=>{const f=await fixture(t),one=await f.store.getJob(f.id);await f.store.transact(s=>{const other=structuredClone(s.jobs[0]);other.id='other';other.projectId='b';other.senderId='ou_personb';other.context=[];s.jobs.push(other);});await f.store.deferUnavailableWebsite(f.id,{scopeHash:one.environmentAccess.scopeHash,reason:'credential_unavailable'});const other=await f.store.getJob('other');assert.equal(other.status,'awaiting_clarification');assert.equal(other.deferredWebsiteReads,undefined);assert.deepEqual(other.context,[]);});
 test('login poll automatically returns an unavailable supplementary website to original source review',async t=>{const f=await fixture(t);await pollWebsiteLogins({store:f.store,websiteCredentials:{recoverLogin:async()=>({credentialState:'unavailable'})},websiteBrowser:{loginStatusFor:async()=>({pageReady:false}),loginReady:async()=>false}});const j=await f.store.getJob(f.id);assert.equal(j.status,'queued');assert.equal(j.events.at(-1).type,'website_source_deferred');assert.equal(j.deferredWebsiteReads.length,1);});
+
+test('privately routed verification shows pending, sent and expired receipts without group mentions',async t=>{
+ const f=await fixture(t),key='bound-login';
+ await f.store.transact(s=>Object.assign(s.jobs[0],{originChatType:'group',replyToMessageId:'root'}));
+ const context={store:f.store,
+  websiteBrowser:{loginStatusFor:async()=>({pageReady:false,loginRequired:true,verificationRequired:true})},
+  remoteLoginQr:{sweep:async()=>{},observe:async()=>{},binding:()=>({key})},
+ };
+ for(const [received,expected,text] of [
+  ['other','pending',/正在获取二维码/],
+  ['sent','sent',/已通过飞书私聊发送/],
+  ['expired','expired',/二维码已过期/],
+ ]){
+  await f.store.transact(s=>{s.remoteLoginQr={[key]:{jobId:received==='other'?'other':f.id,state:received==='other'?'sent':received}};});
+  await pollWebsiteLogins(context);
+  const j=await f.store.getJob(f.id);
+  assert.equal(j.status,'awaiting_clarification');
+  assert.equal(j.result.browserRemoteQrState,expected);
+  assert.match(j.result.summary,text);
+  assert.equal(jobTerminalMention(j),null);
+ }
+ context.remoteLoginQr.binding=()=>null;
+ await pollWebsiteLogins(context);
+ const unbound=await f.store.getJob(f.id);
+ assert.equal(unbound.result.browserRemoteQrState,null);
+ assert.match(jobTerminalMention(unbound).text,/本机页面/);
+});
 
 test('legacy waits keep their state until explicitly resumed; new continuous analysis is opted in',async t=>{const f=await fixture(t);await f.store.transact(s=>{delete s.jobs[0].availableSourceReviewPolicy;});const j=await f.store.getJob(f.id);assert.equal(await f.store.deferUnavailableWebsite(f.id,{scopeHash:j.environmentAccess.scopeHash,reason:'credential_unavailable'}),false);const created=await f.store.createJob({projectId:'a',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,instruction:'新的经营查询'});assert.equal(created.job.availableSourceReviewPolicy,'preserve-and-review-v1');});
 test('configuration revocation blocks alternative review without retaining an active grant',async t=>{const f=await fixture(t),j=await f.store.getJob(f.id);f.cfg.environments.web.baseUrl='https://revoked.example/report';await writeFile(process.env.AGENTOS_ENVIRONMENTS_FILE,JSON.stringify(f.cfg));await assert.rejects(f.store.deferUnavailableWebsite(f.id,{scopeHash:j.environmentAccess.scopeHash,reason:'credential_unavailable'}),/配置|授权|变更/);assert.equal((await f.store.getJob(f.id)).status,'awaiting_clarification');});
