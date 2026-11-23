@@ -2470,3 +2470,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 ## 1.154.16
 
 - Report cumulative account points on check-in receipts and balance queries, including archived questions and groups available to the same verified identity. Weekly rankings keep their independent date filters.
+
+## 1.154.17
+
+- Include the Beijing calendar date in successful and repeated check-in receipts.

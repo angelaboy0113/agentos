@@ -133,7 +133,9 @@ function settleReceipt(context, state, receipt) {
   let text = prior ? '今天已签到。' : '今天还未签到。';
   if (action === 'daily_checkin') {
     state[ledger][id] ??= { id, chatId, senderId, profile, day, createdAt, points: 1 };
-    text = prior ? '今天已经签到。明天可以再领 1 积分。' : '签到成功，获得 1 积分。';
+    const [, month, date] = day.split('-').map(Number);
+    const label = `${month}月${date}日`;
+    text = prior ? `${label}已签到。明天可再领 1 积分。` : `${label}签到成功，获得 1 积分。`;
   }
   const signins = Object.values(state[ledger])
     .filter((row) => actorKey(context.projects, row) === actor).length;
