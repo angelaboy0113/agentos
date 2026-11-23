@@ -968,7 +968,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     assert.equal(snapshot.designLayout.controls[0].text,'查询');
     assert.deepEqual(snapshot.designLayout.controls.map(control=>control.text),['查询','渠道经营复盘','例外处理',n?'分配金额':'预算来源：']);
     assert.doesNotMatch(JSON.stringify(snapshot.designLayout.controls),/DEMO-PRIVATE|AA123456|示例用户名/);
-    assert.equal(snapshot.designReference.visualPolicy,'brand-layout-v5');
+    assert.equal(snapshot.designReference.visualPolicy,'brand-layout-v6');
     assert.equal(snapshot.designLayout.assets.length,2);
     assert.equal(snapshot.designLayout.backgrounds.length,1);
     assert.equal(snapshot.designLayout.brandRegions.length,2);

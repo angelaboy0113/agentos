@@ -2437,3 +2437,8 @@ PRD 截图保留表格操作列里实际加载的静态小图标，包括组件�
 ### 1.154.8 · 2026-11-23
 
 PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提交；普通评论不会进入需求上下文或触发改版。
+
+## 1.154.9
+
+- Keep PRD workspaces out of the ordinary investigation reminder queue, including pending reminders created before a workbench takes over the topic.
+- Preserve known static menu and filter labels in captures, sample page counts, and keep the sample-data caption outside the screenshot.

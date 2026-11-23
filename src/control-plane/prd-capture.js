@@ -66,9 +66,21 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     return '示例 '+code;
   };
   const sampled=new Set();
+  const sampleInk = (element,node,geometry,style,text)=>{
+    element.setAttribute(attribute+'-sample',String(samples.length));
+    const ink=document.createRange();
+    ink.selectNodeContents(node);
+    const inkBox=bounds(ink);
+    const lineHeight=parseFloat(style.lineHeight)||parseFloat(style.fontSize)*1.2;
+    samples.push({text,color:style.color,ink:style.webkitTextFillColor||style.color,
+      left:Math.max(0,inkBox.x-geometry.x),
+      top:Math.max(0,inkBox.y-geometry.y-Math.round(Math.max(0,lineHeight-inkBox.height)/2))});
+  };
   const terms=new Set(('首页 工作台 菜单 基础信息 订单管理 订单列表 订单详情 人工订单 手工订单 代客下单 运营管理 渠道任务 活动管理 财务管理 策略管理 访销管理 门店管理 门店审核 门店未审核 商品管理 预算管理 促销管理 促销活动 活动列表 活动详情 审批管理 订单编号 商品名称 商品编码 经销商 经销商名称 组织架构 订单状态 审批状态 状态 名称 编号 类型 数量 规格 单位 操作 创建时间 更新时间 开始时间 结束时间 查询 搜索 重置 清空 新增 添加 编辑 删除 查看 详情 保存 提交 确定 取消 关闭 返回 导入 导出 上一页 下一页 标题 序号 更新日志 发货状态 DMS订单编号 SAP订单编号 DMS订单号 SAP订单号 经销商编码 订单审批记录 订单审批 订单拆单 经销商下单 订单返点量 渠道量小店返量 保证金下单检查白名单 收起导航 选项管理 新建 更多 搜索菜单或功能 页 前往 暂无数据 今天 最近7天') .split(' '));
   const fieldTerms = new Set(('方案管理 方案列表 方案详情 方案名称 方案编号 方案状态 方案类型 申请人 申请日期 申请金额 预算来源 预算组织 下发预算 可用额度 可用金额 已用额度 占用额度 分配额度 分配总额 分配金额 活动大类 费用类型 使用组织 分配组织 生效日期 失效日期 审核人 提交人 操作时间 优惠类型 补贴金额 补贴状态 促销规则').split(' '));
-  for(const label of brandedLabels??[])terms.add(label);
+  const shellTerms=('门店主数据 月度门店目标 门店提质 店效执行数据 门店质量管理 算账工具 促销员管理 关联促销员 促销员排班 促销员考勤明细 规则配置 提成规则 活动产品 推送群配置 用户权限 人员数据视图 外部用户 系统 数据统计 退出登录 组织架构 按组织筛选门店 全部门店 当前数据 月结版本 当前结果 月结结果 门店 客户 全部状态 活跃 非活跃 不活跃 99价值链:全部 有无导购:全部 有导门店 无导门店 更多操作 每页 条 上一页 下一页').split(' ');
+  for(const label of [...shellTerms,...(brandedLabels??[])])terms.add(label);
+  const searchPlaceholders = new Set(['搜索门店/经销商/编码/人员姓名（支持拼音全拼、首字母）']);
   const fieldLabelSelector='label,legend,th,[role="columnheader"],[class*="form-item__label"],[class*="form-item-label"]';
   const chromeSelector='nav,[role="navigation"],[role="menuitem"],[aria-current="page"],[role="tab"],.el-menu-item,.ant-menu-item,.ant-menu-submenu-title,.el-submenu__title,.el-collapse-item__header,.ant-collapse-header,.panel-title,[class$="-section-title"],[class*="breadcrumb" i]';
   const sensitiveValue='input,select,textarea,option,[contenteditable],[class*="avatar" i],[class*="user-info" i],[class*="user-name" i],.el-select__selected-item,.ant-select-selection-item,[role="option"]';
@@ -117,6 +129,16 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
   const approvedIcon=(element,rect)=>element.matches('svg')&&rect.width<=48&&rect.height<=48
     && iconLocation(element)
     && [...element.querySelectorAll('*')].every(node=>safeShape(node)&&(node.localName!=='use'||localShape(node)));
+  const paginationParts = new Set();
+  for (const button of document.querySelectorAll('button,[role="button"]')) {
+    if (!/^(?:上一页|上页|Previous)$/i.test(button.textContent.trim())) continue;
+    const cluster = button.parentElement;
+    if (![...cluster.children].some(item=>item.matches('button,[role="button"]')
+      && /^(?:下一页|下页|Next)$/i.test(item.textContent.trim()))) continue;
+    for (const item of cluster.children) {
+      if (!item.matches('button,[role="button"]') && /^\d+\s*\/\s*\d+$/.test(item.textContent.trim())) paginationParts.add(item);
+    }
+  }
   for(const element of document.querySelectorAll('body *')){
     if(element.closest(secretSelector)||element.matches('script,style,textarea,option,[contenteditable]'))continue;
     const geometry=bounds(element), style=getComputedStyle(element);
@@ -142,7 +164,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       }
     }
     const placeholder=element.matches('input:not([type=password])')?element.getAttribute('placeholder')?.trim():null;
-    if(placeholder && (terms.has(placeholder)||terms.has(placeholder.replace(/^(?:请输入|请选择|输入|选择)/,'')) || fieldTerms.has(placeholder.replace(/^(?:请输入|请选择|输入|选择)/,'')))){
+    if(placeholder && (searchPlaceholders.has(placeholder)||terms.has(placeholder)||terms.has(placeholder.replace(/^(?:请输入|请选择|输入|选择)/,'')) || fieldTerms.has(placeholder.replace(/^(?:请输入|请选择|输入|选择)/,'')))){
       element.setAttribute(attribute+'-placeholder',String(placeholders.length));
       placeholders.push(getComputedStyle(element,'::placeholder').color);
     }
@@ -157,21 +179,18 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     if(cell&&!rowAction&&!visibleState){
       if(row&&!sampled.has(cell)&&!element.closest('button,[role="button"]')){
         sampled.add(cell);
-        element.setAttribute(attribute+'-sample',String(samples.length));
-        const ink=document.createRange();
-        ink.selectNodeContents(direct[0]);
-        const inkBox=bounds(ink);
-        const lineHeight=parseFloat(style.lineHeight)||parseFloat(style.fontSize)*1.2;
-        samples.push({text:sampleValue(row),color:style.color,ink:style.webkitTextFillColor||style.color,
-          left:Math.max(0,inkBox.x-geometry.x),
-          top:Math.max(0,inkBox.y-geometry.y-Math.round(Math.max(0,lineHeight-inkBox.height)/2))});
+        sampleInk(element,direct[0],geometry,style,sampleValue(row));
       }
       continue;
     }
     if(visibleState)tableCapture.preservedStates++;
     const brandTitle=element.closest('[class*="app-logo" i],[class*="brand-name" i],[class*="logo-title" i],.shell-brand')
       && geometry.y<100&&/^[\p{L}\p{M}][\p{L}\p{M} .&-]{1,24}$/u.test(text);
-    const normalized = text.replace(/\s+/g,'').replace(/[:：]$/,'');
+    if (paginationParts.has(element)) {
+      sampleInk(element,direct[0],geometry,style,'1 / 10');
+      continue;
+    }
+    const normalized = text.replace(/\s+/g,'').replace(/：/g,':').replace(/:$/,'');
     const fieldLabel = element.closest(fieldLabelSelector);
     const semanticChrome = element.closest(chromeSelector);
     const actionLabel = element.closest('button,[role="button"]')&&(
@@ -190,6 +209,6 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     controls.push({text,...geometry,color:style.color,ink:style.webkitTextFillColor||style.color,
       fontFamily:style.fontFamily,fontSize:style.fontSize});
   }
-  tableCapture.sampleFields=samples.length;
+  tableCapture.sampleFields=sampled.size;
   return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,samples,tableCapture};
 }

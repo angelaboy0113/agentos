@@ -48,3 +48,25 @@ test('an internal environment-setup conversation cannot reset accumulated invest
 test('old per-turn notice receipts still claim the question after upgrading to root-question idempotency',async()=>{
  const f=fixture();f.setTime(36);f.state.longInvestigationNotices={legacy:{questionId:'q',profile:'a',projectId:'one',chatId:'group',turnId:'former-supplement',messageId:'already-sent'}};await f.service().retry();assert.equal(f.calls.length,0);assert.equal(Object.keys(f.state.longInvestigationNotices).length,1);
 });
+
+test('PRD workspaces neither enqueue nor replay ordinary investigation reminders', async () => {
+ const prd = fixture();
+ prd.state.questions.q.prd = { messages: [], closed: false };
+ prd.setTime(36);
+ await prd.service().retry();
+ assert.equal(prd.calls.length, 0);
+ assert.equal(prd.state.longInvestigationNotices, undefined);
+
+ const pending = fixture();
+ const send = pending.context.feishu.reply;
+ pending.setTime(36);
+ pending.context.feishu.reply = async () => { throw Error('offline'); };
+ await pending.service().retry();
+ pending.state.questions.q.prd = { messages: [], closed: false };
+ pending.context.feishu.reply = send;
+ pending.setTime(37);
+ await pending.service().retry();
+ assert.equal(pending.calls.length, 0);
+ assert.equal(Object.values(pending.state.longInvestigationNotices)[0].superseded, true);
+ assert.equal(pending.state.jobs[0].status, 'running');
+});
