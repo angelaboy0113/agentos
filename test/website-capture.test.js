@@ -96,20 +96,22 @@ test('PRD list captures require actual rows and replace sensitive cells without 
   canvas.getContext('2d').fillRect(0,0,16,16);
   const raster='<img width="15" height="15" src="'+canvas.toDataURL()+'">';
   grid.querySelector('thead tr').insertAdjacentHTML('beforeend','<th>操作</th>');
-  grid.querySelector('tbody tr').insertAdjacentHTML('beforeend','<td><button>'+icon+raster+'<span>复制</span></button>'+raster+'</td>');
+  grid.querySelector('tbody tr').insertAdjacentHTML('beforeend','<td><button>'+icon+raster+'<span>查看详情</span></button>'+raster+'</td>');
   grid.querySelector('tbody td').insertAdjacentHTML('beforeend',icon+raster);
   await Promise.all([...grid.querySelectorAll('img')].map(img=>img.decode()));
  });
  const withActions=await capture();
- assert.ok(withActions.designLayout.controls.some(c=>c.text==='复制'));
+ assert.ok(withActions.designLayout.controls.some(c=>c.text==='查看详情'));
  assert.equal(withActions.designLayout.assets.length,2);
  assert.equal(await page.locator('td').evaluateAll(cells=>cells.some(cell=>cell.getAttributeNames().some(name=>name.includes('agentos-label')))),false);
+ await page.locator('th').nth(2).evaluate(heading=>{heading.textContent='活跃度';});
+ await page.locator('tbody td').nth(2).evaluate(cell=>{cell.firstElementChild.textContent='非活跃';});
  await page.locator('h1').evaluate(heading=>{
   heading.insertAdjacentHTML('beforebegin','<aside><button>门店主数据</button><button>店效执行数据</button><button>杨某客户</button></aside>');
   heading.insertAdjacentHTML('afterend','<input placeholder="搜索门店/经销商/编码/人员姓名（支持拼音全拼、首字母）"><button><span>99价值链：全部</span></button><button><span>有无导购：全部</span></button><div id="pages"><button>上一页</button><div>762 / 935</div><button>下一页</button></div>');
  });
  const chrome=await capture();
- for(const text of ['门店主数据','店效执行数据','99价值链：全部','有无导购：全部','上一页','下一页'])
+ for(const text of ['门店主数据','店效执行数据','99价值链：全部','有无导购：全部','上一页','下一页','非活跃','查看详情'])
   assert(chrome.designLayout.controls.some(control=>control.text===text),text);
  assert.equal(chrome.designLayout.placeholders.length,1);
  assert(chrome.designLayout.samples.some(sample=>sample.text==='1 / 10'));

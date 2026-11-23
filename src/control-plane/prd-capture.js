@@ -48,7 +48,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     }
   }
   const tableCapture={tables:grids.length,visibleRows,sampleFields:0,preservedStates:0};
-  const states=new Set(('启用 停用 已启用 已停用 有效 无效 待审核 待审批 审批中 审核中 待执行 执行中 进行中 已执行 已审核 已审批 已发布 已批准 已生效 未生效 未开始 已完成 未完成 待提交 草稿 已提交 已驳回 已拒绝 已关闭 已取消 已撤销 已过期 已结束 已上账 待上账 已匹配 未匹配 可申请 已结案 Active Inactive Pending Approved Rejected Completed Draft Open Closed').split(' '));
+  const states=new Set(('启用 停用 已启用 已停用 有效 无效 待审核 待审批 审批中 审核中 待执行 执行中 进行中 已执行 已审核 已审批 已发布 已批准 已生效 未生效 未开始 已完成 未完成 待提交 草稿 已提交 已驳回 已拒绝 已关闭 已取消 已撤销 已过期 已结束 已上账 待上账 已匹配 未匹配 可申请 已结案 活跃 非活跃 不活跃 Active Inactive Pending Approved Rejected Completed Draft Open Closed').split(' '));
   const sampleValue=({header,number})=>{
     const code=String(number).padStart(3,'0');
     if(/序号|^#$/i.test(header))return String(number);
@@ -172,10 +172,10 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     const direct=[...element.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim());
     if(direct.length!==1)continue;
     const text=direct[0].textContent.trim();
-    const rowAction=actionCell(element)&&element.closest('button,a,[role=button]')&&/^(?:查看|详情|编辑|删除|修改|复制|下载|上传|审核|撤回|上账|启用|停用|更多|view|details?|edit|delete|copy|download|upload|review|more)$/i.test(text);
+    const rowAction=actionCell(element)&&element.closest('button,a,[role=button]')&&/^(?:查看(?:详情|明细|记录|日志)?|详情|编辑|删除|修改|复制|下载|上传|审核|撤回|上账|启用|停用|更多|view(?: details)?|details?|edit|delete|copy|download|upload|review|more)$/i.test(text);
     const cell=element.closest(cellSelector);
     const row=rowCells.get(cell);
-    const visibleState=row&&/状态|进度|\bstatus\b/i.test(row.header)&&states.has(text);
+    const visibleState=row&&/状态|进度|活跃度|\bstatus\b/i.test(row.header)&&states.has(text);
     if(cell&&!rowAction&&!visibleState){
       if(row&&!sampled.has(cell)&&!element.closest('button,[role="button"]')){
         sampled.add(cell);
