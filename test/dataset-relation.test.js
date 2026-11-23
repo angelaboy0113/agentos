@@ -24,6 +24,22 @@ test('explicit one-to-many and multiple joins preserve identical-looking busines
  const out=await buildRelationalDataset(a,async ref=>({main:m,configs,products})[ref]);assert.equal(out.rows.length,2);assert.equal(new Set(out.rows.map(r=>r.relation_key)).size,2);
  await assert.rejects(buildRelationalDataset({...a,joins:[{...a.joins[0],relationship:'lookup'}]},async ref=>({main:m,configs})[ref]),/右键重复/);
 });
+test('null grouped keys on the right do not invalidate the matching rows or drop unmatched left rows',async()=>{
+ const left=data([{id:'first',dimension:'D1',month:'202610'},{id:'second',dimension:'D2',month:'202610'}]);
+ const right=data([{dimension:null,month:'202610',total:'17'},{dimension:'D1',month:'202610',total:'4'}]);
+ const join={datasetRef:'right',leftKeys:['dimension','month'],rightKeys:['dimension','month'],
+  rightRowKey:['dimension','month'],relationship:'expand',fields:[{column:'total',as:'occupied'}],empty:'keep',unmatched:'keep'};
+ const recipe={...args,joins:[join]};
+ const from=rows=>async ref=>ref==='main'?left:{...right,rows};
+ const result=await buildRelationalDataset(recipe,from(right.rows));
+ assert.deepEqual(result.rows.map(row=>[row.id,row.occupied]),[['first','4'],['second',null]]);
+ assert.equal(result.derivation.audit.joins[0].emptyRightRows,1);
+ assert.equal(result.derivation.audit.joins[0].unmatchedInputRows,1);
+ assert.deepEqual(result.rows, (await buildRelationalDataset(recipe,from(right.rows.slice(1)))).rows);
+ await assert.rejects(buildRelationalDataset(recipe,from([...right.rows,right.rows[1]])),/稳定行键重复/);
+ await assert.rejects(buildRelationalDataset({...recipe,joins:[{...join,rightRowKey:['total']}]},
+  from([...right.rows,{dimension:'D3',month:'202610',total:null}])),/稳定行键不能为空/);
+});
 test('explicit projections and dictionary labels preserve null; unknown values error and monetary relabeling refuses',async()=>{
  const a={...args,project:[{column:'id',as:'对象编码'},{column:'product',as:'产品编码'},{column:'flag',as:'状态',labels:{'1':'启用','0':'停用'},unmapped:'error'}]};
  const out=await buildRelationalDataset(a,load);assert.deepEqual(out.columns,['对象编码','产品编码','状态','relation_key']);assert.deepEqual(out.rows.map(r=>r.状态),['启用','停用',null]);

@@ -44,8 +44,8 @@ export async function buildRelationalDataset(args,load,{check=async()=>{},maxRow
  for(const join of args.joins){
   if(!join||typeof join!=='object'||Array.isArray(join))bad('joins每项必须为显式关联参数对象');
   await check();const right=await load(join.datasetRef);
-  if(!right?.complete||right.reportDraft)bad('右来源必须是当前授权完整数据集');unique(right,join.rightRowKey);
-  columns({columns:names},join.leftKeys);columns(right,join.rightKeys);
+  if(!right?.complete||right.reportDraft)bad('右来源必须是当前授权完整数据集');
+  columns({columns:names},join.leftKeys);columns(right,join.rightKeys);columns(right,join.rightRowKey);
   if(join.leftKeys.length!==join.rightKeys.length||!['lookup','expand'].includes(join.relationship)||!['keep','drop','error'].includes(join.empty)||!['keep','drop','error'].includes(join.unmatched)||!Array.isArray(join.fields))bad('关联须明确同宽键、relationship=lookup/expand、empty及unmatched=keep/drop/error和fields');
   if(join.split){const s=join.split;if(join.leftKeys.length!==1||!Array.isArray(s.delimiters)||s.delimiters.some(v=>typeof v!=='string'||!v.length)||!['set','preserve'].includes(s.duplicates)||typeof s.trim!=='boolean'||typeof s.whitespace!=='boolean')bad('文本拆分仅单键，明确字面delimiters、trim、whitespace、duplicates=set/preserve；不接收正则');}
   for(const f of join.fields){if(!f||typeof f!=='object'||!right.columns.includes(f.column)||!field(f.as)||names.includes(f.as)||f.as===rowKey)bad('关联输出列不存在、重复或覆盖原字段');names.push(f.as);if(right.numericColumns?.includes(f.column))numericColumns.push(f.as);provenance[f.as]={datasetRef:join.datasetRef,column:f.column};}
@@ -56,15 +56,29 @@ export async function buildRelationalDataset(args,load,{check=async()=>{},maxRow
     bad('selectFirstBy需唯一查找、非拆分键与明示的text/decimal、asc/desc排序');
    }
    columns(right, order.map(o => o.column));
-   for (const row of right.rows) for (const {column,type} of order) {
-    if (typeof row[column] !== 'string' || !row[column]) bad('选取规则排序值不能为空，先按已核实业务口径整理');
-    if (type === 'decimal') compareExact(row[column], row[column]);
-   }
   }
   const rightOrder=new Map(right.rows.map((r,i)=>[r,i]));
-  const index=new Map();for(const row of right.rows){if(join.fields.some(f=>row[f.column]===undefined))bad('右来源行缺少已声明输出字段，不可当作null');const k=key(row,join.rightKeys,true);if(k===null)continue;const group=index.get(k)??[];if(group.length&&join.relationship==='lookup'&&!order)bad('lookup右键重复；一对多须明确expand及实际右侧行键');group.push(row);index.set(k,group);}
+  const index=new Map(), rightIdentities=new Set();
+  let emptyRightRows=0;
+  for(const row of right.rows){
+   if(join.fields.some(f=>row[f.column]===undefined))bad('右来源行缺少已声明输出字段，不可当作null');
+   const k=key(row,join.rightKeys,true);
+   // An empty join key cannot match. Only rows that can match need a stable identity.
+   if(k===null){emptyRightRows++;continue;}
+   const identity=key(row,join.rightRowKey);
+   if(rightIdentities.has(identity))bad('稳定行键重复；声明实际复合粒度，不能静默取第一条');
+   rightIdentities.add(identity);
+   for(const {column,type} of order??[]){
+    if(typeof row[column]!=='string'||!row[column])bad('选取规则排序值不能为空，先按已核实业务口径整理');
+    if(type==='decimal')compareExact(row[column],row[column]);
+   }
+   const group=index.get(k)??[];
+   if(group.length&&join.relationship==='lookup'&&!order)bad('lookup右键重复；一对多须明确expand及实际右侧行键');
+   group.push(row);index.set(k,group);
+  }
   if (order) for (const [k, group] of index) index.set(k, firstBy(group, order));
   const audit={inputRows:work.length,rightRows:right.rows.length,matchedInputRows:0,emptyInputRows:0,unmatchedInputRows:0,outputRows:0,duplicateTokens:0,unmatchedKeys:[],scopeEvidence:args.scopeEvidence};
+  if(emptyRightRows)audit.emptyRightRows=emptyRightRows;
   const next=[];
   for(const [i,item] of work.entries()){
    if(i%1000===0)await check();let keys;

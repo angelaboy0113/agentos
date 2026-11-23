@@ -2450,3 +2450,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 ## 1.154.11
 
 - Retry transient reads of configured public scripts, styles and fonts without forwarding browser credentials. Browser recovery can reload the exact approved read page after those resource failures.
+
+## 1.154.12
+
+- Keep valid report matches when a grouped right-hand source contains rows with empty join keys. Count those rows in the relationship audit and continue to reject invalid or duplicate identities for matchable rows.
