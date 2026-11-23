@@ -19,6 +19,34 @@ import { mkdir, chmod,readFile,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
 import { websiteSessionKey, websiteNavigationTarget, websiteReadRecoveryTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, websiteImageResourceAllowed, websitePdfAttachmentTarget, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
 
+const transientStaticStatuses = new Set([408, 500, 502, 503, 504]);
+const transientStaticErrors = new Set(['ECONNRESET','ECONNREFUSED','EPIPE','ETIMEDOUT','EAI_AGAIN',
+ 'UND_ERR_SOCKET','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT']);
+const staticFailureCanRetry = error => transientStaticStatuses.has(error.status)
+ || transientStaticErrors.has(error.cause?.code ?? error.code) || error.name==='TimeoutError';
+
+async function readPublicResource(fetcher,url,{retry=false,image=false,authorized=async()=>true}={}){
+ const options={method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)};
+ const read=async()=>{
+  const response=await fetcher(url,options);
+  if(response.status!==200){
+   await response.body?.cancel().catch(()=>{});
+   throw Object.assign(new Error('STATIC_HTTP_STATUS'),{status:response.status});
+  }
+  const contentType=response.headers.get('content-type')??'application/octet-stream';
+  if(image&&!/^image\/(?:jpeg|png|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)(?:;|$)/i.test(contentType)){
+   await response.body?.cancel().catch(()=>{});
+   throw new Error('IMAGE_CONTENT_TYPE');
+  }
+  return {headers:response.headers,contentType,body:Buffer.from(await response.arrayBuffer())};
+ };
+ try{return await read();}
+ catch(error){
+  if(!retry||options.signal.aborted||!staticFailureCanRetry(error)||!await authorized())throw error;
+  return read();
+ }
+}
+
 export function routePrdWebsiteBrowser(shared, isolated) {
  const browser=(job,e)=>job.prd?.auto||e?.loginNavigation?.remoteQr===true?isolated:shared;
  return {
@@ -70,7 +98,22 @@ export class WebsiteBrowser {
      // post body, authentication, redirects or response Set-Cookie cross the boundary.
      let permitted=false;try{permitted=await this.authorize(state.job,state.waiting,r);}catch{}
      if(!permitted){await route.abort().catch(()=>{});return;}
-     try{const response=await (passiveImage?this.passiveImageFetch:this.publicFetch)(request.url,{method:'GET',redirect:'manual',signal:AbortSignal.timeout(30000)});if(response.status!==200)throw new Error('STATIC_HTTP_STATUS');const contentType=response.headers.get('content-type')??'application/octet-stream';if(image&&!/^image\/(?:jpeg|png|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)(?:;|$)/i.test(contentType)){await response.body?.cancel();throw new Error('IMAGE_CONTENT_TYPE');}const headers={'content-type':contentType,'cache-control':'no-store'};for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(response.headers.has(name))headers[name]=response.headers.get(name);await route.fulfill({status:200,headers,body:Buffer.from(await response.arrayBuffer())});}catch{state.resourceFailures.add(websitePageLocation(request.url));await route.abort().catch(()=>{});}return;
+     const retry=reviewedStatic&&!image&&['script','stylesheet','font'].includes(request.resourceType);
+     const location=websitePageLocation(request.url), document=state.documentEpoch;
+     try{
+      const resource=await readPublicResource(passiveImage?this.passiveImageFetch:this.publicFetch,request.url,
+       {retry,image,authorized:()=>state.documentEpoch===document&&this.authorize(state.job,state.waiting,r)});
+      const headers={'content-type':resource.contentType,'cache-control':'no-store'};
+      for(const name of ['access-control-allow-origin','cross-origin-resource-policy'])if(resource.headers.has(name))headers[name]=resource.headers.get(name);
+      await route.fulfill({status:200,headers,body:resource.body});
+     }catch(error){
+      if(state.documentEpoch===document){
+       state.resourceFailures.add(location);
+       if(retry&&staticFailureCanRetry(error))state.recoverableStaticFailures.add(location);
+      }
+      await route.abort().catch(()=>{});
+     }
+     return;
     }
     let allow=false,boundary;try{boundary=websiteRequestBoundary(target.baseUrl,request,state?.waiting===true,target.queries?.[state?.job?.environmentAccess?.queryId]?.readEndpoints??[]);allow=boundary.allowed;}catch{}
     const loginReads=target.queries?.[state?.job?.environmentAccess?.queryId]?.loginReads??[];
@@ -107,7 +150,7 @@ export class WebsiteBrowser {
    else {existing.job=job;existing.environment=e;return existing;}
   }
   const session=await this.session(e),page=await session.context.newPage();
-  const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),pendingReadMetadata:new WeakMap(),detachedReads:new WeakSet(),authHandled:new WeakSet(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
+  const s={job,page,session,environment:e,initialTarget,restoreTarget:Boolean(job.environmentAccess?.websiteTarget),refPrefix:randomUUID(),observedScripts:new Set(),refs:new Map(),generation:0,waiting:false,sawLogin:false,blocked:new Set(),blockedResources:new Set(),resourceFailures:new Set(),recoverableStaticFailures:new Set(),staticRecoveryTargets:new Set(),pageErrors:new Set(),blockedLoginReads:new Set(),pendingReads:new Set(),pendingReadMetadata:new WeakMap(),detachedReads:new WeakSet(),authHandled:new WeakSet(),lastReadActivity:Date.now()};this.pages.set(job.id,s);
   page.on('crash',()=>{s.crashed=true;});
   page.on('framenavigated',frame=>{if(frame===page.mainFrame())advanceWebsiteDocumentDiagnostics(s,frame.url());});
   page.on('pageerror',error=>{s.pageErrors.add(/^[A-Za-z]+Error$/.test(error.name)?error.name:'RuntimeError');pageDiagnostic(s,{name:error.name,message:error.message});});
@@ -294,6 +337,20 @@ export class WebsiteBrowser {
   const operation=previous.catch(()=>{}).then(async()=>{if(tool!=='browser_frames'&&tool!=='browser_frame'&&tool!=='browser_recover'&&tool!=='browser_diagnostics'&&tool!=='browser_navigate')await assertWebsiteFrame(s);const result=await (['connection','browser_open','browser_snapshot','browser_read','browser_assets','browser_inspect','browser_frames'].includes(tool)?this.readAcrossNavigation(s,()=>this.perform(s,tool,args)):this.perform(s,tool,args));if(tool!=='browser_frames'&&tool!=='browser_recover'&&tool!=='browser_diagnostics'&&tool!=='browser_navigate')await assertWebsiteFrame(s);return result;});s.operation=operation;
   try{return await operation;}finally{if(s.operation===operation)s.operation=null;}
  }
+ async recoverStaticDocument(s,status){
+  if(!status||status.loginRequired||status.loginState==='access_denied'||s.dom||s.pendingReads.size
+    ||s.blockedResources.size||!s.recoverableStaticFailures.size)return null;
+  const target=s.page.url();
+  if(s.staticRecoveryTargets.has(target))return null;
+  try{websiteNavigationTarget(target,s.environment.baseUrl,s.environment.queries?.[s.job.environmentAccess?.queryId]?.readEndpoints??[]);}
+  catch{return null;}
+  if(!await this.authorize(s.job,false,{url:()=>target,method:()=> 'GET',resourceType:()=> 'document'}))return null;
+  s.staticRecoveryTargets.add(target);
+  s.frameRefs?.clear();s.assets?.clear();s.observedScripts.clear();
+  s.lastRecovery={at:new Date().toISOString(),kind:'reviewed-static-reloaded',target:websitePageLocation(target)};
+  await s.page.goto(target,{waitUntil:'domcontentloaded',timeout:30000});
+  return this.loginStatus(s);
+ }
  async recoverReadLanding(s, login) {
   const query = s.environment.queries?.[s.job.environmentAccess?.queryId];
   if (!query?.readRecoveryTarget || login.loginState !== 'loading' || s.readLandingAttempt || s.lastReadAction
@@ -349,6 +406,7 @@ export class WebsiteBrowser {
    const status=blank?null:await this.recoverReadLanding(s,await this.loginStatus(s));
    if(s.lastRecovery?.kind==='verified-read-landing')login=status;
    if(!blank&&status?.loginRequired)return {...status,stage:'页面在等待认证，沿用已有登录恢复；本次不重新提交凭据'};
+   if(!login&&!blank)login=await this.recoverStaticDocument(s,status);
    if(!login&&(blank||status.loginState==='loading'&&!s.pendingReads.size&&!s.blockedResources.size&&!s.resourceFailures.size)){s.dom=null;s.frameRefs?.clear();s.assets?.clear();s.observedScripts.clear();await s.page.goto(s.currentReadTarget??s.initialTarget,{waitUntil:'domcontentloaded',timeout:30000});s.lastRecovery={at:new Date().toISOString(),kind:blank?'blank-reopened':'quiet-empty-reloaded',target:websitePageLocation(s.currentReadTarget??s.initialTarget)};}
    else if(!login&&status.loginState==='loading')return {stage:'保留当前加载与故障证据，尚未重复导航',pageStatus:'loading',partial:true,url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),diagnostic:{blockedResources:[...s.blockedResources],resourceFailures:[...s.resourceFailures],pageErrorCategories:[...s.pageErrors],pendingReads:s.pendingReads.size},next:s.pendingReads.size?'当前有读取进行中，检查后续快照，不重复点击或打开':'核对实际静态依赖或使用browser_assets继续部署源码取证；不把资源失败当作密码错误'};
   }

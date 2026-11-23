@@ -2446,3 +2446,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 ## 1.154.10
 
 - Expose the existing browser-local dismissal for a visible floating assistant when it overlaps the content needed for a PRD capture.
+
+## 1.154.11
+
+- Retry transient reads of configured public scripts, styles and fonts without forwarding browser credentials. Browser recovery can reload the exact approved read page after those resource failures.

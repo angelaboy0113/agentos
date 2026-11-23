@@ -6,6 +6,7 @@ export function advanceWebsiteDocumentDiagnostics(state,url){
  const previous=state.documentLocation,blockedRequests=[...(state.blocked??[])];
  if(previous&&blockedRequests.length){state.previousDocumentDiagnostics??=[];state.previousDocumentDiagnostics.push({location:previous,blockedRequests});state.previousDocumentDiagnostics=state.previousDocumentDiagnostics.slice(-8);}
  state.documentLocation=websitePageLocation(url);
- for(const key of ['blocked','blockedLoginReads','blockedResources','resourceFailures','pageErrors'])state[key]?.clear();
+ state.documentEpoch=(state.documentEpoch??0)+1;
+ for(const key of ['blocked','blockedLoginReads','blockedResources','resourceFailures','recoverableStaticFailures','pageErrors'])state[key]?.clear();
  state.blockedRequestDetails=[];
 }

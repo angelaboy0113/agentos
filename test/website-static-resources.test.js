@@ -88,3 +88,46 @@ test('configured photo actually decodes and misleading MIME is rejected without 
  assert.ok(calls.every(c=>c.options.redirect==='manual'&&!c.options.headers));
  assert.deepEqual(await session.context.cookies(),[]);
 });
+
+test('transient reviewed dependency failures recover on the same read page without retrying permission failures',async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'static-recovery-'));
+ const routes=[], fetches=[];
+ const server=http.createServer((req,res)=>{
+  routes.push([req.method,req.url]);
+  res.setHeader('content-type','text/html;charset=utf-8');
+  if(req.url==='/')return res.end('<h1>Organization</h1>');
+  const resource=req.url==='/repo/denied'?cdn.replace('framework','denied'):cdn;
+  res.end(`<script src="${resource}"></script><script>document.addEventListener('DOMContentLoaded',()=>document.body.textContent=window.Framework.label)</script>`);
+ });
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP static-retry.test 127.0.0.1']})};
+ const browser=new WebsiteBrowser(dir,driver,async()=>true,{publicFetch:async(url,options)=>{
+  fetches.push(url);
+  assert.equal(options.method,'GET');assert.equal(options.redirect,'manual');assert.equal(options.headers,undefined);
+  if(url.endsWith('denied.js'))return new Response(null,{status:403});
+  const attempts=fetches.filter(u=>u===cdn).length;
+  if(attempts<=2)return new Response(null,{status:503});
+  if(attempts===3)throw Object.assign(new TypeError('fetch failed'),{cause:{code:'ECONNRESET'}});
+  return new Response('window.Framework={label:"Merge requests ready"}',{headers:{'content-type':'application/javascript'}});
+ }});
+ t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
+ const baseUrl=`http://static-retry.test:${server.address().port}/`,env={projectId:'fixture',tier:'uat',baseUrl,
+  queries:{investigate:{staticResources:[cdn,cdn.replace('framework','denied')]}}},job={id:'static-recovery',environmentAccess:{queryId:'investigate'}};
+ await browser.run(job,env,'connection');
+ const target=baseUrl+'repo/pulls';
+ await browser.run(job,env,'browser_navigate',{url:target});
+ const failed=await browser.run(job,env,'browser_snapshot');
+ assert.deepEqual(failed.diagnostic.resourceFailures,[cdn]);
+ assert.equal(fetches.length,2);
+ const recovered=await browser.run(job,env,'browser_recover');
+ assert.equal(recovered.recovery.kind,'reviewed-static-reloaded');
+ assert.equal(recovered.recovery.target,target);
+ assert.match(recovered.pageText,/Merge requests ready/);
+ assert.equal(fetches.length,4);
+ assert.deepEqual(routes.filter(([,url])=>url==='/repo/pulls'),[['GET','/repo/pulls'],['GET','/repo/pulls']]);
+ await browser.run(job,env,'browser_navigate',{url:baseUrl+'repo/denied'});
+ const denied=await browser.run(job,env,'browser_recover');
+ assert.equal(denied.pageStatus,'loading');
+ assert.equal(fetches.filter(u=>u.endsWith('denied.js')).length,1);
+ assert.equal(routes.filter(([,url])=>url==='/repo/denied').length,1);
+});
