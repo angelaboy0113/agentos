@@ -5,7 +5,7 @@ import { createId } from '../shared/protocol.js';
 import { createJobRecord } from '../shared/store.js';
 import { resolveProjectId } from '../shared/project-scope.js';
 import { confirmedSourceEnvironment, selectSourceEnvironment, sourceEnvironmentConflict, sourceEnvironmentForTier } from '../shared/source-environments.js';
-import { prdStart, prdExport, prdDelivered, prdFormVersion } from '../shared/prd-workspace.js';
+import { prdStart, requestsPrd, prdExport, prdDelivered, prdFormVersion } from '../shared/prd-workspace.js';
 import { previousPrdDelivery } from '../shared/prd-revision.js';
 import { requestsPrivateCard } from './private-cards.js';
 import { publishQuestion, questionJob } from './questions.js';
@@ -41,7 +41,7 @@ export class PrdWorkspace {
     this.publisher = new PrdCloudDelivery(context, settings.publisher, {publishers:settings.publishers,...dependencies, onPublished: id => this.resumePending(id)});
   }
 
-  async handle(event, { agent, addressed, content, form }) {
+  async handle(event, { agent, addressed, content, form, recoverQuestionId }) {
     if (event.chat_type !== 'group' || event.sender_type !== 'user' || !agent?.systemAssistant
       || !this.context.cards?.enabled || !this.chatIds.has(event.chat_id) || !event.message_id || !event.sender_id) return null;
     if (event.mentions?.length && !addressed) return null;
@@ -49,7 +49,8 @@ export class PrdWorkspace {
     const lineage = [event.root_id, event.reply_to, event.message_id].filter(Boolean);
     const possible = await stateView(this.context.store, state => Object.values(state.questions ?? {}).some(q =>
       q.prd && q.profile === event.agent_profile && q.chatId === event.chat_id && lineage.includes(q.threadRootId)));
-    if (!possible && !(addressed && prdStart.test(content))) return null;
+    const starts = addressed && requestsPrd(content);
+    if (!possible && !starts) return null;
     const { canonical, plainText, links: draftLinks } = normalizePrdDraftLinks(content);
     if (receptionSensitive(plainText)) return { ignored: true, reason: 'prd_sensitive_group_input' };
     content = canonical;
@@ -58,8 +59,28 @@ export class PrdWorkspace {
       state.questions ??= {};
       state.conversations ??= [];
       let q = Object.values(state.questions).find(q => q.prd && q.profile === event.agent_profile && q.chatId === event.chat_id && lineage.includes(q.threadRootId));
+      let recoveredTurn;
+      if (!q && recoverQuestionId && starts) {
+        const existing = state.questions[recoverQuestionId];
+        const turn = state.conversations.find(t => t.id === existing?.rootTurnId);
+        if (!existing || !turn || existing.withdrawnAt || existing.prd || existing.visibility === 'requester'
+          || existing.messageId !== event.message_id || existing.threadRootId !== existing.messageId
+          || existing.senderId !== event.sender_id || existing.chatId !== event.chat_id
+          || existing.profile !== event.agent_profile || existing.latestTurnId !== turn?.id
+          || turn.questionId !== existing.id || turn.messageId !== existing.messageId
+          || turn.senderId !== existing.senderId || turn.chatId !== existing.chatId || turn.profile !== existing.profile
+          || turn.projectId !== existing.projectId || turn.status !== 'sent' || turn.decision?.action !== 'reply'
+          || normalizePrdDraftLinks(turn.content).canonical !== canonical || questionJob(state, existing.id)
+          || resolveProjectId(this.context.projects, event.chat_id, event.agent_profile) !== existing.projectId) {
+          return { ignored: true, reason: 'prd_original_not_recoverable' };
+        }
+        q = existing;
+        q.generation = Math.max(q.generation, q.cardGeneration ?? 1) + 1;
+        q.prd = { messages: [], closed: false };
+        recoveredTurn = turn;
+      }
       if (!q) {
-        if (!addressed || !prdStart.test(content)) return { ignored: true };
+        if (!starts) return { ignored: true };
         // The root message ID is common to all subscribed assistants, so one owns this topic.
         const rootId = event.root_id || event.message_id;
         if (Object.values(state.questions).some(x => x.prd && x.chatId === event.chat_id && x.threadRootId === rootId)) return { ignored: true, reason: 'prd_owned_by_another_assistant' };
@@ -81,15 +102,15 @@ export class PrdWorkspace {
         const revision = prdFormVersion(q, questionJob(state, q.id));
         if (q.id !== form.questionId || saved?.messageId !== form.cardId || revision !== form.version) return { ignored: true, reason: 'prd_form_stale' };
       }
-      const opening = !q.rootTurnId;
+      const opening = !q.rootTurnId || Boolean(recoveredTurn);
       const firstContent = opening ? content.replace(prdStart, '').replace(/^[\s：:，,。；;]+/, '') : content;
-      const id = createId('CHAT');
+      const id = recoveredTurn?.id ?? createId('CHAT');
       const text = firstContent.trim();
       const j = questionJob(state, q.id);
-      const turn = { id, questionId: q.id, messageId: event.message_id, chatId: q.chatId, chatType: 'group', senderId: q.senderId,
+      const turn = recoveredTurn ?? { id, questionId: q.id, messageId: event.message_id, chatId: q.chatId, chatType: 'group', senderId: q.senderId,
         profile: q.profile, projectId: q.projectId, role: 'developer', content, replyInThread: true, status: 'sent', createdAt: new Date().toISOString(),
         response: '' };
-      state.conversations.push(turn);
+      if (!recoveredTurn) state.conversations.push(turn);
       q.rootTurnId ??= id;
       q.latestTurnId = id;
       const message = { id: event.message_id, turnId: id, text, attachments: event.attachments ?? [] };

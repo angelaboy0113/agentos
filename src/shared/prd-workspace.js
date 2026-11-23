@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 
 export const prdStart = /^(?:(?:我\s*(?:想要|想|要|需要|准备|打算)\s*(?:(?:请你|请|你)?\s*帮我\s*)?|(?:请|麻烦)?\s*帮我\s*)(?:做|写|整理|梳理|设计|出|起草)|新建|发起|创建)\s*(?:(?:一个|一份|个|份)\s*)?(?:新的?\s*)?(?:PRD|需求(?:文档|方案|初稿)?)(?=$|[\s：:，,。！？!?；;（(【\[]|https:\/\/)/i;
+const prdDeliverable = /^(?:我\s*(?:想要|想|要|需要)\s*)?(?:(?:请|麻烦|帮我|并且|并|然后|最后|再)\s*)*(?:输出|生成|产出|编写|撰写|起草|给我)\s*(?:一份|一个|份|个)?\s*(?:新的?\s*)?(?:PRD(?:\s*(?:文档|方案|草稿|定稿))?|需求(?:文档|方案|规格说明书))(?=$|[\s：:（(【\[]|https:\/\/)/i;
+
+export function requestsPrd(content) {
+  if (prdStart.test(content)) return true;
+  return String(content).split(/[，,。！？!?；;\n]+/).some(clause => prdDeliverable.test(clause.trim()));
+}
 export const prdExport = /^(?:(?:请|帮我|请帮我)\s*)?(?:导出|生成|发布)(?:这版|当前版|一份)?\s*(?:PRD\s*)?飞书文档[。！!]?$/i;
 
 export function needsPrdAnswer(job) {

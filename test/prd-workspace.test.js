@@ -108,6 +108,41 @@ test('ordinary requirement language starts a PRD card while lookup and negated r
   assert.equal(Object.values(state.questions).length, 4);
 });
 
+test('group members can request a PRD after describing the business and keep an existing root on recovery', async t => {
+  const { store, send, workspace } = await fixture(t, undefined, { analysisEnvironments: { prd: { tier: 'prd' } } });
+  const member = 'ou_group_member';
+  const text = '根据PRD环境现有的过期品清货流程，结合新的需求进行方案设计，输出PRD文档：根据客户主数据判断是否进入新流程。';
+  for (const [i, other] of ['根据生产数据导出Excel', '解释一下如何输出 PRD 文档', '先查清报错原因，不用生成 PRD 方案', '请分析 PRD 环境的异常'].entries()) {
+    assert.equal(await send('om_nonprd'+i, other, null, { event: { sender_id: member } }), null, other);
+  }
+  const opened = await send('om_member', text, null, { event: { sender_id: member } });
+  const first = (await store.read()).jobs.find(j => j.questionId === opened.questionId);
+  assert.equal(first.senderId, member);
+  assert.equal(first.originalQuestion, text);
+  assert.equal(first.taskIntent, 'analysis');
+  assert.equal(first.prd.auto, true);
+  assert.equal(await send('om_outside', text, null, { event: { sender_id: member, chat_id: 'oc_elsewhere' } }), null);
+  assert.equal(await send('om_unaddressed', text, null, { addressed: false, event: { sender_id: member } }), null);
+
+  const previousId = 'QST-existing';
+  const oldTurn = { id: 'CHAT-existing', questionId: previousId, status: 'sent', chatId: chat, profile,
+    senderId: member, messageId: 'om_existing', projectId: 'ltx', content: text, decision: { action: 'reply' }, createdAt: new Date().toISOString() };
+  await store.transact(state => {
+    state.conversations.push(oldTurn);
+    state.questions[previousId] = { id: previousId, rootTurnId: oldTurn.id, latestTurnId: oldTurn.id, chatId: chat, profile,
+      senderId: member, projectId: 'ltx', messageId: oldTurn.messageId, threadRootId: oldTurn.messageId, generation: 1 };
+  });
+  const event = { chat_type: 'group', chat_id: chat, sender_type: 'user', sender_id: member, agent_profile: profile, message_id: oldTurn.messageId };
+  const options = { agent: { systemAssistant: true }, addressed: true, content: text, recoverQuestionId: previousId };
+  assert.equal((await workspace.handle({ ...event, sender_id: owner }, options)).reason, 'prd_original_not_recoverable');
+  assert.equal((await workspace.handle(event, options)).questionId, previousId);
+  assert.equal((await workspace.handle(event, options)).duplicate, true);
+  const state = await store.read();
+  assert.equal(state.conversations.filter(x => x.questionId === previousId).length, 1);
+  assert.equal(state.jobs.filter(x => x.questionId === previousId).length, 1);
+  assert.equal(state.jobs.find(j => j.questionId === previousId).replyToMessageId, oldTurn.messageId);
+});
+
 function draftFeishu(calls, { shared = true, environment = '参考环境：SIT' } = {}) {
   const text = content => ({ elements: [{ text_run: { content } }] });
   return {
