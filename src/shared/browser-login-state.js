@@ -18,7 +18,7 @@ export function browserLoginState(target, policy){
   const base=new URL(privateEntry.baseUrl),prefix=base.pathname.replace(/\/$/,'');
   if(location.origin!==base.origin||!(location.pathname===prefix||location.pathname.startsWith(prefix+'/')))return false;
   const visibleLines=text.split(/\n/).map(line=>line.trim());
-  return privateEntry.markers.every(marker=>visibleLines.includes(marker.trim()))
+  return (denied||privateEntry.markers.every(marker=>visibleLines.includes(marker.trim())))
     &&[...document.querySelectorAll('a,button,[role=button],span,div')].some(e=>visible(e)&&
       (e.innerText||e.getAttribute('aria-label')||'').trim()===privateEntry.loginLabel);
  })());

@@ -6,8 +6,8 @@ test('private repository fallback opens reviewed login and resumes only when rep
  const server=http.createServer((req,res)=>{
   res.setHeader('content-type','text/html;charset=utf-8');
   const signedIn=req.headers.cookie?.includes('fixture-login=ok');
-  const privateRoot=req.url==='/private';
-  res.end(signedIn?'<h1>Private repository contents</h1>':`<button>微信登录</button><p>${privateRoot?marker:'公开仓库列表'}</p>
+  const label=req.url==='/private'?marker:req.url==='/private/repository'?'页面不存在，或您暂无访问权限':'公开仓库列表';
+  res.end(signedIn?'<h1>Private repository contents</h1>':`<button>微信登录</button><p>${label}</p>
     <template><div role="dialog">扫码登录<img width="160" height="160" src="${qr}"></div></template>
     <script>document.querySelector('button').onclick=()=>document.body.append(document.querySelector('template').content.cloneNode(true))</script>`);
  });
@@ -18,6 +18,7 @@ test('private repository fallback opens reviewed login and resumes only when rep
  const entry={projectId:'one',tier:'uat',baseUrl:root+'/private',loginNavigation:{interactive:true,remoteQr:true,steps:['微信登录'],privateEntryMarkers:[marker]}};
  t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
  assert.match((await browser.run({id:'public'},{...entry,baseUrl:root+'/public'},'connection')).pageText,/公开仓库列表/);
+ assert.equal((await browser.run({id:'deep-entry',environmentAccess:{websiteTarget:entry.baseUrl+'/repository'}},entry,'connection')).privateLoginRequired,true);
  assert.equal((await browser.run(job,entry,'connection')).privateLoginRequired,true);
  const page=browser.pages.get(job.id).page;
  assert.equal((await browser.beginInteractiveLogin(job,entry)).verificationRequired,true);
