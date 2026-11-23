@@ -57,6 +57,7 @@ import { ConversationService, splitReply, responseMessageId } from './conversati
 import { LiveCards } from './live-cards.js';
 import { ReplyAddressing, addressCard } from './reply-addressing.js';
 import { jobCard, resultSummary } from './message-cards.js';
+import { publishCheckinCard } from './checkin.js';
 import { handleCardAction } from './card-actions.js';
 import { jobTerminalMention, failureNotice } from './requester-mention.js';
 import {usageWorkbook} from './admin-usage-export.js';
@@ -188,11 +189,17 @@ async function route(context) {
   const assetMatch = url.pathname.match(/^\/admin\/(app\.js|styles\.css)$/);
   if (request.method === 'GET' && assetMatch) return serveAdmin(context, response, assetMatch[1]);
 
+  if (request.method === 'POST' && url.pathname === '/api/v1/admin/checkin-card') {
+    requireAdminSession(context, request, true);
+    const receipt = await publishCheckinCard(context, await readJson(request));
+    return json(response, 200, { ok: true, ...receipt });
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/usage/export.xlsx') {
     requireAdminSession(context, request, false);
     context.adminUsageExports=(context.adminUsageExports??0)+1;
     try {
-      const names=await context.adminUsageDirectory.names(await stateView(store,s=>({conversations:s.conversations})));
+      const names=await context.adminUsageDirectory.names(await stateView(store,s=>({conversations:s.conversations,checkins:s.checkins})));
       let usage;try { usage=await stateView(store,s=>adminUsage(s,Object.fromEntries(url.searchParams),{projects:context.projects,names,allRecords:true})); }
       catch { return json(response,400,{ok:false,error:'统计日期或时区无效'}); }
       const workbook=usageWorkbook(usage,{person:url.searchParams.get('person')});
@@ -202,7 +209,7 @@ async function route(context) {
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/usage') {
     requireAdminSession(context, request, false);
-    const names = await context.adminUsageDirectory.names(await stateView(store,s=>({conversations:s.conversations})));
+    const names = await context.adminUsageDirectory.names(await stateView(store,s=>({conversations:s.conversations,checkins:s.checkins})));
     try { return json(response, 200, {ok:true, usage:await stateView(store,s=>adminUsage(s,Object.fromEntries(url.searchParams),{projects:context.projects,names}))}); }
     catch { return json(response,400,{ok:false,error:'统计日期或时区无效'}); }
   }

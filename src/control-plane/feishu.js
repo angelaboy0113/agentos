@@ -124,6 +124,12 @@ export class FeishuClient {
     return this.cardRequest('POST', `/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
       { msg_type: 'interactive', content: JSON.stringify(card), uuid: options.idempotencyKey, ...(options.replyInThread ? { reply_in_thread: true } : {}) });
   }
+  async sendCheckinMessage({profile, receiveId, receiveIdType, type, content, uuid}) {
+    return this.cardRequest('POST', '/im/v1/messages?receive_id_type='+receiveIdType, {
+      receive_id: receiveId, msg_type: type, content: JSON.stringify(content), uuid,
+    });
+  }
+
   async sendCard(chatId, card, options = {}) {
     return this.cardRequest('POST', '/im/v1/messages?receive_id_type=chat_id',
       { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(card), uuid: options.idempotencyKey });

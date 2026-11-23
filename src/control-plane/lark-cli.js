@@ -189,6 +189,12 @@ export class LarkCliFeishuClient {
     { cwd: this.cwd, cliEntry: this.cliEntry, profile: options.profile, timeoutMs: 15_000 });
   }
 
+  async sendCheckinMessage({profile, receiveId, receiveIdType, type, content, uuid}) {
+    return this.cardRequest('POST', '/open-apis/im/v1/messages', {
+      receive_id: receiveId, msg_type: type, content: JSON.stringify(content), uuid,
+    }, {profile, params: {receive_id_type: receiveIdType}});
+  }
+
   async sendCard(chatId, card, options = {}) {
     await mkdir(this.cwd, { recursive: true });
     return runLarkCli(['im', '+messages-send', '--as', 'bot', '--chat-id', chatId,
