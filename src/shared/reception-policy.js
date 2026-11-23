@@ -9,11 +9,17 @@ export function validateReceptionPolicy(v){
  return {...v};
 }
 export function receptionScope(policy,record){return Boolean(policy?.enabled&&policy.profiles.includes(record.profile??record.originProfile??record.agentProfile)&&policy.chatIds.includes(record.chatId)&&record.visibility!=='requester');}
+export function prdTopic(s,chatId,refs){
+ return Object.values(s.questions??{}).some(q=>q.prd&&q.chatId===chatId&&!q.withdrawnAt&&
+  refs.some(ref=>ref&&(ref===q.threadRootId||ref===q.messageId||ref===s.cardMessages?.['question:'+q.id]?.messageId)));
+}
 export function topicQuestion(s,event){
- const questions=Object.values(s.questions??{}).filter(q=>q.chatId===event.chat_id&&q.visibility!=='requester'&&!q.closedAt),refs=[event.reply_to,event.root_id].filter(Boolean);
+ const refs=[event.reply_to,event.root_id].filter(Boolean);
+ if(!refs.length||prdTopic(s,event.chat_id,refs))return null;
+ const questions=Object.values(s.questions??{}).filter(q=>q.chatId===event.chat_id&&q.visibility!=='requester'&&!q.closedAt);
  // Resolve the actual topic/card owner before profile filtering, so four receivers
  // cannot all claim the same root after several assistants have spoken there.
- for(const ref of refs){const exact=questions.filter(q=>q.messageId===ref||s.cardMessages?.['question:'+q.id]?.messageId===ref||(s.conversations??[]).some(t=>t.questionId===q.id&&(t.messageId===ref||t.responseIds?.includes(ref))));if(exact.length)return exact.length===1&&exact[0].profile===event.agent_profile?exact[0]:null;}
+ for(const ref of refs){const exact=questions.filter(q=>q.messageId===ref||s.cardMessages?.['question:'+q.id]?.messageId===ref||(s.conversations??[]).some(t=>t.questionId===q.id&&(t.messageId===ref||t.responseIds?.includes(ref))));if(exact.length)return exact.length===1&&exact[0].profile===event.agent_profile&&!prdTopic(s,event.chat_id,[exact[0].threadRootId])?exact[0]:null;}
  const candidates=questions.filter(q=>refs.includes(q.threadRootId));return candidates.length===1&&candidates[0].profile===event.agent_profile?candidates[0]:null;
 }
 export function receptionIdentity(projects,policy,profile){return projects.humanIdentities?.[policy.humanId]?.[profile]??null;}

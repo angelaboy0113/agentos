@@ -44,12 +44,11 @@ export class PrdWorkspace {
   async handle(event, { agent, addressed, content, form, recoverQuestionId }) {
     if (event.chat_type !== 'group' || event.sender_type !== 'user' || !agent?.systemAssistant
       || !this.context.cards?.enabled || !this.chatIds.has(event.chat_id) || !event.message_id || !event.sender_id) return null;
-    if (event.mentions?.length && !addressed) return null;
-    if (!addressed && !event.root_id && !event.reply_to) return null;
+    if (!addressed && !form) return null;
     const lineage = [event.root_id, event.reply_to, event.message_id].filter(Boolean);
     const possible = await stateView(this.context.store, state => Object.values(state.questions ?? {}).some(q =>
       q.prd && q.profile === event.agent_profile && q.chatId === event.chat_id && lineage.includes(q.threadRootId)));
-    const starts = addressed && requestsPrd(content);
+    const starts = !form && addressed && requestsPrd(content);
     if (!possible && !starts) return null;
     const { canonical, plainText, links: draftLinks } = normalizePrdDraftLinks(content);
     if (receptionSensitive(plainText)) return { ignored: true, reason: 'prd_sensitive_group_input' };

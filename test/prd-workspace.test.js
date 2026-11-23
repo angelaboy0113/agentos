@@ -91,7 +91,7 @@ async function fixture(t, cli, ltx = {}, feishu) {
     { chatIds: [chat], publisher: { profile, ownerOpenId: owner, chatIds: [chat] } }, { cli });
   const group = { chat_type: 'group', chat_id: chat, sender_id: owner, sender_type: 'user', agent_profile: profile };
   const send = (id, content, root, args = {}) => workspace.handle({ ...group, message_id: id, ...(root ? { root_id: root } : {}), ...args.event },
-    { agent: { systemAssistant: true }, addressed: args.addressed ?? !root, content, form: args.form });
+    { agent: { systemAssistant: true }, addressed: args.addressed ?? !args.form, content, form: args.form });
   return { store, workspace, dataDir, send, cards, projects };
 }
 
@@ -280,11 +280,13 @@ test('a denied or non-image preview leaves the document text and table available
   assert.match(job.originalQuestion, /TPM \| 状态来源/);
 });
 
-test('bare PRD trigger then unmentioned description and decisions keep one question, job and native checkpoint', async t => {
+test('PRD ignores unaddressed comments and preserves one question, job and native checkpoint for explicit follow-ups', async t => {
   const { store, workspace, send } = await fixture(t);
   assert.equal(await send('om_regular', '能聊聊 PRD 吗？'), null);
   const { questionId } = await send('om_root', '我要做prd');
   assert.equal((await store.read()).jobs.length, 0);
+  assert.equal(await send('om_noise', '在订单详情新增字段', 'om_root', { addressed:false }), null);
+  assert.equal((await store.read()).questions[questionId].prd.messages.length,1);
   assert.equal((await send('om_wrong', '改成仅显示金额', 'om_root', { event: { sender_id: 'ou_other' } })).reason, 'not_prd_requester');
   assert.equal((await send('om_root', '我要做prd', null, { event: { agent_profile: 'knowledge-tpm' } })).reason, 'prd_owned_by_another_assistant');
   await send('om_detail', '在 LTX 订单详情展示 TPM 补贴状态', 'om_root');
@@ -298,7 +300,12 @@ test('bare PRD trigger then unmentioned description and decisions keep one quest
     j.status = 'completed';
     j.result = { outcome: 'ready', finalMessage: '草稿' };
     j.analysisContinuation = { questionId, workspace: '/fixed/workspace', threadId: 'native-thread', executionEngine: 'native-tools-v1' };
+    s.questions[questionId].prd.delivery={revision:j.prd.revision,phase:'delivered',sentAt:new Date().toISOString(),url:'https://unit.feishu.cn/docx/OriginalDelivery'};
   });
+  const beforeComment = await store.read();
+  assert.equal(await send('om_ack','有了','om_root',{addressed:false}),null);
+  assert.equal(await send('om_other_mention','换成蓝色','om_root',{addressed:false,event:{mentions:[{id:'ou_other'}]}}),null);
+  assert.deepEqual(await store.read(),beforeComment);
   await workspace.resumePending(questionId);
   const state = await store.read();
   assert.equal(state.jobs.length, 1);

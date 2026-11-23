@@ -1,5 +1,5 @@
 import {stateView} from '../shared/state-view.js';
-import {receptionKey,receptionScope,topicQuestion,receptionIdentity,publicOwnerStatus,validateOwnerStatus,captureRecoveryEvent,recoveryDiagnosis,receptionSensitive} from '../shared/reception-policy.js';
+import {receptionKey,receptionScope,topicQuestion,prdTopic,receptionIdentity,publicOwnerStatus,validateOwnerStatus,captureRecoveryEvent,recoveryDiagnosis,receptionSensitive} from '../shared/reception-policy.js';
 import {isAdministrator} from './authorization.js';
 import {validateDecision} from './codex-conversation.js';
 import {requesterMentionText} from './requester-mention.js';
@@ -37,7 +37,7 @@ export class ReceptionService{
  start(){if(!this.enabled)return;this.context.store.transact(s=>{for(const e of Object.values(s.recoveryEvents??{}))if(e.status==='diagnosing')e.status='queued';}).then(()=>this.tick()).catch(()=>{});this.timer=setInterval(()=>this.tick().catch(()=>console.error('[reception] reconciliation deferred')),this.intervalMs);this.timer.unref();}
  async close(){this.closed=true;clearInterval(this.timer);this.abort.abort();await this.running;}
  async tick(){if(this.closed||!this.enabled)return;if(this.running)return this.running;this.running=this.run();try{await this.running;}finally{this.running=null;}}
- valid(s,e){const q=s.questions?.[e.questionId];return q&&!q.closedAt&&!s.withdrawnQuestionIds?.includes(q.id)&&q.visibility!=='requester'&&q.profile===e.profile&&q.chatId===e.chatId&&q.projectId===e.projectId&&(e.generation===undefined||q.generation===e.generation)&&receptionScope(this.policy,e);}
+ valid(s,e){const q=s.questions?.[e.questionId];return q&&!q.closedAt&&!s.withdrawnQuestionIds?.includes(q.id)&&q.visibility!=='requester'&&q.profile===e.profile&&q.chatId===e.chatId&&q.projectId===e.projectId&&(e.generation===undefined||q.generation===e.generation)&&receptionScope(this.policy,e)&&(!e.topicReplyTo||!prdTopic(s,q.chatId,[q.threadRootId,q.messageId]));}
  async classify(entry){
   const result=validateDecision(await this.decide({requestId:entry.key,nativeSession:false,role:'owner_intake',message:entry.content,history:[],jobs:[],attachments:[],currentAttachmentIds:[],project:{id:entry.projectId},channel:{kind:'reception_only',ownerMentioned:entry.ownerMentioned,allowedActions:['reply'],rule:'仅分类，不启动业务、不调用工具；未@管理员不能分类owner_help。普通讨论/收到/我看看/闲聊为ignore。'},publicOwnerStatus:await stateView(this.context.store,s=>this.statusInput(s))},this.abort.signal,{sessionKey:'reception:'+entry.key}));
   if(result.action!=='reply'||result.intent!=='none'||result.requiresSourceInspection||result.environmentQuery||result.environmentSetup||result.attachmentIds.length)throw Error('Reception cannot execute business actions');

@@ -20,6 +20,20 @@ test('three-minute owner help is durable, single bot, same original thread and i
 test('owner response cancels pending help even before classification, no speculative notice',async t=>{const{r,replies,advance}=await setup(t);await r.observe(event('m',{mentions:[{id:'ou_admina'}]}),{openId:'robot-a'});await r.observe(event('owner',{sender_id:'ou_admina',content:'我看看'}),{openId:'robot-a'});await r.tick();advance(180001);await r.tick();assert.equal(replies.length,0);});
 test('resolved, closed and changed generations suppress stale help',async t=>{for(const mode of ['resolved','closed','generation']){const{r,store,replies,advance}=await setup(t);await r.observe(event(mode,{mentions:[{id:'ou_admina'}]}),{openId:'robot-a'});await r.tick();await store.transact(s=>{if(mode==='closed')s.questions.q.closedAt=iso(at+2);else if(mode==='generation')s.questions.q.generation++;else s.jobs.push(job({status:'completed',updatedAt:iso(at+5000),result:{outcome:'ready'}}));});advance(180001);await r.tick();assert.equal(replies.length,0);}});
 test('ordinary discussion, other bot mentions and unmatched topics do not intrude',async t=>{const{r,replies}=await setup(t,{kind:'ignore'});await r.observe(event('ordinary',{content:'稍等我看看'}),{openId:'robot-a'});await r.tick();assert.equal(await r.observe(event('other',{mentions:[{id:'robot-b'}]}),{openId:'robot-a'}),null);assert.equal(await r.observe(event('unknown',{root_id:'elsewhere',reply_to:'elsewhere'}),{openId:'robot-a'}),null);assert.equal(replies.length,0);});
+test('a PRD topic silences reception even when an older non-PRD card owns the root',async t=>{
+ const {r,store,replies}=await setup(t);
+ await r.observe(event('old',{mentions:[{id:'ou_admina'}]}),{openId:'robot-a'});
+ await store.transact(s=>{
+  s.questions.prd={...s.questions.q,id:'prd',messageId:'prd-request',profile:'bot-b',prd:{}};
+  s.cardMessages={'question:q':{messageId:'old-card'}};
+ });
+ assert.equal(await r.observe(event('ack',{content:'有了'}),{openId:'robot-a'}),null);
+ assert.equal(await r.observe(event('reply',{root_id:null,reply_to:'old-card',content:'有了'}),{openId:'robot-a'}),null);
+ r.classify=async()=>assert.fail('PRD comments must not reach reception classification');
+ await r.tick();
+ assert.deepEqual(Object.values((await store.read()).receptionInbox).map(x=>x.status),['cancelled']);
+ assert.equal(replies.length,0);
+});
 test('unmentioned business gets one reminder, never a task or repeated prompt',async t=>{const{r,store,replies}=await setup(t,{kind:'needs_mention'});await r.observe(event('m'),{openId:'robot-a'});await r.tick();await r.observe(event('m2'),{openId:'robot-a'});await r.tick();assert.equal(replies.length,1);assert.match(replies[0].text,/@/);assert.equal((await store.read()).jobs.length,0);});
 test('classifier cannot execute business or claim owner help without actual owner mention',async t=>{const{r,store,replies}=await setup(t);await r.observe(event('m'),{openId:'robot-a'});await r.tick();assert.equal(replies.length,0);assert.equal(Object.values((await store.read()).receptionInbox)[0].status,'ignored');});
 test('delivery failure and restart reuse frozen content and native idempotency key',async t=>{const{r,store,replies,context,advance}=await setup(t,{kind:'needs_mention',failSend:true});await r.observe(event('m'),{openId:'robot-a'});await r.tick();advance(15001);const restarted=new ReceptionService(context,policy,{now:()=>at+20000,decide:async()=>{throw Error('Must not rerun classifier');}});await restarted.tick();await restarted.close();assert.equal(replies.length,2);assert.equal(replies[0].opts.idempotencyKey,replies[1].opts.idempotencyKey);assert.equal(replies[0].text,replies[1].text);assert.equal(Object.values((await store.read()).receptionInbox)[0].status,'sent');});

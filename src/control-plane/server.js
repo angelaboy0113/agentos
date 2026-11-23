@@ -658,10 +658,10 @@ export async function handleLarkCliEvent(context, event) {
   const directReception=await context.reception?.direct(event);if(directReception)return directReception;
   if (agent?.systemAssistant && event.chat_type === 'p2p') return { ignored: true, reason: 'assistant_group_only' };
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
-  const prdContent = stripMentions(event.content, event.mentions);
   const prdMentionIds = (event.mentions ?? []).flatMap(item => [item.id?.open_id ?? item.id?.app_id ?? item.id, item.open_id, item.user_id]).filter(Boolean);
-  const prd = await context.prd?.handle({...event,message_id:messageId}, {agent, content:prdContent,
-    addressed:[agent?.openId,agent?.appId].filter(Boolean).some(id => prdMentionIds.includes(id))});
+  const prdAddressed=[agent?.openId,agent?.appId].filter(Boolean).some(id => prdMentionIds.includes(id));
+  const prd = prdAddressed ? await context.prd?.handle({...event,message_id:messageId}, {agent, addressed:true,
+    content:stripMentions(event.content, event.mentions)}) : null;
   if (prd) return prd;
   const reception=await context.reception?.observe(event,agent);if(reception)return reception;
   // Group-only system assistants must route the addressee before credential
