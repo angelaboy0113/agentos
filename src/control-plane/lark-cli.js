@@ -163,7 +163,7 @@ export class LarkCliFeishuClient {
   }
   async getMessage(messageId,options={}){
     await mkdir(this.cwd,{recursive:true});
-    const r=await runLarkCli(['api','GET','/open-apis/im/v1/messages/'+encodeURIComponent(messageId),'--as','bot','--params',JSON.stringify({user_id_type:'open_id'}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile});
+    const r=await runLarkCli(['api','GET','/open-apis/im/v1/messages/'+encodeURIComponent(messageId),'--as','bot','--params',JSON.stringify({user_id_type:'open_id'}),'--json'],{cwd:this.cwd,cliEntry:this.cliEntry,profile:options.profile,timeoutMs:options.timeoutMs});
     return r.data?.items?.find(m=>m.message_id===messageId)??null;
   }
   async replySticker(messageId,fileKey,options={}){

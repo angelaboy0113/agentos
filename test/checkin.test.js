@@ -142,3 +142,57 @@ test('accepts ahead of settlement and private delivery, recovers across restart,
   finish();
   await until(async () => Object.values((await context.store.read()).checkinReceipts).every(r=>r.sent));
 });
+
+test('official receipts add historical points from verified cross-assistant authors without merging names', async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(),'os-checkin-identity-'));
+  const store = new JsonStore(path.join(dir,'agentos.json'));
+  const sent = [], reads = [];
+  const group = 'oc_shared';
+  const people = [
+    ['ltx','ou_clicker','om_local'],
+    ['tpm','ou_linked','om_history'],
+    ['tpm','ou_unrelated','om_sameName'],
+  ];
+  const names = new Map(people.map(([profile,id]) => [JSON.stringify([profile,group,id]),'同名员工']));
+  const context = {
+    store,
+    projects:{chatProfileProjectMap:{[group]:{ltx:'ltx',tpm:'tpm'}}},
+    agents:{agents:{ltx:{profile:'ltx',systemAssistant:true},tpm:{profile:'tpm',systemAssistant:true}}},
+    adminUsageDirectory:{async names(){return names;}},
+    feishu:{
+      async getMessage(id,{profile}){
+        reads.push([id,profile]);
+        const senderId = id === 'om_history'
+          ? (profile === 'ltx' ? 'ou_clicker' : 'ou_linked')
+          : (profile === 'ltx' ? 'ou_other' : 'ou_unrelated');
+        return {message_id:id,chat_id:group,sender:{id:senderId,id_type:'open_id',sender_type:'user',tenant_key:'same-company'}};
+      },
+      async sendCheckinMessage(options){
+        sent.push(options);
+        return {data:{message_id:'om_'+sent.length,chat_id:options.receiveIdType==='chat_id'?group:'oc_dm'}};
+      },
+    },
+  };
+  context.checkinQueue = new CheckinQueue(context);
+  t.after(async () => {
+    await context.checkinQueue.close();
+    await rm(dir,{recursive:true,force:true});
+  });
+  await store.transact(state => {
+    state.conversations = people.map(([profile,senderId,messageId]) => ({
+      id:messageId,messageId,profile,senderId,chatId:group,chatType:'group',createdAt:'2026-11-04T02:00:00Z',
+      archivedAt:'2026-11-20T00:00:00Z',content:'请核对预算金额',
+    }));
+  });
+  const card = await publishCheckinCard(context,{profile:'ltx',group});
+  const click = (action,event_id) => handleCheckinAction(context,{
+    agent_profile:'ltx',operator_id:'ou_clicker',event_id,message_id:card.messageId,chat_id:group,
+  },action,Date.parse('2026-11-24T00:00:00+08:00'));
+  await click('daily_checkin','first');
+  await until(() => sent.some(item => item.content.text === '11月24日获得 1 积分\n累计积分 3'));
+  await click('my_checkin_points','lookup');
+  await until(() => sent.some(item => item.content.text?.includes('累计 3 积分 · 签到 1 · 提问 2')));
+  assert.equal(Object.keys((await store.read()).checkins).length,1);
+  assert.equal(reads.filter(([id]) => id==='om_history').length,2);
+  assert.ok(reads.some(([id]) => id==='om_sameName'));
+});

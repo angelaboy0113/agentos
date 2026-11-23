@@ -122,38 +122,93 @@ export async function handleCheckinAction(context, event, action, now = Date.now
   return { ok: true, duplicate, checkinQueued: true, message: pendingMessage[action], notification: 'callback_only' };
 }
 
-function settleReceipt(context, state, receipt) {
+const directoryKey = ({profile, chatId, senderId}) => JSON.stringify([profile, chatId, senderId]);
+
+async function lookupPointAccounts(context, state, receipt, proofs) {
+  const accounts = new Set([actorKey(context.projects, receipt)]);
+  if (receipt.preview || receipt.action === 'points_store' || !context.adminUsageDirectory || !context.feishu.getMessage) {
+    return {accounts, incomplete: false};
+  }
+  const hints = await context.adminUsageDirectory.names({
+    conversations: [...(state.conversations ?? []), receipt], checkins: state.checkins,
+  });
+  const name = hints.get(directoryKey(receipt));
+  const candidates = new Map();
+  for (const turn of state.conversations ?? []) {
+    if (turn.profile === receipt.profile || turn.visibility === 'private' || turn.chatType === 'p2p' ||
+        state.questions?.[turn.questionId]?.visibility === 'private' || !messageId.test(turn.messageId ?? '') ||
+        !openId.test(turn.senderId ?? '') || !name || hints.get(directoryKey(turn)) !== name ||
+        !allowedGroup(context, assistant(context, receipt.profile), turn.chatId) ||
+        !allowedGroup(context, assistant(context, turn.profile), turn.chatId)) continue;
+    const key = actorKey(context.projects, turn);
+    const prior = candidates.get(key);
+    if (!accounts.has(key) && (!prior || turn.createdAt > prior.createdAt)) candidates.set(key, turn);
+  }
+  let incomplete = !name;
+  await Promise.all([...candidates].map(async ([account, turn]) => {
+    const key = JSON.stringify([turn.profile, turn.chatId, turn.senderId, receipt.profile, receipt.senderId]);
+    if (proofs.has(key)) {
+      if (proofs.get(key)) accounts.add(account);
+      return;
+    }
+    try {
+      const [source, target] = await Promise.all([turn.profile, receipt.profile].map(profile =>
+        context.feishu.getMessage(turn.messageId,{profile,timeoutMs:8000})));
+      const matches = (message, senderId) => message?.message_id === turn.messageId &&
+        message.chat_id === turn.chatId && !message.deleted &&
+        message.sender?.sender_type === 'user' && message.sender.id_type === 'open_id' &&
+        openId.test(senderId ?? '') && message.sender.id === senderId;
+      if (!matches(source, turn.senderId) || !target || target.deleted) {
+        incomplete = true;
+      } else if (matches(target, target.sender?.id) && source.sender.tenant_key &&
+          source.sender.tenant_key === target.sender.tenant_key) {
+        const sameAccount = target.sender.id === receipt.senderId;
+        proofs.set(key, sameAccount);
+        if (sameAccount) accounts.add(account);
+      } else {
+        incomplete = true;
+      }
+    } catch {
+      incomplete = true;
+    }
+  }));
+  return {accounts, incomplete};
+}
+
+function settleReceipt(context, state, receipt, {accounts, incomplete}) {
   const { action, preview, profile, senderId, chatId, day, createdAt } = receipt;
   if (action === 'points_store') return pendingMessage.points_store;
   const actor = actorKey(context.projects, {profile, senderId});
   const ledger = preview ? 'previewCheckins' : 'checkins';
   const id = hash(ledger, actor, day);
   state[ledger] ??= {};
-  const prior = state[ledger][id];
+  const belongs = (row) => accounts.has(actorKey(context.projects, row));
+  const prior = Object.values(state[ledger]).find(row => row.day === day && belongs(row));
   if (action === 'daily_checkin') {
-    state[ledger][id] ??= { id, chatId, senderId, profile, day, createdAt, points: 1 };
+    if (!prior) state[ledger][id] ??= { id, chatId, senderId, profile, day, createdAt, points: 1 };
   }
-  const signins = Object.values(state[ledger])
-    .filter((row) => actorKey(context.projects, row) === actor).length;
+  const signins = new Set(Object.values(state[ledger]).filter(belongs).map(row => row.day)).size;
   const questions = preview ? 0 : adminUsage({
-    conversations: (state.conversations ?? []).filter((row) => actorKey(context.projects, row) === actor),
+    conversations: (state.conversations ?? []).filter(belongs),
     questions: state.questions,
   }, { excludeAdmin: 'false' }, { projects: context.projects }).summary.points;
   const total = signins + questions;
+  const caveat = incomplete ? '\n部分历史账号暂未核实。' : '';
   if (action === 'daily_checkin') {
     const [, month, date] = day.split('-').map(Number);
-    return `${preview ? '【私聊体验】' : ''}${month}月${date}日获得 ${state[ledger][id].points} 积分\n累计积分 ${total}`;
+    return `${preview ? '【私聊体验】' : ''}${month}月${date}日获得 ${(prior ?? state[ledger][id]).points} 积分\n累计积分 ${total}${caveat}`;
   }
   const status = prior ? '今天已签到。' : '今天还未签到。';
   const text = `${status}\n累计 ${total} 积分 · 签到 ${signins} · 提问 ${questions}`;
   if (preview) return '【私聊体验】' + text + '\n体验积分单独累计。';
-  return state.retention && state.retention.mode !== 'archive' ? text + '\n提问积分按当前保留的历史记录统计。' : text;
+  return text + caveat + (state.retention && state.retention.mode !== 'archive' ? '\n提问积分按当前保留的历史记录统计。' : '');
 }
 
 export class CheckinQueue {
   constructor(context) {
     this.context = context;
     this.deliveries = new Map();
+    this.accountProofs = new Map();
     this.closed = false;
   }
 
@@ -184,9 +239,17 @@ export class CheckinQueue {
       .filter(([id, receipt]) => !receipt.sent && receipt.profile && receipt.senderId && !this.deliveries.has(id)));
     const unsettled = pending.filter(([, receipt]) => !receipt.text);
     if (unsettled.length) {
+      const state = await stateView(store, s => ({conversations:s.conversations, questions:s.questions, checkins:s.checkins}));
+      const lookups = new Map();
+      for (const [, receipt] of unsettled) {
+        const key = JSON.stringify([receipt.preview, receipt.action === 'points_store', directoryKey(receipt)]);
+        if (!lookups.has(key)) lookups.set(key, lookupPointAccounts(this.context,state,receipt,this.accountProofs));
+      }
+      const accounts = new Map(await Promise.all([...lookups].map(async ([key, lookup]) => [key, await lookup])));
       await store.transact((state) => {
         for (const [id, receipt] of unsettled) {
-          state.checkinReceipts[id].text = settleReceipt(this.context, state, receipt);
+          const key = JSON.stringify([receipt.preview, receipt.action === 'points_store', directoryKey(receipt)]);
+          state.checkinReceipts[id].text = settleReceipt(this.context, state, receipt, accounts.get(key));
         }
       });
     }
