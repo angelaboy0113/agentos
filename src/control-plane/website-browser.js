@@ -427,6 +427,9 @@ export class WebsiteBrowser {
     const link=await ref.el.evaluate(el=>{
      const anchor=el.closest('a[href]');
      if(!anchor)return null;
+     // A literal placeholder has no destination. Let the application's
+     // existing click handler open its inline details, under the request gate.
+     if(!anchor.target&&/^javascript:(?:;|void\(0\);?)$/i.test(anchor.getAttribute('href').trim()))return null;
      return anchor.target==='_blank'||anchor.origin!==el.ownerDocument.location.origin?anchor.href:null;
     });
     if(link&&link!==ref.linkHref)throw new BrowserInputError('BROWSER_REF_STALE','附件链接已变化，请刷新快照后再查看。');

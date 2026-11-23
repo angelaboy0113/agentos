@@ -89,5 +89,14 @@ test('PRD list captures require actual rows and replace sensitive cells without 
  await page.locator('td').nth(0).evaluate(cell=>{cell.textContent='PRD-PRIVATE-B';});
  await page.locator('td').nth(1).evaluate(cell=>{cell.textContent='PRIVATE CUSTOMER B';});
  assert.equal((await capture()).designReference.sha256,populated.designReference.sha256);
+ await page.locator('.ant-table').evaluate(grid=>{
+  const icon='<svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="red"/></svg>';
+  grid.querySelector('thead tr').insertAdjacentHTML('beforeend','<th>操作</th>');
+  grid.querySelector('tbody tr').insertAdjacentHTML('beforeend','<td><button>'+icon+'<span>复制</span></button></td>');
+  grid.querySelector('tbody td').insertAdjacentHTML('beforeend',icon);
+ });
+ const withActions=await capture();
+ assert.ok(withActions.designLayout.controls.some(c=>c.text==='复制'));
+ assert.equal(withActions.designLayout.assets.length,1);
  assert.equal(await page.locator('td').evaluateAll(cells=>cells.some(cell=>cell.getAttributeNames().some(name=>name.includes('agentos-label')))),false);
 });

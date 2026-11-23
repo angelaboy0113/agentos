@@ -18,6 +18,21 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
   if (inline && !prdPrototypeKey.test(spec?.prototypeKey ?? '')) throw layoutError('每张原型须填写对应正文的 prototypeKey');
   const reference = await readPrdDesignReference(dataDir, job, spec?.referenceId);
   if (!reference) throw Object.assign(new Error('请先截取当前轮真实目标或同系统参考页面'), { code: 'IMAGE_LIVE_SCREEN_REQUIRED' });
+  const base = await readFile(reference.path);
+  if (hash(base) !== reference.sha256) throw layoutError('截图已变化，请重新捕获');
+  const provenance = {
+    status:'verified', mode:spec.mode,
+    ...(inline ? { prototypeKey:spec.prototypeKey, referenceId:spec.referenceId } : {}),
+    inputHashes:[reference.sha256], referenceKinds:[reference.kind],
+    binding:{ jobId:job.id, questionId:job.questionId, projectId:job.projectId,
+      profile:job.originProfile??job.agentProfile, environment:job.sourceEnvironment,
+      generation:job.questionGeneration??job.prd.revision, questionHash:hash(String(currentUserQuestion(job))) }
+  };
+  if (inline && spec.mode === 'reference-only') {
+    if (Object.keys(spec).some(key=>!['mode','prototypeKey','referenceId'].includes(key)))
+      throw layoutError('原样引用现场截图时只填写 mode、prototypeKey 和 referenceId');
+    return {bytes:base, provenance:{...provenance,provider:'prd-live-screenshot',sha256:reference.sha256}};
+  }
   const existing = spec?.mode === 'existing-page';
   const composite = inline || existing;
   if ((!existing && spec?.mode !== 'new-page') ||
@@ -36,8 +51,6 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
   ) || !inline && areas.reduce((sum,a) => sum+a.width*a.height,0) >= 0.75)) {
     throw layoutError('改动区需要在实际截图内填写 x、y、width、height（0 到 1）和拟新增的界面文案');
   }
-  const base = await readFile(reference.path);
-  if (hash(base) !== reference.sha256) throw layoutError('截图已变化，请重新捕获');
   const visibleRegions = areas.map(({x,y,width,height})=>({x,y,width,height}));
   const firstEdit = nativeEdit ? [
     'Edit the attached real UI screenshot in place. Preserve its aspect ratio, viewport framing, branding and layout outside the edit rectangles.',
@@ -168,11 +181,6 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
   } finally {
     await browser.close();
   }
-  return { bytes, provenance: { status:'verified', provider:nativeEdit?'prd-native-image-edit':'prd-screenshot-composite', mode:spec.mode,
-    ...(inline ? { prototypeKey:spec.prototypeKey, referenceId:spec.referenceId } : {}),
-    sha256:hash(bytes), inputHashes:[reference.sha256], referenceKinds:[reference.kind],
-    binding:{ jobId:job.id, questionId:job.questionId, projectId:job.projectId,
-      profile:job.originProfile??job.agentProfile, environment:job.sourceEnvironment,
-      generation:job.questionGeneration??job.prd.revision, questionHash:hash(String(currentUserQuestion(job))) },
+  return { bytes, provenance: { ...provenance, provider:nativeEdit?'prd-native-image-edit':'prd-screenshot-composite',sha256:hash(bytes),
     ...(proposed ? { proposedImage:proposed.provenance } : {}) } };
 }

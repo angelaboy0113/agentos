@@ -38,3 +38,35 @@ test('reviewed visible PDF links use a separate GET and preserve the application
   {url:'https://files.example.test/notices/changed.pdf',method:'GET',redirect:'manual',headers:undefined},
  ]);
 });
+
+test('literal placeholder links open inline details without allowing arbitrary script URLs or write requests',async t=>{
+ const received=[];
+ const server=http.createServer((req,res)=>{
+  received.push(req.url);
+  res.setHeader('content-type','text/html; charset=utf-8');
+  res.end(req.url==='/detail'?'<p>Stored detail</p>':`<h1>Active documents</h1>
+    <a href="javascript:;" id="detail">查看详情</a>
+    <a href="javascript:fetch('/execute')">查看脚本地址</a>
+    <script>document.querySelector('#detail').addEventListener('click',async event=>{
+      event.preventDefault();
+      fetch('/execute',{method:'POST'}).catch(()=>{});
+      const body=await fetch('/detail').then(r=>r.text());
+      document.body.insertAdjacentHTML('beforeend',body);
+    });</script>`);
+ });
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const dir=await mkdtemp(path.join(os.tmpdir(),'web-inline-detail-'));
+ const base='http://agentos-fixture.test:'+server.address().port;
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP agentos-fixture.test 127.0.0.1']})};
+ const browser=new WebsiteBrowser(dir,driver);
+ t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
+ const environment={projectId:'one',tier:'uat',baseUrl:base+'/page'},job={id:'inline-detail'};
+ const snapshot=await browser.run(job,environment,'connection');
+ await assert.rejects(browser.run(job,environment,'browser_click',{ref:snapshot.controls.find(x=>x.label==='查看脚本地址').ref}),{code:'BROWSER_NAVIGATION_SCOPE'});
+ await browser.run(job,environment,'browser_click',{ref:snapshot.controls.find(x=>x.label==='查看详情').ref});
+ await browser.pages.get(job.id).page.getByText('Stored detail').waitFor();
+ const detail=await browser.run(job,environment,'browser_snapshot');
+ assert.equal(detail.url,base+'/page');
+ assert.match(detail.pageText,/Stored detail/);
+ assert.deepEqual(received.filter(url=>url==='/detail'||url==='/execute'),['/detail']);
+});

@@ -50,7 +50,8 @@ async function documentChildren(call, doc) {
 
 async function insertInlineImages(call, cwd, doc, figures) {
   let blocks = await documentChildren(call, doc);
-  for (const { key, artifact: { file } } of figures) {
+  for (const { key, referenceOnly, artifact: { file } } of figures) {
+    const caption=referenceOnly?'现状实拍（已脱敏）':'界面原型（拟议）';
     const anchors = blocks.filter(block => paragraph(block) === marker(key));
     if (anchors.length !== 1 || !validToken.test(anchors[0].block_id)) throw Error('PRD_IMAGE_ANCHOR');
     const anchor = anchors[0].block_id;
@@ -73,9 +74,9 @@ async function insertInlineImages(call, cwd, doc, figures) {
       throw Error('PRD_IMAGE_POSITION');
     }
     await call(['docs','+update','--as','user','--doc',doc,'--command','str_replace','--pattern',marker(key),
-      '--doc-format','markdown','--content','界面原型（拟议）']);
+      '--doc-format','markdown','--content',caption]);
     blocks = await documentChildren(call, doc);
-    if (blocks[index+1]?.image?.token !== images[0].image.token || paragraph(blocks[index]) !== '界面原型（拟议）'
+    if (blocks[index+1]?.image?.token !== images[0].image.token || paragraph(blocks[index]) !== caption
       || blocks.some(b => paragraph(b) === marker(key))) {
       throw Error('PRD_IMAGE_POSITION');
     }
@@ -278,7 +279,9 @@ export class PrdCloudDelivery {
         const provenance = artifact?.receipt.request?.imageGeneration;
         const reference = await readPrdDesignReference(dir, job, provenance?.referenceId);
         const imageEdit = provenance?.proposedImage;
-        const providerVerified = inline && job.prd.nativePrototypeEdits
+        const referenceOnly = inline && provenance?.provider==='prd-live-screenshot' && provenance.mode==='reference-only'
+          && provenance.sha256===reference?.sha256;
+        const providerVerified = referenceOnly || (inline && job.prd.nativePrototypeEdits
           ? provenance?.provider === 'prd-native-image-edit' && imageEdit?.provider === 'codex-native'
             && imageEdit.status === 'verified' && imageEdit.inputHashes?.[0] === reference?.sha256
             && imageEdit.referenceKinds?.[0] === 'website-design-reference'
@@ -286,7 +289,7 @@ export class PrdCloudDelivery {
             && imageEdit.binding?.projectId === q.projectId && imageEdit.binding?.profile === q.profile
             && imageEdit.binding?.environment === job.sourceEnvironment && matchesGeneration(imageEdit.binding)
           : inline ? provenance?.provider === 'prd-screenshot-composite'
-            : ['codex-native','prd-screenshot-composite'].includes(provenance?.provider);
+            : ['codex-native','prd-screenshot-composite'].includes(provenance?.provider));
         if (!reference || provenance?.status !== 'verified' || !providerVerified
           || provenance.sha256 !== files[index+1]?.sha256 || provenance.inputHashes?.[0] !== reference.sha256
           || provenance.referenceKinds?.[0] !== 'website-design-reference'
@@ -296,7 +299,7 @@ export class PrdCloudDelivery {
           await save('artifacts_missing', { notice: '原型缺少本轮真实目标页面截图的生成凭据。请先取得对应系统和环境的截图，再重做原型。' });
           return;
         }
-        figures.push({ key, artifact });
+        figures.push({ key, artifact, referenceOnly });
       }
       const referenceHashes = (job.attachments ?? []).filter(a => a.source?.kind === 'authorized-prd-document-image'
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)

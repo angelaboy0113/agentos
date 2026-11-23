@@ -1002,10 +1002,14 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
       return before.every((value,index)=>value===after[index]);
     },[base.toString('base64'),actual.bytes.toString('base64')]);
     assert.ok(outsideUnchanged);
-    const artifact = await saveArtifact(dataDir,{...job,prd:{...job.prd,revision:3}},'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'.slice(0,-1)+n,'png',actual.bytes);
+    const final = n ? await producePrdPrototype(dataDir,job,JSON.stringify({mode:'reference-only',prototypeKey:key,referenceId}),{
+      generate:async()=>assert.fail('An unchanged reference must not use image generation'),
+    }) : actual;
+    if(n)assert.deepEqual(final.bytes,base);
+    const artifact = await saveArtifact(dataDir,{...job,prd:{...job.prd,revision:3}},'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'.slice(0,-1)+n,'png',final.bytes);
     const receiptPath=path.join(dataDir,'exports',job.id,artifact.id+'.verification.json');
     const receipt=JSON.parse(await fs.readFile(receiptPath,'utf8'));
-    const updated=Buffer.from(JSON.stringify({...receipt,request:{imageGeneration:actual.provenance}}));
+    const updated=Buffer.from(JSON.stringify({...receipt,request:{imageGeneration:final.provenance}}));
     await fs.writeFile(receiptPath,updated);
     figures.push({...artifact,verificationHash:hash(updated)});
   }
@@ -1038,6 +1042,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   assert.notEqual(delivered.digest,pending.digest);
   assert.deepEqual(blocks.map(b=>b.image?.token??b.block_id),['anchor1',figures[0].sha256,'heading2','anchor2',figures[1].sha256]);
   assert.equal(blocks[0].text.elements[0].text_run.content,'界面原型（拟议）');
+  assert.equal(blocks[3].text.elements[0].text_run.content,'现状实拍（已脱敏）');
 });
 
 test('registered Markdown may be handed off as a PRD without looking in the source checkout', async t => {

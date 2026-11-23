@@ -100,8 +100,10 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     const target=/^#[a-z0-9_-]+$/i.test(reference)?document.getElementById(reference.slice(1)):null;
     return target && safeShape(target) && [...target.querySelectorAll('*')].every(e=>safeShape(e)&&e.localName!=='use');
   };
+  const actionCell=element=>/^(?:操作|Actions?|Operations?)$/i.test(rowCells.get(element.closest(cellSelector))?.header??'');
+  const iconLocation=element=>!element.closest('[class*="avatar" i]')&&(!element.closest(cellSelector)||actionCell(element));
   const approvedIcon=(element,rect)=>element.matches('svg')&&rect.width<=48&&rect.height<=48
-    && !element.closest(cellSelector+', [class*="avatar" i]')
+    && iconLocation(element)
     && [...element.querySelectorAll('*')].every(node=>safeShape(node)&&(node.localName!=='use'||localShape(node)));
   for(const element of document.querySelectorAll('body *')){
     if(element.closest(secretSelector)||element.matches('script,style,textarea,option,[contenteditable]'))continue;
@@ -120,7 +122,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       if(brandImage)protect(geometry);
       continue;
     }
-    if(geometry.width<=48&&geometry.height<=48 && !element.closest(cellSelector+', [class*="avatar" i]')){
+    if(geometry.width<=48&&geometry.height<=48 && iconLocation(element)){
       const icon=getComputedStyle(element,'::before');
       if(/^(?:"[\uE000-\uF8FF]"|'[\uE000-\uF8FF]')$/.test(icon.content)&&/icon/i.test(icon.fontFamily)){
         element.setAttribute(attribute+'-glyph',String(glyphs.length));
@@ -136,7 +138,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     const direct=[...element.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim());
     if(direct.length!==1)continue;
     const text=direct[0].textContent.trim();
-    const rowAction=element.closest('button,a,[role=button]')&&['查看','详情','编辑','删除'].includes(text);
+    const rowAction=actionCell(element)&&element.closest('button,a,[role=button]')&&/^(?:查看|详情|编辑|删除|修改|复制|下载|上传|审核|撤回|上账|启用|停用|更多|view|details?|edit|delete|copy|download|upload|review|more)$/i.test(text);
     const cell=element.closest(cellSelector);
     const row=rowCells.get(cell);
     const visibleState=row&&/状态|进度|\bstatus\b/i.test(row.header)&&states.has(text);
@@ -160,10 +162,12 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     const normalized = text.replace(/\s+/g,'').replace(/[:：]$/,'');
     const fieldLabel = element.closest(fieldLabelSelector);
     const semanticChrome = element.closest(chromeSelector);
-    const actionLabel = element.closest('button,[role="button"]')&&/^(?:查看|关闭|返回|刷新|导出|查询|搜索|展开|收起|确认|取消|应用|下载)[\p{L} ]{1,16}$/u.test(text);
+    const actionLabel = element.closest('button,[role="button"]')&&(
+      /^(?:查看|关闭|返回|刷新|导出|查询|搜索|展开|收起|确认|取消|应用|下载|批量|全量)[\p{L} ]{1,16}$/u.test(text)
+      || /^(?:[\p{L}]{1,12})(?:后调整|调整|上账)$/u.test(text));
     // Cells, selection values and account badges stay covered. Ordinary
     // menu, collapse and table-header labels keep their original typography.
-    if(!terms.has(normalized)&&!brandTitle&&!visibleState&&!(
+    if(!terms.has(normalized)&&!brandTitle&&!visibleState&&!rowAction&&!(
       ((fieldLabel||semanticChrome||actionLabel)&&staticLabel(text)) || (element.closest('h1,h2,h3,[role="heading"]')&&fieldTerms.has(normalized))))continue;
     const range=document.createRange();
     range.selectNodeContents(direct[0]);
