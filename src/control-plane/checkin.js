@@ -11,6 +11,9 @@ const dayFormat = new Intl.DateTimeFormat('en-CA', {
 });
 const hash = (...values) => createHash('sha256').update(JSON.stringify(values)).digest('hex');
 
+const checkinActions = new Set(['daily_checkin', 'my_checkin_points', 'points_store']);
+export const isCheckinAction = (action) => checkinActions.has(action);
+
 function actorKey(projects, {profile, senderId}) {
   const person = Object.entries(projects.humanIdentities ?? {})
     .find(([, identities]) => identities[profile] === senderId)?.[0];
@@ -26,6 +29,7 @@ function card(preview) {
       { tag: 'action', actions: [
         { tag: 'button', text: { tag: 'plain_text', content: '今日签到' }, type: 'primary', value: { action: 'daily_checkin' } },
         { tag: 'button', text: { tag: 'plain_text', content: '查我的积分' }, type: 'default', value: { action: 'my_checkin_points' } },
+        { tag: 'button', text: { tag: 'plain_text', content: '积分商城' }, type: 'danger', value: { action: 'points_store' } },
       ] },
       ...(preview ? [{ tag: 'note', elements: [{ tag: 'plain_text', content: '体验积分独立记录，正式积分和排行榜不受影响。' }] }] : []),
     ],
@@ -80,6 +84,7 @@ function weekOf(day) {
 }
 
 export async function handleCheckinAction(context, event, action, now = Date.now()) {
+  if (!isCheckinAction(action)) return { ignored: true, reason: 'unknown_checkin_action' };
   const { operator_id: senderId, agent_profile: profile, chat_id: chat, message_id: message } = event;
   if (!openId.test(senderId) || !chatId.test(chat) || !messageId.test(message)) return { ignored: true, reason: 'invalid_checkin_actor' };
   const binding = await stateView(context.store, (s) => Object.values(s.checkinCards ?? {})
@@ -95,6 +100,11 @@ export async function handleCheckinAction(context, event, action, now = Date.now
   const result = await context.store.transact((state) => {
     state.checkinReceipts ??= {};
     if (state.checkinReceipts[deliveryId]) return { ...state.checkinReceipts[deliveryId] };
+    if (action === 'points_store') {
+      const receipt = { text: '积分商城，敬请期待。', day, sent: false };
+      state.checkinReceipts[deliveryId] = receipt;
+      return receipt;
+    }
     state[ledger] ??= {};
     const prior = state[ledger][id];
     let text = prior ? '今天已签到。' : '今天还未签到。';

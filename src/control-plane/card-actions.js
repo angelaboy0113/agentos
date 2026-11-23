@@ -9,7 +9,7 @@ import { publishQuestion, questionJob } from './questions.js';
 import { jobActionVersion, jobCard } from './message-cards.js';
 import { nextStage } from '../shared/protocol.js';
 import { canContinueTask, isAdministrator, isTaskCreator } from './authorization.js';
-import { handleCheckinAction } from './checkin.js';
+import { handleCheckinAction, isCheckinAction } from './checkin.js';
 import { handleResultPage } from './result-page-actions.js';
 
 const parse = (value) => typeof value === 'string' ? JSON.parse(value || '{}') : value ?? {};
@@ -45,7 +45,7 @@ export async function handleCardAction(context, event) {
       state.cardCallbackAudit??=[];
       state.cardCallbackAudit.push({at:new Date().toISOString(),profile:event.agent_profile??null,eventId:event.event_id??null,
         messageId:event.message_id??null,operatorId:typeof event.operator_id==='string'?event.operator_id:null,
-        action:(()=>{try{const a=parse(event.action_value).action;return ['cancel','approve','approve_environment','renew_environment','clarify','refresh','result_page','enrollment_refresh','enrollment_cancel','daily_checkin','my_checkin_points'].includes(a)?a:/^(?:clarify|prd)_/.test(event.action_name??'')?'clarify':'unknown';}catch{return 'invalid';}})(),cardContentPresent:!!event.card_content,
+        action:(()=>{try{const a=parse(event.action_value).action;return ['cancel','approve','approve_environment','renew_environment','clarify','refresh','result_page','enrollment_refresh','enrollment_cancel'].includes(a)||isCheckinAction(a)?a:/^(?:clarify|prd)_/.test(event.action_name??'')?'clarify':'unknown';}catch{return 'invalid';}})(),cardContentPresent:!!event.card_content,
         outcome:result?.ok?'accepted':result?.ignored?'ignored':result?'rejected':'delivery_failed',
         reason:result?.reason??result?.message??'处理未完成，可按同一事件重试'});
       state.cardCallbackAudit=state.cardCallbackAudit.slice(-200);
@@ -60,7 +60,7 @@ async function applyCardAction(context, event) {
   let parsedValue;
   try { parsedValue = parse(event.action_value); } catch { return { ignored: true, reason:'invalid_action_payload' }; }
   if (projects.retiredChatIds?.includes(event.chat_id) && !['result_page', 'refresh'].includes(parsedValue.action)) return { ignored: true, reason: 'retired_group' };
-  if (['daily_checkin', 'my_checkin_points'].includes(parsedValue.action)) return handleCheckinAction(context, event, parsedValue.action);
+  if (isCheckinAction(parsedValue.action)) return handleCheckinAction(context, event, parsedValue.action);
   if (parsedValue.action === 'result_page') return handleResultPage(context, event);
   const refreshHash=parsedValue.action==='refresh'?createHash('sha256').update(JSON.stringify([profile,event.event_id,event.operator_id,event.chat_id,event.message_id,parsedValue.action,parsedValue.version??null])).digest('hex'):null;
   const refreshKey=`card-action:${profile}:${event.event_id}`;

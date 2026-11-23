@@ -21,6 +21,10 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
   }};
   const preview = await publishCheckinCard(context, {profile});
   assert.equal(sent[0].receiveIdType,'open_id');
+  const buttons = sent[0].content.elements.find((element) => element.tag === 'action').actions;
+  assert.deepEqual(buttons.map((button) => [button.text.content, button.type]), [
+    ['今日签到', 'primary'], ['查我的积分', 'default'], ['积分商城', 'danger'],
+  ]);
   const official = await publishCheckinCard(context, {profile,group:'oc_group'});
   assert.equal((await publishCheckinCard(context, {profile,group:'oc_group'})).messageId,official.messageId);
   const click = (target, user, id, time, action='daily_checkin') => handleCheckinAction(context, {
@@ -29,6 +33,9 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
   const before='2026-11-23T15:59:59Z', after='2026-11-23T16:00:00Z';
   assert.equal((await click(preview,'ou_other','a',before)).ignored,true);
   await click(preview,'ou_owner','b',before);
+  await click(preview, 'ou_owner', 'mall', before, 'points_store');
+  assert.equal(sent.at(-1).content.text, '积分商城，敬请期待。');
+  assert.equal(Object.keys((await store.read()).previewCheckins).length, 1);
   assert.equal(adminUsage(await store.read()).summary.points,0);
   assert.equal((await click(official,'ou_owner','outside',before)).ok,true);
   await Promise.all([click(official,'ou_member','c',before),click(official,'ou_member','d',before)]);
