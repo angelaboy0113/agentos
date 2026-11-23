@@ -20,7 +20,7 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
   const dir = await mkdtemp(path.join(tmpdir(), 'os-checkin-'));
   const store = new JsonStore(path.join(dir, 'agentos.json')), sent = [];
   const profile = 'demo';
-  const projects = {humanIdentities:{groupOwner:{demo:'ou_owner'}},chatProjectMap:{oc_group:'test'}};
+  const projects = {humanIdentities:{groupOwner:{demo:'ou_owner'},member:{demo:'ou_member',other:'ou_linked'}},chatProjectMap:{oc_group:'test'}};
   const context = {store,projects,agents:{agents:{demo:{profile,systemAssistant:true}}},feishu:{
     async sendCheckinMessage(options) {
       sent.push(options);
@@ -62,13 +62,28 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
   assert.equal((await click(official,'ou_member','c',before)).duplicate,true);
   await click(official,'ou_member','e',after);
   await click(official,'ou_member','f',after,'my_checkin_points');
-  await until(() => sent.some(m => m.receiveId === 'ou_member' && /今天已签到。\n本周 2 积分 · 签到 2 · 提问 0/.test(m.content.text)));
+  await until(() => sent.some(m => m.receiveId === 'ou_member' && /今天已签到。\n累计 2 积分 · 签到 2 · 提问 0/.test(m.content.text)));
   const state=await store.read();
   assert.equal(Object.values(state.checkins).filter(x=>x.senderId==='ou_member').length,2);
   const usage = adminUsage(state,{chatId:'oc_group'});
   assert.equal(usage.summary.points,3);
   assert.equal(usage.summary.messages,0);
   assert.ok(usage.records.every(x=>x.kind==='checkin'));
+  await store.transact(s => {
+    s.checkins.historic = {id:'historic',profile:'other',senderId:'ou_linked',chatId:'oc_another',day:'2026-10-30',createdAt:'2026-10-30T00:00:00Z',points:1};
+    s.checkins.unrelated = {id:'unrelated',profile:'other',senderId:'ou_stranger',chatId:'oc_another',day:'2026-10-30',createdAt:'2026-10-30T00:00:00Z',points:1};
+    const turn = {chatId:'oc_another',chatType:'group',createdAt:'2026-10-30T00:00:00Z',content:'要查一份预算',senderName:'同名伙伴',archivedAt:'2026-11-20T00:00:00Z'};
+    s.conversations = [
+      {...turn,id:'first',messageId:'om_first',profile:'other',senderId:'ou_linked'},
+      {...turn,id:'second',messageId:'om_second',profile:'demo',senderId:'ou_member',chatId:'oc_group'},
+      {...turn,id:'third',messageId:'om_third',profile:'demo',senderId:'ou_member',visibility:'private'},
+      {...turn,id:'unrelated',messageId:'om_unrelated',profile:'other',senderId:'ou_stranger'},
+    ];
+  });
+  await click(official,'ou_member','lifetime',after,'my_checkin_points');
+  await until(() => sent.some(m => m.receiveId === 'ou_member' && /累计 5 积分 · 签到 3 · 提问 2/.test(m.content.text)));
+  assert.equal(adminUsage(await store.read(),{chatId:'oc_group',start:'2026-11-21',end:'2026-11-27'}).summary.points,3);
+
 });
 
 test('accepts ahead of settlement and private delivery, recovers across restart, and keeps the click day', async (t) => {

@@ -20,12 +20,12 @@ function actorKey(projects, {profile, senderId}) {
   return JSON.stringify(person ? ['human', person] : ['actor', profile, senderId]);
 }
 
-function card(preview) {
+export function checkinCard(preview) {
   return {
     config: { wide_screen_mode: true },
     header: { template: 'blue', title: { tag: 'plain_text', content: preview ? 'AgentOS 每日签到 · 私聊体验' : 'AgentOS 每日签到' } },
     elements: [
-      { tag: 'markdown', content: '每天签到一次，领取 **1 积分**。北京时间 00:00 开始新的一天。\n\n点击「查我的积分」，查看本周的签到和提问积分。结果由助手私聊发给你。' },
+      { tag: 'markdown', content: '每天签到一次，领取 **1 积分**。北京时间 00:00 开始新的一天。\n\n点击「查我的积分」，查看累计积分。结果由助手私聊发给你。' },
       { tag: 'action', actions: [
         { tag: 'button', text: { tag: 'plain_text', content: '今日签到' }, type: 'primary', value: { action: 'daily_checkin' } },
         { tag: 'button', text: { tag: 'plain_text', content: '查我的积分' }, type: 'default', value: { action: 'my_checkin_points' } },
@@ -75,19 +75,11 @@ export async function publishCheckinCard(context, {profile, group, previewReques
   });
   if (binding.profile !== profile) throw Object.assign(new Error('该群已有另一助手发布的签到卡'), { statusCode: 409 });
   if (binding.messageId) return { messageId: binding.messageId, chatId: binding.chatId, preview, reused: true };
-  const receipt = await send(context, profile, target, 'interactive', card(preview), key.slice(0, 32), preview ? 'open_id' : 'chat_id');
+  const receipt = await send(context, profile, target, 'interactive', checkinCard(preview), key.slice(0, 32), preview ? 'open_id' : 'chat_id');
   if (!preview && receipt.chatId !== group) throw new Error('群签到卡回执与登记目标不一致');
   await context.store.transact((state) => { Object.assign(state.checkinCards[key], receipt); });
   return { ...receipt, preview };
 }
-
-function weekOf(day) {
-  const start = new Date(day + 'T00:00:00Z');
-  start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 1) % 7);
-  const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
-}
-
 
 const pendingMessage = {
   daily_checkin: '已收到签到，正在核对积分。',
@@ -143,15 +135,15 @@ function settleReceipt(context, state, receipt) {
     state[ledger][id] ??= { id, chatId, senderId, profile, day, createdAt, points: 1 };
     text = prior ? '今天已经签到。明天可以再领 1 积分。' : '签到成功，获得 1 积分。';
   }
-  const week = weekOf(day);
-  const signins = Object.values(state[ledger]).filter((row) => row.chatId === chatId && row.day >= week.start
-    && row.day <= week.end && actorKey(context.projects, row) === actor).length;
+  const signins = Object.values(state[ledger])
+    .filter((row) => actorKey(context.projects, row) === actor).length;
   const questions = preview ? 0 : adminUsage({
     conversations: (state.conversations ?? []).filter((row) => actorKey(context.projects, row) === actor),
     questions: state.questions,
-  }, { ...week, chatId, excludeAdmin: 'false' }, { projects: context.projects }).summary.points;
-  text += '\n本周 ' + (signins + questions) + ' 积分 · 签到 ' + signins + ' · 提问 ' + questions;
-  return preview ? '【私聊体验】' + text + '\n体验积分仅在这张卡里展示。' : text;
+  }, { excludeAdmin: 'false' }, { projects: context.projects }).summary.points;
+  text += '\n累计 ' + (signins + questions) + ' 积分 · 签到 ' + signins + ' · 提问 ' + questions;
+  if (preview) return '【私聊体验】' + text + '\n体验积分单独累计。';
+  return state.retention && state.retention.mode !== 'archive' ? text + '\n提问积分按当前保留的历史记录统计。' : text;
 }
 
 export class CheckinQueue {

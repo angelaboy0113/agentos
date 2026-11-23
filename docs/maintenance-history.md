@@ -2466,3 +2466,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 ## 1.154.15
 
 - Allow an admin to reissue a private check-in preview with a request ID. Retries reuse the new message and the original preview stays usable.
+
+## 1.154.16
+
+- Report cumulative account points on check-in receipts and balance queries, including archived questions and groups available to the same verified identity. Weekly rankings keep their independent date filters.
