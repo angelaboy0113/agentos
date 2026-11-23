@@ -57,11 +57,15 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  const panel=el.matches('.el-collapse-item__header,.ant-collapse-header');
  if(panel)label=(el.classList.contains('is-active')||el.getAttribute('aria-expanded')==='true'?'收起':'展开')+(el.closest('form,.el-form,.ant-form')?'筛选：':'面板：')+label;
  const dismiss=!!el.closest('[role="dialog"],.el-dialog,.el-drawer,.ant-modal,.ant-drawer')&&(el.matches('.el-dialog__headerbtn,.el-drawer__close-btn,.ant-modal-close,.ant-drawer-close,[aria-label="Close" i],[aria-label="关闭"]')||/^(关闭|取消|返回|close|cancel|back)$/i.test(label));
+ const floatingDismiss=el.matches('button[type="button"],[role="button"]')
+  && /^(?:关闭\s*(?:后台\s*)?(?:AI\s*)?助手(?:悬浮入口|悬浮窗|浮层)|close (?:the )?floating (?:AI )?assistant)$/i.test(el.getAttribute('aria-label')?.trim()??'')
+  && [el.parentElement,el.parentElement?.parentElement].some(parent=>parent&&getComputedStyle(parent).position==='fixed');
  const localRangeApply=el.matches('button,[role="button"]')&&/^(?:应用(?:日期|时间)范围|apply (?:date|time) range)$/i.test(label)&&!!el.closest('[role="dialog"],dialog,.el-dialog,.ant-modal')?.querySelector('input[type="date"],input[type="datetime-local"],input[aria-label*="时间"],input[aria-label*="日期"],input[aria-label*="date" i],input[aria-label*="time" i]');
  const picker=el.matches('.el-date-editor,.ant-picker,.ant-calendar-picker')||el.matches('input[readonly]')&&!!el.closest('.el-date-editor,.ant-picker,.ant-calendar-picker,.el-select,[role="combobox"]');
  if(el.matches('.el-date-editor,.ant-picker,.ant-calendar-picker')&&el.querySelector('input:not([disabled])'))return {visible:true,label,type:null};
  if(el.matches('.el-date-editor,.ant-picker,.ant-calendar-picker'))label=fieldLabel||el.getAttribute('aria-label')||'日期范围选择';
  if(dismiss)label='关闭当前弹窗';
+ if(floatingDismiss)label='收起页面悬浮助手';
  if(calendar&&!label){const c=String(el.className);label=/d-arrow-left|prev-year|super-prev/.test(c)?'上一年':/d-arrow-right|next-year|super-next/.test(c)?'下一年':/arrow-left|prev-month|prev-btn/.test(c)?'上个月':/arrow-right|next-month|next-btn/.test(c)?'下个月':'';}
  if(calendar&&el.matches('td,[role="gridcell"]')){const header=el.closest('.el-date-range-picker__content')?.querySelector('.el-date-range-picker__header')??calendar.querySelector('.el-date-picker__header,.ant-picker-header-view,.ant-calendar-header');label='日期选择：'+(el.getAttribute('title')||el.closest('td')?.getAttribute('title')||(header?.innerText??'').trim())+' '+label;}
  if(pagination&&!label)label=tag==='input'?'前往页码':el.matches('.btn-next,.ant-pagination-next')?'下一页':el.matches('.btn-prev,.ant-pagination-prev')?'上一页':'';
@@ -88,7 +92,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  else if(picker||localRangeApply){type='read-action';kind='picker';}
  else if(expansion){type='read-action';kind='expansion';}
  else if(panel){type='read-action';kind='panel';}
- else if(dismiss){type='read-action';kind='dismiss';}
+ else if(dismiss||floatingDismiss){type='read-action';kind='dismiss';}
  else if(option||calendar&&el.matches('button,td,[role="gridcell"]')||pagination){type='read-action';kind=option?'option':calendar?'calendar':'pagination';}
  else if(navigation){type='read-action';kind='navigation';}
  else if(querySubmit&&el.matches('button,[role=button]')){type='read-action';kind='query';}

@@ -2442,3 +2442,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 
 - Keep PRD workspaces out of the ordinary investigation reminder queue, including pending reminders created before a workbench takes over the topic.
 - Preserve known static menu and filter labels in captures, sample page counts, and keep the sample-data caption outside the screenshot.
+
+## 1.154.10
+
+- Expose the existing browser-local dismissal for a visible floating assistant when it overlaps the content needed for a PRD capture.

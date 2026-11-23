@@ -97,3 +97,23 @@ test('isolated browser tracks an in-flight query until response without replay o
  const returned=b.pages.get(job.id).page.waitForResponse(r=>r.url().includes('/api/query'));response.end('Verified rows');await returned;snap=await b.run(job,e,'browser_snapshot');assert.equal(snap.pendingQueries,0);assert.match(snap.pageText,/Verified rows/);assert.equal(hits,1);
  snap=await b.run(job,e,'browser_click',{ref:snap.controls.find(c=>c.kind==='query').ref});assert.equal(hits,2);assert.equal(snap.pendingQueries,1);snap=await b.run(job,e,'browser_navigate',{url:e.baseUrl});assert.equal(snap.pendingQueries,0);assert.equal(snap.navigation.documentChanged,true);assert.equal(snap.navigation.supersededPendingReads,1);assert.equal(snap.navigation.serverCancellationConfirmed,false);assert.equal(hits,2);
 });
+
+test('visible floating assistant dismissal works without exposing ordinary close-business controls',async t=>{
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'floating-dismiss-'));
+ const body='<h1>列表</h1><button type="button" aria-label="关闭后台 AI 助手悬浮入口">同名测试按钮</button>'
+  +'<div style="position:fixed;bottom:0;right:0"><button type="button" aria-label="关闭后台 AI 助手悬浮入口" onclick="this.parentElement.remove()">×</button><button type="button">关闭订单</button></div>';
+ const server=http.createServer((_,res)=>{res.setHeader('content-type','text/html;charset=utf-8');res.end(body);});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP floating.test 127.0.0.1']})};
+ const browser=new WebsiteBrowser(dir,driver);
+ t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
+ const job={id:'floating-ui'},environment={projectId:'orders',tier:'prd',baseUrl:`http://floating.test:${server.address().port}/`};
+ const before=await browser.run(job,environment,'connection');
+ const dismissals=before.controls.filter(control=>control.kind==='dismiss');
+ assert.equal(dismissals.length,1);
+ assert.equal(dismissals[0].label,'收起页面悬浮助手');
+ assert(!before.controls.some(control=>control.label==='关闭订单'||control.label==='同名测试按钮'));
+ const after=await browser.run(job,environment,'browser_click',{ref:dismissals[0].ref});
+ assert.match(after.pageText,/列表/);
+ assert(!after.controls.some(control=>control.kind==='dismiss'));
+});
