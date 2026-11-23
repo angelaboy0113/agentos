@@ -69,11 +69,13 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
   assert.equal(usage.summary.points,3);
   assert.equal(usage.summary.messages,0);
   assert.ok(usage.records.every(x=>x.kind==='checkin'));
-  assert.ok(sent.some(m => m.receiveId === 'ou_member' && m.content.text?.startsWith('11月23日签到成功，获得 1 积分。')));
-  assert.ok(sent.some(m => m.receiveId === 'ou_member' && m.content.text?.startsWith('11月23日已签到。')));
-  assert.ok(sent.some(m => m.receiveId === 'ou_member' && m.content.text?.startsWith('11月24日签到成功，获得 1 积分。')));
-  assert.ok(sent.some(m => m.receiveId === 'ou_owner' && m.content.text?.startsWith('【私聊体验】11月23日签到成功')));
-
+  const memberReceipts = sent.filter(m => m.receiveId === 'ou_member').map(m => m.content.text);
+  assert.deepEqual(memberReceipts.slice(0,3), [
+    '11月23日获得 1 积分\n累计积分 1',
+    '11月23日获得 1 积分\n累计积分 1',
+    '11月24日获得 1 积分\n累计积分 2',
+  ]);
+  assert.ok(sent.some(m => m.receiveId === 'ou_owner' && m.content.text === '【私聊体验】11月23日获得 1 积分\n累计积分 1'));
   await store.transact(s => {
     s.checkins.historic = {id:'historic',profile:'other',senderId:'ou_linked',chatId:'oc_another',day:'2026-10-30',createdAt:'2026-10-30T00:00:00Z',points:1};
     s.checkins.unrelated = {id:'unrelated',profile:'other',senderId:'ou_stranger',chatId:'oc_another',day:'2026-10-30',createdAt:'2026-10-30T00:00:00Z',points:1};

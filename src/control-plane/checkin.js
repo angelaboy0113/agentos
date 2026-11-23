@@ -130,12 +130,8 @@ function settleReceipt(context, state, receipt) {
   const id = hash(ledger, actor, day);
   state[ledger] ??= {};
   const prior = state[ledger][id];
-  let text = prior ? '今天已签到。' : '今天还未签到。';
   if (action === 'daily_checkin') {
     state[ledger][id] ??= { id, chatId, senderId, profile, day, createdAt, points: 1 };
-    const [, month, date] = day.split('-').map(Number);
-    const label = `${month}月${date}日`;
-    text = prior ? `${label}已签到。明天可再领 1 积分。` : `${label}签到成功，获得 1 积分。`;
   }
   const signins = Object.values(state[ledger])
     .filter((row) => actorKey(context.projects, row) === actor).length;
@@ -143,7 +139,13 @@ function settleReceipt(context, state, receipt) {
     conversations: (state.conversations ?? []).filter((row) => actorKey(context.projects, row) === actor),
     questions: state.questions,
   }, { excludeAdmin: 'false' }, { projects: context.projects }).summary.points;
-  text += '\n累计 ' + (signins + questions) + ' 积分 · 签到 ' + signins + ' · 提问 ' + questions;
+  const total = signins + questions;
+  if (action === 'daily_checkin') {
+    const [, month, date] = day.split('-').map(Number);
+    return `${preview ? '【私聊体验】' : ''}${month}月${date}日获得 ${state[ledger][id].points} 积分\n累计积分 ${total}`;
+  }
+  const status = prior ? '今天已签到。' : '今天还未签到。';
+  const text = `${status}\n累计 ${total} 积分 · 签到 ${signins} · 提问 ${questions}`;
   if (preview) return '【私聊体验】' + text + '\n体验积分单独累计。';
   return state.retention && state.retention.mode !== 'archive' ? text + '\n提问积分按当前保留的历史记录统计。' : text;
 }

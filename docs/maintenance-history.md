@@ -2474,3 +2474,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 ## 1.154.17
 
 - Include the Beijing calendar date in successful and repeated check-in receipts.
+
+## 1.154.18
+
+- Show only that day's earned point and the latest account total on check-in receipts. A repeated check-in shows the already-earned point without awarding it twice.
