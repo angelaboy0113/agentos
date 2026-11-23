@@ -1,5 +1,5 @@
 import {sshMysqlConnection} from './ssh-mysql.js';
-import { accountMode } from '../shared/database-account-policy.js';
+import { accountGrantsStatement, accountMode } from '../shared/database-account-policy.js';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { databaseEndpoints } from './config-endpoints.js';
 import { loadEnvironments, verifyApprovedPlan, fingerprint } from '../shared/environment-access.js';
@@ -39,7 +39,7 @@ export async function mysqlRead(e, q, parameters, cred, adapters = {}) {
       supportBigNumbers: true, bigNumberStrings: true,
       ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
     if (timedOut) throw new Error('timeout');
-    const [grants] = await connection.query('SHOW GRANTS FOR CURRENT_USER'); checkAccountGrants(e, grants);
+    const [grants] = await connection.query(accountGrantsStatement(e)); checkAccountGrants(e, grants);
     await connection.query(`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`);
     await connection.query('START TRANSACTION READ ONLY');
     const [rows] = await connection.execute({ sql: `SELECT * FROM (${q.sql}) AS agentos_read_scope LIMIT ${q.maxRows + 1}`, timeout: q.timeoutMs }, parameters);

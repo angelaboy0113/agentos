@@ -9,3 +9,7 @@ export function validateAccountPolicy(e) {
  }
 }
 export function accountMode(e) {validateAccountPolicy(e);return e.accountPolicy==='business-readonly'?'business-readonly':'strict-readonly';}
+export function accountGrantsStatement(e) {
+ // Some MySQL gateways accept only the short form for the connected business account.
+ return accountMode(e)==='business-readonly'?'SHOW GRANTS':'SHOW GRANTS FOR CURRENT_USER';
+}

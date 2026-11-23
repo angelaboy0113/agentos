@@ -16,6 +16,7 @@ import { ReportDatasets, ReportInputError } from './report-datasets.js';
 import { createHash } from 'node:crypto';
 import { safeExecutionError } from '../shared/failure-diagnostic.js';
 import { createNacosBrowser } from './environment-browser.js';
+import { accountGrantsStatement } from '../shared/database-account-policy.js';
 import { boundedFetch, checkAccountGrants } from './environment-connector.js';
 import {projectConfigValues} from '../shared/config-projection.js';
 import { databaseEndpoints, schedulerConfiguration,configurationValues } from './config-endpoints.js';
@@ -262,7 +263,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         supportBigNumbers: true, bigNumberStrings: true, dateStrings: true, jsonStrings:true,
         ...(e.tls ? { ssl: { rejectUnauthorized: true } } : {}) });
       if (!active) { conn.destroy(); conn = null; throw new Error('连接已超时'); }
-      try { const [g] = await conn.query({sql:'SHOW GRANTS FOR CURRENT_USER',timeout:q.timeoutMs}); checkAccountGrants(e, g); await conn.query({sql:`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`,timeout:q.timeoutMs}); await conn.query({sql:'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',timeout:q.timeoutMs}); await conn.query({sql:'START TRANSACTION READ ONLY',timeout:q.timeoutMs}); }
+      try { const [g] = await conn.query({sql:accountGrantsStatement(e),timeout:q.timeoutMs}); checkAccountGrants(e, g); await conn.query({sql:`SET SESSION MAX_EXECUTION_TIME=${q.timeoutMs}`,timeout:q.timeoutMs}); await conn.query({sql:'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',timeout:q.timeoutMs}); await conn.query({sql:'START TRANSACTION READ ONLY',timeout:q.timeoutMs}); }
       catch (error) { conn.destroy(); conn = null; throw error; }
     }
     return conn;

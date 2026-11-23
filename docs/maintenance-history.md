@@ -2454,3 +2454,7 @@ PRD 话题只接收艾特对应助手的消息和经过原卡校验的表单提�
 ## 1.154.12
 
 - Keep valid report matches when a grouped right-hand source contains rows with empty join keys. Count those rows in the relationship audit and continue to reject invalid or duplicate identities for matchable rows.
+
+## 1.154.13
+
+- Verify grants for approved business-account MySQL connections using the current-session short form supported by database gateways. Keep grant validation and read-only transaction requirements for connection checks and investigations.

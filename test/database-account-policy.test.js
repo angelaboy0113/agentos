@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {accountMode,CONNECTION_SQL} from '../src/shared/database-account-policy.js';
+import {accountGrantsStatement,accountMode,CONNECTION_SQL} from '../src/shared/database-account-policy.js';
 import {checkAccountGrants,mysqlRead} from '../src/runner/environment-connector.js';
 const business=()=>({kind:'mysql',accountPolicy:'business-readonly',ownerOpenIdsByProfile:{owner:['ou_admin']},businessAccountAuthorization:{approverId:'ou_admin',confirmedAt:new Date().toISOString()},queries:{check:{sql:CONNECTION_SQL}}});
 const grants=[{grant:'GRANT SELECT, INSERT, UPDATE, DELETE ON demo.* TO user'}];
@@ -11,6 +11,7 @@ test('business account requires explicit admin authorization and restricts SQL t
 test('business mode still starts readonly transaction before bound query and rolls back',async()=>{
  const calls=[];const connection={query:async sql=>{sql=typeof sql==='string'?sql:sql.sql;calls.push(sql);return [grants];},execute:async(q,p)=>{calls.push(q.sql);return [[{database_name:'demo'}]];},rollback:async()=>calls.push('rollback'),destroy:()=>calls.push('destroy')};
  await mysqlRead(business(),{sql:CONNECTION_SQL,parameters:[],outputColumns:['database_name'],timeoutMs:1000,maxRows:1},[],{username:'fake',password:'fake'},{mysql:{createConnection:async options=>{assert.equal(options.multipleStatements,false);assert.equal(options.supportBigNumbers,true);assert.equal(options.bigNumberStrings,true);return connection;}}});
+ assert.equal(calls[0],'SHOW GRANTS');assert.equal(accountGrantsStatement({}),'SHOW GRANTS FOR CURRENT_USER');
  assert.ok(calls.indexOf('START TRANSACTION READ ONLY')<calls.findIndex(x=>x.startsWith('SELECT *')));assert.deepEqual(calls.slice(-2),['rollback','destroy']);
 });
 test('readonly transaction failure stops business account before executing data query',async()=>{
