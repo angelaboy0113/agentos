@@ -1,4 +1,35 @@
 import test from 'node:test';import assert from 'node:assert/strict';import http from 'node:http';import os from 'node:os';import path from 'node:path';import{mkdtemp,rm}from'node:fs/promises';import{chromium}from'playwright';import{WebsiteBrowser}from'../src/control-plane/website-browser.js';
+test('private repository fallback opens reviewed login and resumes only when repository content returns',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'private-entry-qr-'));
+ const marker='该组织暂无公开仓库';
+ const qr='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160"/></svg>');
+ const server=http.createServer((req,res)=>{
+  res.setHeader('content-type','text/html;charset=utf-8');
+  const signedIn=req.headers.cookie?.includes('fixture-login=ok');
+  const privateRoot=req.url==='/private';
+  res.end(signedIn?'<h1>Private repository contents</h1>':`<button>微信登录</button><p>${privateRoot?marker:'公开仓库列表'}</p>
+    <template><div role="dialog">扫码登录<img width="160" height="160" src="${qr}"></div></template>
+    <script>document.querySelector('button').onclick=()=>document.body.append(document.querySelector('template').content.cloneNode(true))</script>`);
+ });
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const driver={launchPersistentContext:(p,o)=>chromium.launchPersistentContext(p,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP private.fixture.test 127.0.0.1']})};
+ const browser=new WebsiteBrowser(dir,driver),job={id:'private'};
+ const root=`http://private.fixture.test:${server.address().port}`;
+ const entry={projectId:'one',tier:'uat',baseUrl:root+'/private',loginNavigation:{interactive:true,remoteQr:true,steps:['微信登录'],privateEntryMarkers:[marker]}};
+ t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
+ assert.match((await browser.run({id:'public'},{...entry,baseUrl:root+'/public'},'connection')).pageText,/公开仓库列表/);
+ assert.equal((await browser.run(job,entry,'connection')).privateLoginRequired,true);
+ const page=browser.pages.get(job.id).page;
+ assert.equal((await browser.beginInteractiveLogin(job,entry)).verificationRequired,true);
+ await page.locator('img').waitFor();
+ assert.ok((await browser.captureLoginQr(job,entry))?.buffer.length>0);
+ assert.equal(await browser.loginReady(job,entry),false);
+ await page.evaluate(()=>{document.cookie='fixture-login=ok; path=/';});
+ await page.reload();
+ assert.equal(await browser.loginReady(job,entry),true);
+ assert.match((await browser.run(job,entry,'connection')).pageText,/Private repository contents/);
+ assert.equal(browser.pages.get(job.id).page,page);
+});
 test('remote challenge capture uses the existing authorized task tab and rejects ambiguous or expired images',async t=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'capture-login-qr-'));
  const png='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" fill="black"/></svg>');

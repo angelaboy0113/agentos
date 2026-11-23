@@ -233,7 +233,7 @@ export async function investigateEnvironment(plan, emit = async () => {}, adapte
       if(choice.tool==='connection'&&!result.loginRequired)websiteLogin=null;
       if(result.loginRequired){
         websiteLogin=result;
-        if(e.kind!=='website'||!tools.spec.some(x=>x.tool==='browser_assets'))return awaitWebsiteLogin();
+        if(result.privateLoginRequired||e.kind!=='website'||!tools.spec.some(x=>x.tool==='browser_assets'))return awaitWebsiteLogin();
         // Only list public script refs at the approved entry; no authentication or business query replay.
         await authorizePlan();let catalog;try{const began=Date.now();timing.toolCalls++;try{catalog=await tools.run('browser_assets',{});}finally{timing.toolMs+=Date.now()-began;}}catch{return awaitWebsiteLogin();}
         if(!catalog?.assets?.length)return awaitWebsiteLogin();

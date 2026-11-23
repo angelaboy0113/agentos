@@ -799,13 +799,18 @@ test('Feishu delivery does not accept a prototype made without the current scree
 });
 
 test('PRD website actions and login recovery use the same isolated browser', async () => {
-  const browser = name=>({run:()=>name,loginStatusFor:()=>name,captureLoginQr:()=>name});
+  const browser = name=>({run:()=>name,loginStatusFor:()=>name,captureLoginQr:()=>name,beginInteractiveLogin:()=>name});
   const route=routePrdWebsiteBrowser(browser('shared'),browser('isolated'));
   assert.equal(route.run({}), 'shared');
   const prd={prd:{auto:true}};
   assert.equal(route.run(prd), 'isolated');
   assert.equal(route.loginStatusFor(prd), 'isolated');
   assert.equal(route.captureLoginQr(prd), 'isolated');
+  const qrEntry={loginNavigation:{remoteQr:true}};
+  assert.equal(route.run({},qrEntry), 'isolated');
+  assert.equal(route.loginStatusFor({},qrEntry), 'isolated');
+  assert.equal(route.beginInteractiveLogin({},qrEntry), 'isolated');
+  assert.equal(route.captureLoginQr({},qrEntry), 'isolated');
 });
 
 

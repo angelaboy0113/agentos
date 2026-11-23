@@ -1,6 +1,7 @@
 // Fixed DOM probe: returns categories only, never account/password/token values or server text.
-export function browserLoginState(targetDocument){
- const document=targetDocument??globalThis.document,location=document.location;
+export function browserLoginState(target, policy){
+ const document=target?.querySelectorAll?target:globalThis.document,location=document.location;
+ const privateEntry=policy??(target?.baseUrl?target:null);
  const visible=e=>!!e?.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'&&getComputedStyle(e).display!=='none';
  const passwords=[...document.querySelectorAll('input[type="password"]')].filter(visible);
  const authPath=/\/(?:login|signin|sign-in|authenticate|auth|captcha|verify)(?:[/?#]|$)/i.test(location.pathname+location.hash);
@@ -13,10 +14,18 @@ export function browserLoginState(targetDocument){
  // alone on a public homepage is not evidence of an expired session.
  const denied=/页面不存在.{0,20}(?:访问权限|无权限)|请先登录|登录后.{0,12}(?:查看|访问)|sign in to (?:view|access)/i.test(text);
  const loginControl=[...document.querySelectorAll('a,button,[role=button],span')].filter(visible).some(e=>/^(?:微信登录|扫码登录|登\s*录|sign in|log in)$/i.test((e.innerText||e.getAttribute('aria-label')||'').trim()));
+ const privateLoginRequired=Boolean(privateEntry?.markers?.length&&(()=>{
+  const base=new URL(privateEntry.baseUrl),prefix=base.pathname.replace(/\/$/,'');
+  if(location.origin!==base.origin||!(location.pathname===prefix||location.pathname.startsWith(prefix+'/')))return false;
+  const visibleLines=text.split(/\n/).map(line=>line.trim());
+  return privateEntry.markers.every(marker=>visibleLines.includes(marker.trim()))
+    &&[...document.querySelectorAll('a,button,[role=button],span,div')].some(e=>visible(e)&&
+      (e.innerText||e.getAttribute('aria-label')||'').trim()===privateEntry.loginLabel);
+ })());
  const interactivePrompt=loginControl&&/欢迎登录|扫码登录|请使用.{0,20}微信.{0,20}扫码验证/.test(text);
  const qrInstructions=/扫码登录|请使用.{0,30}扫码|scan.{0,20}(?:QR|code)/i.test(text);
  const verification=challenge||!passwords.length&&(interactivePrompt&&/扫码/.test(text)||authPath&&qrInstructions);
- const loginRequired=!!(passwords.length||authPath||passwordChange||verification||denied&&loginControl||interactivePrompt);
+ const loginRequired=!!(passwords.length||authPath||passwordChange||verification||denied&&loginControl||interactivePrompt||privateLoginRequired);
  const accessDenied=!loginRequired&&(
   /(?:^|\/)error\/(?:no-access|access-denied|forbidden|unauthorized)(?:[/?#]|$)/i.test(location.pathname+location.hash)||
   /^(?:(?:当前)?您暂无权限[，,\s]*请联系管理员(?:配置)?[。！!\s]*|(?:403[\s:：-]*)?(?:access denied|forbidden|permission denied)[.!\s]*)$/i.test(text)
@@ -24,7 +33,7 @@ export function browserLoginState(targetDocument){
  const loginState=accessDenied?'access_denied':passwordChange?'password_change_required':verification?'verification_required':loginRequired?(error?'rejected':'login_required'):loading?'loading':'ready';
  const verificationImageReady=verification&&[...document.querySelectorAll('img')].filter(visible).some(e=>e.complete&&e.naturalWidth>0&&/qrcode|qrconnect|^data:image\//i.test(e.getAttribute('src')??''));
  const verificationFramePresent=verification&&[...document.querySelectorAll('iframe')].filter(visible).some(e=>/qrconnect|qrcode/i.test(e.getAttribute('src')??''));
- return {loginState,loginRequired,credentialFormVisible:passwords.length>0,verificationRequired:verification,verificationImageReady,verificationFramePresent,verificationExpired:verification&&/二维码.{0,8}(?:失效|过期)|(?:^|\n)刷新二维码(?:\n|$)|QR code.{0,15}expired/i.test(text),passwordChangeRequired:passwordChange,credentialRejected:loginState==='rejected',pageReady:loginState==='ready'};
+ return {loginState,loginRequired,...(privateLoginRequired?{privateLoginRequired:true}:{}),credentialFormVisible:passwords.length>0,verificationRequired:verification,verificationImageReady,verificationFramePresent,verificationExpired:verification&&/二维码.{0,8}(?:失效|过期)|(?:^|\n)刷新二维码(?:\n|$)|QR code.{0,15}expired/i.test(text),passwordChangeRequired:passwordChange,credentialRejected:loginState==='rejected',pageReady:loginState==='ready'};
 }
 // Examine allowlisted response fields transiently; raw payloads and text never leave this function.
 export function authResponseState(status,payload){

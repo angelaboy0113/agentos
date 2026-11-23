@@ -20,18 +20,23 @@ import path from 'node:path';
 import { websiteSessionKey, websiteNavigationTarget, websiteReadRecoveryTarget, websiteRequestAllowed, websiteRequestBoundary, websiteStaticResourceAllowed, websiteImageResourceAllowed, websitePdfAttachmentTarget, reviewedPathMatches, cleanWebsiteText,websiteLoginPreferenceAllowed,websiteLoginReadAllowed } from '../shared/website-policy.js';
 
 export function routePrdWebsiteBrowser(shared, isolated) {
- const browser=job=>job.prd?.auto?isolated:shared;
+ const browser=(job,e)=>job.prd?.auto||e?.loginNavigation?.remoteQr===true?isolated:shared;
  return {
-  run:(job,...args)=>browser(job).run(job,...args),
-  loginReady:(job,...args)=>browser(job).loginReady(job,...args),
-  loginStatusFor:(job,...args)=>browser(job).loginStatusFor(job,...args),
-  submitCredentials:(job,...args)=>browser(job).submitCredentials(job,...args),
-  captureLoginQr:(job,...args)=>browser(job).captureLoginQr?.(job,...args),
-  refreshLoginQr:(job,...args)=>browser(job).refreshLoginQr?.(job,...args),
+  run:(job,e,...args)=>browser(job,e).run(job,e,...args),
+  loginReady:(job,e,...args)=>browser(job,e).loginReady(job,e,...args),
+  loginStatusFor:(job,e,...args)=>browser(job,e).loginStatusFor(job,e,...args),
+  submitCredentials:(job,e,...args)=>browser(job,e).submitCredentials(job,e,...args),
+  beginInteractiveLogin:(job,e)=>browser(job,e).beginInteractiveLogin?.(job,e),
+  captureLoginQr:(job,e,...args)=>browser(job,e).captureLoginQr?.(job,e,...args),
+  refreshLoginQr:(job,e,...args)=>browser(job,e).refreshLoginQr?.(job,e,...args),
   health:()=>shared.health(),
   release:id=>Promise.allSettled([shared.release(id),isolated.release(id)]),
   close:()=>Promise.allSettled([shared.close(),isolated.close()]),
  };
+}
+function privateEntryPolicy(environment){
+ const navigation=environment.loginNavigation;
+ return navigation?.privateEntryMarkers?.length?{baseUrl:environment.baseUrl,markers:navigation.privateEntryMarkers,loginLabel:navigation.steps[0]}:undefined;
 }
 // One private profile per project/environment/origin. Pages and refs remain per question/job.
 export class WebsiteBrowser {
@@ -72,7 +77,7 @@ export class WebsiteBrowser {
     if(state&&websiteLoginReadAllowed(request,true,loginReads,target.baseUrl,target.loginNavigation)){
      // The first QR iframe request can precede the next investigator snapshot.
      // Verify an actual visible login/challenge in this same task's parent DOM.
-     if(!state.waiting)try{state.waiting=(await state.page.evaluate(browserLoginState)).loginRequired===true;}catch{}
+     if(!state.waiting)try{state.waiting=(await state.page.evaluate(browserLoginState,privateEntryPolicy(target))).loginRequired===true;}catch{}
      if(websiteLoginReadAllowed(request,state.waiting,loginReads,target.baseUrl,target.loginNavigation))allow=true;
     }
     if(state&&websiteLoginPreferenceAllowed(target,request,state.session.credentialPrincipal))allow=true;
@@ -158,7 +163,7 @@ export class WebsiteBrowser {
    await s.page.goto(s.environment.loginPreferences.loginUrl,{waitUntil:'domcontentloaded',timeout:30000});
   }
   await assertWebsiteFrame(s);
-  const state=await this.readAcrossNavigation(s,()=>websiteDOM(s).evaluate(browserLoginState));
+  const state=await this.readAcrossNavigation(s,()=>websiteDOM(s).evaluate(browserLoginState,privateEntryPolicy(s.environment)));
   // An identity-provider success page is not a successful application login.
   if(new URL(s.page.url()).origin!==new URL(s.environment.baseUrl).origin){state.pageReady=false;state.loginRequired=true;if(!state.verificationRequired&&!state.passwordChangeRequired&&!state.credentialRejected){state.loginState=loginPageAllowed(s.page.url(),s.environment.loginNavigation)?'login_required':'request_error';if(state.loginState==='request_error')state.requestFailed=true;}}
   if(state.verificationRequired&&state.verificationFramePresent){
@@ -178,7 +183,7 @@ export class WebsiteBrowser {
   const navigation=validateLoginNavigation(e.loginNavigation);if(navigation.interactive!==true)throw Error('没有审核的交互登录入口');
   if(!await this.authorize(job,true,{url:()=>e.baseUrl,method:()=> 'GET',resourceType:()=> 'document'}))throw Error('原任务登录范围已失效');
   const s=await this.state(job,e);s.waiting=true;
-  const before=await this.loginStatus(s);if(before.verificationRequired)return before;
+  const before=await this.loginStatus(s);if(before.verificationRequired||navigation.privateEntryMarkers&&before.pageReady)return before;
   s.waiting=true;
   await this.readAcrossNavigation(s,()=>waitForCaptureReady(s));
   if(loginPageAllowed(s.page.url(),navigation)){
@@ -350,7 +355,7 @@ export class WebsiteBrowser {
   if(tool==='browser_assets')return readWebsiteAsset(s,args,this.authorize,this.publicFetch);
   login??=await this.loginStatus(s);
   if(['connection','browser_open','browser_snapshot'].includes(tool))login=await this.recoverReadLanding(s,login);
-  if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,stage:'等待本机登录',message:'登录后自动继续原问题，无需回复继续。'};}
+  if(login.loginRequired){await s.page.bringToFront();return {loginRequired:true,...(login.privateLoginRequired?{privateLoginRequired:true}:{}),stage:'等待网站登录',message:'登录后自动继续原问题，无需回复继续。'};}
   if(login.loginState==='access_denied')return {stage:'站点拒绝访问，业务页面未就绪',loginState:login.loginState,
    pageStatus:'access_denied',url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),
    partial:true,pageText:'',controls:[],diagnostic:websiteDiagnostics(s),message:'查看同任务页面诊断中的实际受阻初始化请求或应用授权；拒绝页不能作为真实业务页面截图。'};
