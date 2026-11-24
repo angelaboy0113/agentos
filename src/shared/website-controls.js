@@ -1,7 +1,7 @@
 // Fixed DOM adapter shared by all applications; no model-supplied selectors or scripts.
 export const websiteControls='label:has(input[type="radio"]),.el-collapse-item__header,.ant-collapse-header,div[aria-expanded],i[aria-expanded],div,span,i,.ant-card-hoverable,.ant-table-row-expand-icon,.el-table__expand-icon,a,[role="link"],button,textarea,select,[role="button"],input:not([type="password"]):not([type="hidden"]),[role="menuitem"],[role="treeitem"],[role="tab"],[role="option"],[role="gridcell"],[role="combobox"],[role="checkbox"],[role="radio"],[aria-haspopup],.el-date-editor,.ant-picker,.ant-calendar-picker,.ant-calendar-date,.ant-calendar-prev-month-btn,.ant-calendar-next-month-btn,.ant-calendar-prev-year-btn,.ant-calendar-next-year-btn,.ant-calendar-ok-btn,.el-submenu__title,.ant-menu-submenu-title,.el-select-dropdown__item,.ant-select-item-option,.el-date-picker td.available,.el-date-range-picker td.available,.el-month-table td,.el-year-table td,.ant-picker-cell-in-view:not(.ant-picker-cell-disabled),.el-pagination li,.ant-pagination-item,span,tr[data-row-key],[role="row"][data-row-key]';
 export function controlMetadataBatch({elements,options,limit=Infinity}={elements:null}){
- function metadata(el,{readNavigationSelectors=[],hoverTooltip=null,bindLink=false}={}){
+ function metadata(el,{readNavigationSelectors=[],dialogOpeners=[],dialogPreview=false,hoverTooltip=null,bindLink=false}={}){
  const visible=el.isConnected&&!!el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
  if(el.matches('[role="tooltip"]'))return {visible,type:null};
  if(!visible||el.disabled||el.getAttribute('aria-disabled')==='true'||el.matches('.disabled,.is-disabled,.ant-picker-cell-disabled,.ant-calendar-disabled-cell')||el.closest('.ant-calendar-disabled-cell,.ant-picker-cell-disabled')||el.closest('[contenteditable="true"],[data-sensitive],[data-agentos-secret]'))return {visible:false};
@@ -56,7 +56,8 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  if(expansion)label=(el.classList.contains('ant-table-row-expanded')||el.classList.contains('el-table__expand-icon--expanded')||el.getAttribute('aria-expanded')==='true'?'收起':'展开')+'行详情：'+(el.closest('tr,[role="row"]')?.innerText??'').trim().slice(0,70);
  const panel=el.matches('.el-collapse-item__header,.ant-collapse-header');
  if(panel)label=(el.classList.contains('is-active')||el.getAttribute('aria-expanded')==='true'?'收起':'展开')+(el.closest('form,.el-form,.ant-form')?'筛选：':'面板：')+label;
- const dismiss=!!el.closest('[role="dialog"],.el-dialog,.el-drawer,.ant-modal,.ant-drawer')&&(el.matches('.el-dialog__headerbtn,.el-drawer__close-btn,.ant-modal-close,.ant-drawer-close,[aria-label="Close" i],[aria-label="关闭"]')||/^(关闭|取消|返回|close|cancel|back)$/i.test(label));
+ const dismiss=!!el.closest('dialog,[role="dialog"],.el-dialog,.el-drawer,.ant-modal,.ant-drawer')&&(el.matches('.el-dialog__headerbtn,.el-drawer__close-btn,.ant-modal-close,.ant-drawer-close,[aria-label="Close" i],[aria-label="关闭"]')||/^(关闭|取消|返回|close|cancel|back)$/i.test(label));
+ if(dialogPreview&&!dismiss&&el.closest('dialog,[role="dialog"],.el-dialog,.ant-modal'))return {visible:true,label,type:null,blocked:true};
  const floatingDismiss=el.matches('button[type="button"],[role="button"]')
   && /^(?:关闭\s*(?:后台\s*)?(?:AI\s*)?助手(?:悬浮入口|悬浮窗|浮层)|close (?:the )?floating (?:AI )?assistant)$/i.test(el.getAttribute('aria-label')?.trim()??'')
   && [el.parentElement,el.parentElement?.parentElement].some(parent=>parent&&getComputedStyle(parent).position==='fixed');
@@ -78,6 +79,8 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  if(!label)return {visible:true,label,type:null};
  const mutation=/立即执行|执行一次|单次执行|立即运行|运行一次|重放|重发|重新发送|试运行|测试接口|接口测试|新增|创建|保存|修改|编辑|删除|启动|停止|触发|重跑|终止|发布|启用|禁用|提交|支付|注销|退出|作废|驳回|撤回|取消订单|关闭订单|确认收货|\b(add|create|save|update|edit|delete|remove|start|stop|trigger|execute|run|restart|reset|kill|publish|enable|disable|submit|approve|pay|logout|cancel|resend|replay)\b/i;
  const querySubmit=/^(?:(?:开始|执行)?(?:查询|搜索|检索)(?:\s*[\/／]\s*分析)?|(?:run|start|execute) (?:query|search))$/i.test(label);
+ const dialogOpener=el.matches('button,[role="button"]')&&!el.closest('dialog,[role="dialog"],.el-dialog,.ant-modal')
+  &&dialogOpeners.some(rule=>label===rule.label&&el.matches(rule.selector));
  const navigation=reviewedNavigation||el.matches('.ant-card-hoverable,[role="link"],[role="menuitem"],[role="treeitem"],[role="tab"],.el-submenu__title,.ant-menu-submenu-title');
  let type=null,kind=row?'row':'action';
  if(['input','textarea'].includes(tag)){
@@ -93,6 +96,7 @@ export function controlMetadataBatch({elements,options,limit=Infinity}={elements
  else if(expansion){type='read-action';kind='expansion';}
  else if(panel){type='read-action';kind='panel';}
  else if(dismiss||floatingDismiss){type='read-action';kind='dismiss';}
+ else if(dialogOpener){type='read-action';kind='dialog-opener';}
  else if(option||calendar&&el.matches('button,td,[role="gridcell"]')||pagination){type='read-action';kind=option?'option':calendar?'calendar':'pagination';}
  else if(navigation){type='read-action';kind='navigation';}
  else if(querySubmit&&el.matches('button,[role=button]')){type='read-action';kind='query';}
@@ -146,4 +150,21 @@ export function websiteFields({secretSelector,full=false}){
 export function validateWebsiteNavigationSelectors(value){
  if(!Array.isArray(value)||value.length>32||value.some(s=>typeof s!=='string'||s.length>200||! /^(?:[.#][A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*)(?: (?:[.#][A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*)){0,3}$/.test(s)||/password|secret|token|credential/i.test(s)))throw new Error('只读导航控件必须为审核后的固定class/id选择器');
  return value;
+}
+
+export function validateWebsiteDialogOpeners(value){
+ if(!Array.isArray(value)||value.length>16)throw Error('只读弹窗须登记固定页面、控件选择器及标签');
+ for(const rule of value){
+  if(!rule||Object.keys(rule).sort().join(',')!=='label,route,selector'
+    ||typeof rule.route!=='string'||!/^\/[\w./-]*(?:#\/[\w./-]+)?$/.test(rule.route)||rule.route.includes('..')
+    ||typeof rule.label!=='string'||!rule.label.trim()||rule.label.length>60||/[\r\n]/.test(rule.label))throw Error('只读弹窗入口定义无效');
+  validateWebsiteNavigationSelectors([rule.selector]);
+ }
+ return value;
+}
+
+export function websiteDialogOpeners(url,rules=[]){
+ const u=new URL(url);
+ const route=u.pathname+(u.hash.startsWith('#/')?u.hash.split('?')[0]:'');
+ return rules.filter(rule=>rule.route===route);
 }

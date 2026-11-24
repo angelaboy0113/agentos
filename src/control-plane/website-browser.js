@@ -7,9 +7,17 @@ import {advanceWebsiteDocumentDiagnostics}from'../shared/website-document-diagno
 import {readWebsiteAsset} from './website-assets.js';
 import {inspectWebsiteControl} from '../shared/website-control-inspection.js';
 import {loginNavigationPage,loginRenewalPage,validateLoginNavigation} from '../shared/login-navigation.js';
-import {websiteControls,controlMetadata,controlMetadataBatch,websiteFields} from '../shared/website-controls.js';
+import {websiteControls,controlMetadata,controlMetadataBatch,websiteDialogOpeners,websiteFields} from '../shared/website-controls.js';
 import {pageDiagnostic,websiteDiagnostics,pendingWebsiteReads,websiteActionDiagnostics} from '../shared/website-diagnostics.js';
 export {controlMetadata} from '../shared/website-controls.js';
+
+function readControlOptions(s){
+ const query=s.environment.queries?.[s.job?.environmentAccess?.queryId];
+ const url=websiteDOM(s).url();
+ return {bindLink:true,hoverTooltip:s.hoverTooltip,readNavigationSelectors:query?.readNavigationSelectors??[],
+  dialogOpeners:websiteDialogOpeners(url,query?.readDialogOpeners),
+  dialogPreview:s.dialogPreviewUrl===url};
+}
 import {waitForCaptureReady,screenshotSecretSelector} from '../shared/website-capture.js';
 import {browserLoginState,authResponseState} from '../shared/browser-login-state.js';
 import { randomUUID,createHash } from 'node:crypto';
@@ -425,9 +433,9 @@ export class WebsiteBrowser {
   if(tool==='browser_key'&&args.ref==='page'){await s.page.keyboard.press('Escape');return this.snapshot(s);}
   if(tool==='browser_scroll'&&args.ref==='page'){await s.page.evaluate(direction=>window.scrollBy(direction==='left'?-600:direction==='right'?600:0,direction==='up'?-600:direction==='down'?600:0),args.direction);return this.snapshot(s);}
   const ref=s.refs.get(args.ref);if(!ref)throw new BrowserInputError('BROWSER_REF_STALE','页面引用已过期；先browser_snapshot，再使用新引用。');
-  const current=await ref.el.evaluate(controlMetadata,{bindLink:true,hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}).catch(()=>null);
+  const current=await ref.el.evaluate(controlMetadata,readControlOptions(s)).catch(()=>null);
   if(!current||!current.visible)throw new BrowserInputError('BROWSER_REF_STALE','原控件已移除或隐藏；先browser_snapshot，不重复旧操作。');
-  if(current.label!==ref.rawLabel||current.type!==ref.type||current.linkHref!==ref.linkHref)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
+  if(current.label!==ref.rawLabel||current.type!==ref.type||current.kind!==ref.kind||current.linkHref!==ref.linkHref)throw new BrowserInputError('BROWSER_CONTROL_CHANGED','控件内容或用途已改变；重新读取snapshot后选择，不执行原操作。');
   if(current.blocked)throw new Error('该操作可能改变业务状态，本次未执行');
   if(tool==='browser_inspect')return {url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),label:cleanWebsiteText(current.label),...await ref.el.evaluate(inspectWebsiteControl)};
   if(tool==='browser_context_menu'){
@@ -461,6 +469,7 @@ export class WebsiteBrowser {
   const expected={browser_search:'search',browser_select:'select',browser_click:'read-action'}[tool];
   if(!['browser_key','browser_scroll'].includes(tool)&&ref.type!==expected&&!(tool==='browser_click'&&ref.type==='search'))throw new BrowserInputError('BROWSER_CONTROL_TYPE','当前引用不是该工具对应的控件；菜单和详情用browser_click，输入框用browser_search，原生下拉框用browser_select。');
   s.lastReadAction={tool,controlLabel:cleanWebsiteText(current.label).slice(0,100),controlKind:current.kind,startedAt:new Date().toISOString()};
+  if(current.kind==='dialog-opener')s.dialogPreviewUrl=websiteDOM(s).url();
   s.queryAction=(tool==='browser_click'&&current.kind==='query')||(tool==='browser_key'&&args.key==='Enter'&&ref.type==='search');
   if(s.queryAction)s.lastQueryAction={startedAt:Date.now(),endedAt:Infinity};
   try{
@@ -545,13 +554,13 @@ export class WebsiteBrowser {
   await Promise.allSettled([...s.refs.values()].map(r=>r.el.dispose()));s.refs.clear();s.generation++;
   const text=await websiteDOM(s).locator('body').evaluate(body=>{const w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT),out=[];let n;while((n=w.nextNode())){const p=n.parentElement;if(!p||p.closest('script,style,noscript,input,textarea,[contenteditable],[hidden],[data-sensitive],[data-agentos-secret]')||!p.getClientRects().length||getComputedStyle(p).visibility==='hidden')continue;const t=n.textContent.trim();if(t)out.push(t);}return out.join('\n');});
   const handles=await websiteDOM(s).locator([websiteControls,...(s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[])].join(',')).filter({visible:true}).elementHandles();
-  const metadata=await websiteDOM(s).evaluate(controlMetadataBatch,{elements:handles,limit:300,options:{bindLink:true,hoverTooltip:s.hoverTooltip,readNavigationSelectors:s.environment.queries?.[s.job?.environmentAccess?.queryId]?.readNavigationSelectors??[]}});
+  const metadata=await websiteDOM(s).evaluate(controlMetadataBatch,{elements:handles,limit:300,options:readControlOptions(s)});
   const controls=[];
   for(const [i,el]of handles.entries()){
    const info=controls.length<300?metadata[i]:null;
    if(!info?.type||info.blocked){await el.dispose();continue;}
    const label=cleanWebsiteText(info.label).slice(0,100),ref=`${s.refPrefix}-${s.generation}-${i}`;
-   s.refs.set(ref,{el,type:info.type,rawLabel:info.label,linkHref:info.linkHref});controls.push({ref,type:info.type,label,kind:info.kind,...(info.options?{options:info.options}:{})});
+   s.refs.set(ref,{el,type:info.type,kind:info.kind,rawLabel:info.label,linkHref:info.linkHref});controls.push({ref,type:info.type,label,kind:info.kind,...(info.options?{options:info.options}:{})});
   }
   const fields=await websiteDOM(s).evaluate(websiteFields,{secretSelector:screenshotSecretSelector});
   const loading=!text.trim()||s.pendingReads.size>0||await websiteDOM(s).locator('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,[role="progressbar"]').evaluateAll(xs=>xs.some(x=>x.getClientRects().length&&getComputedStyle(x).visibility!=='hidden'));

@@ -182,3 +182,30 @@ test('scoped reviewed calendar count can open details with date context and no m
  assert.equal(item.type,'read-action');assert.ok(!before.controls.some(c=>c.label==='3'));
  const after=await browser.run(job,e,'browser_click',{ref:item.ref});assert.match(after.pageText,/只读日历明细/);
 });
+
+test('reviewed dialog openers use the registered route and leave upload and confirmation unavailable',async t=>{
+ const server=http.createServer((req,res)=>{
+  res.setHeader('content-type','text/html; charset=utf-8');
+  res.end('<h1>费用记录</h1><div id="toolbar"><button class="open-button" onclick="document.querySelector(\'dialog\').showModal()">批量调整</button><button class="open-button">批量提交</button></div><button class="open-button">批量调整</button><dialog><h2>上传清单</h2><input type="file"><button>确定</button><button onclick="document.querySelector(\'dialog\').close()">取消</button></dialog>');
+ });
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'dialog-preview-'));
+ const driver={launchPersistentContext:(d,o)=>chromium.launchPersistentContext(d,{...o,headless:true,args:[...o.args,'--no-proxy-server','--host-resolver-rules=MAP dialog-fixture.test 127.0.0.1']})};
+ const browser=new WebsiteBrowser(dir,driver);
+ t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
+ const baseUrl='http://dialog-fixture.test:'+server.address().port;
+ const scope={projectId:'fixture',tier:'uat',baseUrl:baseUrl+'/ledger/',queries:{inspect:{
+  readDialogOpeners:[{route:'/ledger/',selector:'#toolbar .open-button',label:'批量调整'}],
+  readEndpoints:['/ledger/','/ledger/other'].map(route=>({method:'GET',path:route,reviewed:true})),
+ }}};
+ const job={id:'preview-dialog',environmentAccess:{queryId:'inspect'}};
+ let current=await browser.run(job,scope,'connection');
+ const openers=current.controls.filter(c=>c.kind==='dialog-opener');
+ assert.equal(openers.length,1);
+ current=await browser.run(job,scope,'browser_click',{ref:openers[0].ref});
+ assert.match(current.pageText,/上传清单/);
+ assert.equal(current.controls.some(c=>c.label==='确定'||c.label==='批量提交'),false);
+ assert.ok(current.controls.some(c=>c.kind==='dismiss'));
+ current=await browser.run(job,scope,'browser_navigate',{url:baseUrl+'/ledger/other'});
+ assert.equal(current.controls.some(c=>c.kind==='dialog-opener'),false);
+});

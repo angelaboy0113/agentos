@@ -1,3 +1,7 @@
+## 1.155.11
+
+- Preview reviewed local business dialogs on an exact page route and button label while withholding action references for uploading, confirmation and edits inside the dialog. Existing request-level read authorization stays in force.
+
 ## 1.155.10
 
 - Show the actual numbered clarification questions above the PRD response form when a draft points to another internal result field. Ask for business scope changes instead of re-asking for existing configuration.

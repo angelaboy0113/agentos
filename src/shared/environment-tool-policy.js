@@ -1,5 +1,5 @@
 import {validateConfigKeys} from './config-projection.js';
-import {validateWebsiteNavigationSelectors} from './website-controls.js';
+import {validateWebsiteDialogOpeners,validateWebsiteNavigationSelectors} from './website-controls.js';
 import {validateCnbQuery} from './cnb-policy.js';
 import {validateTsfQuery} from './tsf-policy.js';
 import {validateTctQuery} from './tct-policy.js';
@@ -24,6 +24,7 @@ export function validateToolQuery(e, q) {
   }
   if(q.loginReads!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw Error('认证读取仅支持审核后的网站排查');validateWebsiteLoginReads(q.loginReads);}
   if(q.readNavigationSelectors!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true)throw Error('导航适配仅限审核后的网站只读调查');validateWebsiteNavigationSelectors(q.readNavigationSelectors);}
+  if(q.readDialogOpeners!==undefined){if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true||q.browser!==true)throw Error('弹窗入口仅限审核后的网站只读调查');validateWebsiteDialogOpeners(q.readDialogOpeners);}
   if(q.readRecoveryTarget!==undefined){
    if(e.kind!=='website'||q.mode!=='investigate'||q.reviewed!==true||q.browser!==true||typeof q.readRecoveryTarget!=='string')throw Error('空白页恢复入口仅支持审核后的网页只读排查');
    websiteReadRecoveryTarget(q.readRecoveryTarget,e.baseUrl,q.readEndpoints);
