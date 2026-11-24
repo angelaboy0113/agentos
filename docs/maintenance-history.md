@@ -1,3 +1,7 @@
+## 1.155.9
+
+- Review unresolved business decisions before PRD delivery, publish editable flowcharts for branching workflows, preserve existing action pixels, and include the document link in delivery notices.
+
 ## 1.155.8
 
 - Recover text-only PRD revisions with unchanged figures selected and verified in the current review. Revalidate the original screenshot, source snapshot and artifact bindings before publishing.

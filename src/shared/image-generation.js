@@ -73,6 +73,7 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
    if(digest!==receipt.item.sha256||actual.bytes.length!==receipt.item.bytes||!actual.bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))throw failure('IMAGE_INPUT','原型参考截图校验失败');
    return {path:file,sha256:digest,kind:'website-design-reference',
     ...(scope?{subjectProjectId:scope.projectId}:{}),
+    ...(receipt.item.actionRegions?.length?{actionRegions:receipt.item.actionRegions}:{}),
     ...(receipt.item.brandRegions?.length?{brandRegions:receipt.item.brandRegions}:{})};
   }
  }

@@ -9,10 +9,11 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     .map(element=>({kind:element.matches('[role=dialog]')?'dialog':element.matches('[role=tabpanel]')?'tabpanel':element.matches('[role=table],[role=grid]')?'table':element.tagName.toLowerCase(),...bounds(element)}))
     .filter(visible).slice(0,40);
   const controls=[], placeholders=[], assets=[], glyphs=[], backgrounds=[], brandRegions=[], samples=[];
-  const protect = ({x,y,width,height})=>{
+  const clip = ({x,y,width,height})=>{
     const left=Math.max(0,x),top=Math.max(0,y),right=Math.min(innerWidth,x+width),bottom=Math.min(innerHeight,y+height);
-    if(right>left&&bottom>top)brandRegions.push({x:left/innerWidth,y:top/innerHeight,width:(right-left)/innerWidth,height:(bottom-top)/innerHeight});
+    if (right>left&&bottom>top) return {x:left/innerWidth,y:top/innerHeight,width:(right-left)/innerWidth,height:(bottom-top)/innerHeight};
   };
+  const protect = region => { const box = clip(region); if (box) brandRegions.push(box); };
   if (!attribute) return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions};
   const gridSelector='table,[role="grid"],[role="table"],.el-table,.ant-table,.vxe-table';
   const cellSelector='td,th[scope=row],[role="rowheader"],[role="cell"],[role="gridcell"]';
@@ -210,5 +211,13 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       fontFamily:style.fontFamily,fontSize:style.fontSize});
   }
   tableCapture.sampleFields=sampled.size;
-  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,samples,tableCapture};
+  const actionRegions = [...document.querySelectorAll('button,[role="button"]')]
+    .filter(element => !element.closest(secretSelector) && !element.parentElement?.closest('button,[role="button"]'))
+    .flatMap(element => {
+      const box = bounds(element), region = clip(box);
+      if (!region || box.width > innerWidth/2 || box.height > innerHeight/3 || getComputedStyle(element).visibility !== 'visible') return [];
+      const hit = document.elementFromPoint((region.x+region.width/2)*innerWidth,(region.y+region.height/2)*innerHeight);
+      return element.contains(hit) ? [region] : [];
+    });
+  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,actionRegions,samples,tableCapture};
 }

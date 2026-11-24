@@ -6,7 +6,7 @@ import {codexEnvironment,loadCodexRuntimeSettings,resolveCodexBinary,conversatio
 import {artifactPermissionArgs,artifactPolicy} from '../shared/artifact-workspace.js';
 import {failureDiagnostic} from '../shared/failure-diagnostic.js';
 import {continuousReviewDecision} from '../shared/investigation-review.js';
-import {prdReviewBasisMissing} from '../shared/prd-workspace.js';
+import {prdFlowchartIssue,prdReviewBasisMissing} from '../shared/prd-workspace.js';
 import {ToolResultStore} from './tool-result-store.js';
 import {InvestigationDirectTools,investigationDynamicTools} from './investigation-direct-tools.js';
 
@@ -169,6 +169,11 @@ export async function runNativeInvestigation(options,adapters={}) {
     // waiting indefinitely during teardown.
     if(!direct.channel){
       const reviewMissing=result.outcome==='ready'&&!continuation?prdReviewBasisMissing(job,result):[];
+      const draft=result.outcome==='ready'&&!continuation?result.documentRequests?.find(request=>request.format==='md'):null;
+      if(typeof draft?.content==='string'){
+        const issue=prdFlowchartIssue(job,draft.content);
+        if(issue)reviewMissing.push(issue);
+      }
       const reviewKey=reviewMissing.join(',');
       if(reviewKey&&!prdReviewAttempts.has(reviewKey)){
         prdReviewAttempts.add(reviewKey);

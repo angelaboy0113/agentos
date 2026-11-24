@@ -6,7 +6,7 @@ import { reportFile } from '../shared/report-files.js';
 import { readPrdDesignReference } from '../shared/image-generation.js';
 import { previousPrdDelivery, prdHighlightChanges, readPrdRevisionBaseline } from '../shared/prd-revision.js';
 import { reportEligible } from '../shared/report-acceptance.js';
-import { prdBusinessAligned, prdDocumentTitle, prdFinalContentIssue, prdIntentDigest, prdReviewBasisMissing } from '../shared/prd-workspace.js';
+import { prdBusinessAligned, prdDocumentTitle, prdFinalContentIssue, prdFlowchartBlocks, prdFlowchartIssue, prdIntentDigest, prdReviewBasisMissing } from '../shared/prd-workspace.js';
 import { stateView } from '../shared/state-view.js';
 import { currentUserQuestion } from '../shared/user-request-scope.js';
 import { questionJob, publishQuestion } from './questions.js';
@@ -18,6 +18,7 @@ const hasNativeTable = xml => /<table(?:\s|>)/i.test(xml);
 const authError = error => /no user logged in|app_scope_not_applied|user_scope_not_granted|missing_scope|missing required scope|99991672|99991679/i.test(error.message);
 const prototypeAnchors = body => [...body.matchAll(/^\[\[PROTOTYPE:([a-z][a-z0-9-]{0,63})\]\][ \t]*$/gm)].map(match => match[1]);
 const marker = key => 'AGENTOSPRDFIGURE-'+key;
+const flowchartMarker = index => 'AGENTOSPRDFLOWCHART-'+(index+1);
 const paragraph = block => block?.text?.elements?.map(e => e.text_run?.content ?? '').join('').trim();
 
 function reviewedPrdArtifacts(job, generation, format) {
@@ -81,6 +82,26 @@ async function insertInlineImages(call, cwd, doc, figures) {
       throw Error('PRD_IMAGE_POSITION');
     }
   }
+}
+
+async function verifyFlowcharts(call, doc, sources, render) {
+  if (!sources.length) return;
+  const read = async () => [...(await render()).matchAll(/<whiteboard\b[^>]*\btoken="[^"]+"[^>]*>([\s\S]*?)<\/whiteboard>/gi)]
+    .map(board => board[1].replaceAll('&gt;', '>').replaceAll('&quot;', '"').trim());
+  let actual = await read();
+  const expectedCounts = new Map();
+  for (const [index, source] of sources.entries()) {
+    const expected = (expectedCounts.get(source) ?? 0)+1;
+    expectedCounts.set(source, expected);
+    if (actual.filter(chart => chart===source).length >= expected) continue;
+    const markers = (await documentChildren(call,doc)).filter(block => paragraph(block)===flowchartMarker(index));
+    if (markers.length!==1 || !validToken.test(markers[0].block_id)) throw Error('PRD_FLOWCHART_ANCHOR');
+    await call(['docs','+update','--as','user','--doc',doc,'--command','block_replace','--block-id',markers[0].block_id,
+      '--doc-format','xml','--content','-'], {input:'<whiteboard type="mermaid">\n'+source.replaceAll('>', '&gt;')+'\n</whiteboard>'});
+    actual = await read();
+    if (actual.filter(chart => chart===source).length < expected) throw Error('PRD_FLOWCHART_READBACK');
+  }
+  if (actual.length!==sources.length || sources.some((source,index)=>source!==actual[index])) throw Error('PRD_FLOWCHART_READBACK');
 }
 
 function documentIdentity(result) {
@@ -262,7 +283,8 @@ export class PrdCloudDelivery {
       const [{ content }, ...images] = await Promise.all(files.map((f, i) =>
         reportFile(dir, job.id, f, { includeContent: i === 0, includeReceipt: i > 0 })));
       const raw = content.toString('utf8');
-      const issue = job.prd.businessFinal && prdFinalContentIssue(raw, job.prd.fixedFinalSections);
+      const issue = (job.prd.businessFinal && prdFinalContentIssue(raw, job.prd.fixedFinalSections))
+        || prdFlowchartIssue(job, raw);
       if (issue) {
         await save('artifacts_missing', { notice: issue });
         return;
@@ -322,7 +344,11 @@ export class PrdCloudDelivery {
       const reviewedBody = prdMarkdown(raw, { prototypeHash: files[1]?.sha256, referenceHashes, tableRequired: !job.prd.fixedFinalSections });
       const title = prdDocumentTitle(q, revision, job.prd.businessFinal, reviewedBody);
       const body = job.prd.businessFinal ? reviewedBody.replace(/^#[ \t]+[^\r\n]+/, () => '# ' + title) : reviewedBody;
-      const highlighted = prdHighlightChanges(baseline, body);
+      let highlighted = prdHighlightChanges(baseline, body);
+      const flowcharts = job.prd.decisionReview ? prdFlowchartBlocks(highlighted) : [];
+      for (const [index, block] of flowcharts.entries()) {
+        highlighted = highlighted.replace(block[0], () => flowchartMarker(index));
+      }
       const markdown = inline ? highlighted.replace(/^\[\[PROTOTYPE:([a-z][a-z0-9-]{0,63})\]\][ \t]*$/gm, (_, key) => marker(key)) : highlighted;
       const hasHighlights = markdown.includes('<span background-color=');
       const parent = path.join(dir, 'prd-delivery');
@@ -352,11 +378,12 @@ export class PrdCloudDelivery {
         const doc = delivery.token;
         const render = async () => {
           const remote = await call(['docs', '+fetch', '--as', 'user', '--doc', doc, '--doc-format', 'xml', '--detail', 'full']);
-          return JSON.stringify(remote).replaceAll('\\\"', '"');
+          return typeof remote==='string' ? remote : (remote.data?.document ?? remote.data)?.content ?? '';
         };
         if (delivery.phase === 'created') {
           const xml = await render();
           if ((!job.prd.fixedFinalSections || hasMarkdownTable(body)) && !hasNativeTable(xml) || !/<h[1-6](?:\s|>)/i.test(xml) || hasHighlights && !/<span[^>]*background-color="(?:(?:light-)?yellow|rgba\(255,\s*246,\s*122,\s*0\.8\))"/i.test(xml) && !(delivery.inlineHighlights === undefined && xml.includes('本次变更'))) throw Error('PRD_NATIVE_BLOCK_READBACK');
+          await verifyFlowcharts(call,doc,flowcharts.map(block=>block[1].trim()),render);
           await save('body_verified');
         }
         if (delivery.phase === 'body_verified' && !figures.length) await save('image_verified');

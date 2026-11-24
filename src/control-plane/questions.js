@@ -157,7 +157,9 @@ export function questionView(state, questionId, projects = {}) {
       const text = requesterMentionText(q.senderId, '请在上方 PRD 卡片的输入框填写，并点「提交补充，继续整理」。');
       mention = text ? {kind:'clarification',profile:q.profile,replyTo:q.messageId,text,jobId:job?.id??null,requestKey:'prd:'+prdAnswerVersion} : null;
     } else if (prdDeliveryComplete) {
-      const text = requesterMentionText(q.senderId, '飞书 PRD 评审稿已就绪，本群成员可编辑。链接在上方卡片。');
+      const url = prdDeliveryLink(q.prd.delivery);
+      const text = requesterMentionText(q.senderId, '飞书 PRD 评审稿已就绪，本群成员可编辑。'
+        + (url ? '\n' + url : '请在需求卡片查看。'));
       mention = text ? {kind:'prd_delivery',profile:q.profile,replyTo:q.messageId,text} : null;
     }
   }

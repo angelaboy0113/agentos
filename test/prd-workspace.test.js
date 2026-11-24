@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdBusinessAligned, prdFinalContentIssue, prdFinalSections, prdDocumentTitle, prdGuidance, prdIntentDigest, prdReviewBasisMissing } from '../src/shared/prd-workspace.js';
+import { prdBusinessAligned, prdFinalContentIssue, prdFinalSections, prdFlowchartIssue, prdDocumentTitle, prdGuidance, prdIntentDigest, prdReviewBasisMissing } from '../src/shared/prd-workspace.js';
 import { prdHighlightChanges } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
@@ -521,6 +521,13 @@ const alignedPrdResult = {
     { id: 'prd-business-purpose', required: true, status: 'passed', evidence: '初稿说明人员核对状态需跨系统；原卡确认在详情查询' },
     { id: 'prd-module-impact', required: true, status: 'passed', evidence: '依据固定源码核对了模块及显示状态的范围，原卡已确认' },
     { id: 'prd-page-fidelity', required: true, status: 'passed', evidence: '已核对适用界面和改动边界' },
+    { id: 'prd-design-decisions', required: false, status: 'passed', evidence: [
+      '范围及期间：适用｜仅在订单详情展示当前状态',
+      '触发及顺序：适用｜进入详情时读取已有结果',
+      '权限及状态：适用｜权限沿用原详情，展示审批状态',
+      '材料及校验：不适用｜只读展示无上传或导入',
+      '例外及后续：适用｜没有审批结果时显示无记录',
+    ].join('\n') },
     { id: 'prd-process-design', required: true, status: 'passed', evidence: [
       '现状链路：订单详情读取订单编号，审批系统保存决定',
       '拟议改造及沿用：详情增加状态，审批方式沿用原规则',
@@ -577,6 +584,17 @@ test('new PRD runs receive the process design skill and require all four evidenc
     ? { ...check, evidence: check.evidence.replace(/走查结果：[^\n]+/, '走查结果：   ') } : check);
   assert.deepEqual(prdReviewBasisMissing(job, { handoff: { checks } }), ['prd-process-design']);
   assert.deepEqual(prdReviewBasisMissing({ prd: { reviewBasis: true } }, { handoff: { checks } }), []);
+});
+
+test('complex PRDs require an in-section flowchart and reviewed decision coverage', () => {
+  const job = {originalQuestion:'审批完成后对预算占用及上账做分流',prd:{reviewBasis:true,processDesign:true,decisionReview:true}};
+  const chart = ['```mermaid','flowchart TD','A["提交"] --> B{"审批通过"}','B -->|是| C["上账"]','```'].join('\n');
+  assert.ok(prdFlowchartIssue(job,md));
+  assert.equal(prdFlowchartIssue(job,md.replace('## 操作流程\n','## 操作流程\n'+chart+'\n')),null);
+  assert.ok(prdFlowchartIssue(job,md+'\n'+chart));
+  assert.ok(prdFlowchartIssue({prd:{decisionReview:true}},chart.replace('B -->|是| C["上账"]','click B "https://example.com"')));
+  assert.deepEqual(prdReviewBasisMissing(job,alignedPrdResult),[]);
+  assert.deepEqual(prdReviewBasisMissing(job,{handoff:{checks:alignedPrdResult.handoff.checks.filter(c=>c.id!=='prd-design-decisions')}}),['prd-design-decisions']);
 });
 
 test('PRD final body starts with a prose summary and excludes QA and development sections', () => {
@@ -796,7 +814,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,reviewBasis:true,processDesign:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true,nativeUiCapture:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,reviewBasis:true,processDesign:true,decisionReview:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true,nativeUiCapture:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
@@ -995,6 +1013,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     assert.equal(snapshot.designLayout.assets.length,2);
     assert.equal(snapshot.designLayout.backgrounds.length,1);
     assert.equal(snapshot.designLayout.brandRegions.length,2);
+    assert.ok(snapshot.designLayout.actionRegions.length);
     const base = await fs.readFile(path.join(dir,snapshot.designReference.name));
     if (!n) {
       await page.locator('#business').evaluate(el=>{el.textContent='BB999999';});
@@ -1008,7 +1027,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     const actual = await producePrdPrototype(dataDir,job,JSON.stringify({
       mode:n?'new-page':'existing-page', prototypeKey:key, referenceId,
       prompt:'保留真实界面，在修改区增加查看活动入口',
-      areas:[{x:.25,y:.4,width:.5,height:.2},snapshot.designLayout.brandRegions[0]],
+      areas:[{x:.25,y:.4,width:.5,height:.2},snapshot.designLayout.brandRegions[0],snapshot.designLayout.actionRegions[0]],
     }),{generate:async ({references,editReference,prompt})=>{
       assert.equal(editReference,true);
       assert.equal(references[0].sha256,hash(base));

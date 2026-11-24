@@ -52,6 +52,14 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
     throw layoutError('改动区需要在实际截图内填写 x、y、width、height（0 到 1）和拟新增的界面文案');
   }
   const visibleRegions = areas.map(({x,y,width,height})=>({x,y,width,height}));
+  const existingActions = reference.actionRegions ?? [];
+  const editableActions = spec.editableActions ?? [];
+  if (nativeEdit && (!Array.isArray(editableActions)
+    || editableActions.some(index => !Number.isSafeInteger(index) || !existingActions[index]))) {
+    throw layoutError('editableActions 只可填写确实要修改的现有按钮在 designLayout.actionRegions 的下标');
+  }
+  const protectedRegions = (reference.brandRegions??[]).concat(nativeEdit
+    ? existingActions.filter((_,index)=>!editableActions.includes(index)) : []);
   const firstEdit = nativeEdit ? [
     'Edit the attached real UI screenshot in place. Preserve its aspect ratio, viewport framing, branding and layout outside the edit rectangles.',
     'Inside the edit rectangles preserve all unchanged components, exact labels, alignment, colors, row heights, button styles and layout seen in the screenshot.',
@@ -172,7 +180,7 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
       });
       return canvas.toDataURL().split(',')[1];
     }, { original:encode(base), proposal:proposed && encode(proposed.bytes), areas, shifts, nativeEdit,
-      brandRegions:(reference.brandRegions??[]).filter(withinScreenshot) });
+      brandRegions:protectedRegions.filter(withinScreenshot) });
     bytes = Buffer.from(output,'base64');
   } catch (error) {
     const detail=error.message.match(/(?:生图比例与底图不一致[^\r\n]*|菜单顺移区域太小|第 \d+ 个[^\r\n]+|标注文字超出改动区域)/)?.[0];
