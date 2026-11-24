@@ -35,19 +35,20 @@ function firstBy(rows, order) {
  return [best];
 }
 // Deterministic fixed data operations only. No code, regex, SQL, filesystem paths or global data access.
-export async function buildRelationalDataset(args,load,{check=async()=>{},maxRows=Number.MAX_SAFE_INTEGER}={}){
+export async function buildRelationalDataset(args,load,{check=async()=>{},maxRows=Number.MAX_SAFE_INTEGER,writeRows}={}){
  if(!args||typeof args!=='object'||typeof args.scopeEvidence!=='string'||args.scopeEvidence.trim().length<3||!Array.isArray(args.joins)||!args.joins.length)bad('须声明关联/展开范围依据及joins数组');
  const base=await load(args.datasetRef);if(!base?.complete||base.reportDraft)bad('关联来源必须是当前任务完整数据集');unique(base,args.keyColumns);
  const rowKey=args.rowKey??'relation_key';if(!field(rowKey)||base.columns.includes(rowKey))bad('关联输出行键与来源字段冲突');
  let names=[...base.columns],numericColumns=[...(base.numericColumns??[])],provenance=Object.fromEntries(names.map(c=>[c,{datasetRef:args.datasetRef,column:c}]));
- const inputs=[base],audits=[];let work=base.rows.map(row=>({row:{...row},identity:[key(row,args.keyColumns)]}));
+ const inputs=[base],audits=[];
+ let work=(function*(){for(const row of base.rows)yield {row,identity:[key(row,args.keyColumns)]};})();
  for(const join of args.joins){
   if(!join||typeof join!=='object'||Array.isArray(join))bad('joins每项必须为显式关联参数对象');
   await check();const right=await load(join.datasetRef);
   if(!right?.complete||right.reportDraft)bad('右来源必须是当前授权完整数据集');
   columns({columns:names},join.leftKeys);columns(right,join.rightKeys);columns(right,join.rightRowKey);
   if(join.leftKeys.length!==join.rightKeys.length||!['lookup','expand'].includes(join.relationship)||!['keep','drop','error'].includes(join.empty)||!['keep','drop','error'].includes(join.unmatched)||!Array.isArray(join.fields))bad('关联须明确同宽键、relationship=lookup/expand、empty及unmatched=keep/drop/error和fields');
-  if(join.split){const s=join.split;if(join.leftKeys.length!==1||!Array.isArray(s.delimiters)||s.delimiters.some(v=>typeof v!=='string'||!v.length)||!['set','preserve'].includes(s.duplicates)||typeof s.trim!=='boolean'||typeof s.whitespace!=='boolean')bad('文本拆分仅单键，明确字面delimiters、trim、whitespace、duplicates=set/preserve；不接收正则');}
+  if(join.split){const s=join.split;if(!Array.isArray(s.delimiters)||s.delimiters.some(v=>typeof v!=='string'||!v.length)||!['set','preserve'].includes(s.duplicates)||typeof s.trim!=='boolean'||typeof s.whitespace!=='boolean')bad('文本拆分只作用于第一个左键，明确字面delimiters、trim、whitespace、duplicates=set/preserve；不接收正则');}
   for(const f of join.fields){if(!f||typeof f!=='object'||!right.columns.includes(f.column)||!field(f.as)||names.includes(f.as)||f.as===rowKey)bad('关联输出列不存在、重复或覆盖原字段');names.push(f.as);if(right.numericColumns?.includes(f.column))numericColumns.push(f.as);provenance[f.as]={datasetRef:join.datasetRef,column:f.column};}
   const order = join.selectFirstBy;
   if (order !== undefined) {
@@ -57,10 +58,12 @@ export async function buildRelationalDataset(args,load,{check=async()=>{},maxRow
    }
    columns(right, order.map(o => o.column));
   }
-  const rightOrder=new Map(right.rows.map((r,i)=>[r,i]));
+  const rightOrder=join.split?.duplicates==='set'?new Map():null;
   const index=new Map(), rightIdentities=new Set();
   let emptyRightRows=0;
-  for(const row of right.rows){
+  for(const [position,row] of right.rows.entries()){
+   if(position%1000===0)await check();
+   if(rightOrder)rightOrder.set(row,position);
    if(join.fields.some(f=>row[f.column]===undefined))bad('右来源行缺少已声明输出字段，不可当作null');
    const k=key(row,join.rightKeys,true);
    // An empty join key cannot match. Only rows that can match need a stable identity.
@@ -77,12 +80,21 @@ export async function buildRelationalDataset(args,load,{check=async()=>{},maxRow
    group.push(row);index.set(k,group);
   }
   if (order) for (const [k, group] of index) index.set(k, firstBy(group, order));
-  const audit={inputRows:work.length,rightRows:right.rows.length,matchedInputRows:0,emptyInputRows:0,unmatchedInputRows:0,outputRows:0,duplicateTokens:0,unmatchedKeys:[],scopeEvidence:args.scopeEvidence};
+  const audit={inputRows:0,rightRows:right.rows.length,matchedInputRows:0,emptyInputRows:0,unmatchedInputRows:0,outputRows:0,duplicateTokens:0,unmatchedKeys:[],scopeEvidence:args.scopeEvidence};
   if(emptyRightRows)audit.emptyRightRows=emptyRightRows;
-  const next=[];
-  for(const [i,item] of work.entries()){
-   if(i%1000===0)await check();let keys;
-   if(join.split){const value=item.row[join.leftKeys[0]],tokens=split(value,{...join.split,duplicates:'preserve'});audit.duplicateTokens+=tokens.length-new Set(tokens).size;keys=(join.split.duplicates==='set'?[...new Set(tokens)]:tokens).map(v=>JSON.stringify([v]));}
+  const input=work;
+  work=(async function*(){
+  for await(const item of input){
+   if(audit.inputRows++%1000===0)await check();let keys;
+   if(join.split){
+    const [splitColumn,...otherColumns]=join.leftKeys;
+    const tokens=split(item.row[splitColumn],{...join.split,duplicates:'preserve'});
+    const distinct=new Set(tokens);
+    audit.duplicateTokens+=tokens.length-distinct.size;
+    const otherKey=key(item.row,otherColumns,true);
+    const otherValues=otherKey===null?null:JSON.parse(otherKey);
+    keys=otherValues===null?[]:(join.split.duplicates==='set'?[...distinct]:tokens).map(v=>JSON.stringify([v,...otherValues]));
+   }
    else{const k=key(item.row,join.leftKeys,true);keys=k===null?[]:[k];}
    // Set membership follows right-source order and does not repeat rows for duplicate tokens.
    let matches=[];
@@ -91,13 +103,16 @@ export async function buildRelationalDataset(args,load,{check=async()=>{},maxRow
    const empty=!keys.length,policy=empty?join.empty:join.unmatched;
    if(empty)audit.emptyInputRows++;else if(!matches.length){audit.unmatchedInputRows++;if(audit.unmatchedKeys.length<3)audit.unmatchedKeys.push(keys.slice(0,3));}else audit.matchedInputRows++;
    if(!matches.length){if(policy==='error')bad(empty?'关联左键为空：请核对真实空配置处理':'关联左键未匹配：请核对范围和编码，不能补零');if(policy==='keep')matches=[null];}
-   const occurrence=new Map();
-   for(const row of matches){const identity=row?key(row,join.rightRowKey):null,ordinal=occurrence.get(identity)??0;occurrence.set(identity,ordinal+1);
+   const occurrence=join.split?.duplicates==='preserve'?new Map():null;
+   for(const row of matches){const identity=row?key(row,join.rightRowKey):null,ordinal=occurrence?.get(identity)??0;occurrence?.set(identity,ordinal+1);
     const output={...item.row};for(const f of join.fields)output[f.as]=row?row[f.column]:null;
-    next.push({row:output,identity:[...item.identity,identity,ordinal]});if(next.length>maxRows)bad('关联展开超过当前已配置的报表行数范围，已有来源保留');
+    if(++audit.outputRows>maxRows)bad('关联展开超过当前已配置的报表行数范围，已有来源保留');
+    if(audit.outputRows%1000===0)await check();
+    yield {row:output,identity:[...item.identity,identity,ordinal]};
    }
   }
-  audit.outputRows=next.length;audits.push(audit);work=next;inputs.push(right);
+  })();
+  audits.push(audit);inputs.push(right);
  }
  if(args.project!==undefined){
   if(!Array.isArray(args.project)||!args.project.length)bad('project须为非空的实际字段投影数组');
@@ -105,9 +120,26 @@ export async function buildRelationalDataset(args,load,{check=async()=>{},maxRow
   for(const f of args.project){if(!f||typeof f!=='object'||!names.includes(f.column)||!field(f.as)||f.as===rowKey||outputs.has(f.as))bad('project字段不存在、输出重复或覆盖行键');outputs.add(f.as);
    if(f.labels!==undefined&&(!f.labels||Array.isArray(f.labels)||typeof f.labels!=='object'||Object.values(f.labels).some(v=>typeof v!=='string')||!['keep','error'].includes(f.unmapped)||numericColumns.includes(f.column)))bad('枚举映射需要文本labels及unmapped=keep/error；金额数值列不可改标签');
   }
-  work=work.map(x=>({...x,row:Object.fromEntries(args.project.map(f=>{let v=x.row[f.column];if(v===undefined)bad('project行缺少来源字段');if(v!==null&&f.labels){if(Object.hasOwn(f.labels,v))v=f.labels[v];else if(f.unmapped==='error')bad('枚举值未核实：'+f.column+'='+JSON.stringify(v));}return [f.as,v];}))}));
+  const input=work;
+  work=(async function*(){
+   for await(const item of input){
+    const row=Object.fromEntries(args.project.map(f=>{
+     let value=item.row[f.column];
+     if(value===undefined)bad('project行缺少来源字段');
+     if(value!==null&&f.labels){
+      if(Object.hasOwn(f.labels,value))value=f.labels[value];
+      else if(f.unmapped==='error')bad('枚举值未核实：'+f.column+'='+JSON.stringify(value));
+     }
+     return [f.as,value];
+    }));
+    yield {...item,row};
+   }
+  })();
   provenance=Object.fromEntries(args.project.map(f=>[f.as,provenance[f.column]]));numericColumns=args.project.filter(f=>numericColumns.includes(f.column)).map(f=>f.as);names=args.project.map(f=>f.as);
  }
- const rows=work.map(x=>({...x.row,[rowKey]:datasetHash(x.identity)}));
- return {rows,columns:[...names,rowKey],numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===base.snapshotId)?base.snapshotId:datasetHash(inputs.map(d=>d.snapshotId)),derivation:{kind:'dataset_relation',version:1,args:structuredClone(args),audit:{sourceRows:base.rows.length,outputRows:rows.length,joins:audits},provenance}};
+ const output=(async function*(){for await(const item of work)yield {...item.row,[rowKey]:datasetHash(item.identity)};})();
+ const finish=rows=>({rows,columns:[...names,rowKey],numericColumns,complete:true,readAt:inputs.map(d=>d.readAt).sort()[0],readThroughAt:inputs.map(d=>d.readThroughAt??d.readAt).sort().at(-1),snapshotId:inputs.every(d=>d.snapshotId===base.snapshotId)?base.snapshotId:datasetHash(inputs.map(d=>d.snapshotId)),derivation:{kind:'dataset_relation',version:1,args:structuredClone(args),audit:{sourceRows:base.rows.length,outputRows:audits.at(-1).outputRows,joins:audits},provenance}});
+ if(writeRows)return writeRows(output,finish);
+ const rows=[];for await(const row of output)rows.push(row);
+ return finish(rows);
 }

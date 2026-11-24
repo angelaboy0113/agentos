@@ -1,4 +1,4 @@
-import {registerLocalExecution} from './local-executions.js';
+import {processAbsent,registerLocalExecution} from './local-executions.js';
 import { fork, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {safeExecutionError} from '../shared/failure-diagnostic.js';
@@ -45,7 +45,19 @@ export function executeTaskProcess(job, config, emit, signal, worker = workerFil
         error.processesExited = !terminationFailure;
         return reject(error);
       }
-      if (failure || code !== 0 || !result) return reject(failure ?? safeExecutionError({code:fatalMemory?'TASK_WORKER_MEMORY':'TASK_WORKER_EXIT',exitCode:code,exitSignal,diagnosticStage:'task_worker'}));
+      if (failure || code !== 0 || !result) {
+        const error=failure ?? safeExecutionError({code:fatalMemory?'TASK_WORKER_MEMORY':'TASK_WORKER_EXIT',exitCode:code,exitSignal,diagnosticStage:'task_worker'});
+        if(fatalMemory&&error.code==='TASK_WORKER_MEMORY'&&child.pid&&process.platform!=='win32'){
+          try{
+            if(!processAbsent(-child.pid))await terminateTree(child);
+            for(let attempt=0;attempt<10&&!processAbsent(-child.pid);attempt++){
+              await new Promise(resolve=>setTimeout(resolve,100));
+            }
+            error.processesExited=processAbsent(-child.pid);
+          }catch{error.processesExited=false;}
+        }
+        return reject(error);
+      }
       resolve(result);
     });
     registerLocalExecution(config.localExecutionRegistry,job,child.pid).then(()=>{if(!signal.aborted&&child.connected)child.send({job,config});}).catch(error=>{failure=error;abort();});

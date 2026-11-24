@@ -105,7 +105,10 @@ export class AgentRunner {
         this.stopped = true; // Never lease another task while the old process may still be writing.
         console.error(`[runner] ${job.id}: stop could not be verified; Runner paused for manual inspection`);
       }
-      if (!lostLease) await emit(controller.signal.aborted && error.processesExited
+      const memoryExit=!controller.signal.aborted&&error.code==='TASK_WORKER_MEMORY'&&error.processesExited===true&&job.continuousInvestigation;
+      if (!lostLease) await emit(memoryExit
+        ? {type:'completed',processesExited:true,result:executionInterruption(job,error,'task_worker')}
+        : controller.signal.aborted && error.processesExited
         ? { type: 'cancelled', processesExited: true }
         : { type:'failed',message:failureDiagnostic(error),result:job.continuousInvestigation?executionInterruption({...job,context:[...(job.context??[]),...(executionResult?[{kind:'environment_result',result:executionResult}]:[])]},error,executionResult?'control_result':'task_worker'):{error:failureDiagnostic(error),executionFailure:failureDetails(error,{stage:executionResult?'control_result':'task_worker'})} });
     } finally {
@@ -122,7 +125,7 @@ export class AgentRunner {
     let checkpoint=job;
     try{return await this.continueInvestigation(job,emit,signal,current=>{checkpoint=current;});}
     catch(error){
-      if(signal.aborted||error.processesExited===false)throw error;
+      if(signal.aborted||error.processesExited===false||error.code==='TASK_WORKER_MEMORY'&&error.processesExited===true)throw error;
       return executionInterruption(checkpoint,error,checkpoint.environmentAccess?'environment_read':'source_analysis');
     }
   }

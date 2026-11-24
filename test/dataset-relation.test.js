@@ -92,6 +92,30 @@ test('composite join keys keep tenant boundaries and input order, refresh does n
  const a={...args,joins:[{datasetRef:'products',leftKeys:['tenant','code'],rightKeys:['tenant','code'],rightRowKey:['tenant','id'],relationship:'lookup',fields:[{column:'value',as:'matched'}],empty:'error',unmatched:'error'}]};
  const out=await buildRelationalDataset(a,async ref=>ref==='main'?m:r);assert.deepEqual(out.rows.map(r=>r.matched),['west-only','east-only']);
 });
+
+test('saved expansion streams results and paginates them after a cold start while preserving composite membership',async t=>{
+ const f=await fixture(t);
+ const left=data([{id:'l1',store:'01',tokens:'p2,p1,p1'},{id:'l2',store:'02',tokens:'p1'}]);
+ const right=data([{id:'r1',store:'01',type:'p1'},{id:'r2',store:'02',type:'p1'},{id:'r3',store:'01',type:'p2'}]);
+ const leftRef='dataset-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+ const rightRef='dataset-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+ const storage=new TaskDatasetStore(f.directory,f.scope,{chunkBytes:165});
+ await storage.save(leftRef,left,left.snapshotId,left.readAt);
+ await storage.save(rightRef,right,right.snapshotId,right.readAt);
+ f.d.storage=storage;
+ const [join]=args.joins;
+ const out=await f.d.relate({...args,datasetRef:leftRef,joins:[{...join,datasetRef:rightRef,
+  leftKeys:['tokens','store'],rightKeys:['type','store'],relationship:'expand',
+  fields:[{column:'id',as:'matched'}]}]});
+ assert.equal(out.rowCount,3);
+ const cold=new ReportDatasets({directory:f.directory,scope:f.scope,maxRows:'all'});
+ assert.deepEqual((await cold.inspect({datasetRef:out.datasetRef,offset:1,limit:2,columns:['matched']})).preview,[{matched:'r3'},{matched:'r2'}]);
+ assert.equal((await cold.readDataset({datasetRef:out.datasetRef,offset:2,column:'matched'})).value,'r2');
+ const saved=await storage.get(out.datasetRef);
+ assert.ok(saved.storage.parts.length>1);
+ assert.equal(out.audit.joins[0].duplicateTokens,1);
+ await cold.verifyDerived({...saved.data,snapshotId:saved.snapshotId,readAt:saved.readAt});
+});
 test('fresh restore refuses symlinked dependency files even if their content/hash and environment are otherwise correct',async t=>{
  const f=await fixture(t),out=await f.d.relate(f.a),name=f.a.joins[0].datasetRef+'.json',file=path.join(f.directory,'datasets',name),moved=path.join(f.root,name);
  await rename(file,moved);await symlink(moved,file);

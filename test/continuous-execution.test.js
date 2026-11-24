@@ -9,6 +9,33 @@ import { JsonStore } from '../src/shared/store.js';
 import { planQuery } from '../src/shared/environment-access.js';
 import {nativeGrantedEntry} from '../src/runner/investigation-entry.js';
 
+test('verified read-only OOM returns the original checkpoint to the normal queue without reusing its grant',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'agentos-worker-memory-'));
+ t.after(()=>rm(dir,{recursive:true,force:true}));
+ const file=path.join(dir,'state.json');
+ const question={id:'q',senderId:'person',profile:'knowledge-ltx',projectId:'ltx',chatId:'group'};
+ const checkpoint={questionId:'q',workspace:'/fixed/snapshot',threadId:'thread',executionEngine:'native-tools-v1'};
+ const job={id:'job',questionId:'q',status:'running',originProfile:question.profile,senderId:question.senderId,
+  projectId:question.projectId,chatId:question.chatId,taskIntent:'analysis',continuousInvestigation:true,
+  stage:'developer',lease:{id:'first',runnerId:'runner'},events:[],context:[{kind:'environment_result',result:{summary:'saved data'}}],
+  analysisContinuation:checkpoint,analysisSourceSnapshot:{workspace:checkpoint.workspace},
+  environmentAccess:{environmentId:'read-only',scopeHash:'old-grant'}};
+ await writeFile(file,JSON.stringify({version:1,jobs:[job],questions:{q:question},runners:{},processedMessages:{}}));
+ const store=new JsonStore(file);
+ const result={outcome:'blocked',executionFailure:{code:'TASK_WORKER_MEMORY'}};
+ const requeued=await store.appendEvent(job.id,{type:'completed',leaseId:'first',runnerId:'runner',processesExited:true,result});
+ assert.equal(requeued.event.type,'queued');
+ assert.equal(requeued.job.status,'queued');
+ assert.equal(requeued.job.environmentAccess,undefined);
+ assert.equal(requeued.job.lease,null);
+ assert.deepEqual(requeued.job.context,job.context);
+ assert.deepEqual(requeued.job.analysisContinuation,checkpoint);
+ assert.equal(requeued.job.executorRecovery.replayBusinessStep,false);
+ const next=await store.leaseNext('runner',['developer']);
+ const failedAgain=await store.appendEvent(job.id,{type:'completed',leaseId:next.lease.id,runnerId:'runner',processesExited:true,result});
+ assert.equal(failedAgain.job.status,'blocked');
+});
+
 test('native initial approved source enters the main worker once without an outer environment model',async()=>{
  const root={id:'native-initial',questionId:'q',projectId:'a',stage:'developer',taskIntent:'analysis',continuousInvestigation:true,lease:{id:'lease',runnerId:'r'},context:[],environmentAccess:{environmentId:'db',tier:'prd'}};
  const calls=[];const runner=new AgentRunner({runnerId:'r',analysisEngine:'native-tools-v1'},async j=>{calls.push(j);return{outcome:'ready',finalMessage:'same-thread evidence'};});

@@ -41,6 +41,33 @@ function questionEvidence(prior, supplied = []) {
   ]);
 }
 
+export function queueMemoryCheckpoint(state,job,at,{maintenance=false}={}){
+  const q=state.questions?.[job.questionId], checkpoint=job.analysisContinuation;
+  if(job.status!==(maintenance?'blocked':'running')||job.taskIntent!=='analysis'
+    ||!job.continuousInvestigation||job.stage!=='developer'||!q||q.closedAt||q.withdrawnAt
+    ||q.senderId!==job.senderId||q.profile!==(job.originProfile??job.agentProfile)
+    ||q.projectId!==job.projectId||q.chatId!==job.chatId
+    ||state.jobs.findLast(item=>item.questionId===q.id)?.id!==job.id
+    ||state.cardMessages?.['question:'+q.id]?.error==='原消息已撤回，停止更新'
+    ||(state.conversations??[]).some(turn=>turn.questionId===q.id&&['queued','thinking','decided','ready'].includes(turn.status))
+    ||checkpoint?.questionId!==q.id||checkpoint.executionEngine!=='native-tools-v1'
+    ||!checkpoint.workspace||checkpoint.workspace!==job.analysisSourceSnapshot?.workspace||!checkpoint.threadId
+    ||job.events.some(event=>event.type==='cancel_requested'||event.type==='worker_memory_checkpoint_queued'))return false;
+  if(maintenance&&job.result?.executionFailure?.code!=='TASK_WORKER_MEMORY')return false;
+  const interruptedEnvironment=job.environmentAccess?{environmentId:job.environmentAccess.environmentId,scopeHash:job.environmentAccess.scopeHash}:undefined;
+  job.executorRecovery={version:1,reviewPending:true,at,reason:'task_worker_memory',
+    fixedSourcePreserved:true,replayBusinessStep:false,interruptedEnvironment};
+  delete job.environmentAccess;
+  delete job.browserResumeClaim;
+  delete job.browserCheckpoint;
+  job.result=null;
+  job.lease=null;
+  job.status='queued';
+  job.updatedAt=at;
+  job.events.push({id:createId('EVT'),type:'worker_memory_checkpoint_queued',at,processesExited:true,businessReplay:false});
+  return true;
+}
+
 export class JsonStore {
   constructor(file) {
     this.file = path.resolve(file);
@@ -548,6 +575,11 @@ export class JsonStore {
       }
       const entry = { id: createId('EVT'), at: new Date().toISOString(), ...event };
       job.events.push(entry);
+      if(event.type==='completed'&&event.processesExited===true&&event.leaseId
+        &&event.result?.outcome==='blocked'&&event.result.executionFailure?.code==='TASK_WORKER_MEMORY'
+        &&queueMemoryCheckpoint(state,job,entry.at)){
+        return {job:structuredClone(job),event:{...entry,type:'queued'},nextJob:null};
+      }
       if (event.type === 'heartbeat' && job.lease) {
         job.lease.expiresAt = new Date(Date.now() + 120_000).toISOString();
       }

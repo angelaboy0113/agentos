@@ -102,8 +102,13 @@ export async function verifyPeriodDataset(data,load,options={}){
    for(const k of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(!sameJSON(data[k],rebuilt[k]))bad('显式维度与完整原始来源重算不一致');
   }else if(kind==='dataset_relation'){
    if(data.derivation.version!==1)bad('不支持的关联展开配方版本');
-   const rebuilt=await buildRelationalDataset(data.derivation.args,read,options);
-   for(const k of ['rows','columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(!sameJSON(data[k],rebuilt[k]))bad('关联展开与完整原始来源重算不一致');
+   const rebuilt=await buildRelationalDataset(data.derivation.args,read,{...options,writeRows:async(rows,finish)=>{
+    let index=0;
+    for await(const row of rows)if(!sameJSON(data.rows[index++],row))bad('关联展开与完整原始来源重算不一致');
+    if(index!==data.rows.length)bad('关联展开与完整原始来源重算不一致');
+    return finish([]);
+   }});
+   for(const k of ['columns','numericColumns','readAt','readThroughAt','snapshotId','derivation'])if(!sameJSON(data[k],rebuilt[k]))bad('关联展开与完整原始来源重算不一致');
   }else if(kind==='window_counts'){
    if(data.derivation.version!==1)bad('不支持的窗口配方版本');const args=data.derivation.args;
    await read(args.populationRef);for(const source of args.sources)await read(source.datasetRef);

@@ -96,20 +96,23 @@ export class ReportDatasets {
   return {expectedColumns:data.columns,requiredChecks:required,checkCandidates:checks.map(({sourceProof,referenceCandidates,...c})=>({...c,referenceCandidates:referenceCandidates.slice(0,8),referenceCandidatesLimited:referenceCandidates.length>8})),populationCandidates:populations.slice(0,12),populationCandidatesLimited:populations.length>12,note:'Previously verified catalog/resident datasets only; refresh list_datasets for additional saved evidence. Structural candidates only: matching draft keys or distinct raw-query provenance does not establish the original business scope, filters or amounts. Verify original requirements and definitions; do not shrink scope to match the draft. Different aliases and derived baselines remain supported explicitly. Use list_datasets pagination for additional saved candidates. No query executed and no verification receipt issued.'};
  }
  async inspect({datasetRef,offset=0,limit=20,columns,sections}={}){
-  await this.check();const data=await this.restore(datasetRef);if(!data)throw new ReportInputError('Invalid dataset reference');
+  await this.check();
+  if(!Number.isSafeInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>100)throw new ReportInputError('Inspect needs nonnegative offset and limit 1..100');
+  const data=await this.readDatasetRange(datasetRef,offset,limit);
+  if(!data)throw new ReportInputError('Invalid dataset reference');
   columns??=data.columns;
   const allowedSections=['preview','queryDefinition','derivation','dependencies','reportDraft'];
   if(sections!==undefined&&(!Array.isArray(sections)||!sections.length||sections.some(s=>!allowedSections.includes(s))))throw new ReportInputError('sections须为preview/queryDefinition/derivation/dependencies/reportDraft的非空数组');
-  if(!Number.isInteger(offset)||offset<0||offset>data.rows.length||!Number.isInteger(limit)||limit<1||limit>100||!Array.isArray(columns)||!columns.length||new Set(columns).size!==columns.length||columns.some(c=>!data.columns.includes(c)))throw new ReportInputError('Inspect needs actual columns and nonnegative offset, limit 1..100');
+  if(offset>data.rowCount||!Array.isArray(columns)||!columns.length||new Set(columns).size!==columns.length||columns.some(c=>!data.columns.includes(c)))throw new ReportInputError('Inspect needs actual columns and nonnegative offset, limit 1..100');
   const rows=[];let bytes=0;
-  for(const row of data.rows.slice(offset,offset+limit)){const selected=Object.fromEntries(columns.map(c=>[c,row[c]])),size=Buffer.byteLength(JSON.stringify(selected));if(bytes+size>8000)break;rows.push(selected);bytes+=size;}
+  for(const row of data.rows){const selected=Object.fromEntries(columns.map(c=>[c,row[c]])),size=Buffer.byteLength(JSON.stringify(selected));if(bytes+size>8000)break;rows.push(selected);bytes+=size;}
   const dependencies=[];
-  for(const ref of datasetDependencies(data)){const d=await this.restore(ref);if(d)dependencies.push({datasetRef:ref,kind:d.reportDraft?'report_draft':d.derivation?.kind??'query',columns:d.columns,rowCount:d.rows.length,queryHash:d.queryHash,dependencies:datasetDependencies(d)});}
+  for(const ref of datasetDependencies(data)){const d=await this.readDatasetRange(ref,0,0);if(d)dependencies.push({datasetRef:ref,kind:d.reportDraft?'report_draft':d.derivation?.kind??'query',columns:d.columns,rowCount:d.rowCount,queryHash:d.queryHash,dependencies:datasetDependencies(d)});}
   const populationPlans=[];
-  for(const source of data.reportDraft?.sources??[]){const d=await this.restore(source.datasetRef);if(d?.derivation?.kind==='period_grid'){const a=d.derivation.args;populationPlans.push({tool:'period_dataset',arguments:{populationRef:a.populationRef,keyColumns:a.keyColumns,period:a.period,rowKey:a.rowKey??'period_key',sources:[]},keyColumn:a.rowKey??'period_key'});}}
+  for(const source of data.reportDraft?.sources??[]){const d=await this.readDatasetRange(source.datasetRef,0,0);if(d?.derivation?.kind==='period_grid'){const a=d.derivation.args;populationPlans.push({tool:'period_dataset',arguments:{populationRef:a.populationRef,keyColumns:a.keyColumns,period:a.period,rowKey:a.rowKey??'period_key',sources:[]},keyColumn:a.rowKey??'period_key'});}}
   const q=data.queryDefinition;
   await this.check();
-  const result={datasetRef,inputEvidence:data.inputEvidence??null,columns:data.columns,rowCount:data.rows.length,historical:Date.now()-Date.parse(data.readAt)>86400000,preview:rows,previewOffset:offset,nextOffset:offset+rows.length<data.rows.length?offset+rows.length:null,previewBlocked:rows.length===0&&offset<data.rows.length,previewNote:'Saved evidence only, no database read; old readAt is historical, not current. If previewBlocked, select fewer columns or use read_dataset for a long cell. Preview is not a complete population.',readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,sourceRead:data.sourceRead,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,dependencies,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns,finalization:{...await this.finalizationHints(data),populationPlans,snapshotWindowMs:this.snapshotWindowMs,note:'Each numeric check requires a different raw query. A period coverage population is a separate period_dataset with sources=[], not a metric grid. populationPlans only describe existing population/range; verify business scope and raw provenance before use.'}}:undefined};
+  const result={datasetRef,inputEvidence:data.inputEvidence??null,columns:data.columns,rowCount:data.rowCount,historical:Date.now()-Date.parse(data.readAt)>86400000,preview:rows,previewOffset:offset,nextOffset:offset+rows.length<data.rowCount?offset+rows.length:null,previewBlocked:rows.length===0&&offset<data.rowCount,previewNote:'Saved evidence only, no database read; old readAt is historical, not current. If previewBlocked, select fewer columns or use read_dataset for a long cell. Preview is not a complete population.',readAt:data.readAt,snapshotId:data.snapshotId,queryHash:data.queryHash,sourceRead:data.sourceRead,queryDefinition:q?{sql:q.sql.slice(0,6000),params:q.params.slice(0,50),limited:q.sql.length>6000||q.params.length>50}:null,derivation:data.derivation,dependencies,reportDraft:data.reportDraft?{sources:data.reportDraft.sources,columns:data.reportDraft.columns,finalization:{...await this.finalizationHints(data),populationPlans,snapshotWindowMs:this.snapshotWindowMs,note:'Each numeric check requires a different raw query. A period coverage population is a separate period_dataset with sources=[], not a metric grid. populationPlans only describe existing population/range; verify business scope and raw provenance before use.'}}:undefined};
   if(sections)for(const section of allowedSections)if(!sections.includes(section))delete result[section];
   result.omittedSections=[];
   for(const section of ['preview','dependencies','derivation','queryDefinition','reportDraft']){
@@ -126,6 +129,18 @@ export class ReportDatasets {
   let saved;try{saved=await this.storage.get(ref);}catch{throw new ReportInputError('数据集范围、文件或摘要校验失败；先调用list_datasets核对本任务已有成果，必要时重新取数。');}await this.check();
   if(saved.data.rows.length>this.maxRows)throw new ReportInputError('恢复数据集超过当前授权行数上限');
   this.sourceScopes.set(ref,saved.scope);const data={...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};this.remember(ref,data);return data;
+ }
+ async readDatasetRange(ref,offset,limit,allowPartial=false){
+  const data=this.datasets.get(ref);
+  if(data)return {...data,rows:data.rows.slice(offset,offset+limit),rowCount:data.rows.length};
+  await this.check();
+  if(!this.storage)return null;
+  let saved;
+  try{saved=await this.storage.get(ref,{range:{offset,limit},allowPartial});}
+  catch{throw new ReportInputError('数据集范围、文件或摘要校验失败；先调用list_datasets核对本任务已有成果，必要时重新取数。');}
+  await this.check();
+  if(saved.storedRowCount>this.maxRows)throw new ReportInputError('恢复数据集超过当前授权行数上限');
+  return {...saved.data,rowCount:saved.storedRowCount,readAt:saved.readAt,snapshotId:saved.snapshotId};
  }
  // Only evict memory copies backed by validated task storage; disk references stay immutable.
  remember(ref,data){
@@ -154,12 +169,11 @@ export class ReportDatasets {
  }
  async readDataset({datasetRef,offset=0,column,textOffset=0,limit=1024}){
   await this.check();if(!Number.isInteger(offset)||offset<0||!Number.isInteger(textOffset)||textOffset<0||!Number.isInteger(limit)||limit<1||limit>4000)throw new ReportInputError('证据分页位置须为非负整数，limit为1至4000字符；按nextTextOffset续读');
-  let data=this.datasets.get(datasetRef);
-  if(!data&&this.storage){const saved=await this.storage.get(datasetRef,{allowPartial:true});data={...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};}
-  if(!data||!data.columns.includes(column)||offset>=data.rows.length)throw new ReportInputError('证据引用、行号或列名无效；只能读取本任务实际保存字段');
-  const value=data.rows[offset][column],text=value===null?null:String(value);if(textOffset>(text?.length??0))throw new ReportInputError('字段分页位置超出实际长度');
+  const data=await this.readDatasetRange(datasetRef,offset,1,true);
+  if(!data||!data.columns.includes(column)||offset>=data.rowCount)throw new ReportInputError('证据引用、行号或列名无效；只能读取本任务实际保存字段');
+  const value=data.rows[0][column],text=value===null?null:String(value);if(textOffset>(text?.length??0))throw new ReportInputError('字段分页位置超出实际长度');
   const part=text===null?null:text.slice(textOffset,textOffset+limit),nextTextOffset=text!==null&&textOffset+limit<text.length?textOffset+limit:null;
-  await this.check();return {datasetRef,offset,column,value:part,totalCharacters:text?.length??0,nextTextOffset,nextRowOffset:nextTextOffset===null&&offset+1<data.rows.length?offset+1:null,rowCount:data.rows.length,complete:data.complete,readAt:data.readAt,snapshotId:data.snapshotId,note:'仅分段显示；null仍为null，完整性沿用原查询，未取新数据。'};
+  await this.check();return {datasetRef,offset,column,value:part,totalCharacters:text?.length??0,nextTextOffset,nextRowOffset:nextTextOffset===null&&offset+1<data.rowCount?offset+1:null,rowCount:data.rowCount,complete:data.complete,readAt:data.readAt,snapshotId:data.snapshotId,note:'仅分段显示；null仍为null，完整性沿用原查询，未取新数据。'};
  }
  async summarize(args){
   await this.check();const base=await this.restore(args.datasetRef);if(base)await this.verifyDerived(base);
@@ -198,9 +212,19 @@ export class ReportDatasets {
  async relate(args){
   await this.check();const validation={};
   const load=async ref=>{const d=await this.restore(ref);if(d)await this.verifyDerived(d,validation);return d;};
-  const data=await buildRelationalDataset(args,load,{check:()=>this.check(),maxRows:this.maxRows}),ref='dataset-'+randomUUID();
-  if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
-  return {datasetRef:ref,complete:true,rowCount:data.rows.length,columns:data.columns,readAt:data.readAt,readThroughAt:data.readThroughAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'完整保存数据按显式粒度关联展开，配方可重算；仍需范围、计算分量及实际文件核验'};
+  const ref='dataset-'+randomUUID(),samples=[];
+  const writeRows=this.storage?async (rows,finish)=>{
+   const limit=this.previewRows;
+   async function* withPreview(){
+    for await(const row of rows){if(samples.length<limit)samples.push(row);yield row;}
+   }
+   const saved=await this.storage.saveRows(ref,withPreview(),finish);
+   return saved.data;
+  }:undefined;
+  const data=await buildRelationalDataset(args,load,{check:()=>this.check(),maxRows:this.maxRows,writeRows});
+  await this.check();
+  if(!this.storage)this.remember(ref,data);
+  return {datasetRef:ref,complete:true,rowCount:data.derivation.audit.outputRows,columns:data.columns,readAt:data.readAt,readThroughAt:data.readThroughAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(this.storage?samples:data.rows,this.previewRows),stage:'完整保存数据按显式粒度关联展开，配方可重算；仍需范围、计算分量及实际文件核验'};
  }
  async period(args){
   await this.check();const data=await buildPeriodDataset(args,ref=>this.restore(ref),{check:()=>this.check(),maxRows:this.maxRows}),ref='dataset-'+randomUUID();

@@ -1,3 +1,8 @@
+## 1.155.2
+
+- Stream joins into the existing verified dataset chunks, paginate saved rows without loading the complete result, and allow exact additional keys alongside literal-list membership joins.
+- Return interrupted read-only investigations with a confirmed exited worker and a verified same-session checkpoint to the normal memory-aware queue. Resume by reviewing saved evidence under the original scope and renewed read authorization.
+
 ## 1.155.1
 
 - Name new Feishu PRD documents from the concise business title in the approved draft. The same drafting session condenses the initial text, linked Feishu draft and confirmed decisions into that title.
