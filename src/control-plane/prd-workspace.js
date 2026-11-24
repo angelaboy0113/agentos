@@ -313,7 +313,7 @@ function applyPending(state, q, project) {
       senderId: q.senderId, agentProfile: q.profile, originProfile: q.profile, originChatType: 'group', agentRole: 'developer', stage: 'developer',
       workflow: 'continuous_analysis', continuousInvestigation: true, taskIntent: 'analysis', sourceEnvironment,
       sourceMessageId: turn.id, replyToMessageId: q.messageId, originalQuestion: text, currentQuestion: text, instruction: text, attachments,
-      prd: { revision: 1, exportRevision: 1, auto: true, businessFinal: true, reviewBasis: true, fixedFinalSections: true, inlinePrototypes: true, nativePrototypeEdits: true, nativeUiCapture: true } });
+      prd: { revision: 1, exportRevision: 1, auto: true, businessFinal: true, reviewBasis: true, processDesign: true, fixedFinalSections: true, inlinePrototypes: true, nativePrototypeEdits: true, nativeUiCapture: true } });
     job = created.job;
     q.title = (drafts[0]?.title || requesterText).slice(0, 120);
   } else {
@@ -331,7 +331,7 @@ function applyPending(state, q, project) {
       delete job.analysisSourceSnapshot;
       delete job.analysisSourceSnapshots;
     }
-    job.prd = { revision, exportRevision: revision, auto: true, businessFinal: true, reviewBasis: true, fixedFinalSections: true, inlinePrototypes: true, nativePrototypeEdits: true, nativeUiCapture: true, ...(refreshSource ? { refreshSource: true } : {}), ...(previous ? { previousRevision: {
+    job.prd = { revision, exportRevision: revision, auto: true, businessFinal: true, reviewBasis: true, processDesign: true, fixedFinalSections: true, inlinePrototypes: true, nativePrototypeEdits: true, nativeUiCapture: true, ...(refreshSource ? { refreshSource: true } : {}), ...(previous ? { previousRevision: {
       revision: previous.revision, url: previous.url, sentAt: previous.sentAt, digest: previous.digest, artifacts: previous.artifacts,
     } } : {}) };
     if (q.prd.delivery && !q.prd.delivery.sentAt && !q.prd.delivery.token) delete q.prd.delivery;

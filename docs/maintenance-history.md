@@ -1,3 +1,7 @@
+## 1.155.7
+
+- Bundle the PRD process-design skill into new and revised workspaces. Verify the current workflow, proposed changes and retained behavior, a representative walkthrough, and evidence references before accepting the handoff.
+
 ## 1.155.6
 
 - Support previous and next groups on private points-store preview cards. Each update keeps the same message and presents two gifts without touching points.

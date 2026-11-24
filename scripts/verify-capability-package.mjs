@@ -31,7 +31,7 @@ required.unshift('src/control-plane/admin-metrics.js','test/admin-metrics.test.j
 required.unshift('src/shared/delivery-retry.js','src/control-plane/delivery-maintenance.js','test/delivery-retry.test.js','docs/delivery-maintenance.md');
 required.unshift('src/shared/website-document-diagnostics.js','test/website-document-diagnostics.test.js','src/shared/connected-read-scope.js','scripts/prepare-connected-read-scope.mjs','test/connected-read-scope.test.js','config/connected-read-policy.example.json','docs/connected-read-scope.md');
 required.unshift('src/control-plane/remote-login-qr.js','test/remote-login-qr.test.js','docs/remote-login-qr.md','config/remote-login-qr.example.json');
-required.unshift('src/shared/prd-workspace.js','src/control-plane/prd-workspace.js','src/control-plane/prd-cloud-delivery.js','test/prd-workspace.test.js','config/prd-workspace.example.json','docs/prd-workspace.md');
+required.unshift('config/design-skills/prd-process-design/SKILL.md','src/shared/prd-workspace.js','src/control-plane/prd-workspace.js','src/control-plane/prd-cloud-delivery.js','test/prd-workspace.test.js','config/prd-workspace.example.json','docs/prd-workspace.md');
 required.unshift('src/control-plane/website-pdf-preview.js','test/website-link-inspection.test.js');
 for(const name of required){const info=await lstat(path.join(root,name));if(!info.isFile()||info.isSymbolicLink())throw new Error('Missing/unsafe package member: '+name);}
 for(const name of ['config/multi-repository-project.example.json','config/capabilities.example.json','config/task-result.schema.json','package.json','package-lock.json'])JSON.parse(await readFile(path.join(root,name),'utf8'));

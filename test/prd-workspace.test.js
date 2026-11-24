@@ -521,6 +521,12 @@ const alignedPrdResult = {
     { id: 'prd-business-purpose', required: true, status: 'passed', evidence: '初稿说明人员核对状态需跨系统；原卡确认在详情查询' },
     { id: 'prd-module-impact', required: true, status: 'passed', evidence: '依据固定源码核对了模块及显示状态的范围，原卡已确认' },
     { id: 'prd-page-fidelity', required: true, status: 'passed', evidence: '已核对适用界面和改动边界' },
+    { id: 'prd-process-design', required: true, status: 'passed', evidence: [
+      '现状链路：订单详情读取订单编号，审批系统保存决定',
+      '拟议改造及沿用：详情增加状态，审批方式沿用原规则',
+      '走查结果：一笔已有审批通过的订单只展示通过状态，不写入订单',
+      '证据定位：固定分支的详情状态读取逻辑和原卡确认',
+    ].join('\n') },
   ] },
 };
 
@@ -559,6 +565,18 @@ test('PRD review requires evidence for purpose, module impact and page fitness',
   const missing = { handoff: { checks: alignedPrdResult.handoff.checks.filter(c=>c.id!=='prd-module-impact') } };
   assert.deepEqual(prdReviewBasisMissing(job, missing), ['prd-module-impact']);
   assert.deepEqual(prdReviewBasisMissing({ prd: { businessFinal: true } }, missing), []);
+});
+
+test('new PRD runs receive the process design skill and require all four evidence fields', () => {
+  const job = { prd: { reviewBasis: true, processDesign: true } };
+  assert.match(prdGuidance(job), /逐个理解独立模块/);
+  assert.match(prdGuidance(job), /沿真实依赖往上下游追/);
+  assert.doesNotMatch(prdGuidance({}), /流程设计 Skill/);
+  assert.deepEqual(prdReviewBasisMissing(job, alignedPrdResult), []);
+  const checks = alignedPrdResult.handoff.checks.map(check => check.id === 'prd-process-design'
+    ? { ...check, evidence: check.evidence.replace(/走查结果：[^\n]+/, '走查结果：   ') } : check);
+  assert.deepEqual(prdReviewBasisMissing(job, { handoff: { checks } }), ['prd-process-design']);
+  assert.deepEqual(prdReviewBasisMissing({ prd: { reviewBasis: true } }, { handoff: { checks } }), []);
 });
 
 test('PRD final body starts with a prose summary and excludes QA and development sections', () => {
@@ -778,7 +796,7 @@ test('the requester submits the revision-bound PRD card and processing resumes w
   const [job] = (await store.read()).jobs;
   assert.equal(job.id,first.id);
   assert.equal(job.analysisContinuation.threadId,'same-native-thread');
-  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,reviewBasis:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true,nativeUiCapture:true});
+  assert.deepEqual(job.prd,{revision:2,exportRevision:2,auto:true,businessFinal:true,reviewBasis:true,processDesign:true,fixedFinalSections:true,inlinePrototypes:true,nativePrototypeEdits:true,nativeUiCapture:true});
   assert.equal(job.currentQuestion,'不展示金额。');
 });
 
