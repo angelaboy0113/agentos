@@ -1,3 +1,7 @@
+## 1.155.5
+
+- Send private points-store previews with their final card payload on first delivery. Bind the preview to its recipient and allow only points-store callbacks.
+
 ## 1.155.4
 
 - Render clearly bordered Markdown rows as Feishu tables when a separator is missing and the columns match the header. Ambiguous pipe text and fenced code retain their normal display. The existing native-table capacity and full-detail fallback still apply.

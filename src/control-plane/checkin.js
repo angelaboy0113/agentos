@@ -54,10 +54,32 @@ async function send(context, profile, receiveId, type, content, uuid, receiveIdT
   return { messageId: receipt.data.message_id, chatId: receipt.data.chat_id };
 }
 
-export async function publishCheckinCard(context, {profile, group, previewRequestId} = {}) {
+function validPointsStorePreview(card) {
+  if (card?.schema !== '2.0' || card.header?.title?.content !== 'AgentOS 积分商城'
+    || !Array.isArray(card.body?.elements) || Buffer.byteLength(JSON.stringify(card)) > 28_000) return false;
+  const nodes = [...card.body.elements];
+  let buttons = 0;
+  while (nodes.length) {
+    const node = nodes.pop();
+    if (!node || typeof node !== 'object') continue;
+    if (node.tag === 'button') {
+      if (node.disabled || !Array.isArray(node.behaviors) || node.behaviors.length !== 1 || node.behaviors[0]?.type !== 'callback'
+        || node.behaviors[0].value?.action !== 'points_store') return false;
+      buttons++;
+    }
+    nodes.push(...Object.values(node).filter(value => value && typeof value === 'object'));
+  }
+  return buttons > 0;
+}
+
+export async function publishCheckinCard(context, {profile, group, previewRequestId, pointsStorePreviewCard} = {}) {
   const preview = group === undefined;
   if (previewRequestId !== undefined && (!preview || typeof previewRequestId !== 'string' || !/^[a-zA-Z0-9_-]{8,64}$/.test(previewRequestId))) {
     throw Object.assign(new Error('新体验卡仅支持私聊，并须提供有效的请求编号'), { statusCode: 400 });
+  }
+  const shopPreview = pointsStorePreviewCard !== undefined;
+  if (shopPreview && (!preview || !previewRequestId || !validPointsStorePreview(pointsStorePreviewCard))) {
+    throw Object.assign(new Error('积分商城预览必须为仅含商城试兑按钮的私聊卡片'), { statusCode: 400 });
   }
   const agent = assistant(context, profile);
   const owner = context.projects.humanIdentities?.groupOwner?.[profile];
@@ -67,15 +89,21 @@ export async function publishCheckinCard(context, {profile, group, previewReques
   const target = preview ? owner : group;
   const key = previewRequestId === undefined
     ? (preview ? hash('preview', profile, owner) : hash('group', group))
-    : hash('preview-reissue', profile, owner, previewRequestId);
+    : hash(shopPreview ? 'points-store-preview' : 'preview-reissue', profile, owner, previewRequestId);
+  const contentHash = shopPreview ? hash(pointsStorePreviewCard) : undefined;
   const binding = await context.store.transact((state) => {
     state.checkinCards ??= {};
-    const value = state.checkinCards[key] ??= { profile, preview, target };
+    const value = state.checkinCards[key] ??= { profile, preview, target,
+      ...(shopPreview ? { purpose:'points_store', contentHash } : {}),
+    };
     return { ...value };
   });
   if (binding.profile !== profile) throw Object.assign(new Error('该群已有另一助手发布的签到卡'), { statusCode: 409 });
+  if (shopPreview && binding.contentHash !== contentHash) {
+    throw Object.assign(new Error('相同预览请求编号的卡片内容已变化'), { statusCode: 409 });
+  }
   if (binding.messageId) return { messageId: binding.messageId, chatId: binding.chatId, preview, reused: true };
-  const receipt = await send(context, profile, target, 'interactive', checkinCard(preview), key.slice(0, 32), preview ? 'open_id' : 'chat_id');
+  const receipt = await send(context, profile, target, 'interactive', pointsStorePreviewCard ?? checkinCard(preview), key.slice(0, 32), preview ? 'open_id' : 'chat_id');
   if (!preview && receipt.chatId !== group) throw new Error('群签到卡回执与登记目标不一致');
   await context.store.transact((state) => { Object.assign(state.checkinCards[key], receipt); });
   return { ...receipt, preview };
@@ -97,6 +125,9 @@ export async function handleCheckinAction(context, event, action, now = Date.now
     .find((c) => c.profile === profile && c.messageId === message && c.chatId === chat));
   if (!binding || (binding.preview ? binding.target !== senderId : !allowedGroup(context, assistant(context, profile), chat))) {
     return { ignored: true, reason: 'checkin_card_scope_mismatch' };
+  }
+  if (binding.purpose === 'points_store' && action !== 'points_store') {
+    return { ignored: true, reason: 'checkin_card_action_mismatch' };
   }
   const eventAt = Number(event.timestamp);
   const clickedAt = Number.isSafeInteger(eventAt) && eventAt >= 1e12 && eventAt <= now ? eventAt : now;

@@ -50,6 +50,23 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
     agent_profile:profile, operator_id:user, event_id:id, message_id:target.messageId, chat_id:target.chatId,
   }, action, Date.parse(time));
   const before='2026-11-23T15:59:59Z', after='2026-11-23T16:00:00Z';
+  const pointsStorePreviewCard = {schema:'2.0',header:{title:{content:'AgentOS 积分商城'}},body:{elements:[
+    {tag:'column_set',columns:[{elements:[{tag:'button',behaviors:[{type:'callback',value:{action:'points_store'}}]}]}]},
+  ]}};
+  const shopRequest = {profile,previewRequestId:'private-shop-demo',pointsStorePreviewCard};
+  const shop = await publishCheckinCard(context,shopRequest);
+  assert.deepEqual(sent.at(-1).content,pointsStorePreviewCard);
+  assert.equal(sent.at(-1).receiveId,'ou_owner');
+  assert.equal((await publishCheckinCard(context,shopRequest)).messageId,shop.messageId);
+  await assert.rejects(publishCheckinCard(context,{...shopRequest,group:'oc_group'}),{statusCode:400});
+  const changed = structuredClone(pointsStorePreviewCard);
+  changed.body.elements.push({tag:'markdown',content:'Changed'});
+  await assert.rejects(publishCheckinCard(context,{...shopRequest,pointsStorePreviewCard:changed}),{statusCode:409});
+  changed.body.elements[0].columns[0].elements[0].behaviors[0].value.action='daily_checkin';
+  await assert.rejects(publishCheckinCard(context,{...shopRequest,pointsStorePreviewCard:changed}),{statusCode:400});
+  assert.equal((await click(shop,'ou_owner','shop-invalid',before)).reason,'checkin_card_action_mismatch');
+  assert.equal((await click(shop,'ou_other','shop-other',before,'points_store')).ignored,true);
+  assert.equal((await click(shop,'ou_owner','shop-trial',before,'points_store')).ok,true);
   assert.equal((await click(preview,'ou_other','a',before)).ignored,true);
   await click(preview,'ou_owner','b',before);
   await click(fresh,'ou_owner','b2',before);
