@@ -20,12 +20,12 @@ const prototypeAnchors = body => [...body.matchAll(/^\[\[PROTOTYPE:([a-z][a-z0-9
 const marker = key => 'AGENTOSPRDFIGURE-'+key;
 const paragraph = block => block?.text?.elements?.map(e => e.text_run?.content ?? '').join('').trim();
 
-function reviewedPrdMarkdown(job, generation) {
+function reviewedPrdArtifacts(job, generation, format) {
   const { handoffGate, reportAssessment, reportInspections } = job.result;
   if (!handoffGate?.passed || reportAssessment?.decision !== 'deliver' || reportAssessment.coverage !== 'complete'
-    || reportAssessment.issues?.length) return null;
+    || reportAssessment.issues?.length) return [];
   const selected = reportAssessment.deliverables ?? [];
-  return job.reportFiles?.findLast(file => file.format === 'md' && (file.sourceJobId ?? job.id) === job.id
+  return (job.reportFiles ?? []).filter(file => file.format === format && (file.sourceJobId ?? job.id) === job.id
     && Number.isSafeInteger(file.questionGeneration) && file.questionGeneration < generation && reportEligible(job,file)
     && selected.some(item=>item.fileId===file.id && item.evidence?.trim())
     && reportInspections?.some(item=>item.status==='verified' && item.contentAudit?.structure==='passed'
@@ -206,16 +206,22 @@ export class PrdCloudDelivery {
     const eligible = (job.reportFiles ?? []).filter(file => file.questionGeneration === q.generation && reportEligible(job, file));
     const prototypes = eligible.filter(f => f.format === 'png');
     const currentMarkdown = eligible.findLast(f => f.format === 'md');
-    const reviewedMarkdown = inline && !currentMarkdown ? reviewedPrdMarkdown(job,q.generation) : null;
-    const files = [currentMarkdown ?? reviewedMarkdown, ...(inline ? prototypes : [prototypes.at(-1)])];
+    const reviewedMarkdown = inline && !currentMarkdown ? reviewedPrdArtifacts(job,q.generation,'md').at(-1) : null;
+    // A text revision can keep images reviewed again in the current handoff.
+    // A current image with the same anchor always takes precedence.
+    const reviewedPrototypes = inline && job.prd.processDesign && job.analysisSourceSnapshot?.cacheKey
+      ? reviewedPrdArtifacts(job,q.generation,'png') : [];
+    const files = [currentMarkdown ?? reviewedMarkdown, ...(inline ? [...reviewedPrototypes, ...prototypes] : [prototypes.at(-1)])];
     const previous = previousPrdDelivery(q, revision);
     const digest = prdIntentDigest([id, q.chatId, revision, q.generation, ...files.map(f => f?.sha256)]);
     let delivery = q.prd.delivery?.revision === revision ? q.prd.delivery : { revision, digest, phase: 'pending' };
     // Rebind only the pre-creation record from a missing current draft. Once
     // cloud creation starts, the original digest remains a hard guard.
     const missingBodyDigest = prdIntentDigest([id,q.chatId,revision,q.generation,undefined,...prototypes.map(f=>f.sha256)]);
-    const mayRebind = prior => reviewedMarkdown && prior?.phase === 'artifacts_missing' && !prior.token
-      && prior.digest === missingBodyDigest;
+    const currentDigest = prdIntentDigest([id,q.chatId,revision,q.generation,currentMarkdown?.sha256,...prototypes.map(f=>f.sha256)]);
+    const mayRebind = prior => prior?.phase === 'artifacts_missing' && !prior.token
+      && (reviewedMarkdown && prior.digest === missingBodyDigest
+        || reviewedPrototypes.length > 0 && prior.digest === currentDigest);
     if (delivery.digest !== digest && !mayRebind(delivery)) return;
     const save = async (phase, values = {}) => {
       const changed = await store.transact(state => {
@@ -227,7 +233,9 @@ export class PrdCloudDelivery {
           fresh.prd.deliveryHistory ??= {};
           fresh.prd.deliveryHistory[prior.revision] = prior;
         }
-        fresh.prd.delivery = { ...delivery, ...values, digest, phase, updatedAt: new Date().toISOString() };
+        const savedDigest = phase === 'artifacts_missing' && reviewedPrototypes.length
+          ? (prior?.revision === revision ? prior.digest : currentDigest) : digest;
+        fresh.prd.delivery = { ...delivery, ...values, digest: savedDigest, phase, updatedAt: new Date().toISOString() };
         return fresh.prd.delivery;
       });
       delivery = changed;
@@ -276,9 +284,14 @@ export class PrdCloudDelivery {
       for (const key of keys) {
         const index = inline ? images.findLastIndex(a => a.receipt.request?.imageGeneration?.prototypeKey === key) : 0;
         const artifact = images[index];
+        const file = files[index+1];
+        const reused = reviewedPrototypes.includes(file);
         const provenance = artifact?.receipt.request?.imageGeneration;
         const reference = await readPrdDesignReference(dir, job, provenance?.referenceId);
         const imageEdit = provenance?.proposedImage;
+        const matchesPrototype = (binding, legacyNull = false) => reused
+          ? binding?.generation === file.questionGeneration && /^[a-f0-9]{64}$/.test(binding.questionHash ?? '')
+          : matchesGeneration(binding, legacyNull);
         const referenceOnly = inline && provenance?.provider==='prd-live-screenshot' && provenance.mode==='reference-only'
           && provenance.sha256===reference?.sha256;
         const providerVerified = referenceOnly || (inline && job.prd.nativePrototypeEdits
@@ -287,19 +300,20 @@ export class PrdCloudDelivery {
             && imageEdit.referenceKinds?.[0] === 'website-design-reference'
             && imageEdit.binding?.jobId === job.id && imageEdit.binding?.questionId === id
             && imageEdit.binding?.projectId === q.projectId && imageEdit.binding?.profile === q.profile
-            && imageEdit.binding?.environment === job.sourceEnvironment && matchesGeneration(imageEdit.binding)
+            && imageEdit.binding?.environment === job.sourceEnvironment && matchesPrototype(imageEdit.binding)
+            && (!reused || imageEdit.binding.questionHash === provenance.binding?.questionHash)
           : inline ? provenance?.provider === 'prd-screenshot-composite'
             : ['codex-native','prd-screenshot-composite'].includes(provenance?.provider));
         if (!reference || provenance?.status !== 'verified' || !providerVerified
-          || provenance.sha256 !== files[index+1]?.sha256 || provenance.inputHashes?.[0] !== reference.sha256
+          || provenance.sha256 !== file?.sha256 || provenance.inputHashes?.[0] !== reference.sha256
           || provenance.referenceKinds?.[0] !== 'website-design-reference'
           || provenance.binding?.jobId !== job.id || provenance.binding?.questionId !== id
           || provenance.binding?.projectId !== q.projectId || provenance.binding?.profile !== q.profile
-          || provenance.binding?.environment !== job.sourceEnvironment || !matchesGeneration(provenance.binding, true)) {
+          || provenance.binding?.environment !== job.sourceEnvironment || !matchesPrototype(provenance.binding, true)) {
           await save('artifacts_missing', { notice: '原型缺少本轮真实目标页面截图的生成凭据。请先取得对应系统和环境的截图，再重做原型。' });
           return;
         }
-        figures.push({ key, artifact, referenceOnly });
+        figures.push({ key, artifact, referenceOnly, fileId: file.id });
       }
       const referenceHashes = (job.attachments ?? []).filter(a => a.source?.kind === 'authorized-prd-document-image'
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
@@ -372,7 +386,7 @@ export class PrdCloudDelivery {
           await save('delivered', { sentAt: new Date().toISOString(), notice: '飞书评审稿已创建，本群成员可编辑。',
             artifacts:{ generation:q.generation, markdownId:files[0].id,
               ...(reviewedMarkdown ? { markdownGeneration:reviewedMarkdown.questionGeneration } : {}),
-              ...(inline ? { prototypeIds:files.slice(1).map(f => f.id) } : { prototypeId:files[1].id }) } });
+              ...(inline ? { prototypeIds:figures.map(f => f.fileId) } : { prototypeId:files[1].id }) } });
         }
       } finally { await rm(cwd, { recursive: true, force: true }); }
     } catch (error) {

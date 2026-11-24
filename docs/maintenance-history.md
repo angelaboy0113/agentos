@@ -1,3 +1,7 @@
+## 1.155.8
+
+- Recover text-only PRD revisions with unchanged figures selected and verified in the current review. Revalidate the original screenshot, source snapshot and artifact bindings before publishing.
+
 ## 1.155.7
 
 - Bundle the PRD process-design skill into new and revised workspaces. Verify the current workflow, proposed changes and retained behavior, a representative walkthrough, and evidence references before accepting the handoff.

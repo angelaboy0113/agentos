@@ -1075,6 +1075,63 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
   assert.equal(blocks[3].text.elements[0].text_run.content,'现状实拍（已脱敏）');
 });
 
+test('PRD text revision can rebind a failed pre-creation record to a reviewed unchanged screenshot', async t => {
+  let checkedPublisher = 0;
+  const {store, workspace, send, dataDir} = await fixture(t, async args => {
+    assert.equal(args[0], 'api');
+    checkedPublisher++;
+    return {data:{open_id:'intentionally-wrong-owner'}};
+  });
+  const {questionId} = await send('om_text_revision', '我要做PRD：订单详情增加信息');
+  const [prior] = (await store.read()).jobs;
+  prior.analysisSourceSnapshot = {cacheKey:'verified-source'};
+  const referenceId = '99999999-9999-4999-8999-999999999999';
+  const item = {name:referenceId+'.png',sha256:hash(png),bytes:png.length,
+    visualPolicy:'brand-layout-v6',pageUrl:'https://test.example/target'};
+  const dir = path.join(dataDir,'website-evidence',prior.id);
+  await fs.mkdir(dir,{recursive:true});
+  await fs.writeFile(path.join(dir,item.name),png);
+  assert.equal(await savePrdDesignReference(dataDir,prior,item),referenceId);
+  const image = await saveArtifact(dataDir,prior,'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa9','png',png);
+  const receiptPath = path.join(dataDir,'exports',prior.id,image.id+'.verification.json');
+  const receipt = JSON.parse(await fs.readFile(receiptPath,'utf8'));
+  receipt.request = {imageGeneration:{status:'verified',provider:'prd-live-screenshot',mode:'reference-only',
+    prototypeKey:'order',referenceId,sha256:image.sha256,inputHashes:[item.sha256],referenceKinds:['website-design-reference'],
+    binding:{jobId:prior.id,questionId,projectId:prior.projectId,profile,environment:prior.sourceEnvironment,
+      generation:1,questionHash:hash(prior.originalQuestion)}}};
+  const verifiedReceipt = JSON.stringify(receipt);
+  await fs.writeFile(receiptPath,verifiedReceipt);
+  image.verificationHash = hash(verifiedReceipt);
+  const next = {...prior,prd:{...prior.prd,revision:2,exportRevision:2}};
+  const body = md.replace('## 页面设计与原型\n\n无','## 页面设计与原型\n\n[[PROTOTYPE:order]]');
+  const markdown = await saveArtifact(dataDir,next,'report-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa8','md',Buffer.from(body));
+  const result = {...alignedPrdResult,handoffGate:{passed:true},
+    reportAssessment:{decision:'deliver',coverage:'complete',issues:[],deliverables:[{fileId:image.id,evidence:'图已复核'}]},
+    reportInspections:[{status:'verified',contentAudit:{structure:'passed'},
+      binding:{sourceJobId:prior.id,fileId:image.id,sha256:image.sha256,verificationHash:image.verificationHash}}]};
+  const initialDigest = prdIntentDigest([questionId,chat,2,2,markdown.sha256]);
+  await store.transact(s => {
+    const q = s.questions[questionId];
+    q.generation = 2;
+    q.prd.delivery = {revision:2,digest:initialDigest,phase:'artifacts_missing'};
+    Object.assign(s.jobs[0],next,{status:'completed',result,reportFiles:[image,markdown],
+      analysisSourceSnapshot:{cacheKey:'changed-source'}});
+  });
+  await workspace.publisher.deliver(questionId);
+  assert.equal(checkedPublisher,0);
+  await store.transact(s => {
+    s.jobs[0].analysisSourceSnapshot = prior.analysisSourceSnapshot;
+    s.jobs[0].result.reportInspections = [];
+  });
+  await workspace.publisher.deliver(questionId);
+  assert.equal(checkedPublisher,0);
+  assert.equal((await store.read()).questions[questionId].prd.delivery.digest,initialDigest);
+  await store.transact(s => { s.jobs[0].result.reportInspections = result.reportInspections; });
+  await workspace.publisher.deliver(questionId);
+  assert.equal(checkedPublisher,1);
+  assert.equal((await store.read()).questions[questionId].prd.delivery.phase,'authorization_required');
+});
+
 test('registered Markdown may be handed off as a PRD without looking in the source checkout', async t => {
   const { dataDir } = await fixture(t);
   const workspace=path.join(dataDir,'source-fixture');
