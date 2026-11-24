@@ -1,3 +1,7 @@
+## 1.155.3
+
+- Keep fallback explanations for empty or unavailable data out of the causal evidence gate. Requests that ask for a business cause still require causal evidence.
+
 ## 1.155.2
 
 - Stream joins into the existing verified dataset chunks, paginate saved rows without loading the complete result, and allow exact additional keys alongside literal-list membership joins.

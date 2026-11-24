@@ -25,7 +25,10 @@ function originalAcceptanceText(job){
 
 export function requiresCausalEvidence(job) {
  // Generated directions must not add a causal acceptance gate to a report.
- const text=originalAcceptanceText(job);
+ const text=originalAcceptanceText(job)
+  .replace(/[【\[]\s*(?:无法完成时|取数失败时|数据不可用时)\s*[】\]][^【]*?(?=[【]|$)/g,' ')
+  .replace(/(?:如果|若是?|如遇)(?:查询|取数|结果|数据)[^。！？；\n]{0,36}(?:零条|0\s*条|为空|无记录)[^。！？；\n]*(?:[；;][^。！？\n]{0,30}(?:确认为|确认确实为|确认是|确实为)[^。！？\n]*)?/g,' ')
+  .replace(/(?:如果|若是?|如遇)(?:因为|由于)?[^。！？；\n]{0,90}(?:无法完成|拿不到(?:数据|记录|清单)|查不到(?:数据|记录|明细)|取数失败)[^。！？；\n]*(?:如实|说明原因|告知原因)[^。！？；\n]*/g,' ');
  return (job.prd?explicitCausalRequest:causalQuestion).test(text);
 }
 export function requiresDeepInvestigation(job) {

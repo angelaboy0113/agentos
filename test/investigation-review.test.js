@@ -272,6 +272,14 @@ test('source-backed where-to-create guidance normalizes ready and partial before
  const strict=assessInvestigation(live,original);assert.equal(enforceHandoff(strict,await validateHandoff(live,strict,dir)).outcome,'blocked');
 });
 
+test('zero-result or unavailable-data fallback instructions do not make a report causal',()=>{
+ const request='核查期间提报并输出两张表。若查询得到0条，请复查。确认是0条就说明原因。【无法完成时】如果拿不到费用名单，请如实说明原因。';
+ assert.equal(requiresCausalEvidence({originalQuestion:request.replace('。确认是','；确认是')}),false);
+ assert.equal(requiresCausalEvidence({originalQuestion:'请输出清单。如果由于权限限制无法完成，请如实说明原因。'}),false);
+ assert.equal(requiresCausalEvidence({originalQuestion:'为什么审批失败？'+request}),true);
+ assert.equal(requiresCausalEvidence({originalQuestion:'如果发现重复上账，请调查根因。'}),true);
+});
+
 test('generated investigation instructions cannot turn an accepted reconciliation report into a root-cause investigation',()=>{
  const job={taskIntent:'analysis',stage:'developer',originalQuestion:'核对订单与明细金额，导出完整CSV，保留无法解释的差额，不补假零。',instruction:'深入分析异常原因与根因，继续定位失败环节'};
  assert.equal(requiresCausalEvidence(job),false);assert.equal(requiresDeepInvestigation(job),false);
