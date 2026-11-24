@@ -305,7 +305,9 @@ export class PrdCloudDelivery {
         && a.source.questionId === id && a.source.originProfile === q.profile && a.source.projectId === q.projectId)
         .map(a => a.source.sha256);
       const baseline = previous ? await readPrdRevisionBaseline(dir, job, previous).catch(() => null) : null;
-      const body = prdMarkdown(raw, { prototypeHash: files[1]?.sha256, referenceHashes, tableRequired: !job.prd.fixedFinalSections });
+      const reviewedBody = prdMarkdown(raw, { prototypeHash: files[1]?.sha256, referenceHashes, tableRequired: !job.prd.fixedFinalSections });
+      const title = prdDocumentTitle(q, revision, job.prd.businessFinal, reviewedBody);
+      const body = job.prd.businessFinal ? reviewedBody.replace(/^#[ \t]+[^\r\n]+/, () => '# ' + title) : reviewedBody;
       const highlighted = prdHighlightChanges(baseline, body);
       const markdown = inline ? highlighted.replace(/^\[\[PROTOTYPE:([a-z][a-z0-9-]{0,63})\]\][ \t]*$/gm, (_, key) => marker(key)) : highlighted;
       const hasHighlights = markdown.includes('<span background-color=');
@@ -330,7 +332,7 @@ export class PrdCloudDelivery {
           }
           await save('creating', { publisherProfile:config.profile, inlineHighlights:hasHighlights });
           const created = await call(['docs', '+create', '--as', 'user', '--parent-position', 'my_library',
-            '--doc-format', 'markdown', '--title', prdDocumentTitle(q, revision, job.prd.businessFinal), '--content', '-'], { input: markdown, timeoutMs: 90_000 });
+            '--doc-format', 'markdown', '--title', title, '--content', '-'], { input: markdown, timeoutMs: 90_000 });
           await save('created', documentIdentity(created));
         }
         const doc = delivery.token;

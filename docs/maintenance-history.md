@@ -1,3 +1,7 @@
+## 1.155.1
+
+- Name new Feishu PRD documents from the concise business title in the approved draft. The same drafting session condenses the initial text, linked Feishu draft and confirmed decisions into that title.
+
 ## 1.153.9
 
 - Read visible PDF links from reviewed attachment directories without navigating away from the active website. Save verified bytes and a first-page preview in the task work area when a trusted rasterizer is configured. Ungranted targets remain a recoverable navigation diagnostic.

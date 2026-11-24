@@ -570,6 +570,9 @@ test('PRD final body starts with a prose summary and excludes QA and development
   assert.equal(prdFinalContentIssue(md.replace('## 页面设计与原型\n\n无',
     '## 页面设计与原型\n\n### 弹窗\n\n[[PROTOTYPE:dialog]]'), true), null);
   assert.equal(prdDocumentTitle({ title: '订单跟踪 · 需求初稿' }, 3, true), '订单跟踪 · 需求文档');
+  assert.equal(prdDocumentTitle({ title: '我要做一个PRD https://unit.feishu.cn/docx/Draft' }, 3, true, md), '订单补贴状态');
+  assert.equal(prdDocumentTitle({ title: '很长的描述'.repeat(20) }, 1, true, '# 订单协查\n\n## 摘要'), '订单协查');
+  assert.equal(prdDocumentTitle({ title: '订单跟踪 · 需求初稿' }, 2, true, '# 需求文档\n\n## 摘要'), '订单跟踪');
   assert.match(prdFinalContentIssue('# 订单跟踪\n\n## 摘要\n\n## 业务规则'), /摘要/);
   for (const text of ['## 验收标准', '## 待确认事项', '## 研发实现', '## 版本记录', '|编号|测试用例|']) {
     assert.match(prdFinalContentIssue(md + '\n' + text), /移除/);
@@ -583,6 +586,7 @@ test('PRD without UI changes retains its prototype section and shares without an
     if (args[0] === 'api') return { data: { open_id: owner } };
     if (args[0] === 'auth') return { ok: true, missing: [] };
     if (args[1] === '+create') {
+      assert.equal(args[args.indexOf('--title') + 1], '订单补贴状态');
       assert.match(options.input, /## 页面设计与原型\n\n无$/);
       return { data: { document_id: 'NoUiPrototype', url: 'https://unit.feishu.cn/docx/NoUiPrototype' } };
     }
@@ -625,6 +629,7 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
     assert.ok(args.includes('user'));
     if (args[0] === 'api') return { data: { open_id: owner } };
     if (args[1] === '+create') {
+      assert.equal(args[args.indexOf('--title') + 1], '订单补贴状态');
       drafts.push(opts.input);
       image=false;
       const token=drafts.length===1?doc:doc+'Second';
