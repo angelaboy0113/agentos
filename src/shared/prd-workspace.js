@@ -121,6 +121,7 @@ ${processDesignSkill}
 ` : ''}
 ${job.prd.decisionReview ? `
 先按 Skill 对拟议改动做一次反向评审，在原卡合并询问全部尚缺的实质决定，避免逐个追问。禁止自行选定会改变业务结果的默认值。交付增加 ${decisionCheck} 核验项，status=passed，evidence 五行按顺序为 ${decisionLabels.join('、')}。每行写「栏目：适用｜本轮正文对应的小节、已确认选择及它如何改变结果」或「栏目：不适用｜范围依据」。每项适用规则同时写进正文。验收时读回候选正文及原型，结合证据复查默认值、权限、失败与同批等适用分支，未确认则回到卡片，并保留已查证内容。
+blocker.needed 直接给出可在输入框作答的具体问题和选项，勿引用 finalMessage、内部字段或「见上文」。现行配置和口径由助手取证；跨期影响须明确是只改变扣减，还是也改变源业绩归属及可申请额度。配置型规则要确认空值、边界日期和并行单据顺序，适用时合并询问。
 ${prdNeedsFlowchart(job) ? '在「操作流程」使用飞书可编辑流程图，正文写一个或多个 mermaid 围栏代码块。首行 flowchart TD 或 flowchart LR，后续每行一条边，例如 A["提交申请"] --> B{"审批通过"}、B -->|是| C["生成待处理单"]（示例之间实际换行）。只用英数节点标识、带双引号的节点标签、简单箭头及分支标签，禁止链接、样式指令及外部资源。图呈现关键条件和汇合点，配流程表写详细规则。' : '图表按复杂度选用，简单变更无需硬加流程图。'}
 新增操作放在界面留白，规避 designLayout.actionRegions。只有需求明确改动已有按钮时才在 PNG 的 editableActions 列其零起始下标；其他按钮的截图原像素会保留。
 ` : ''}
@@ -186,8 +187,14 @@ export function prdBusinessWait(job, result) {
   if (!job.prd?.businessFinal || investigation?.blocker?.kind !== 'user_input'
     || !investigation.blocker.needed?.trim() || result.environmentSetup || result.browserLoginRequired
     || result.websiteQuery || result.environmentQuery || result.sourceEnvironmentQuery || result.sourceHistoryQuery) return result;
+  const blocker = investigation.blocker;
+  const referencesAnotherField = /finalMessage|见(?:上文|正文|详细说明)|(?:上方|上述)(?:第|问题|事项)/i.test(blocker.needed);
+  const questions = referencesAnotherField
+    ? String(result.finalMessage ?? '').split(/\r?\n/).filter(line => /^\s*\d+[.、)）]\s*\S/.test(line) && /[？?]/.test(line))
+    : [];
   return { ...result, outcome: 'needs_clarification', documentRequests: null, reportAssessment: null,
     reportReviewRequired: false, investigation: { ...investigation, status: 'wait',
+      blocker: questions.length ? {...blocker,needed:questions.join('\n')} : blocker,
       goals: (investigation.goals ?? []).map(goal => goal.required ? { ...goal, status: 'open' } : goal) } };
 }
 

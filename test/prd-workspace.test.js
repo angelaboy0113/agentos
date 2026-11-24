@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { JsonStore } from '../src/shared/store.js';
 import { PrdWorkspace } from '../src/control-plane/prd-workspace.js';
 import { prdMarkdown } from '../src/control-plane/prd-cloud-delivery.js';
-import { prdBusinessAligned, prdFinalContentIssue, prdFinalSections, prdFlowchartIssue, prdDocumentTitle, prdGuidance, prdIntentDigest, prdReviewBasisMissing } from '../src/shared/prd-workspace.js';
+import { prdBusinessAligned, prdBusinessWait, prdFinalContentIssue, prdFinalSections, prdFlowchartIssue, prdDocumentTitle, prdGuidance, prdIntentDigest, prdReviewBasisMissing } from '../src/shared/prd-workspace.js';
 import { prdHighlightChanges } from '../src/shared/prd-revision.js';
 import { requiresCausalEvidence } from '../src/shared/investigation-review.js';
 
@@ -554,6 +554,14 @@ test('unanswered PRD decisions return to the form before creating files', async 
   assert.equal(prepared.result.investigation.goals[0].status, 'open');
   assert.equal(prdBusinessAligned(job, prepared.result), false);
   assert.equal(prdBusinessAligned(job, alignedPrdResult), true);
+});
+
+test('PRD clarification places the actual questions beside the form', () => {
+  const job = {prd:{businessFinal:true}};
+  const questionList = '1. 只调整扣罚，还是也调整退货额度？\n2. 同批先退货，还是先扣罚？';
+  const result = {finalMessage:'请确认以下规则\n'+questionList+'\n技术依据\n1. 已读取现行规则。',
+    investigation:{goals:[],blocker:{kind:'user_input',needed:'请在卡片按 finalMessage 确认'}}};
+  assert.equal(prdBusinessWait(job,result).investigation.blocker.needed,questionList);
 });
 
 test('PRD review requires evidence for purpose, module impact and page fitness', () => {

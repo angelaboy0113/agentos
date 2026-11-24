@@ -1,3 +1,7 @@
+## 1.155.10
+
+- Show the actual numbered clarification questions above the PRD response form when a draft points to another internal result field. Ask for business scope changes instead of re-asking for existing configuration.
+
 ## 1.155.9
 
 - Review unresolved business decisions before PRD delivery, publish editable flowcharts for branching workflows, preserve existing action pixels, and include the document link in delivery notices.
