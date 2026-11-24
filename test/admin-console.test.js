@@ -51,7 +51,9 @@ test('local admin console serves task records and safely updates runtime setting
 
   const page = await fetch(`${base}/admin`);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /AgentOS 控制台/);
+  const html = await page.text();
+  assert.match(html, /AgentOS 控制台/);
+  assert.match(html, /data-view="checkins"/);
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   const cookie = page.headers.get('set-cookie').split(';')[0];
 
@@ -72,6 +74,13 @@ test('local admin console serves task records and safely updates runtime setting
   }
 
   assert.equal((await fetch(`${base}/api/v1/admin/usage`)).status,401);
+  const checkinsUrl = base+'/api/v1/admin/checkins';
+  assert.equal((await fetch(checkinsUrl)).status,401);
+  const checkinsResponse = await fetch(checkinsUrl,{headers:{cookie}});
+  assert.equal(checkinsResponse.status,200);
+  assert.equal(checkinsResponse.headers.get('cache-control'),'no-store');
+  assert.deepEqual((await checkinsResponse.json()).statistics.totalRanking,[]);
+  assert.equal((await fetch(checkinsUrl+'?day=2026-02-30',{headers:{cookie}})).status,400);
   assert.equal((await fetch(`${base}/api/v1/admin/usage/export.xlsx`)).status,401);
   const exported=await fetch(`${base}/api/v1/admin/usage/export.xlsx`,{headers:{cookie}});
   assert.equal(exported.status,200);assert.match(exported.headers.get('content-type'),/spreadsheetml/);assert.equal(Buffer.from(await exported.arrayBuffer()).subarray(0,2).toString(),'PK');

@@ -16,6 +16,7 @@
       <nav aria-label="主导航">
         <button class="nav-item active" data-view="overview"><span>概览</span><kbd>1</kbd></button>
         <button class="nav-item" data-view="usage"><span>使用统计</span><kbd>5</kbd></button>
+        <button class="nav-item" data-view="checkins"><span>签到统计</span><kbd>6</kbd></button>
         <button class="nav-item" data-view="records"><span>任务记录</span><kbd>2</kbd></button>
         <button class="nav-item" data-view="knowledge"><span>团队知识</span><kbd>4</kbd></button>
         <button class="nav-item" data-view="deliveries"><span>投递待维护</span><span id="delivery-badge"></span></button>
@@ -111,6 +112,44 @@
         <div class="overview-grid"><section class="panel table-panel"><div class="panel-heading"><h3>活跃伙伴榜 · 点击查看个人记录</h3></div><div class="table-wrap"><table><thead><tr><th>排名</th><th>人员</th><th>积分</th><th>提问 / 追问</th><th>使用助手</th></tr></thead><tbody id="usage-ranking"></tbody></table></div></section>
         <section class="panel"><div class="panel-heading"><h3>助手与日期分布</h3></div><div id="usage-distribution"></div></section></div>
         <section class="panel table-panel"><div class="panel-heading"><h3 id="usage-person-title">全部人员记录</h3><button class="text-button" id="usage-person-clear">查看所有人员</button></div><div class="table-wrap"><table><thead><tr><th>人员 / 问题</th><th>助手 / 环境</th><th>积分</th><th>状态</th><th>提问时间</th></tr></thead><tbody id="usage-records"></tbody></table></div><div class="panel-heading"><button class="text-button" id="usage-prev">上一页</button><span id="usage-page"></span><button class="text-button" id="usage-next">下一页</button></div></section>
+      </section>
+
+      <section class="view" id="view-checkins">
+        <section class="panel table-panel checkin-panel">
+          <div class="panel-heading">
+            <div><h3>签到排行</h3><p>按北京时间计算。今天还未签到时，连续天数保留到昨天。</p></div>
+            <div class="checkin-switch" role="group" aria-label="排行类型">
+              <button type="button" class="text-button" id="checkin-rank-total" aria-pressed="true">累计签到榜</button>
+              <button type="button" class="text-button" id="checkin-rank-streak" aria-pressed="false">连续签到榜</button>
+            </div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">排名</th><th scope="col">人员</th><th scope="col">累计签到</th><th scope="col">当前连续</th><th scope="col">历史最长</th><th scope="col">最近签到</th></tr></thead>
+            <tbody id="checkin-ranking"><tr><td colspan="6" class="empty">正在读取签到排行…</td></tr></tbody>
+          </table></div>
+        </section>
+        <section class="panel table-panel checkin-panel">
+          <div class="panel-heading">
+            <div><h3 id="checkin-record-title">签到明细</h3><p id="checkin-day-summary" role="status">正在读取…</p></div>
+            <div class="checkin-switch" role="group" aria-label="明细类型">
+              <button type="button" class="text-button" id="checkin-type-signins" aria-pressed="true">签到记录</button>
+              <button type="button" class="text-button" id="checkin-type-clicks" aria-pressed="false">按钮点击</button>
+            </div>
+          </div>
+          <div class="toolbar checkin-filters">
+            <label><span>日期（北京时间）</span><input type="date" id="checkin-day"></label>
+            <button type="button" class="text-button" id="checkin-person-clear" hidden>查看所有人员</button>
+            <span id="checkin-click-note" hidden>点击明细仅展示仍留存的回执。</span>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">人员</th><th scope="col">助手</th><th scope="col" id="checkin-record-action">积分</th><th scope="col" id="checkin-record-status" hidden>私聊回执</th><th scope="col">时间（北京时间）</th></tr></thead>
+            <tbody id="checkin-records"></tbody>
+          </table></div>
+          <div class="panel-heading">
+            <button type="button" class="text-button" id="checkin-prev" disabled>上一页</button><span id="checkin-page"></span>
+            <button type="button" class="text-button" id="checkin-next" disabled>下一页</button>
+          </div>
+        </section>
       </section>
 
       <section class="view" id="view-knowledge">

@@ -74,3 +74,26 @@ input, select { width: 100%; height: 40px; padding: 0 11px; border: 1px solid va
 @media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
 
 .usage-filters{flex-wrap:wrap;gap:16px}.usage-filters input{padding:8px;border:1px solid var(--line);border-radius:6px}.usage-bar{display:flex;gap:12px;align-items:center;margin:12px 20px}.usage-bar span{min-width:100px}.usage-bar meter{flex:1;min-width:50px}#usage-ranking tr[data-person]{cursor:pointer}#usage-ranking tr[data-person]:hover{background:var(--blue-soft)}@media(max-width:680px){.sidebar nav{grid-template-columns:repeat(5,1fr)}.nav-item span{font-size:11px}.usage-filters{grid-template-columns:1fr}.usage-bar{margin-inline:12px}}
+
+.checkin-panel { margin-bottom: 16px; }
+.checkin-panel .panel-heading { gap: 12px; flex-wrap: wrap; }
+.checkin-switch { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--canvas); border-radius: 8px; }
+.checkin-switch .text-button { padding: 6px 10px; border-radius: 5px; }
+.checkin-switch [aria-pressed="true"] { color: var(--blue); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.checkin-ranked { color: var(--blue); font-variant-numeric: tabular-nums; }
+.checkin-person { padding-inline: 8px; }
+.checkin-person[aria-pressed="true"] { color: var(--blue); background: var(--blue-soft); }
+.checkin-filters { align-items: end; flex-wrap: wrap; margin: 0; border-top: 1px solid var(--line); }
+.checkin-filters input { padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
+#checkin-click-note, #checkin-page { color: var(--muted); font-size: 12px; }
+@media (min-width: 681px) and (max-width: 980px) {
+  .nav-item[data-view="checkins"] span { display: block; font-size: 11px; }
+  .nav-item[data-view="checkins"]::before { display: none; }
+}
+@media (max-width: 680px) {
+  .sidebar { height: auto; }
+  .sidebar nav { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  main { padding-bottom: 116px; }
+  .checkin-filters { display: flex; }
+  .checkin-panel th, .checkin-panel td { padding-inline: 10px; white-space: nowrap; }
+}

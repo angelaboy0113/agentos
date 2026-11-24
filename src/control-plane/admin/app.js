@@ -1,6 +1,6 @@
 const state = { overview: null, settings: null, records: [] };
 let overviewSeq=0;
-const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识', usage: '使用统计', deliveries: '投递待维护' };
+const titles = { overview: '运行概览', records: '任务记录', settings: '模型设置', knowledge: '团队知识', usage: '使用统计', checkins: '签到统计', deliveries: '投递待维护' };
 const statusMap = {
   queued: ['排队中', 'warn'], running: ['执行中', 'live'], cancelling: ['停止中', 'warn'],
   completed: ['完整完成', 'good'], partial: ['部分完成', 'warn'], unverified: ['结果未标明', 'warn'], sent: ['已回复', 'good'], failed: ['失败', 'bad'],
@@ -23,7 +23,7 @@ let searchTimer;
 document.querySelector('#record-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadRecords, 220); });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeDrawer();
-  if (/^[12345]$/.test(event.key) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) showView(['overview', 'records', 'settings', 'knowledge', 'usage'][Number(event.key) - 1]);
+  if (/^[123456]$/.test(event.key) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) showView(['overview', 'records', 'settings', 'knowledge', 'usage', 'checkins'][Number(event.key) - 1]);
 });
 
 async function api(path, options = {}) {
@@ -105,8 +105,8 @@ async function openRecord(id) {
 }
 
 function closeDrawer() { document.querySelector('#record-drawer').classList.remove('open'); document.querySelector('#record-drawer').setAttribute('aria-hidden', 'true'); document.querySelector('#drawer-backdrop').hidden = true; }
-function showView(name) { if(name==='deliveries')loadDeliveries(); document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'usage') loadUsage(); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); if (name === 'knowledge') loadKnowledge(); }
-function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if(current==='deliveries')loadDeliveries(); else if (current === 'usage') loadUsage(); else if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
+function showView(name) { if(name==='deliveries')loadDeliveries(); document.querySelectorAll('.view').forEach((item) => item.classList.toggle('active', item.id === `view-${name}`)); document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); setText('page-title', titles[name]); if (name === 'usage') loadUsage(); if (name === 'checkins') loadCheckins(); if (name === 'records') loadRecords(); if (name === 'settings') loadSettings(); if (name === 'knowledge') loadKnowledge(); }
+function refreshCurrent() { const current = document.querySelector('.nav-item.active')?.dataset.view; if(current==='deliveries')loadDeliveries(); else if (current === 'usage') loadUsage(); else if (current === 'checkins') loadCheckins(); else if (current === 'records') loadRecords(); else if (current === 'settings') loadSettings(); else if (current === 'knowledge') loadKnowledge(); else loadOverview(); }
 function bindRecordButtons(root) { root.querySelectorAll('[data-record]').forEach((item) => item.addEventListener('click', () => openRecord(item.dataset.record))); }
 
 function recordRow(item) { const status = statusInfo(item.displayStatus ?? item.status); return `<button class="record-row" data-record="${escapeHtml(item.id)}"><span class="record-icon">${item.kind === 'job' ? '任' : '答'}</span><span class="record-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.projectName)} · ${escapeHtml(stageMap[item.stage] ?? item.stage ?? '普通回复')}</small></span><span class="record-meta"><span class="pill ${status[1]}">${status[0]}</span><small>${dateTime(item.createdAt)}</small></span></button>`; }
@@ -184,6 +184,72 @@ document.querySelector('#usage-export').onclick=async()=>{
  try{const params=new URLSearchParams({start:value('usage-start'),end:value('usage-end'),profile:value('usage-profile'),scope:value('usage-scope'),grouping:value('usage-grouping'),excludeAdmin:value('usage-admin'),person:usagePerson});const response=await fetch('/api/v1/admin/usage/export.xlsx?'+params);if(!response.ok){const data=await response.json();throw Error(data.error||'导出失败');}const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='AgentOS-使用统计.xlsx';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('Excel 已导出，包含当前筛选范围的全部明细');}
  catch(e){toast(e.message);}finally{button.disabled=false;button.textContent='导出 Excel';}
 };
+
+const checkinView = {rank:'total',type:'signins',person:'',page:1,request:0,data:null};
+const checkinTime = new Intl.DateTimeFormat('zh-CN',{
+  timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23',
+});
+const checkinElement = id => document.getElementById('checkin-'+id);
+for (const rank of ['total','streak']) {
+  checkinElement('rank-'+rank).onclick = () => {checkinView.rank=rank;drawCheckinRanking();};
+}
+for (const type of ['signins','clicks']) {
+  checkinElement('type-'+type).onclick = () => {checkinView.type=type;checkinView.page=1;loadCheckins();};
+}
+checkinElement('day').onchange = () => {checkinView.page=1;loadCheckins();};
+checkinElement('person-clear').onclick = () => {checkinView.person='';checkinView.page=1;loadCheckins();};
+checkinElement('prev').onclick = () => {checkinView.page--;loadCheckins();};
+checkinElement('next').onclick = () => {checkinView.page++;loadCheckins();};
+
+function drawCheckinRanking() {
+  for (const rank of ['total','streak']) checkinElement('rank-'+rank).setAttribute('aria-pressed',String(rank===checkinView.rank));
+  const data = checkinView.data;
+  if (!data) return;
+  const ranking = checkinView.rank==='streak' ? data.streakRanking : data.totalRanking;
+  const cell = (value, selected) => selected ? '<strong class="checkin-ranked">'+value+' 天</strong>' : value+' 天';
+  const body = checkinElement('ranking');
+  body.innerHTML = ranking.map(person => `<tr><td>${person.rank}</td><td><button type="button" class="text-button checkin-person" data-checkin-person="${escapeHtml(person.key)}" aria-pressed="${person.key===checkinView.person}">${escapeHtml(person.name)}</button></td><td>${cell(person.total,checkinView.rank==='total')}</td><td>${cell(person.current,checkinView.rank==='streak')}</td><td>${person.longest} 天</td><td>${escapeHtml(person.lastDay)}</td></tr>`).join('') ||
+    '<tr><td colspan="6" class="empty">暂无符合条件的签到排行。</td></tr>';
+  body.querySelectorAll('[data-checkin-person]').forEach(button => button.onclick = () => {
+    checkinView.person=button.dataset.checkinPerson;
+    checkinView.page=1;
+    loadCheckins();
+  });
+}
+
+async function loadCheckins() {
+  const request = ++checkinView.request;
+  const {type,person,page} = checkinView;
+  const params = new URLSearchParams({day:checkinElement('day').value,type,person,page:String(page)});
+  checkinElement('prev').disabled = true;
+  checkinElement('next').disabled = true;
+  try {
+    const {statistics:data,assistantNames:labels} = await api('/api/v1/admin/checkins?'+params);
+    if (request!==checkinView.request) return;
+    checkinView.data=data;
+    checkinView.page=data.pagination.page;
+    checkinElement('day').max=data.today;
+    checkinElement('day').value=data.day;
+    drawCheckinRanking();
+    for (const item of ['signins','clicks']) checkinElement('type-'+item).setAttribute('aria-pressed',String(item===type));
+    const isClick = type==='clicks';
+    const selected = data.totalRanking.find(row=>row.key===person);
+    checkinElement('person-clear').hidden=!person;
+    checkinElement('record-status').hidden=!isClick;
+    checkinElement('click-note').hidden=!isClick;
+    setText('checkin-record-action',isClick?'按钮':'积分');
+    setText('checkin-record-title',selected ? selected.name+'的'+(isClick?'点击明细':'签到明细') : isClick?'点击明细':'签到明细');
+    setText('checkin-day-summary',`${data.summary.signedPeople} 人签到 · ${data.summary.signClicks} 次留存签到点击`);
+    checkinElement('records').innerHTML = data.records.map(row=>`<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(labels?.[row.profile]??assistantLabel(row.profile))}</td><td>${isClick?escapeHtml(row.action):row.points}</td>${isClick?`<td>${row.notified?'已发送':'待发送'}</td>`:''}<td>${checkinTime.format(new Date(row.createdAt))}</td></tr>`).join('') ||
+      `<tr><td colspan="${isClick?5:4}" class="empty">这一天暂无${isClick?'点击':'签到'}记录。</td></tr>`;
+    setText('checkin-page',`${data.pagination.total} 条 · 第 ${data.pagination.page} / ${data.pagination.pages} 页`);
+    checkinElement('prev').disabled=data.pagination.page<=1;
+    checkinElement('next').disabled=data.pagination.page>=data.pagination.pages;
+    markUpdated();
+  } catch (error) {
+    if (request===checkinView.request) toast(error.message);
+  }
+}
 
 async function loadDeliveries(){
  try{const{deliveries}=await api('/api/v1/admin/deliveries');document.querySelector('#delivery-list').innerHTML=deliveries.length?deliveries.map((e,i)=>`<article class="metric-explanation"><strong>${escapeHtml(e.questionId??'私聊登记')} · ${escapeHtml(e.profile??'')}</strong><p>${escapeHtml(e.group)} · 失败 ${e.attempts} 次 · ${escapeHtml(e.reason)} · ${dateTime(e.heldAt)}</p><button class="text-button" data-retry-delivery="${i}" ${e.reconciliationRequired?'disabled':''}>${e.reconciliationRequired?'先核对平台回执':'已检查，恢复原投递'}</button></article>`).join(''):'<p>暂无待维护投递</p>';document.querySelectorAll('[data-retry-delivery]').forEach(b=>b.addEventListener('click',async()=>{const e=deliveries[Number(b.dataset.retryDelivery)];if(!confirm('确认已核对权限及原消息回执？将恢复原投递，不会重新执行查询。'))return;try{await api('/api/v1/admin/deliveries/resume',{method:'POST',headers:{'x-agentos-admin':'1'},body:JSON.stringify({group:e.group,key:e.key,fingerprint:e.fingerprint})});await loadDeliveries();}catch(error){toast(error.message)}}));markUpdated();}catch(error){toast(error.message)}

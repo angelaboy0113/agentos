@@ -2,6 +2,76 @@ import {isAdministrator} from './authorization.js';
 const cleanName=x=>typeof x==='string'&&!/[<>\r\n\x00-\x1f]/.test(x)&&x.length<=100?x.trim():'';
 const keyOf=t=>JSON.stringify([t.profile,t.chatId,t.senderId]);
 const dateParts=(value,zone)=>new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));
+const dayMs = 86_400_000;
+const validDay = day => /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(Date.parse(day)) &&
+  new Date(day).toISOString().slice(0,10) === day;
+
+function checkinRank(people, field) {
+  const sorted = people.filter(person => person[field] > 0)
+    .sort((a,b) => b[field] - a[field] || a.name.localeCompare(b.name, 'zh-CN') || a.key.localeCompare(b.key));
+  let rank = 0;
+  return sorted.map((person,index) => {
+    if (index === 0 || person[field] !== sorted[index-1][field]) rank = index+1;
+    return {...person, rank};
+  });
+}
+
+export function adminCheckins(state, query = {}, {projects = {}, names = new Map(), now = Date.now()} = {}) {
+  const today = dateParts(now,'Asia/Shanghai');
+  const day = query.day || today;
+  if (!validDay(day) || day > today) throw new Error('Invalid check-in date');
+  const people = new Map();
+  const todayNumber = Date.parse(today) / dayMs;
+  const actionLabels = {daily_checkin:'今日签到',my_checkin_points:'查我的积分',points_store:'积分商城'};
+  const identity = row => {
+    const linked = Object.entries(projects.humanIdentities ?? {}).find(([,ids]) => ids[row.profile] === row.senderId)?.[0];
+    return linked ? `human:${linked}` : `actor:${JSON.stringify([row.profile,row.senderId])}`;
+  };
+  const forDay = (row) => ({
+    key:identity(row), name:cleanName(names.get(keyOf(row))) || '姓名暂不可用',
+    profile:row.profile, createdAt:row.createdAt,
+  });
+  const isValid = (row) => row && !row.preview && row.profile && row.senderId &&
+    validDay(row.day) && row.day <= today && Number.isFinite(Date.parse(row.createdAt));
+  const signins = [];
+  for (const row of Object.values(state.checkins ?? {})) {
+    if (!isValid(row)) continue;
+    const view = forDay(row);
+    let person = people.get(view.key);
+    if (!person) {
+      person = {key:view.key,name:view.name,days:new Set()};
+      people.set(view.key,person);
+    }
+    if (person.name === '姓名暂不可用') person.name = view.name;
+    person.days.add(row.day);
+    if (row.day === day) signins.push({...view,points:Number.isFinite(row.points)?row.points:1});
+  }
+  const ranking = [...people.values()].map(({key,name,days}) => {
+    const dates = [...days].sort();
+    let longest = 0, run = 0, previous = -Infinity;
+    for (const date of dates) {
+      const value = Date.parse(date) / dayMs;
+      run = value === previous+1 ? run+1 : 1;
+      longest = Math.max(longest,run);
+      previous = value;
+    }
+    return {key,name,total:dates.length,current:previous>=todayNumber-1?run:0,longest,lastDay:dates.at(-1)};
+  });
+  const clicks = Object.values(state.checkinReceipts ?? {})
+    .filter(row => isValid(row) && row.day===day && Object.hasOwn(actionLabels,row.action))
+    .map(row => ({...forDay(row), action:actionLabels[row.action], notified:row.sent===true}));
+  const type = query.type==='clicks' ? 'clicks' : 'signins';
+  const records = (type==='clicks' ? clicks : signins).filter(r => !query.person || r.key===query.person)
+    .sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+  const pageSize = 50, pages = Math.max(1,Math.ceil(records.length/pageSize));
+  const page = Math.min(Math.max(1,Number.parseInt(query.page) || 1),pages);
+  return {
+    today,day,type,
+    summary:{signedPeople:new Set(signins.map(row=>row.key)).size,signClicks:clicks.filter(row=>row.action===actionLabels.daily_checkin).length},
+    totalRanking:checkinRank(ranking,'total'),streakRanking:checkinRank(ranking,'current'),
+    records:records.slice((page-1)*pageSize,page*pageSize),pagination:{page,pages,total:records.length},
+  };
+}
 function category(t){
  const text=String(t.content??'').trim();if(!text&&!(t.attachments??[]).length)return 'empty';const compact=text.replace(/[\s，,。.!！?？]/g,'').toLowerCase();
  if(/password|passwd|密码|secret|token\s*[:：=]|账号\s*[:：]/i.test(text)||t.credentialSubmission)return 'sensitive';
@@ -51,9 +121,44 @@ export function adminUsage(state,query={}, {projects={},names=new Map(),now=Date
  return {selection:{profile:query.profile??'',projectId:query.projectId??'',chatId:query.chatId??'',person:query.person??''},profileOptions,filters:{scope,grouping,excludeAdmin,timeZone:zone,start:query.start??'',end:query.end??''},summary:{points:rows.reduce((n,r)=>n+r.points,0),messages:rows.filter(r=>r.kind!=='checkin').length,people:people.size,followups:rows.filter(r=>r.followup).length},ranking,assistants:group('profile'),projects:group('projectId'),timeline:group('day').sort((a,b)=>a.key.localeCompare(b.key)),records:allRecords?selected:selected.slice((page-1)*pageSize,page*pageSize),pagination:{page,pageSize,total:selected.length,pages:Math.ceil(selected.length/pageSize)},excluded,coverage:{firstAt:(state.conversations??[]).map(t=>t.createdAt).filter(Boolean).sort()[0]??null,retentionDays:state.retention?.mode==='archive'?null:state.retention?.days??30},pointRule:'每日签到1分；每条有效业务提问或追问1分，不以任务成功与否计分；闲聊、环境补充、控制指令0分。按当前筛选范围及留存记录计算，不是永久累计账户。',method:'按机器人身份、群和原消息去重；仅留存记录。业务分类为规则估计，非人工周榜复核；同名合并仅用于展示，不作身份或权限依据。追问标记依据原话题引用，非新任务数；提问数不等于解决数。'};
 }
 // Names are fetched with each bot's own existing group-read permission, never used for authorization.
-export class AdminUsageDirectory{
- constructor(context){this.context=context;this.cache=new Map();this.flight=null;}
- async names(state){if(this.flight)return this.flight;this.flight=this.load(state).finally(()=>{this.flight=null;});return this.flight;}
- async load(state){const out=new Map(),pairs=new Map();for(const t of [...(state.conversations??[]),...Object.values(state.checkins??{})])if(t.profile&&t.chatId&&t.chatType!=='p2p'&&t.visibility!=='private')pairs.set(JSON.stringify([t.profile,t.chatId]),t);
- await Promise.all([...pairs].map(async([key,t])=>{let v=this.cache.get(key);if(!v||Date.now()-v.at>(v.failed?60000:900000)){try{v={at:Date.now(),names:await this.context.replyAddressing.members(t.chatId,t.profile)};}catch{v={at:Date.now(),names:v?.names??new Map(),failed:true};}this.cache.set(key,v);}for(const [id,name]of v.names)out.set(keyOf({...t,senderId:id}),name);}));return out;}
+export class AdminUsageDirectory {
+  constructor(context) {
+    this.context = context;
+    this.cache = new Map();
+    this.flights = new Map();
+  }
+
+  async names(state) {
+    const pairs = new Map();
+    for (const row of [...(state.conversations ?? []), ...Object.values(state.checkins ?? {})]) {
+      if (row.profile && row.chatId && row.chatType !== 'p2p' && row.visibility !== 'private') {
+        pairs.set(JSON.stringify([row.profile,row.chatId]),row);
+      }
+    }
+    const names = new Map();
+    await Promise.all([...pairs].map(async ([key,row]) => {
+      const source = await this.members(key,row);
+      for (const [senderId,name] of source.names) names.set(keyOf({...row,senderId}),name);
+    }));
+    return names;
+  }
+
+  async members(key, row) {
+    const cached = this.cache.get(key);
+    if (cached && Date.now()-cached.at <= (cached.failed ? 60000 : 900000)) return cached;
+    if (!this.flights.has(key)) {
+      const refresh = (async () => {
+        let value;
+        try {
+          value = {at:Date.now(), names:await this.context.replyAddressing.members(row.chatId,row.profile)};
+        } catch {
+          value = {at:Date.now(), names:cached?.names ?? new Map(), failed:true};
+        }
+        this.cache.set(key,value);
+        return value;
+      })().finally(() => this.flights.delete(key));
+      this.flights.set(key,refresh);
+    }
+    return this.flights.get(key);
+  }
 }

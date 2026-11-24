@@ -61,7 +61,7 @@ import { CheckinQueue, publishCheckinCard } from './checkin.js';
 import { handleCardAction } from './card-actions.js';
 import { jobTerminalMention, failureNotice } from './requester-mention.js';
 import {usageWorkbook} from './admin-usage-export.js';
-import { adminUsage, AdminUsageDirectory } from './admin-usage.js';
+import { adminCheckins, adminUsage, AdminUsageDirectory } from './admin-usage.js';
 import { adminOverview, adminRecordDetail, adminRecords } from './admin-view.js';
 import { CODEX_MODELS, CODEX_REASONING_EFFORTS, loadCodexRuntimeSettings, saveCodexRuntimeSettings } from '../shared/codex-runtime.js';
 
@@ -194,6 +194,23 @@ async function route(context) {
     requireAdminSession(context, request, true);
     const receipt = await publishCheckinCard(context, await readJson(request));
     return json(response, 200, { ok: true, ...receipt });
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/checkins') {
+    requireAdminSession(context, request, false);
+    const state = await stateView(store, s => ({checkins:s.checkins,checkinReceipts:s.checkinReceipts}));
+    const names = await context.adminUsageDirectory.names({
+      checkins:state.checkins, conversations:Object.values(state.checkinReceipts ?? {}).filter(row => !row.preview),
+    });
+    try {
+      const statistics = adminCheckins(state,Object.fromEntries(url.searchParams),{projects:context.projects,names});
+      const assistantNames = Object.fromEntries(Object.values(context.agents.agents ?? {})
+        .filter(agent => agent.profile && agent.displayName)
+        .map(agent => [agent.profile,agent.displayName]));
+      return json(response,200,{ok:true,statistics,assistantNames},{'cache-control':'no-store'});
+    } catch {
+      return json(response,400,{ok:false,error:'请选择今天或之前的有效日期'});
+    }
   }
 
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/usage/export.xlsx') {
