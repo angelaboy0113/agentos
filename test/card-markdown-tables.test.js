@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readableMarkdown, resultPages } from '../src/control-plane/result-presentation.js';
+import { analysisPrimaryCardElements, conversationPrimaryCardElements, readableMarkdown, resultPages } from '../src/control-plane/result-presentation.js';
 import { cardMarkdownSegments, nativeCardTable } from '../src/control-plane/card-markdown-tables.js';
 
 test('card tables become labelled records before pagination, preserving evidence and empty cells', () => {
@@ -44,4 +44,33 @@ test('confirmed GFM tables can become native Card 2.0 table components', () => {
   assert.deepEqual(table.columns.map((column) => column.display_name), ['字段', '含义']);
   assert.equal(table.rows[0].column_2, '主经销商');
   assert.equal(nativeCardTable({ type: 'table', headers: Array(7).fill('列'), rows: [['值']] }), null);
+});
+
+test('answer cards recover a missing table separator for consistently bordered rows', () => {
+  const source = '说明\n\n| 项目 | 规则 | 结果 |\n| 订单 | `A|B` | 通过 |\n| 商品 | a\\|b | |\n\n结尾';
+  for (const render of [analysisPrimaryCardElements, conversationPrimaryCardElements]) {
+    const blocks = render(source);
+    assert.deepEqual(blocks.map(block => block.tag), ['markdown', 'table', 'markdown']);
+    const [, table] = blocks;
+    assert.deepEqual(table.columns.map(column => column.display_name), ['项目', '规则', '结果']);
+    assert.deepEqual(table.rows, [
+      { column_1: '订单', column_2: '`A|B`', column_3: '通过' },
+      { column_1: '商品', column_2: 'a\\|b', column_3: '—' },
+    ]);
+  }
+  assert.match(resultPages(source).join('\n'), /\*\*项目\*\*：商品/);
+  assert.equal(cardMarkdownSegments('| 名称 | 值 |\r\n| 主题 | 样式 |\r\n')[0].type, 'table');
+});
+
+test('separator recovery preserves ambiguous rows and code examples', () => {
+  for (const text of [
+    'a | b\nc | d',
+    '| A | B |\n| one | two | three |\n| four | five | three |',
+    '| A | B |\n| --- |\n| one | two |\n| three | four |',
+    '| A | B |\n| one | two |\n| unclosed | field',
+    '| A | B |\n| one | escaped\\|',
+    '| lone | row |',
+    '    | A | B |\n    | one | two |',
+    '~~~md\n| A | B |\n| one | two |\n~~~',
+  ]) assert.deepEqual(cardMarkdownSegments(text), [{ type: 'markdown', text }]);
 });

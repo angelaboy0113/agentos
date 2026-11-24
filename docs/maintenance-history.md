@@ -1,3 +1,7 @@
+## 1.155.4
+
+- Render clearly bordered Markdown rows as Feishu tables when a separator is missing and the columns match the header. Ambiguous pipe text and fenced code retain their normal display. The existing native-table capacity and full-detail fallback still apply.
+
 ## 1.155.3
 
 - Keep fallback explanations for empty or unavailable data out of the causal evidence gate. Requests that ask for a business cause still require causal evidence.

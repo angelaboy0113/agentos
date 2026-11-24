@@ -1,5 +1,5 @@
-// Parse only confirmed GFM tables. First-screen cards can render them with the
-// native Card 2.0 table component; folded details still have a vertical fallback.
+// Parse GFM tables and recover clearly delimited rows with a missing separator.
+// First-screen cards use native tables; folded details have a vertical fallback.
 function cellsOf(line) {
   const source = line.trim();
   const cells = [];
@@ -42,6 +42,26 @@ function parsedTable(lines, start) {
   return rows.length && !invalid ? { headers, rows, end } : null;
 }
 
+const borderedRow = (line = '') => /^ {0,3}\|/.test(line)
+  && /(?:^|[^\\])(?:\\\\)*\|[ \t\r]*$/.test(line.trimStart().slice(1));
+
+function tableWithoutSeparator(lines, start) {
+  if (!borderedRow(lines[start]) || borderedRow(lines[start - 1])) return null;
+  const headers = cellsOf(lines[start]);
+  if (!headers || headers.length < 2 || headers.some(cell => !cell || /^:?-+:?$/.test(cell))) return null;
+
+  const rows = [];
+  let end = start + 1;
+  for (; borderedRow(lines[end]); end++) {
+    const cells = cellsOf(lines[end]);
+    if (cells?.length !== headers.length || cells.every(cell => /^:?-+:?$/.test(cell))) return null;
+    rows.push(cells);
+  }
+  // A pipe row missing its outer border makes the inferred block ambiguous.
+  if (lines[end]?.match(/^ {0,3}\|/) || !rows.length) return null;
+  return { headers, rows, end };
+}
+
 export function cardMarkdownSegments(text) {
   const lines = String(text ?? '').split('\n'), segments = [];
   let buffer = [];
@@ -61,7 +81,7 @@ export function cardMarkdownSegments(text) {
       fence = { char: marker[1][0], length: marker[1].length };
       buffer.push(lines[i]); continue;
     }
-    const table = parsedTable(lines, i);
+    const table = parsedTable(lines, i) ?? tableWithoutSeparator(lines, i);
     if (!table) { buffer.push(lines[i]); continue; }
     flush();
     segments.push({ type: 'table', headers: table.headers, rows: table.rows });
