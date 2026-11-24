@@ -116,5 +116,51 @@ test('PRD list captures require actual rows and replace sensitive cells without 
  assert.equal(chrome.designLayout.placeholders.length,1);
  assert(chrome.designLayout.samples.some(sample=>sample.text==='1 / 10'));
  assert.doesNotMatch(JSON.stringify(chrome.designLayout),/杨某客户|762 \/ 935/);
- assert.equal(chrome.designReference.visualPolicy,'brand-layout-v6');
+ assert.equal(chrome.designReference.visualPolicy,'brand-layout-v7');
+});
+
+
+test('PRD selects a complete dialog or feedback region, preserving static copy and local coordinates', async t => {
+ const driver=await chromium.launch({headless:true});
+ t.after(()=>driver.close());
+ const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'prd-focused-evidence-'));
+ t.after(()=>rm(dir,{recursive:true,force:true}));
+ const page=await driver.newPage({viewport:{width:800,height:450}});
+ const browser=new WebsiteBrowser(dir);
+ browser.loginStatus=async()=>({loginRequired:false});
+ const job={id:'prd-local',prd:{auto:true,inlinePrototypes:true}};
+ const url='https://example.test/import';
+ await page.route(url,route=>route.fulfill({contentType:'text/html;charset=utf-8',body:`
+   <h1>费用上账</h1><aside>系统管理</aside>
+   <div role="dialog" style="position:fixed;left:152px;top:70px;width:430px;height:260px;background:white;border:1px solid gray">
+     <h2>批量调整</h2>
+     <div class="ant-upload"><p>将文件拖到此处，或</p><a>点击上传</a><p>仅允许导入.xls,.xlsx格式文件。</p></div>
+     <button>取消</button><button>确定</button><div data-sensitive>hidden-business-value</div>
+   </div><div role="status" style="position:fixed;left:610px;top:40px;background:#cfc;padding:8px">导入成功</div>
+   <section style="width:400px"><h2>申请材料</h2><label for="dealer">经销商简称</label><span><input id="dealer" value="private-dealer-name" readonly></span><button>上传</button></section>
+ `}));
+ await page.goto(url);
+ const capture=(targetText,scope)=>browser.screenshot({page,job},{url,targetText,...(scope?{scope}:{})});
+ const modal=await capture('点击上传');
+ assert.equal(modal.designReference.captureScope,'dialog');
+ assert.equal(modal.designLayout.viewportWidth,432);
+ assert.equal(modal.designLayout.viewportHeight,262);
+ for(const copy of ['批量调整','将文件拖到此处，或','点击上传','仅允许导入.xls,.xlsx格式文件。','取消','确定'])
+  assert(modal.designLayout.controls.some(control=>control.text===copy),copy);
+ assert(!modal.designLayout.controls.some(control=>control.text==='系统管理'));
+ assert.equal(modal.designLayout.actionRegions.length,2);
+ assert(modal.designLayout.actionRegions.every(box=>box.x+box.width<=1&&box.y+box.height<=1));
+ const {readFile}=await import('node:fs/promises');
+ const png=await readFile(path.join(dir,'website-evidence',job.id,modal.designReference.name));
+ assert.deepEqual([png.readUInt32BE(16),png.readUInt32BE(20)],[432,262]);
+ assert(!JSON.stringify(modal).includes('hidden-business-value'));
+ assert.equal((await capture('导入成功')).designReference.captureScope,'feedback');
+ const section=await capture('申请材料','region');
+ assert.equal(section.designReference.captureScope,'region');
+ assert(section.designLayout.samples.some(sample=>sample.text==='示例单位 001'));
+ assert(!JSON.stringify(section).includes('private-dealer-name'));
+ assert.equal((await capture('批量调整','page')).designLayout.viewportWidth,800);
+ assert.equal((await capture('费用上账')).designReference.captureScope,'page');
+ await page.getByRole('dialog').evaluate(el=>{el.style.top='400px';});
+ await assert.rejects(capture('批量调整'),{code:'BROWSER_CONTENT_CHANGED'});
 });

@@ -5,7 +5,7 @@ export class BrowserInputError extends Error {
 export const correctableBrowserCodes=new Set(['BROWSER_ARGUMENTS','BROWSER_REF_STALE','BROWSER_CONTROL_TYPE','BROWSER_CONTROL_CHANGED','BROWSER_OPERATION_TIMEOUT','BROWSER_CONTENT_CHANGED','BROWSER_ASSET_RESPONSE','BROWSER_NAVIGATION_SCOPE','BROWSER_ATTACHMENT_UNAVAILABLE']);
 export function validateBrowserTool(tool,args={}){
  if(tool==='browser_screenshot'&&args&&Object.keys(args).length){
-  if(Object.keys(args).some(key=>!['url','targetText','emptyState'].includes(key))||args.emptyState!==undefined&&typeof args.emptyState!=='boolean'||typeof args.url!=='string'||!args.url||args.url.length>2048||
+  if(Object.keys(args).some(key=>!['url','targetText','emptyState','scope'].includes(key))||args.scope!==undefined&&!['auto','page','region'].includes(args.scope)||args.emptyState!==undefined&&typeof args.emptyState!=='boolean'||typeof args.url!=='string'||!args.url||args.url.length>2048||
     typeof args.targetText!=='string'||!args.targetText.trim()||args.targetText.length>100)throw new BrowserInputError('BROWSER_ARGUMENTS','原型截图需要最近快照的url和视口中目标界面的标题targetText。');
   return;
  }

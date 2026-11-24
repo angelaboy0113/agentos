@@ -1020,7 +1020,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
     assert.equal(snapshot.designLayout.controls[0].text,'查询');
     assert.deepEqual(snapshot.designLayout.controls.map(control=>control.text),['查询','渠道经营复盘','例外处理',n?'分配金额':'预算来源：']);
     assert.doesNotMatch(JSON.stringify(snapshot.designLayout.controls),/DEMO-PRIVATE|AA123456|示例用户名/);
-    assert.equal(snapshot.designReference.visualPolicy,'brand-layout-v6');
+    assert.equal(snapshot.designReference.visualPolicy,'brand-layout-v7');
     assert.equal(snapshot.designLayout.assets.length,2);
     assert.equal(snapshot.designLayout.backgrounds.length,1);
     assert.equal(snapshot.designLayout.brandRegions.length,2);
@@ -1062,6 +1062,36 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
       return before.every((value,index)=>value===after[index]);
     },[base.toString('base64'),actual.bytes.toString('base64')]);
     assert.ok(outsideUnchanged);
+    if(n){
+      const [row]=snapshot.designLayout.tableRows;
+      assert(row?.height>0);
+      const {x,y,width,height}=row;
+      const area={x,y,width,height};
+      const existingRecipe={mode:'existing-page',prototypeKey:key,referenceId,prompt:'在原有参数前插入新行',areas:[area]};
+      await assert.rejects(producePrdPrototype(dataDir,job,JSON.stringify(existingRecipe),{
+        generate:async()=>assert.fail('Must protect existing rows before calling image editor'),
+      }), /覆盖现有表格行/);
+      const shifts=[{...area,height:height*2,dy:height}];
+      const shifted=await producePrdPrototype(dataDir,job,JSON.stringify({...existingRecipe,shifts}),{
+        generate:async()=>{await editor.screenshot({path:modelOutput});return {file:modelOutput,root:dataDir,threadId:'test-row-shift',model:'gpt-image-2'};},
+      });
+      const rowIntact=await page.evaluate(async ({images,row})=>{
+        const pixels=async (bytes,offset)=>{
+          const img=new Image();img.src='data:image/png;base64,'+bytes;await img.decode();
+          const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
+          const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);
+          return ctx.getImageData(Math.round(row.x*img.width),Math.round((row.y+offset)*img.height),
+            Math.round(row.width*img.width),Math.round(row.height*img.height)).data;
+        };
+        const [a,b]=await Promise.all([pixels(images[0],0),pixels(images[1],row.height)]);
+        return a.every((value,index)=>value===b[index]);
+      },{images:[base.toString('base64'),shifted.bytes.toString('base64')],row});
+      assert(rowIntact);
+    }
+    await assert.rejects(producePrdPrototype(dataDir,job,JSON.stringify({
+      mode:'new-page',prototypeKey:key,referenceId,prompt:'测试控件裁切',
+      areas:[{x:.25,y:.45,width:.4,height:.2,fit:'control'}],
+    }),{generate:async()=>{await editor.screenshot({path:modelOutput});return {file:modelOutput,root:dataDir,threadId:'test-control-edge',model:'gpt-image-2'};}}), /裁切边缘/);
     const final = n ? await producePrdPrototype(dataDir,job,JSON.stringify({mode:'reference-only',prototypeKey:key,referenceId}),{
       generate:async()=>assert.fail('An unchanged reference must not use image generation'),
     }) : actual;

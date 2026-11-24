@@ -1,5 +1,5 @@
 import {readWebsitePdfPreview} from './website-pdf-preview.js';
-import {describePrdCapture} from './prd-capture.js';
+import {describePrdCapture,localizePrdLayout,prdCaptureTarget} from './prd-capture.js';
 import { passivePublicImage, fetchPassivePublicImage } from './public-website-image.js';
 import {loginPageAllowed} from '../shared/website-sso.js';
 import {websiteFrames,websiteDOM,assertWebsiteFrame} from './website-frames.js';
@@ -579,16 +579,20 @@ export class WebsiteBrowser {
   const dir=path.join(this.evidenceRoot,s.job.id);await mkdir(dir,{recursive:true,mode:0o700});await chmod(this.evidenceRoot,0o700);await chmod(dir,0o700);
   const name=randomUUID()+'.png',file=path.join(dir,name);
   if (prd) {
-   const targetVisible=async()=>{
-    if(pageUrl()!==args.url)return false;
-    const bounds=await s.page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+   const scope=args.scope??'auto';
+   const describeTarget=async()=>{
+    if(pageUrl()!==args.url)return null;
+    const captures=[];
     for(const target of await dom.getByText(args.targetText,{exact:true}).all()){
-     const box=await target.boundingBox();
-     if(box&&box.width&&box.height&&box.x<bounds.width&&box.y<bounds.height&&box.x+box.width>0&&box.y+box.height>0)return true;
+     const found=await target.evaluate(prdCaptureTarget,scope);
+     if(found&&!captures.some(item=>JSON.stringify(item)===JSON.stringify(found)))captures.push(found);
     }
-    return false;
+    if(captures.length>1)throw new BrowserInputError('BROWSER_CONTENT_CHANGED','目标文字位于多个可见区域，请提供更具体的弹窗标题或提示。');
+    return captures[0]??null;
    };
-   if(!await targetVisible())throw new BrowserInputError('BROWSER_CONTENT_CHANGED','未在当前视口看到目标标题，请打开目标详情、弹窗或模块后重新截图。');
+   const capture=await describeTarget();
+   if(!capture)throw new BrowserInputError('BROWSER_CONTENT_CHANGED','未在当前视口看到目标标题，请打开目标详情、弹窗或模块后重新截图。');
+   if(capture.clipped)throw new BrowserInputError('BROWSER_CONTENT_CHANGED','目标区域未完整显示，请调整只读视图后重新截图。');
    const style = '*, *::before, *::after {color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;caret-color:transparent!important;background-image:none!important;list-style-image:none!important} img, svg, canvas, video, object, embed {visibility:hidden!important}';
    const options={path:file,type:'png',timeout:10000,style,animations:'disabled',
     mask:[dom.locator(screenshotSecretSelector),dom.locator('iframe,frame')],maskColor:'#6b7280'};
@@ -605,7 +609,7 @@ export class WebsiteBrowser {
     if (labelAttribute) {
      for(const [index,sample] of layout.samples.entries()){
       const selector=`[${labelAttribute}-sample="${index}"]`;
-      options.style+=`${selector}{position:relative!important}${selector}::after{content:${JSON.stringify(sample.text)}!important;position:absolute!important;left:${sample.left}px;top:${sample.top}px;max-width:calc(100% - ${sample.left}px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;color:${sample.color}!important;-webkit-text-fill-color:${sample.ink}!important}`;
+      options.style+=`${selector}{position:relative!important}${selector}::after{content:${JSON.stringify(sample.text)}!important;position:absolute!important;left:${sample.left}px;top:${sample.top}px;max-width:${sample.maxWidth?sample.maxWidth+'px':'calc(100% - '+sample.left+'px)'};${sample.fontSize?'font-size:'+sample.fontSize+'px!important;':''}overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;color:${sample.color}!important;-webkit-text-fill-color:${sample.ink}!important}`;
      }
      for (const [index,control] of layout.controls.entries()) {
       const selector=`[${labelAttribute}="${index}"]`;
@@ -622,7 +626,20 @@ export class WebsiteBrowser {
      for(const [index,color] of layout.glyphs.entries())options.style+=
       `[${labelAttribute}-glyph="${index}"]::before{color:${color}!important;-webkit-text-fill-color:${color}!important}`;
     }
-    pixels=await (frameElement?frameElement.screenshot(options):s.page.screenshot(options));
+    if(capture.rect){
+     let clip=capture.rect;
+     if(frameElement){
+      const frame=await frameElement.boundingBox();
+      const border=await frameElement.evaluate(el=>({x:el.clientLeft,y:el.clientTop}));
+      if(!frame)throw new BrowserInputError('BROWSER_CONTENT_CHANGED','目标内嵌页面已关闭，请重新打开。');
+      clip={...clip,x:Math.round(frame.x+border.x+clip.x),y:Math.round(frame.y+border.y+clip.y)};
+     }
+     const viewport=await s.page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+     if(clip.x<0||clip.y<0||clip.x+clip.width>viewport.width||clip.y+clip.height>viewport.height)
+      throw new BrowserInputError('BROWSER_CONTENT_CHANGED','目标区域超出浏览器视口，请先显示完整区域。');
+     pixels=await s.page.screenshot({...options,clip,scale:'css'});
+     layout=localizePrdLayout(layout,capture);
+    }else pixels=await (frameElement?frameElement.screenshot(options):s.page.screenshot(options));
    }
    finally{
     if(labelAttribute)await dom.evaluate(attribute=>{
@@ -632,9 +649,9 @@ export class WebsiteBrowser {
     await frameElement?.dispose();
    }
    await chmod(file,0o600);
-   if(!await targetVisible().catch(()=>false)){await rm(file,{force:true});throw new BrowserInputError('BROWSER_CONTENT_CHANGED','截图期间目标已变化，请重新打开目标界面。');}
+   if(JSON.stringify(await describeTarget().catch(()=>null))!==JSON.stringify(capture)){await rm(file,{force:true});throw new BrowserInputError('BROWSER_CONTENT_CHANGED','截图期间目标已变化，请重新打开目标界面。');}
    return {designReference:{name,sha256:createHash('sha256').update(pixels).digest('hex'),bytes:pixels.length,
-    capturedAt:new Date().toISOString(),pageUrl:args.url,visualPolicy:'brand-layout-v6',brandRegions:layout.brandRegions,actionRegions:layout.actionRegions,tableCapture:layout.tableCapture},designLayout:layout,rows:[],stage:'已截取真实目标页面脱敏截图，designLayout 提供实际视口及结构坐标'};
+    capturedAt:new Date().toISOString(),pageUrl:args.url,visualPolicy:'brand-layout-v7',captureScope:capture.kind,brandRegions:layout.brandRegions,actionRegions:layout.actionRegions,tableRows:layout.tableRows,tableCapture:layout.tableCapture},designLayout:{...layout,captureScope:capture.kind},rows:[],stage:'已截取真实目标页面脱敏截图，designLayout 提供实际视口及结构坐标'};
   }
   const buffer=await s.page.screenshot({path:file,type:'png',fullPage:false,timeout:10000,mask:s.page.frames().map(frame=>frame.locator(screenshotSecretSelector)),maskColor:'#6b7280',...(readiness.status==='ready'?{}:{style:'body::after{content:"页面加载尚未完成 · 现场截图";position:fixed;top:8px;right:12px;z-index:2147483647;background:#fff3cd;color:#704d00;padding:6px 10px;border:1px solid #e6ce81;border-radius:4px;font:13px sans-serif;pointer-events:none}'})});await chmod(file,0o600);
   return {...await this.snapshot(s),...(readiness.status==='ready'?{}:{pageStatus:'loading',partial:true}),stage:readiness.status==='ready'?'已保存稳定网页截图':'已保存加载未完成的现场截图',screenshot:{name,sha256:createHash('sha256').update(buffer).digest('hex'),bytes:buffer.length,capturedAt:new Date().toISOString(),url:websitePageLocation(s.page.url()),route:websitePageRoute(s.page.url()),readiness},rows:[],note:'已等待接口、加载指示和页面稳定；正常业务字段保留，凭据及显式敏感区用灰色遮挡。readiness.status为ready仅代表渲染稳定，不代表业务正常；其它状态是加载未完成的现场证据。截图由控制服务校验后发送原话题，不能代替未打开页面的检查。'};

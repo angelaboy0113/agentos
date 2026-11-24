@@ -1,3 +1,7 @@
+## 1.155.14
+
+- PRD 截图自动按真实弹窗、短提示或页面取景，局部控件可明确选择区域，页面与菜单可保留全幅上下文。保留静态上传说明和已知状态，已改动原型支持按原像素顺移旧行，以及新增控件的裁切边缘检查。
+
 ## 1.155.13
 
 - Allow a group card topic to be configured for one assistant’s friendly text replies. The topic skips question cards and investigation intake, and comment retries reuse the same reply.

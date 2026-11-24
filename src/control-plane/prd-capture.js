@@ -1,3 +1,41 @@
+// Use fixed DOM landmarks. Inputs are visible text and a scope hint, never selectors.
+export function prdCaptureTarget(element, scope) {
+  const dialog = '[role="dialog"],[role="alertdialog"],dialog[open],.ant-modal-content,.ant-modal,.el-dialog,.ant-drawer-content,.el-drawer';
+  const feedback = '[role="alert"],[role="status"],[role="tooltip"],.ant-message-notice-content,.ant-notification-notice,.el-message,.el-notification';
+  const box = element.getBoundingClientRect();
+  if (!box.width || !box.height || box.right <= 0 || box.bottom <= 0
+    || box.left >= innerWidth || box.top >= innerHeight || getComputedStyle(element).visibility !== 'visible') return null;
+  const overlay = element.closest(dialog+','+feedback);
+  const region = scope === 'page' ? null : overlay ??
+    (scope === 'region' ? element.closest('form,fieldset,[role="group"],.ant-form-item,.el-form-item,[data-prd-section],section,li,[role="menuitem"],button,[role="button"]') ?? element : null);
+  if (!region) return {kind:'page'};
+  const r = region.getBoundingClientRect();
+  const x = Math.floor(Math.max(0,r.left)), y = Math.floor(Math.max(0,r.top));
+  const width = Math.ceil(Math.min(innerWidth,r.right))-x, height = Math.ceil(Math.min(innerHeight,r.bottom))-y;
+  const clipped = r.left < -1 || r.top < -1 || r.right > innerWidth+1 || r.bottom > innerHeight+1;
+  return {kind:region.matches(dialog)?'dialog':region.matches(feedback)?'feedback':'region',
+    rect:{x,y,width,height},clipped};
+}
+
+export function localizePrdLayout(layout, capture) {
+  if (!capture.rect) return layout;
+  const {x,y,width,height}=capture.rect;
+  const position = region => {
+    const left=Math.max(x,region.x), top=Math.max(y,region.y);
+    const right=Math.min(x+width,region.x+region.width), bottom=Math.min(y+height,region.y+region.height);
+    return right>left&&bottom>top ? {...region,x:left-x,y:top-y,width:right-left,height:bottom-top} : null;
+  };
+  const normalized = regions => (regions??[]).flatMap(region=>{
+    const item=position({x:region.x*layout.viewportWidth,y:region.y*layout.viewportHeight,
+      width:region.width*layout.viewportWidth,height:region.height*layout.viewportHeight});
+    return item?[{x:item.x/width,y:item.y/height,width:item.width/width,height:item.height/height}]:[];
+  });
+  return {...layout,viewportWidth:width,viewportHeight:height,
+    sections:layout.sections.map(position).filter(Boolean),controls:layout.controls.map(position).filter(Boolean),
+    brandRegions:normalized(layout.brandRegions),actionRegions:normalized(layout.actionRegions),
+    tableRows:normalized(layout.tableRows)};
+}
+
 // Runs in the page. Preserve native UI ink for semantic chrome and known static copy.
 export function describePrdCapture({ attribute, secretSelector, brandedLabels }) {
   const bounds = target => {
@@ -49,7 +87,8 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     }
   }
   const tableCapture={tables:grids.length,visibleRows,sampleFields:0,preservedStates:0};
-  const states=new Set(('启用 停用 已启用 已停用 有效 无效 待审核 待审批 审批中 审核中 待执行 执行中 进行中 已执行 已审核 已审批 已发布 已批准 已生效 未生效 未开始 已完成 未完成 待提交 草稿 已提交 已驳回 已拒绝 已关闭 已取消 已撤销 已过期 已结束 已上账 待上账 已匹配 未匹配 可申请 已结案 活跃 非活跃 不活跃 Active Inactive Pending Approved Rejected Completed Draft Open Closed').split(' '));
+  const tableRows=[...new Set([...rowCells.keys()].map(cell=>cell.closest(rowSelector)))].map(row=>clip(bounds(row))).filter(Boolean);
+  const states=new Set(('启用 停用 已启用 已停用 有效 无效 待审核 待审批 审批中 审核中 待执行 执行中 进行中 已执行 已审核 已审批 已发布 已批准 已生效 未生效 未开始 已完成 未完成 待提交 草稿 已提交 已驳回 已拒绝 已关闭 已取消 已撤销 已过期 已结束 已上账 待上账 部分上账 全部上账 关闭上账 未上账 已匹配 未匹配 可申请 已结案 活跃 非活跃 不活跃 Active Inactive Pending Approved Rejected Completed Draft Open Closed').split(' '));
   const sampleValue=({header,number})=>{
     const code=String(number).padStart(3,'0');
     if(/序号|^#$/i.test(header))return String(number);
@@ -67,6 +106,29 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     return '示例 '+code;
   };
   const sampled=new Set();
+  const populatedFields=new Set();
+  const sampleFormField=(element,geometry,style)=>{
+    if(rowCells.has(element.closest(cellSelector)) || !element.matches('input:not([type]),input[type=text],input[type=number],input[type=date],input[type=email],input[type=tel],textarea')
+      || !element.value?.trim() || element.closest(secretSelector))return;
+    const group=element.closest('.ant-form-item,.el-form-item,[role=group]');
+    const label=element.labels?.[0]??group?.querySelector('label,[class*="form-item-label"],[class*="form-item__label"]');
+    const key=label?.textContent.trim().replace(/[：:\s*]+$/,'');
+    if (!key || !/^(?:活动名称|活动编码|活动编号|经销商(?:简称|名称|编码)|申请人|申请时间|审批状态|申请金额|预算来源|(?:累计)?可申请(?:金额|额度)(?:来源年份)?|本次申请金额|打包袋数量|备注)$/.test(key))return;
+    const parent=element.parentElement;
+    if(!parent||populatedFields.has(parent)||parent.querySelectorAll('input,textarea').length!==1
+      || !['none','normal'].includes(getComputedStyle(parent,'::after').content))return;
+    populatedFields.add(parent);
+    const parentBox=bounds(parent);
+    const paddingX=parseFloat(style.paddingLeft)||0;
+    const paddingY=element.matches('textarea')?parseFloat(style.paddingTop)||0:
+      Math.max(0,(geometry.height-(parseFloat(style.lineHeight)||parseFloat(style.fontSize)*1.2))/2);
+    const text=key==='审批状态'?'审批中':key==='备注'?'示例备注':key.endsWith('年份')?'2026':sampleValue({header:key,number:1});
+    parent.setAttribute(attribute+'-sample',String(samples.length));
+    samples.push({text,color:style.color,ink:style.webkitTextFillColor||style.color,
+      left:Math.max(0,geometry.x-parentBox.x+paddingX),top:Math.max(0,geometry.y-parentBox.y+paddingY),
+      maxWidth:Math.max(1,geometry.width-paddingX-5),fontSize:parseFloat(style.fontSize)||14});
+  };
+
   const sampleInk = (element,node,geometry,style,text)=>{
     element.setAttribute(attribute+'-sample',String(samples.length));
     const ink=document.createRange();
@@ -169,6 +231,7 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       element.setAttribute(attribute+'-placeholder',String(placeholders.length));
       placeholders.push(getComputedStyle(element,'::placeholder').color);
     }
+    sampleFormField(element,geometry,style);
     if(element.closest(sensitiveValue))continue;
     const direct=[...element.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim());
     if(direct.length!==1)continue;
@@ -194,12 +257,18 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     const normalized = text.replace(/\s+/g,'').replace(/：/g,':').replace(/:$/,'');
     const fieldLabel = element.closest(fieldLabelSelector);
     const semanticChrome = element.closest(chromeSelector);
+    const uploadChrome = element.closest('.ant-upload,.el-upload,[data-prd-upload]') &&
+      /^(?:点击上传|上传文件|(?:将|把)文件拖(?:拽|动)?到此处[，,]?(?:或)?|(?:仅允许导入|支持)(?:[.\s]*(?:xls[x]?|csv|pdf|png|jpe?g|mp4)[.、,，\s]*){1,8}(?:格式)?文件[。.]?)$/i.test(text);
+    const feedbackCopy = element.closest('[role="alert"],[role="status"],[role="tooltip"],.ant-message-notice-content,.ant-notification-notice,.el-message,.el-notification')
+      && /^(?:操作|保存|提交|上传|导入|删除|更新|处理|校验)(?:成功|失败|完成)[！!。.]?$/.test(text);
+    const dialogTitle = element.closest('.ant-modal-title,.el-dialog__title,[role="dialog"] [role="heading"],[role="dialog"] h2')
+      && /^(?:上传|批量(?:导入|上传|调整)|(?:文件|数据|模板)(?:上传|导入)|(?:新增|编辑|确认|操作)提示)$/.test(text);
     const actionLabel = element.closest('button,[role="button"]')&&(
       /^(?:查看|关闭|返回|刷新|导出|查询|搜索|展开|收起|确认|取消|应用|下载|批量|全量)[\p{L} ]{1,16}$/u.test(text)
       || /^(?:[\p{L}]{1,12})(?:后调整|调整|上账)$/u.test(text));
     // Cells, selection values and account badges stay covered. Ordinary
     // menu, collapse and table-header labels keep their original typography.
-    if(!terms.has(normalized)&&!brandTitle&&!visibleState&&!rowAction&&!(
+    if(!terms.has(normalized)&&!brandTitle&&!visibleState&&!rowAction&&!uploadChrome&&!dialogTitle&&!feedbackCopy&&!(
       ((fieldLabel||semanticChrome||actionLabel)&&staticLabel(text)) || (element.closest('h1,h2,h3,[role="heading"]')&&fieldTerms.has(normalized))))continue;
     const range=document.createRange();
     range.selectNodeContents(direct[0]);
@@ -219,5 +288,5 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       const hit = document.elementFromPoint((region.x+region.width/2)*innerWidth,(region.y+region.height/2)*innerHeight);
       return element.contains(hit) ? [region] : [];
     });
-  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,actionRegions,samples,tableCapture};
+  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,actionRegions,tableRows,samples,tableCapture};
 }

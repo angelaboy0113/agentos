@@ -29,3 +29,8 @@ Assistant 使用现有只读调查能力，按需核对本系统固定源码与�
 ### Related application pages
 
 For a PRD spanning multiple applications, the original card and session stay with the receiving assistant. A reciprocal related project in the same group can expose a reviewed, registered website in the same runtime tier. Add its exact environment ID to the originating project’s `integrationPeerEnvironments` list for that project. The site must permit reading for the original user. Open the target entry from the task catalog and gather screenshots independently. Capture receipts retain the originating task and the target application, and recheck the current scope before prototype generation and delivery. Ordinary cross-system database investigations keep their existing rules.
+
+
+### 原型取景与旧控件保护
+
+默认按可见目标确定截图范围。弹窗、抽屉和提示优先取其自身区域，页面或菜单位置可用 `scope=page`，局部表单或控件可用 `scope=region`。修改坐标、原有按钮和表格行坐标相对于返回图的宽高。取图时保留可识别的静态上传说明和状态文字，部分已填表单字段以明确的示例值展示。新增表格行可以用 `shifts` 按原图像素向下顺移，镜像范围内的旧控件和旧行一起移动。修改既有的表格行时声明 `editableRows`。独立新增按钮和短提示可设 `fit=control`，在边缘有显著连续变化时回到原型修订。

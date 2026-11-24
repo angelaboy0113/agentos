@@ -47,7 +47,7 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
      const candidate=JSON.parse((await safeBytes(path.join(dir,prior))).bytes);
      const sourceCacheKey=job.analysisSourceSnapshot?.cacheKey;
      const visualPolicy=candidate.item?.visualPolicy;
-     if((['brand-layout-v5','brand-layout-v6'].includes(visualPolicy)||!job.prd.nativeUiCapture&&['brand-layout-v2','brand-layout-v3','brand-layout-v4'].includes(visualPolicy))
+     if((['brand-layout-v5','brand-layout-v6','brand-layout-v7'].includes(visualPolicy)||!job.prd.nativeUiCapture&&['brand-layout-v2','brand-layout-v3','brand-layout-v4'].includes(visualPolicy))
        && (!job.prd.reviewBasis || !sourceCacheKey || candidate.sourceCacheKey===sourceCacheKey))receipt=candidate;
     }
    }
@@ -73,6 +73,8 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
    if(digest!==receipt.item.sha256||actual.bytes.length!==receipt.item.bytes||!actual.bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))throw failure('IMAGE_INPUT','原型参考截图校验失败');
    return {path:file,sha256:digest,kind:'website-design-reference',
     ...(scope?{subjectProjectId:scope.projectId}:{}),
+    ...(receipt.item.captureScope?{captureScope:receipt.item.captureScope}:{}),
+    ...(receipt.item.tableRows?.length?{tableRows:receipt.item.tableRows}:{}),
     ...(receipt.item.actionRegions?.length?{actionRegions:receipt.item.actionRegions}:{}),
     ...(receipt.item.brandRegions?.length?{brandRegions:receipt.item.brandRegions}:{})};
   }

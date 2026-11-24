@@ -40,16 +40,37 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
     throw layoutError('请选择 existing-page 或 new-page 并给出对应内容');
   }
   const areas = composite ? spec.areas : [];
-  const shifts = inline && !nativeEdit ? spec.shifts ?? [] : [];
+  const shifts = inline ? spec.shifts ?? [] : [];
   const withinScreenshot = a => a && [a.x,a.y,a.width,a.height].every(n => typeof n === 'number' && Number.isFinite(n))
     && a.x >= 0 && a.y >= 0 && a.width > 0 && a.height > 0 && a.x+a.width <= 1 && a.y+a.height <= 1;
   if (!Array.isArray(shifts) || shifts.some(s=>!withinScreenshot(s)||typeof s.dy!=='number'||s.dy<=0||s.dy>=s.height)
     || !Array.isArray(areas) || composite && (!areas.length || areas.some(a =>
     !withinScreenshot(a) || (inline && !nativeEdit && !withinScreenshot(a.sample))
+    || (a.fit!==undefined&&a.fit!=='control')
     || (a.inset!==undefined&&(!Number.isFinite(a.inset)||a.inset<0||a.inset>=1))
     || ((!inline || a.text !== undefined) && (typeof a.text !== 'string' || !a.text.trim() || /[\r\n]/.test(a.text)))
   ) || !inline && areas.reduce((sum,a) => sum+a.width*a.height,0) >= 0.75)) {
     throw layoutError('改动区需要在实际截图内填写 x、y、width、height（0 到 1）和拟新增的界面文案');
+  }
+  const intersects = (a,b) => a.x<b.x+b.width && b.x<a.x+a.width && a.y<b.y+b.height && b.y<a.y+a.height;
+  const contains = (a,b) => a.x<=b.x+0.002 && a.y<=b.y+0.002
+    && a.x+a.width>=b.x+b.width-0.002 && a.y+a.height>=b.y+b.height-0.002;
+  const rows = reference.tableRows ?? [];
+  const editableRows = spec.editableRows ?? [];
+  if (nativeEdit && !existing && shifts.length) throw layoutError('新页面设计不需要顺移已有页面行');
+  if (nativeEdit && existing) {
+    if (!Array.isArray(editableRows) || editableRows.some(index=>!Number.isSafeInteger(index)||!rows[index])) {
+      throw layoutError('editableRows 只可填写本次明确要替换内容的现有行下标');
+    }
+    if(shifts.some((shift,index)=>shifts.slice(0,index).some(other=>intersects(shift,other))
+      ||areas.some(area=>intersects(shift,area)&&!contains({...shift,height:shift.dy},area))
+      ||(reference.brandRegions??[]).some(brand=>intersects(shift,brand)))) {
+      throw layoutError('顺移区不能覆盖品牌、另一顺移区或新行之外的改动；新增内容仅绘入腾出的区域');
+    }
+    if (areas.some(area=>rows.some((row,index)=>intersects(area,row)&&!editableRows.includes(index)
+      && !shifts.some(shift=>contains({...shift,height:shift.dy},area)&&contains(shift,row))))) {
+      throw layoutError('改动区覆盖现有表格行。新增行请用 shifts 顺移旧行，明确改旧行时才填写 editableRows');
+    }
   }
   const visibleRegions = areas.map(({x,y,width,height})=>({x,y,width,height}));
   const existingActions = reference.actionRegions ?? [];
@@ -59,11 +80,12 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
     throw layoutError('editableActions 只可填写确实要修改的现有按钮在 designLayout.actionRegions 的下标');
   }
   const protectedRegions = (reference.brandRegions??[]).concat(nativeEdit
-    ? existingActions.filter((_,index)=>!editableActions.includes(index)) : []);
+    ? existingActions.filter((region,index)=>!editableActions.includes(index)&&!shifts.some(shift=>contains(shift,region))) : []);
   const firstEdit = nativeEdit ? [
     'Edit the attached real UI screenshot in place. Preserve its aspect ratio, viewport framing, branding and layout outside the edit rectangles.',
     'Inside the edit rectangles preserve all unchanged components, exact labels, alignment, colors, row heights, button styles and layout seen in the screenshot.',
     'Reuse the visible reference controls for new fields, rows or actions. Keep visible workflow states and existing terminology. Leave masked fields and records masked; do not reconstruct them.',
+    'For a standalone button, short notice or other discrete control, leave breathing room inside its rectangle so the final composite keeps every glyph, border and rounded corner.',
     'If the requirement calls for a new page, adapt the reference page structure in the rectangles rather than redesigning the application shell.',
     'Return one full edited screenshot with no margins, captions, split panels, or annotations. The allowed rectangles use x, y, width and height as fractions of the screenshot.',
     JSON.stringify(visibleRegions),
@@ -105,9 +127,37 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
         ctx.clip();
         ctx.drawImage(design,0,0,w,h);
         ctx.restore();
+        for (const shift of shifts) {
+          const x = Math.round(shift.x*w), y = Math.round(shift.y*h);
+          const endX = Math.round((shift.x+shift.width)*w), endY = Math.round((shift.y+shift.height)*h);
+          const dy = Math.round(shift.dy*h);
+          const width = endX-x, height = endY-y-dy;
+          if (width < 1 || height < 1 || dy < 1) throw Error('菜单顺移区域太小');
+          ctx.drawImage(source,x,y,width,height,x,y+dy,width,height);
+        }
         for(const {x,y,width,height} of brandRegions){
           const left=Math.floor(x*w),top=Math.floor(y*h),widthPx=Math.ceil((x+width)*w)-left,heightPx=Math.ceil((y+height)*h)-top;
           ctx.drawImage(source,left,top,widthPx,heightPx,left,top,widthPx,heightPx);
+        }
+        if (areas.some(area=>area.fit==='control')) {
+          const before=document.createElement('canvas');before.width=w;before.height=h;
+          const original=before.getContext('2d');original.drawImage(source,0,0);
+          for(const [index,area] of areas.entries()){
+            if(area.fit!=='control')continue;
+            const x=Math.round(area.x*w),y=Math.round(area.y*h);
+            const width=Math.round((area.x+area.width)*w)-x,height=Math.round((area.y+area.height)*h)-y;
+            if(width<8||height<8)throw Error(`第 ${index+1} 个控件改动区太小`);
+            const a=original.getImageData(x,y,width,height).data,b=ctx.getImageData(x,y,width,height).data;
+            const changed=(c,r)=>{const i=(r*width+c)*4;return Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2])>75;};
+            const crowded=(length,point)=>{
+              let run=0;
+              for(let i=0;i<length;i++){run=point(i)?run+1:0;if(run>=Math.max(6,Math.ceil(length/5)))return true;}
+              return false;
+            };
+            if(crowded(width,i=>changed(i,0))||crowded(width,i=>changed(i,height-1))
+              ||crowded(height,i=>changed(0,i))||crowded(height,i=>changed(width-1,i)))
+              throw Error(`第 ${index+1} 个控件改动贴到裁切边缘，请留出边距再生成`);
+          }
         }
         return canvas.toDataURL().split(',')[1];
       }
