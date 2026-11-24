@@ -8,7 +8,7 @@ import {MemoryAdmission} from '../shared/memory-admission.js';
 import {getHeapStatistics} from 'node:v8';
 import {stateView,questionStateView} from '../shared/state-view.js';
 import {ReceptionService} from './reception.js';
-import {loadReceptionPolicy} from '../shared/reception-policy.js';
+import {loadReceptionPolicy,receptionSensitive} from '../shared/reception-policy.js';
 import {cloudSheetTarget,readCloudSheet,CloudSheetError,registerCloudSheetInput,registerCloudDocumentInput,restoreCloudSheetInput} from '../shared/feishu-cloud-sheet.js';
 import {LongInvestigationNotices} from './long-investigation-notices.js';
 import {SuccessStickers} from './success-stickers.js';
@@ -663,6 +663,26 @@ async function handleFeishuEvent(context, envelope) {
   });
 }
 
+function findCasualTopic(conversations, event) {
+  if (event.chat_type !== 'group') return null;
+  return conversations?.casualTopics?.find(topic => topic.chatId === event.chat_id
+    && ([event.root_id, event.reply_to].includes(topic.rootId)
+      || (topic.threadId && topic.threadId === event.thread_id)));
+}
+
+function casualTopicReply(text, addressed) {
+  if (/排查|帮(?:我|忙)?(?:查|看)|(?:查|看)一下|查询|日志|报错|数据库|写.*PRD/i.test(text)) {
+    return addressed ? '这里聊使用感受，业务问题可以在群里单独问我呀。' : null;
+  }
+  if (/厉害|(?:很|真|非常|特别|太|挺|蛮|超)棒|真快|好快|确实快|(?:变|更|明显|确实|真的|速度)快|快了|给力|点赞|牛[啊呀哇皮]|优秀|不错|夸|赞|谢谢|辛苦|👍|👏/.test(text)) {
+    return '谢谢夸奖，收到啦 😊';
+  }
+  if (addressed || /哈哈|好耶|有感觉|加油|有变快|多快|快不快|你.*[吗呢？?]|[😄😂😊]/.test(text)) {
+    return '哈哈，收到！谢谢愿意来跟我聊 😊';
+  }
+  return null;
+}
+
 export async function handleLarkCliEvent(context, event) {
   if (event.type !== 'im.message.receive_v1' || ['bot', 'app'].includes(event.sender_type)) return null;
   if (context.projects.retiredChatIds?.includes(event.chat_id)) return { ignored: true, reason: 'retired_group' };
@@ -678,6 +698,16 @@ export async function handleLarkCliEvent(context, event) {
   if (agent?.allowedChatIds && event.chat_type !== 'p2p' && !agent.allowedChatIds.includes(event.chat_id)) return { ignored: true, reason: 'outside_assistant_group' };
   const prdMentionIds = (event.mentions ?? []).flatMap(item => [item.id?.open_id ?? item.id?.app_id ?? item.id, item.open_id, item.user_id]).filter(Boolean);
   const prdAddressed=[agent?.openId,agent?.appId].filter(Boolean).some(id => prdMentionIds.includes(id));
+  const casualTopic = findCasualTopic(context.conversations, event);
+  if (casualTopic) {
+    if (sourceProfile !== casualTopic.profile || event.sender_type !== 'user'
+      || !['text', 'post', undefined].includes(event.message_type)
+      || (prdMentionIds.length && !prdAddressed)) return { ignored: true, reason: 'casual_topic_only' };
+    const content = stripMentions(event.content, event.mentions);
+    const response = content && !receptionSensitive(content) ? casualTopicReply(content, prdAddressed) : null;
+    if (!response) return { ignored: true, reason: 'casual_topic_no_reply' };
+    return context.conversations.enqueueCasualReply({...event, message_id:messageId, agent_role:role}, response);
+  }
   const prd = prdAddressed ? await context.prd?.handle({...event,message_id:messageId}, {agent, addressed:true,
     content:stripMentions(event.content, event.mentions)}) : null;
   if (prd) return prd;

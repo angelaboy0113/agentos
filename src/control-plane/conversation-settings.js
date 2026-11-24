@@ -8,5 +8,11 @@ export async function loadConversationSettings(file) {
   if(watch && (typeof watch.enabled!=='boolean' || !Array.isArray(watch.profiles) || watch.profiles.some(x=>typeof x!=='string')
     || !Number.isInteger(watch.intervalMs) || watch.intervalMs<15000 || watch.intervalMs>300000
     || !Number.isInteger(watch.lookbackMinutes) || watch.lookbackMinutes<1 || watch.lookbackMinutes>1440)) throw new Error('Invalid edited mentions configuration');
-  return { groupSessions: value.groupSessions, questionCards: value.questionCards, ...(watch?{editedMentions:watch}:{}) };
+  const casualTopics = value.casualTopics ?? [];
+  if (!Array.isArray(casualTopics) || casualTopics.some(topic =>
+    !topic || !/^oc_[A-Za-z0-9]+$/.test(topic.chatId ?? '')
+    || !/^om_[A-Za-z0-9]+$/.test(topic.rootId ?? '')
+    || (topic.threadId !== undefined && !/^omt_[A-Za-z0-9]+$/.test(topic.threadId))
+    || typeof topic.profile !== 'string' || !topic.profile)) throw new Error('Invalid casual topic configuration');
+  return { casualTopics, groupSessions: value.groupSessions, questionCards: value.questionCards, ...(watch?{editedMentions:watch}:{}) };
 }

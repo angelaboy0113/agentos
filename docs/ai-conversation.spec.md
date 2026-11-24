@@ -15,3 +15,8 @@
 验收：问候/身份/当前项目均调用模型；多轮指代可以创建完整任务；自然语言确认仍通过权限校验；同事件重复投递无重复任务；AI 错误无任务；仅 @ 对应机器人应答；重启保留上下文。
 
 性能与运行约束见 `conversation-latency.spec.md`。对话使用常驻 Codex app-server，同群/用户/角色/项目复用线程；不同会话有界并发，同会话严格顺序。模型和订阅登录不变。3 秒慢响应提示只陈述接收事实，真正回答仍由 AI 产生。超时失败不创建任务，发送重试不再调用 AI 或重复应用动作。
+
+
+### Casual group topics
+
+In the deployment’s conversation configuration, optional `casualTopics` entries bind `chatId`, `rootId`, an optional `threadId`, and the replying assistant’s `profile`. Obtain these IDs from an existing group card and restart the control plane to load the setting. Registered topics route human text comments to a short direct response for praise, casual feedback, or mentions of the configured assistant. Other bots and comments directed to another participant receive no automated response. A business request in the topic never opens an AgentOS task. Ordinary group routing continues outside the configured topics.

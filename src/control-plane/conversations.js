@@ -57,6 +57,7 @@ export class ConversationService {
     this.context = context;
     this.groupSessions = options.groupSessions === true;
     this.questionCards = options.questionCards === true;
+    this.casualTopics = options.casualTopics ?? [];
     this.memory = new MemoryService({ dataDir: context.config.dataDir, settings: options.memorySettings });
     this.engine = options.decide ? null : new CodexConversationEngine({ dataDir: context.config.dataDir, file: context.config.codexRuntimeFile });
     this.decide = options.decide ?? ((input, signal, detail) => this.engine.decide(input, { ...detail, signal }));
@@ -95,6 +96,26 @@ export class ConversationService {
   }
 
   abortWithdrawn(ids){for(const id of ids){this.turnAborts.get(id)?.abort();const f=this.feedback.get(id);clearTimeout(f?.timer);clearInterval(f?.pulse);this.feedback.delete(id);}this.wake();}
+
+  async enqueueCasualReply(event, response) {
+    if (!event.message_id || !event.sender_id) return { ignored: true, reason: 'casual_topic_invalid_identity' };
+    const accepted = await this.context.store.transact(state => {
+      state.conversations ??= [];
+      const existing = state.conversations.find(turn => turn.messageId === event.message_id && turn.profile === event.agent_profile);
+      if (existing) return { conversation: true, turnId: existing.id, duplicate: true };
+      const id = createId('CHAT');
+      state.conversations.push({
+        id, messageId: event.message_id, chatId: event.chat_id, senderId: event.sender_id,
+        profile: event.agent_profile, role: event.agent_role, chatType: 'group',
+        projectId: resolveProjectId(this.context.projects, event.chat_id, event.agent_profile),
+        status: 'ready', displayMode: 'direct', casualTopic: true, replyInThread: true, response,
+        content: '', attachments: [], createdAt: new Date().toISOString(),
+      });
+      return { conversation: true, turnId: id, duplicate: false };
+    });
+    this.wake();
+    return accepted;
+  }
 
   async enqueue(event) {
     if (!event.message_id || !event.chat_id || !event.sender_id) throw new Error('Missing message identity');
@@ -332,7 +353,7 @@ export class ConversationService {
         const deliveryStarted = Date.now();
         if(turn.directoryChannel){const responseIds=await this.context.contactChannels.deliver(turn);await this.update(turn.id,{status:'sent',completedAt:new Date().toISOString(),responseIds,contactImageMessageId:turn.outcome?.contactImage?responseIds[0]:null});continue;}
         const responseIds = [...(turn.responseIds ?? [])];
-        const addressee=turn.displayMode!=='direct'&&turn.questionId&&this.context.cards?.enabled?'':await this.context.replyAddressing?.forTurn(turn)??'';
+        const addressee=turn.casualTopic||turn.displayMode!=='direct'&&turn.questionId&&this.context.cards?.enabled?'':await this.context.replyAddressing?.forTurn(turn)??'';
         let parts;
         if (this.context.cards?.enabled&&turn.displayMode!=='direct') {
           const cardId = turn.questionId ? await publishQuestion(this.context, turn.questionId) : await this.context.cards.upsert(`chat:${turn.id}`, addressCard(conversationCard(turn),addressee),
@@ -343,7 +364,7 @@ export class ConversationService {
         } else {
           if(turn.visibility==='requester')throw new Error('私有卡片投递不可用，未回退公开消息');
           parts = splitReply(addressText(turn.response,addressee));
-          if(turn.displayMode==='direct'&&turn.chatType==='group'&&parts.length)parts[0]=requesterMentionText(turn.senderId,parts[0]);
+          if(turn.displayMode==='direct'&&turn.chatType==='group'&&!turn.casualTopic&&parts.length)parts[0]=requesterMentionText(turn.senderId,parts[0]);
           const mention = turn.displayMode==='direct'?null:conversationTerminalMention(turn);
           if (mention && parts.length) parts[parts.length - 1] = `${parts.at(-1)}\n\n${mention.text}`;
         }

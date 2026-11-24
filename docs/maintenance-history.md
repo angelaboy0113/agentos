@@ -1,3 +1,7 @@
+## 1.155.13
+
+- Allow a group card topic to be configured for one assistant’s friendly text replies. The topic skips question cards and investigation intake, and comment retries reuse the same reply.
+
 ## 1.155.12
 
 - PRD 定稿的工件验收和飞书发布分步交接，已核验的工件先交给发布器，发布器凭回执确认送达。流程图按正文校对状态和分支。
