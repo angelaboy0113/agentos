@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { resolveProjectId } from '../shared/project-scope.js';
 import { stateView } from '../shared/state-view.js';
 import { adminUsage } from './admin-usage.js';
+import { navigatePointsStore, pointsStorePageCard, pointsStorePages } from './points-store-pages.js';
 
 const openId = /^ou_[A-Za-z0-9]+$/;
 const chatId = /^oc_[A-Za-z0-9]+$/;
@@ -11,7 +12,7 @@ const dayFormat = new Intl.DateTimeFormat('en-CA', {
 });
 const hash = (...values) => createHash('sha256').update(JSON.stringify(values)).digest('hex');
 
-const checkinActions = new Set(['daily_checkin', 'my_checkin_points', 'points_store']);
+const checkinActions = new Set(['daily_checkin', 'my_checkin_points', 'points_store','points_store_page']);
 export const isCheckinAction = (action) => checkinActions.has(action);
 
 function actorKey(projects, {profile, senderId}) {
@@ -72,7 +73,7 @@ function validPointsStorePreview(card) {
   return buttons > 0;
 }
 
-export async function publishCheckinCard(context, {profile, group, previewRequestId, pointsStorePreviewCard} = {}) {
+export async function publishCheckinCard(context, {profile, group, previewRequestId, pointsStorePreviewCard, paginatePointsStore = false} = {}) {
   const preview = group === undefined;
   if (previewRequestId !== undefined && (!preview || typeof previewRequestId !== 'string' || !/^[a-zA-Z0-9_-]{8,64}$/.test(previewRequestId))) {
     throw Object.assign(new Error('新体验卡仅支持私聊，并须提供有效的请求编号'), { statusCode: 400 });
@@ -81,6 +82,8 @@ export async function publishCheckinCard(context, {profile, group, previewReques
   if (shopPreview && (!preview || !previewRequestId || !validPointsStorePreview(pointsStorePreviewCard))) {
     throw Object.assign(new Error('积分商城预览必须为仅含商城试兑按钮的私聊卡片'), { statusCode: 400 });
   }
+  const catalog = paginatePointsStore && shopPreview ? pointsStorePages(pointsStorePreviewCard) : null;
+  if (paginatePointsStore && !catalog) throw Object.assign(new Error('商城翻组预览至少需要两组双列礼品'),{statusCode:400});
   const agent = assistant(context, profile);
   const owner = context.projects.humanIdentities?.groupOwner?.[profile];
   if (!agent || (preview ? !openId.test(owner ?? '') : !allowedGroup(context, agent, group))) {
@@ -90,11 +93,12 @@ export async function publishCheckinCard(context, {profile, group, previewReques
   const key = previewRequestId === undefined
     ? (preview ? hash('preview', profile, owner) : hash('group', group))
     : hash(shopPreview ? 'points-store-preview' : 'preview-reissue', profile, owner, previewRequestId);
-  const contentHash = shopPreview ? hash(pointsStorePreviewCard) : undefined;
+  const contentHash = shopPreview ? (catalog ? hash('page',pointsStorePreviewCard) : hash(pointsStorePreviewCard)) : undefined;
   const binding = await context.store.transact((state) => {
     state.checkinCards ??= {};
     const value = state.checkinCards[key] ??= { profile, preview, target,
       ...(shopPreview ? { purpose:'points_store', contentHash } : {}),
+      ...(catalog ? {catalog,page:0,pageRevision:0} : {}),
     };
     return { ...value };
   });
@@ -103,7 +107,8 @@ export async function publishCheckinCard(context, {profile, group, previewReques
     throw Object.assign(new Error('相同预览请求编号的卡片内容已变化'), { statusCode: 409 });
   }
   if (binding.messageId) return { messageId: binding.messageId, chatId: binding.chatId, preview, reused: true };
-  const receipt = await send(context, profile, target, 'interactive', pointsStorePreviewCard ?? checkinCard(preview), key.slice(0, 32), preview ? 'open_id' : 'chat_id');
+  const content = catalog ? pointsStorePageCard(catalog) : pointsStorePreviewCard ?? checkinCard(preview);
+  const receipt = await send(context, profile, target, 'interactive', content, key.slice(0, 32), preview ? 'open_id' : 'chat_id');
   if (!preview && receipt.chatId !== group) throw new Error('群签到卡回执与登记目标不一致');
   await context.store.transact((state) => { Object.assign(state.checkinCards[key], receipt); });
   return { ...receipt, preview };
@@ -121,11 +126,13 @@ export async function handleCheckinAction(context, event, action, now = Date.now
   if (!event.event_id || !openId.test(senderId) || !chatId.test(chat) || !messageId.test(message)) {
     return { ignored: true, reason: 'invalid_checkin_actor' };
   }
-  const binding = await stateView(context.store, (s) => Object.values(s.checkinCards ?? {})
-    .find((c) => c.profile === profile && c.messageId === message && c.chatId === chat));
+  const found = await stateView(context.store, (s) => Object.entries(s.checkinCards ?? {})
+    .find(([,c]) => c.profile === profile && c.messageId === message && c.chatId === chat));
+  const [key,binding] = found ?? [];
   if (!binding || (binding.preview ? binding.target !== senderId : !allowedGroup(context, assistant(context, profile), chat))) {
     return { ignored: true, reason: 'checkin_card_scope_mismatch' };
   }
+  if (action === 'points_store_page') return navigatePointsStore(context,event,{...binding,key});
   if (binding.purpose === 'points_store' && action !== 'points_store') {
     return { ignored: true, reason: 'checkin_card_action_mismatch' };
   }

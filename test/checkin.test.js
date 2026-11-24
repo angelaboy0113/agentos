@@ -213,3 +213,58 @@ test('official receipts add historical points from verified cross-assistant auth
   assert.equal(reads.filter(([id]) => id==='om_history').length,2);
   assert.ok(reads.some(([id]) => id==='om_sameName'));
 });
+
+test('private shop pages update the same card in order and keep checkout and signing separate', async t => {
+  const dir=await mkdtemp(path.join(tmpdir(),'os-shop-pages-'));
+  t.after(()=>rm(dir,{recursive:true,force:true}));
+  const store=new JsonStore(path.join(dir,'agentos.json'));
+  const profile='demo', sent=[], updates=[];
+  let failUpdate=false;
+  const context={store,projects:{humanIdentities:{groupOwner:{demo:'ou_owner'}}},
+    agents:{agents:{demo:{profile,systemAssistant:true}}},feishu:{
+      async sendCheckinMessage(data){sent.push(data);return {data:{message_id:'om_shop',chat_id:'oc_dm'}};},
+      async updateCard(id,card,options){
+        assert.equal(id,'om_shop');
+        assert.equal(options.profile,profile);
+        if(failUpdate)throw Error('temporary delivery failure');
+        updates.push(card);
+      },
+    }};
+  const tile = content => ({tag:'column',elements:[
+    {tag:'markdown',content},
+    {tag:'button',behaviors:[{type:'callback',value:{action:'points_store'}}]},
+  ]});
+  const panel = (label,...names) => ({tag:'collapsible_panel',header:{title:{content:label}},
+    elements:[{tag:'column_set',columns:names.map(tile)}]});
+  const pointsStorePreviewCard={schema:'2.0',config:{},header:{title:{content:'AgentOS 积分商城'}},
+    body:{elements:[panel('视频 · 2 款','B 站','腾讯'),panel('饮品 · 2 款','咖啡','奶茶')]}};
+  const request={profile,previewRequestId:'paged-demo',pointsStorePreviewCard,paginatePointsStore:true};
+  const receipt=await publishCheckinCard(context,request);
+  const first=JSON.stringify(sent[0].content);
+  assert.match(first,/第 1 \/ 2 组/);
+  assert.doesNotMatch(first,/咖啡/);
+  assert.equal((await publishCheckinCard(context,request)).messageId,receipt.messageId);
+  assert.equal(sent.length,1);
+  const click=(step,revision,id,operator='ou_owner',chat='oc_dm')=>handleCheckinAction(context,{
+    event_id:id,operator_id:operator,agent_profile:profile,message_id:receipt.messageId,chat_id:chat,
+    action_value:JSON.stringify({action:'points_store_page',step,revision}),
+  },'points_store_page');
+  assert.equal((await click(1,0,'wrong','ou_other')).ignored,true);
+  assert.equal((await click(1,0,'other-chat','ou_owner','oc_other')).ignored,true);
+  assert.equal((await click(-1,0,'out-of-range')).ignored,true);
+  failUpdate=true;
+  await assert.rejects(click(1,0,'next'),/temporary delivery failure/);
+  failUpdate=false;
+  assert.equal((await click(1,0,'next')).ok,true);
+  assert.equal((await click(1,0,'next')).duplicate,true);
+  assert.equal((await click(-1,0,'stale')).ignored,true);
+  assert.equal(updates.length,1);
+  assert.match(JSON.stringify(updates[0]),/第 2 \/ 2 组.*咖啡/);
+  const outcomes=await Promise.all([click(-1,1,'back1'),click(-1,1,'back2')]);
+  assert.equal(outcomes.filter(result=>result.ok).length,1);
+  assert.equal(updates.length,2);
+  assert.match(JSON.stringify(updates[1]),/第 1 \/ 2 组/);
+  const s=await store.read();
+  assert.equal(Object.values(s.checkinReceipts??{}).length,0);
+  assert.equal(Object.values(s.checkins??{}).length,0);
+});

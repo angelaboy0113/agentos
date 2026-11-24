@@ -1,3 +1,7 @@
+## 1.155.6
+
+- Support previous and next groups on private points-store preview cards. Each update keeps the same message and presents two gifts without touching points.
+
 ## 1.155.5
 
 - Send private points-store previews with their final card payload on first delivery. Bind the preview to its recipient and allow only points-store callbacks.
