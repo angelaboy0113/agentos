@@ -692,6 +692,9 @@ test('cross-system PRD delivers styled cloud review draft as the owner with nati
   const exportJob = (await store.read()).jobs[0];
   const screenshot = await saveScreenshot(dataDir, exportJob);
   assert.match(prdGuidance(exportJob), /提交一个 md 和一个 png/);
+  assert.match(prdGuidance(exportJob), /立即返回 outcome=ready.*reportAssessment.decision=deliver/);
+  assert.match(prdGuidance(exportJob), /发布器随后建文档、回读、共享并给原卡回执/);
+  assert.match(prdGuidance(exportJob), /收到回执前勿写已送达/);
   const files = await Promise.all([
     saveArtifact(dataDir, exportJob, 'report-11111111-1111-1111-1111-111111111111', 'md', Buffer.from(md)),
     saveArtifact(dataDir, exportJob, 'report-22222222-2222-2222-2222-222222222222', 'png', png, screenshot, null),

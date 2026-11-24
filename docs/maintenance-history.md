@@ -1,3 +1,7 @@
+## 1.155.12
+
+- PRD 定稿的工件验收和飞书发布分步交接，已核验的工件先交给发布器，发布器凭回执确认送达。流程图按正文校对状态和分支。
+
 ## 1.155.11
 
 - Preview reviewed local business dialogs on an exact page route and button label while withholding action references for uploading, confirmation and edits inside the dialog. Existing request-level read authorization stays in force.
