@@ -28,7 +28,8 @@ test('other chats, deleted roots, wrong IDs, private chat and unrelated thread r
 
 test('plain rich text roots do not download resources, and a cached symlink never supplies external bytes',async t=>{
  const f=await fixture(t);f.raw.msg_type='post';f.raw.body.content=JSON.stringify({text:'ordinary discussion'});assert.deepEqual(await f.source.downloadTopicAttachments(f.event),[]);assert.equal(f.count().downloads,0);
- f.raw.msg_type='file';const [input]=await f.source.downloadTopicAttachments(f.event);await fs.unlink(input.path);const external=path.join(f.cwd,'not-an-input');await fs.writeFile(external,'private');await fs.symlink(external,input.path);
+ f.raw.msg_type='file';f.raw.body.content=JSON.stringify({file_key:'file-original'});
+ const [input]=await f.source.downloadTopicAttachments(f.event);await fs.unlink(input.path);const external=path.join(f.cwd,'not-an-input');await fs.writeFile(external,'private');await fs.symlink(external,input.path);
  f.source.downloadAttachments=async()=>{throw Error('Refresh required; cannot reuse symlink');};await assert.rejects(f.source.downloadTopicAttachments(f.event),/Refresh required/);assert.equal(await fs.readFile(external,'utf8'),'private');
 });
 
@@ -39,7 +40,7 @@ test('a new mention imports earlier image and file replies only from its author 
  Object.assign(f.event,{sender_type:'user',mentions:[{id:'ou_assistant'}]});
  const author={sender_type:'user',id:'ou_author',id_type:'open_id',tenant_key:'team'};
  const message=(id,type,extra={})=>({message_id:'om_'+id,root_id:'om_root',chat_id:'oc_group',
-  thread_id:'omt_thread',msg_type:type,sender:author,body:{content:'{}'},...extra});
+  thread_id:'omt_thread',msg_type:type,sender:author,body:{content:JSON.stringify({[type+'_key']:type+'_'+id})},...extra});
  const pages=new Map([
   [undefined,{items:[
    message('future','file'),message('reply','text'),message('edited','image',{deleted:true}),
@@ -50,13 +51,20 @@ test('a new mention imports earlier image and file replies only from its author 
   ],has_more:true,page_token:'older'}],
   ['older',{items:[
    message('image','image'),message('file','file'),
-   message('rich','post',{body:{content:'{"image_key":"img_example"}'}}),
+   message('rich','post',{body:{content:'{"content":[[{"image_key":"img_example"}]],"content_v2":[[{"image_key":"img_example"}]]}'}}),
    message('previous','text',{mentions:[{id:'ou_assistant'}]}),message('used','file'),
   ]}],
  ]);
  f.source.readThreadPage=async (thread,token)=>{assert.equal(thread,'omt_thread');return pages.get(token);};
+ const downloads=[];
+ const download=f.source.downloadAttachments;
+ f.source.downloadAttachments=async(event,resources)=>{
+  downloads.push(resources);
+  return download(event);
+ };
  const result=await f.source.downloadTopicAttachments(f.event);
  assert.deepEqual(result.map(x=>path.basename(path.dirname(path.dirname(x.path)))),['om_rich','om_file','om_image']);
+ assert.deepEqual(downloads,[[{key:'img_example',type:'image'}],[{key:'file_file',type:'file'}],[{key:'image_image',type:'image'}]]);
  assert.deepEqual(await f.source.downloadTopicAttachments(f.event),result);
  assert.equal(f.count().downloads,3);
  await assert.doesNotReject(async()=>assert.deepEqual(await f.source.downloadTopicAttachments({...f.event,mentions:[]}),[]));

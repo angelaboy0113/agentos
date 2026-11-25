@@ -180,22 +180,36 @@ export class LarkEventSource {
     }
   }
 
-  async downloadAttachments(event) {
+  async downloadAttachments(event, resources) {
     if (!['image', 'file', 'audio', 'media', 'post'].includes(event.message_type)) return [];
     const messageId = event.message_id ?? event.id;
     if (!messageId) return [];
-    const directory = path.join(this.config.cwd, 'messages', sanitizeSegment(messageId), ...(event.resourceVersion ? [sanitizeSegment(event.resourceVersion)] : []));
+    const directory = path.resolve(this.config.cwd, 'messages', sanitizeSegment(messageId), ...(event.resourceVersion ? [sanitizeSegment(event.resourceVersion)] : []));
     await mkdir(directory, { recursive: true });
-    await runLarkCli([
-      'im', '+messages-mget', '--as', 'bot', '--message-ids', messageId,
-      '--download-resources', '--no-reactions', '--json',
-    ], {
+    const cliOptions = {
       cliEntry: this.config.cliEntry,
       cwd: directory,
       profile: this.config.profile,
       configDir: this.config.configDir,
-    });
-    const files = await listFiles(directory);
+    };
+    let files;
+    if(resources){
+      files=[];
+      for(const {key,type} of resources){
+        const result=await runLarkCli(['im','+messages-resources-download','--as','bot','--message-id',messageId,
+          '--file-key',key,'--type',type,'--output',key,'--json'],cliOptions);
+        const savedPath=result.data?.saved_path;
+        const output=typeof savedPath==='string'&&path.resolve(directory,savedPath);
+        if(!output||path.dirname(output)!==directory||!(await stat(output)).size){
+          throw Error('Invalid message resource download');
+        }
+        files.push(output);
+      }
+    }else{
+      await runLarkCli(['im','+messages-mget','--as','bot','--message-ids',messageId,
+        '--download-resources','--no-reactions','--json'],cliOptions);
+      files=await listFiles(directory);
+    }
     return Promise.all(files.map(async (file, index) => ({
       id: `${sanitizeSegment(messageId)}-${event.resourceVersion ? sanitizeSegment(event.resourceVersion).slice(0,16)+'-' : ''}${index + 1}`,
       path: file,
@@ -280,7 +294,10 @@ export class LarkEventSource {
 
   async downloadRelatedMessage(message) {
     const id=message.message_id;
-    const digest=createHash('sha256').update(JSON.stringify({profile:this.config.profile,chatId:message.chat_id,type:message.msg_type,body:message.body,updatedAt:message.update_time})).digest('hex');
+    const resources=messageResources(message);
+    if(!resources.length)return [];
+    const digest=createHash('sha256').update(JSON.stringify({profile:this.config.profile,chatId:message.chat_id,
+      type:message.msg_type,body:message.body,updatedAt:message.update_time,resources})).digest('hex');
     const index=path.join(this.config.cwd,'related-input-index');await mkdir(index,{recursive:true,mode:0o700});
     const manifest=path.join(index,sanitizeSegment(id)+'.json');
     const verify=async files=>{
@@ -291,7 +308,7 @@ export class LarkEventSource {
       return true;
     };
     try {const saved=JSON.parse(await readFile(manifest));if(saved.digest===digest&&await verify(saved.files))return saved.files.map(({sha256,...x})=>x);}catch(error){if(!['ENOENT','ENOTDIR'].includes(error.code)&&!(error instanceof SyntaxError))throw error;}
-    const files=await this.downloadAttachments({message_id:id,message_type:message.msg_type,resourceVersion:digest});
+    const files=await this.downloadAttachments({message_id:id,message_type:message.msg_type,resourceVersion:digest},resources);
     if(!files.length)return [];
     const checked=await Promise.all(files.map(async x=>({...x,sha256:await inputHash(x.path)})));
     if(!await verify(checked))throw Error('Related topic input path or hash verification failed');
@@ -301,8 +318,25 @@ export class LarkEventSource {
 }
 
 function hasMessageResources(message) {
-  return ['file','image','audio','media'].includes(message.msg_type)
-    || message.msg_type==='post'&&/"(?:image_key|file_key)"\s*:/.test(message.body?.content??'');
+  return messageResources(message).length>0;
+}
+
+function messageResources(message) {
+  if(!['file','image','audio','media','post'].includes(message.msg_type))return [];
+  let content;
+  try{content=JSON.parse(message.body?.content??'');}catch{return [];}
+  const resources=new Map();
+  const parts=[content];
+  while(parts.length){
+    const part=parts.pop();
+    if(!part||typeof part!=='object')continue;
+    for(const [field,value] of Object.entries(part)){
+      const type=field==='image_key'?'image':field==='file_key'?'file':null;
+      if(type&&typeof value==='string'&&/^[A-Za-z0-9_-]{1,512}$/.test(value))resources.set(value,{key:value,type});
+      else if(value&&typeof value==='object')parts.push(value);
+    }
+  }
+  return [...resources.values()];
 }
 
 async function inputHash(file){const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);return hash.digest('hex');}
