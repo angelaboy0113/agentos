@@ -13,3 +13,28 @@ test('real MySQL premature-finish feedback can be shut down without a coroutine 
  const running=investigateEnvironment(plan,async()=>{},{load:async()=>cfg,credential:async()=>({password:'synthetic'}),tools:async()=>({spec:[{tool:'connection'},{tool:'select'}],run:async()=>({connected:true}),close:async()=>{closed=true;}}),planner:async()=>channel.planner()}).then(r=>{channel.settle(r);return r;},e=>{channel.fail(e);throw e;});
  await channel.observe();const rejected=await channel.choose({tool:'finish',arguments:'{}',complete:false,summary:'Need remaining data'});assert.equal(rejected.state,'tools');assert.equal(rejected.input.results.at(-1).error.code,'PREMATURE_FINISH');await channel.stop();const result=await running;assert.equal(closed,true);assert.equal(result.partial,true);assert.ok(result.steps.some(x=>x.includes('connection')));
 });
+
+test('typed CSV append errors return actionable diagnostics and keep the tool catalog for correction',async()=>{
+ const {QueryInputError}=await import('../src/runner/environment-tools.js');
+ const cfg={version:1,environments:{demo:structuredClone(entry)}},plan=planQuery(cfg,{environmentId:'demo',queryId:'investigate',parameters:['Append field']},'demo',{profile:'demo',senderId:'owner'});
+ let round=0,applied=0;
+ const result=await investigateEnvironment(plan,async()=>{},{
+  load:async()=>cfg,credential:async()=>({password:'synthetic'}),
+  tools:async()=>({spec:[{tool:'connection'},{tool:'append_report_columns'}],close:async()=>{},
+   run:async(tool,args)=>{
+    if(tool==='connection')return{connected:true};
+    if(args.attachmentId==='raw')throw new QueryInputError('REPORT_INPUT','请使用已绑定原文件');
+    applied++;
+    return {exportFile:{id:'test-file',sha256:'digest'}};
+   }}),
+  planner:async()=>({close:async()=>{},next:async input=>{
+   assert(input.tools.some(t=>t.tool==='append_report_columns'));
+   if(round++===0)return{tool:'append_report_columns',arguments:'{"attachmentId":"raw"}'};
+   assert.match(input.results.at(-1).error.message,/请使用已绑定原文件/);
+   return{tool:'append_report_columns',arguments:'{"attachmentId":"verified"}'};
+  }}),
+ });
+ assert.equal(applied,1);
+ assert.equal(result.partial,false);
+ assert.equal(result.toolInputErrors.find(e=>e.tool==='append_report_columns').resolved,true);
+});

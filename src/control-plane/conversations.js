@@ -2,7 +2,7 @@ import{jointInquiry,jointInquiryFromAcceptedTurns,sameTrustedHuman}from '../shar
 import {directSocial} from '../shared/reception-policy.js';
 import {requesterMentionText} from './requester-mention.js';
 import {publicStickerPolicy} from './success-stickers.js';
-import {deliveredReportInputs,boundReportInput} from '../shared/report-followup.js';
+import {bindReattachedReports,deliveredReportInputs,boundReportInput} from '../shared/report-followup.js';
 import {requestedDocumentFormats} from '../shared/document-artifacts.js';
 import {addressCard,addressText} from './reply-addressing.js';
 import {readBusinessDefinitions,recordBusinessDefinitions} from '../shared/business-definitions.js';
@@ -430,8 +430,9 @@ export class ConversationService {
     const parent = availableHistory.find((item) => item.messageId === turn.parentId || item.feedbackMessageId === turn.parentId || item.responseIds?.includes(turn.parentId));
     if (parent && !history.includes(parent)) history.unshift(parent);
     const deliveredFiles=await deliveredReportInputs(state,turn,projectId,this.context.config.dataDir);
-    const attachments = [...new Map([...history.flatMap((item) => item.attachments ?? []).filter(a=>a.source?.kind!=='delivered-report'), ...turn.attachments, ...deliveredFiles.inputs]
+    const availableAttachments = [...new Map([...history.flatMap((item) => item.attachments ?? []).filter(a=>a.source?.kind!=='delivered-report'), ...turn.attachments, ...deliveredFiles.inputs]
       .map((item) => [item.id, item])).values()];
+    const attachments = await bindReattachedReports(store,turn,projectId,this.context.config.dataDir,availableAttachments);
     const relatedMessages = new Set(preceding.flatMap(item => [item.id,item.messageId]).filter(Boolean));
     relatedMessages.add(turn.id); relatedMessages.add(turn.messageId);
     if(turn.directoryChannel)return {requestId:turn.id,questionId:turn.questionId,role:turn.role,nativeSession:true,currentActor:{senderId:turn.senderId,profile:turn.profile},project:{id:projectId},message:turn.content,history:history.map(t=>({user:t.content,assistant:t.response})),attachments:[],currentAttachmentIds:[],contactDirectory:await this.context.contacts.catalog(turn),delivery:{visibility:'requester_and_owner'},channel:{kind:'contacts_only',allowedActions:['lookup_contact','reply'],rule:'只根据姓名或完整工号调用lookup_contact查询；联系人事实必须来自工具结果。需要补充姓名/工号时用reply，不得编造资料，不得创建开发、数据库或环境任务。结果在群内私有卡片中展示，仅提问者和群主可见。'}};
@@ -467,8 +468,8 @@ export class ConversationService {
       ...([...questionIds].some(id=>state.questions?.[id]?.archivedAt) ? {
         archivedQuestionHistory:'此前任务明细已归档。原问题与已交付内容只用于识别追问对象；当前状态或新证据须发起新调查。'
       } : {}),
-      deliveredFiles:{files:deliveredFiles.inputs.map(({id,filename,source})=>({attachmentId:id,filename,sourceJobId:source.sourceJobId,sourceEnvironment:source.sourceEnvironment,sha256:source.sha256,deliveredAt:source.deliveredAt})),unavailable:deliveredFiles.unavailable,
-        rule:'这些是本问题可见链已经实际交付的文件，不是当前数据库。文件问题或修改必须创建只读analysis并携带对应attachmentId，Runner会下载完整原文件；不要让用户重传，不以历史文字或前三行猜全表。只做选列/改表头/筛选/排序时可用revise_report_file生成新核验CSV，不重新查询数据库；新增字段用import_task_input导入原键、完整in_set补查，再append_report_columns关联并显式格式化，不刷新旧列；新金额或业务口径另按原权限核验。'} ,
+      deliveredFiles:{files:attachments.filter(a=>a.source?.kind==='delivered-report').map(({id,filename,source})=>({attachmentId:id,filename,sourceJobId:source.sourceJobId,sourceEnvironment:source.sourceEnvironment,sha256:source.sha256,deliveredAt:source.deliveredAt})),unavailable:deliveredFiles.unavailable,
+        rule:'这些文件来自本问题链的实际交付，或当前附件与同群同助手公开交付文件逐字节一致；不是当前数据库。文件问题或修改必须创建只读analysis并携带对应attachmentId，Runner会下载完整原文件；不要让用户重传，不以历史文字或前三行猜全表。只做选列/改表头/筛选/排序时可用revise_report_file生成新核验CSV，不重新查询数据库；新增字段用import_task_input导入原键、完整in_set补查，再append_report_columns关联并显式格式化，不刷新旧列；新金额或业务口径另按原权限核验。'} ,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: routingCatalog(catalog(await loadEnvironments(), projectId)),
       role: turn.role, administrator: isAdministrator(projects, turn),
@@ -511,7 +512,7 @@ export class ConversationService {
     if (attachments.length !== attachmentIds.size) throw new Error('AI 引用了不存在的附件，请重新说明。');
     // Recheck generated-file capabilities at application time, including replay after restart.
     for(const attachment of attachments)if(attachment.source?.kind==='delivered-report')
-      await boundReportInput(await questionStateView(store,{...turn,projectId}),{...turn,originProfile:turn.profile,projectId},attachment,this.context.config.dataDir);
+      await boundReportInput(store,{...turn,originProfile:turn.profile,projectId},attachment,this.context.config.dataDir);
     if (decision.action === 'request_environment_setup') {
       if(decision.environmentSetup?.url)decision.environmentSetup=enrollmentTarget(decision.environmentSetup);
       // A bare endpoint cannot authorize local credential extraction: discover its source first.

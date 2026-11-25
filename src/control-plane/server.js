@@ -621,7 +621,7 @@ async function route(context) {
     const attachment = job?.attachments.find((item) => item.id === decodeURIComponent(attachmentMatch[2]));
     if (!attachment) return json(response, 404, { ok: false, error: 'Attachment not found' });
     const inputPath=attachment.source?.kind==='delivered-report'
-      ? (await (await import('../shared/report-followup.js')).boundReportInput(await questionStateView(store,job),job,attachment,config.dataDir)).file : attachment.path;
+      ? (await (await import('../shared/report-followup.js')).boundReportInput(store,job,attachment,config.dataDir)).file : attachment.path;
     const info = await stat(inputPath);
     response.writeHead(200, {
       'content-type': attachment.contentType ?? 'application/octet-stream',

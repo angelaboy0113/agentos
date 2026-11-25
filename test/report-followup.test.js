@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {ReportDatasets} from '../src/runner/report-datasets.js';
 import {createEnvironmentTools} from '../src/runner/environment-tools.js';
-import {deliveredReportInputs,boundReportInput} from '../src/shared/report-followup.js';
+import {bindReattachedReports,deliveredReportInputs,boundReportInput} from '../src/shared/report-followup.js';
 import {reportCsv,projectReport,reviseReportFile} from '../src/shared/report-revision.js';
 import {inspectReport,reportReviewEvidence} from '../src/shared/report-inspection.js';
 import {recordReportFiles,assessReportDelivery,recordReportReview} from '../src/shared/report-acceptance.js';
@@ -33,7 +33,7 @@ test('delivered CSV survives next-generation followup, actual runner download an
  const f=await fixture(t);f.state.questions.q.generation=2;
  const {inputs}=await deliveredReportInputs(f.state,f.actor,'one',f.root);assert.equal(inputs.length,1);
  const next={...f.job,id:'JOB-followup',reportFiles:[],attachments:inputs};
- const config={serverUrl:'http://controller.invalid',runnerToken:'synthetic'},fetchInput=async()=>new Response(await readFile((await boundReportInput(f.state,next,inputs[0],f.root)).file));
+ const config={serverUrl:'http://controller.invalid',runnerToken:'synthetic'},fetchInput=async()=>new Response(await readFile((await boundReportInput({read:async()=>f.state},next,inputs[0],f.root)).file));
  const files=await downloadAttachments(next,config,path.join(f.root,'runner'),{fetchInput});
  assert.deepEqual(reportCsv(await readFile(files[0].path)).rows.map(r=>r[0]),['00001','00002','00003']);
  assert.match(taskInputNotice(files),/delivered-report|originalDelivery/);
@@ -50,6 +50,27 @@ test('scope and receipts reject other system, bot, group, unrelated thread and p
  assert.equal((await deliveredReportInputs(f.state,{...f.actor,visibility:'requester'},'one',f.root)).inputs.length,1);
  delete f.state.reportDeliveries[Object.keys(f.state.reportDeliveries)[0]].messageId;
  assert.equal((await deliveredReportInputs(f.state,{...f.actor,visibility:'requester'},'one',f.root)).inputs.length,0);
+});
+
+test('reattached verified CSV matches by bytes across threads only in the same public assistant and group',async t=>{
+ const f=await fixture(t),store={read:async()=>f.state},turn={...f.actor,questionId:'new-question'};
+ Object.values(f.state.reportDeliveries)[0].destination={profile:'bot'};
+ const upload={id:'attached-current',type:'file',path:path.join(f.root,'reattached.csv')};
+ await writeFile(upload.path,(await reportFile(f.root,f.job.id,f.item)).content);
+ const bind=(actor=turn)=>bindReattachedReports(store,actor,actor.projectId,f.root,[upload]);
+ const [bound]=await bind();
+ assert.equal(bound.id,upload.id);
+ assert.equal(bound.source?.uploadedCopy,true);
+ assert.equal(bound.source.report.id,f.item.id);
+ const {file}=await boundReportInput(store,{...f.job,questionId:turn.questionId},bound,f.root);
+ assert.deepEqual(await readFile(file),await readFile(upload.path));
+ for(const changes of [{profile:'other'},{chatId:'other'},{projectId:'other'}])assert.deepEqual(await bind({...turn,...changes}),[upload]);
+ f.state.questions.q.visibility='requester';
+ assert.deepEqual(await bind(),[upload]);
+ f.state.questions.q.visibility=null;
+ await writeFile(upload.path,'new text');
+ assert.deepEqual(await bind(),[upload]);
+ await assert.rejects(boundReportInput(store,{...f.job,questionId:turn.questionId},bound,f.root),/摘要/);
 });
 
 test('real conversation intake exposes generated files even without any uploaded attachment/history; selected file enters followup job',async t=>{
@@ -70,7 +91,7 @@ test('real conversation intake exposes generated files even without any uploaded
 test('modify actual delivered CSV, independently inspect every output cell, deliver revised version with retry and follow up again',async t=>{
  const f=await fixture(t),attachment=(await deliveredReportInputs(f.state,f.actor,'one',f.root)).inputs[0];
  const job={...f.job,id:'JOB-revised',stage:'developer',reportFiles:[],reportReviews:{},attachments:[attachment]};
- const tools=await createEnvironmentTools({kind:'mysql',projectId:'one',tier:'prd',database:'synthetic'}, {mode:'investigate',tables:[],exportMaxRows:'all',maxRows:20,timeoutMs:1000}, {}, {dataDir:f.root,exportDirectory:path.join(f.root,'exports',job.id),reportJob:job,readTaskInput:async()=>readFile((await boundReportInput(f.state,job,attachment,f.root)).file),connect:()=>{throw Error('no database query allowed');}});
+ const tools=await createEnvironmentTools({kind:'mysql',projectId:'one',tier:'prd',database:'synthetic'}, {mode:'investigate',tables:[],exportMaxRows:'all',maxRows:20,timeoutMs:1000}, {}, {dataDir:f.root,exportDirectory:path.join(f.root,'exports',job.id),reportJob:job,readTaskInput:async()=>readFile((await boundReportInput({read:async()=>f.state},job,attachment,f.root)).file),connect:()=>{throw Error('no database query allowed');}});
  t.after(()=>tools.close());assert.ok(tools.spec.some(x=>x.tool==='revise_report_file'));
  const revised=await tools.run('revise_report_file',{attachmentId:attachment.id,requirement:'保留前两列，金额改名为原金额，只要00001',columns:[{from:'编号',label:'编号'},{from:'金额',label:'原金额'}],filters:[{column:'编号',op:'eq',value:'00001'}]});
  recordReportFiles(job,[revised.exportFile],1);job.reportEvidence=await reportReviewEvidence(f.root,job);
@@ -89,7 +110,7 @@ test('modify actual delivered CSV, independently inspect every output cell, deli
 test('malformed/linked/missing files retain explicit failure; revisions cannot mutate amounts, change environment, use paths or forged references',async t=>{
  const f=await fixture(t),a=(await deliveredReportInputs(f.state,f.actor,'one',f.root)).inputs[0],job={...f.job,id:'JOB-next',attachments:[a]};
  await assert.rejects(reviseReportFile(f.root,{...job,sourceEnvironment:'sit'},a,{attachmentId:a.id,requirement:'改表头'}),/环境/);
- await assert.rejects(boundReportInput(f.state,job,{...a,source:{...a.source,sourceJobId:'foreign'}},f.root),/不再属于/);
+ await assert.rejects(boundReportInput({read:async()=>f.state},job,{...a,source:{...a.source,sourceJobId:'foreign'}},f.root),/不再属于/);
  const parsed=reportCsv((await reportFile(f.root,f.job.id,f.item)).content);
  for(const args of [{requirement:'改值',script:'x'},{requirement:'改值',columns:[{from:'不存在',label:'金额'}]},{requirement:'筛选',filters:[{column:'金额',op:'gt',value:1}]}])assert.throws(()=>projectReport(parsed,args));
  for(const bad of ['"a"x\r\n','"a","a"\r\n','"a"\r\n"broken','"a","b"\r\n"1"\r\n'])assert.throws(()=>reportCsv(Buffer.from(bad)));

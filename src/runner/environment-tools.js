@@ -375,7 +375,11 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
         if(tool==='import_task_input'){await adapters.authorize?.();const attachment=adapters.reportJob.attachments.find(x=>x.id===args.attachmentId);if(!attachment)throw new ReportInputError('附件不属于当前任务');const bytes=await adapters.readTaskInput(attachment.id);let data;try{data=attachment.source?.kind==='delivered-report'?deliveredCsvDataset(attachment,bytes,args,adapters.reportJob):nativeInputDataset(attachment,bytes,args,adapters.reportJob);}catch(error){if(error.code==='REPORT_INPUT')throw new ReportInputError(error.message);throw error;}await adapters.authorize?.();return datasets.importInput(data);}
         if(tool==='append_report_columns'){
           await adapters.authorize?.();let attachment=adapters.reportJob.attachments?.find(x=>x.id===args.attachmentId),bytes;
-          if(attachment)bytes=await adapters.readTaskInput(attachment.id);
+          if(attachment){
+            if(attachment.source?.kind!=='delivered-report')throw new ReportInputError('该附件未绑定已交付CSV；请从本任务已核验CSV或已绑定原文件补列，不要把普通附件当成已核验报表');
+            if(!adapters.readTaskInput)throw new ReportInputError('当前任务文件读取入口不可用');
+            bytes=await adapters.readTaskInput(attachment.id);
+          }
           else {
             const file=reportView.reportFiles.find(x=>x.id===args.attachmentId&&x.kind!=='document'&&x.filename?.endsWith('.csv'));
             if(!file)throw new ReportInputError('原文件不属于当前任务已登记的核验CSV');
