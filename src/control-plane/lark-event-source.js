@@ -221,15 +221,66 @@ export class LarkEventSource {
   }
 
   async downloadTopicAttachmentsNow(event) {
-    // Only an accepted @-mention in the bound public group reaches this point.
-    // A file can be the topic root even if no bot was mentioned on that file.
     const id=event.root_id;
     if(event.chat_type!=='group'||!/^om_[A-Za-z0-9]+$/.test(id??'')||id===(event.message_id??event.id)||!this.config.profile)return [];
     const root=await this.readMessage(id);
-    if(!root||root.deleted||root.message_id!==id||root.chat_id!==event.chat_id
-      ||root.root_id&&root.root_id!==id||!['file','image','audio','media','post'].includes(root.msg_type))return [];
-    if(root.msg_type==='post'&&!/"(?:image_key|file_key)"\s*:/.test(root.body?.content??''))return [];
-    const digest=createHash('sha256').update(JSON.stringify({profile:this.config.profile,chatId:root.chat_id,type:root.msg_type,body:root.body,updatedAt:root.update_time})).digest('hex');
+    if(!root||root.deleted||root.message_id!==id||root.chat_id!==event.chat_id||root.root_id&&root.root_id!==id)return [];
+
+    const inputs = hasMessageResources(root) ? await this.downloadRelatedMessage(root) : [];
+    if (!/^omt_[A-Za-z0-9]+$/.test(root.thread_id??'') || event.sender_type!=='user'
+        || !event.mentions?.length || !isForThisBot(event,this.config.botOpenId,this.config.botAppId)) return inputs;
+    try {
+      for (const message of await this.findThreadAttachments(event,root)) {
+        try { inputs.push(...await this.downloadRelatedMessage(message)); }
+        catch { console.warn(this.logPrefix,'无法读取话题补充附件',message.message_id); }
+      }
+    } catch { console.warn(this.logPrefix,'无法读取话题补充消息',id); }
+    return inputs;
+  }
+
+  async readThreadPage(threadId,pageToken) {
+    const params={container_id_type:'thread',container_id:threadId,sort_type:'ByCreateTimeDesc',page_size:50,
+      ...(pageToken?{page_token:pageToken}:{})};
+    const result=await runLarkCli(['api','GET','/open-apis/im/v1/messages','--as','bot','--params',JSON.stringify(params),'--json'],{
+      cliEntry:this.config.cliEntry,cwd:this.config.cwd,profile:this.config.profile,configDir:this.config.configDir,
+    });
+    if(!Array.isArray(result.data?.items))throw Error('Invalid thread history response');
+    return result.data;
+  }
+
+  async findThreadAttachments(event,root) {
+    const currentId=event.message_id??event.id;
+    const scoped=message=>message.root_id===root.message_id&&message.chat_id===event.chat_id
+      && message.thread_id===root.thread_id&&/^om_[A-Za-z0-9]+$/.test(message.message_id??'');
+    const attachments=new Map();
+    const seenPages=new Set();
+    let token,author;
+    do {
+      const page=await this.readThreadPage(root.thread_id,token);
+      for(const message of page.items){
+        if(!scoped(message))continue;
+        if(message.message_id===currentId){
+          if(message.deleted||message.sender?.sender_type!=='user'||!message.sender.id)return [];
+          author=message.sender;
+          continue;
+        }
+        if(!author||message.sender?.sender_type!=='user'||message.sender.id!==author.id
+            ||message.sender.id_type!==author.id_type||message.sender.tenant_key!==author.tenant_key)continue;
+        if(message.mentions?.length&&isForThisBot(message,this.config.botOpenId,this.config.botAppId)){
+          return [...attachments.values()].reverse();
+        }
+        if(!message.deleted&&hasMessageResources(message))attachments.set(message.message_id,message);
+      }
+      token=page.has_more?page.page_token:undefined;
+      if(!token||seenPages.has(token))break;
+      seenPages.add(token);
+    }while(token);
+    return [...attachments.values()].reverse();
+  }
+
+  async downloadRelatedMessage(message) {
+    const id=message.message_id;
+    const digest=createHash('sha256').update(JSON.stringify({profile:this.config.profile,chatId:message.chat_id,type:message.msg_type,body:message.body,updatedAt:message.update_time})).digest('hex');
     const index=path.join(this.config.cwd,'related-input-index');await mkdir(index,{recursive:true,mode:0o700});
     const manifest=path.join(index,sanitizeSegment(id)+'.json');
     const verify=async files=>{
@@ -240,13 +291,18 @@ export class LarkEventSource {
       return true;
     };
     try {const saved=JSON.parse(await readFile(manifest));if(saved.digest===digest&&await verify(saved.files))return saved.files.map(({sha256,...x})=>x);}catch(error){if(!['ENOENT','ENOTDIR'].includes(error.code)&&!(error instanceof SyntaxError))throw error;}
-    const files=await this.downloadAttachments({message_id:id,message_type:root.msg_type,resourceVersion:digest});
+    const files=await this.downloadAttachments({message_id:id,message_type:message.msg_type,resourceVersion:digest});
     if(!files.length)return [];
     const checked=await Promise.all(files.map(async x=>({...x,sha256:await inputHash(x.path)})));
     if(!await verify(checked))throw Error('Related topic input path or hash verification failed');
     await writeFile(manifest+'.tmp',JSON.stringify({digest,files:checked}),{mode:0o600});await rename(manifest+'.tmp',manifest);
     return files;
   }
+}
+
+function hasMessageResources(message) {
+  return ['file','image','audio','media'].includes(message.msg_type)
+    || message.msg_type==='post'&&/"(?:image_key|file_key)"\s*:/.test(message.body?.content??'');
 }
 
 async function inputHash(file){const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);return hash.digest('hex');}
