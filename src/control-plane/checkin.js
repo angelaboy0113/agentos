@@ -73,7 +73,31 @@ function validPointsStorePreview(card) {
   return buttons > 0;
 }
 
-export async function publishCheckinCard(context, {profile, group, previewRequestId, pointsStorePreviewCard, paginatePointsStore = false} = {}) {
+const reminderActions = [
+  ['今日签到', 'daily_checkin'],
+  ['查我的积分', 'my_checkin_points'],
+  ['积分商城', 'points_store'],
+];
+const imageKey = /^img_[\w-]{1,160}$/;
+
+function dailyReminderCard({posterKey, buttonKeys}) {
+  return {schema:'2.0', config:{update_multi:true}, body:{
+    direction:'vertical', padding:'12px', vertical_spacing:'10px', elements:[
+      {tag:'markdown', content:'📅 **每日签到提醒**\n今天还没签到？点下方「今日签到」，领 1 积分。点「查我的积分」可看账号累计积分。'},
+      {tag:'img', img_key:posterKey, alt:{tag:'plain_text',content:'AgentOS 每日签到海报'}, scale_type:'fit_horizontal', preview:true},
+      {tag:'column_set', flex_mode:'trisect', horizontal_spacing:'8px', columns:reminderActions.map(([label,action],index)=>({
+        tag:'column', width:'weighted', weight:1, elements:[{
+          tag:'interactive_container', width:'fill', height:'auto', has_border:false, padding:'0px',
+          behaviors:[{type:'callback',value:{action}}],
+          elements:[{tag:'img', img_key:buttonKeys[index], alt:{tag:'plain_text',content:label}, scale_type:'fit_horizontal', preview:false}],
+        }],
+      }))},
+      {tag:'markdown', text_align:'center', text_size:'notation', content:'<font color="grey">北京时间 00:00 开始新的一天。结果由助手私聊发送。</font>'},
+    ],
+  }};
+}
+
+export async function publishCheckinCard(context, {profile, group, previewRequestId, pointsStorePreviewCard, paginatePointsStore = false, groupReminder} = {}, now = Date.now()) {
   const preview = group === undefined;
   if (previewRequestId !== undefined && (!preview || typeof previewRequestId !== 'string' || !/^[a-zA-Z0-9_-]{8,64}$/.test(previewRequestId))) {
     throw Object.assign(new Error('新体验卡仅支持私聊，并须提供有效的请求编号'), { statusCode: 400 });
@@ -89,25 +113,41 @@ export async function publishCheckinCard(context, {profile, group, previewReques
   if (!agent || (preview ? !openId.test(owner ?? '') : !allowedGroup(context, agent, group))) {
     throw Object.assign(new Error('签到卡的机器人或目标群未登记'), { statusCode: 400 });
   }
+  if (groupReminder !== undefined && (preview || !groupReminder ||
+    typeof groupReminder.posterKey !== 'string' || !imageKey.test(groupReminder.posterKey) ||
+    !Array.isArray(groupReminder.buttonKeys) || groupReminder.buttonKeys.length !== reminderActions.length ||
+    groupReminder.buttonKeys.some(key => typeof key !== 'string' || !imageKey.test(key)))) {
+    throw Object.assign(new Error('签到提醒仅支持正式群及有效的海报、按钮素材'), {statusCode:400});
+  }
+  const reminderDay = groupReminder ? dayFormat.format(now) : null;
   const target = preview ? owner : group;
-  const key = previewRequestId === undefined
+  const key = reminderDay ? hash('group-reminder', group, reminderDay) : previewRequestId === undefined
     ? (preview ? hash('preview', profile, owner) : hash('group', group))
     : hash(shopPreview ? 'points-store-preview' : 'preview-reissue', profile, owner, previewRequestId);
-  const contentHash = shopPreview ? (catalog ? hash('page',pointsStorePreviewCard) : hash(pointsStorePreviewCard)) : undefined;
+  const contentHash = groupReminder ? hash(groupReminder.posterKey, groupReminder.buttonKeys)
+    : shopPreview ? (catalog ? hash('page',pointsStorePreviewCard) : hash(pointsStorePreviewCard)) : undefined;
   const binding = await context.store.transact((state) => {
     state.checkinCards ??= {};
+    if (reminderDay) {
+      const original = state.checkinCards[hash('group',group)];
+      if (!original?.messageId || original.profile !== profile || original.chatId !== group) {
+        throw Object.assign(new Error('此助手尚未在目标群发布正式签到卡'), {statusCode:409});
+      }
+    }
     const value = state.checkinCards[key] ??= { profile, preview, target,
       ...(shopPreview ? { purpose:'points_store', contentHash } : {}),
+      ...(reminderDay ? {reminderDay, contentHash} : {}),
       ...(catalog ? {catalog,page:0,pageRevision:0} : {}),
     };
     return { ...value };
   });
   if (binding.profile !== profile) throw Object.assign(new Error('该群已有另一助手发布的签到卡'), { statusCode: 409 });
-  if (shopPreview && binding.contentHash !== contentHash) {
+  if ((shopPreview || reminderDay) && binding.contentHash !== contentHash) {
     throw Object.assign(new Error('相同预览请求编号的卡片内容已变化'), { statusCode: 409 });
   }
   if (binding.messageId) return { messageId: binding.messageId, chatId: binding.chatId, preview, reused: true };
-  const content = catalog ? pointsStorePageCard(catalog) : pointsStorePreviewCard ?? checkinCard(preview);
+  const content = groupReminder ? dailyReminderCard(groupReminder)
+    : catalog ? pointsStorePageCard(catalog) : pointsStorePreviewCard ?? checkinCard(preview);
   const receipt = await send(context, profile, target, 'interactive', content, key.slice(0, 32), preview ? 'open_id' : 'chat_id');
   if (!preview && receipt.chatId !== group) throw new Error('群签到卡回执与登记目标不一致');
   await context.store.transact((state) => { Object.assign(state.checkinCards[key], receipt); });

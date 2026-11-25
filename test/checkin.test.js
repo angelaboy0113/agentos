@@ -46,6 +46,23 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
   await assert.rejects(publishCheckinCard(context,{profile,group:'oc_group',previewRequestId:'private-second'}),{statusCode:400});
   const official = await publishCheckinCard(context, {profile,group:'oc_group'});
   assert.equal((await publishCheckinCard(context, {profile,group:'oc_group'})).messageId,official.messageId);
+  const reminder = {profile, group:'oc_group', groupReminder:{
+    posterKey:'img_poster',buttonKeys:['img_checkin','img_points','img_shop'],
+  }};
+  const dayOne = Date.parse('2026-11-23T22:00:00Z');
+  const dayTwo = dayOne + 86400000;
+  await assert.rejects(publishCheckinCard(context,{...reminder,group:undefined},dayOne),{statusCode:400});
+  const firstReminder = await publishCheckinCard(context,reminder,dayOne);
+  assert.equal(firstReminder.preview,false);
+  assert.notEqual(firstReminder.messageId,official.messageId);
+  assert.equal((await publishCheckinCard(context,reminder,dayOne)).messageId,firstReminder.messageId);
+  const nextReminder = await publishCheckinCard(context,reminder,dayTwo);
+  assert.notEqual(nextReminder.messageId,firstReminder.messageId);
+  assert.equal((await publishCheckinCard(context,{profile,group:'oc_group'})).messageId,official.messageId);
+  const reminderMessage = sent.find(message => message.content.body?.elements?.[0]?.content.includes('每日签到提醒'));
+  assert.equal(reminderMessage.receiveId,'oc_group');
+  assert.deepEqual(reminderMessage.content.body.elements[2].columns.map(c =>
+    c.elements[0].behaviors[0].value.action),['daily_checkin','my_checkin_points','points_store']);
   const click = (target, user, id, time, action='daily_checkin') => handleCheckinAction(context, {
     agent_profile:profile, operator_id:user, event_id:id, message_id:target.messageId, chat_id:target.chatId,
   }, action, Date.parse(time));
@@ -75,7 +92,7 @@ test('check-in binds original card, separates preview, deduplicates callbacks an
   assert.equal(Object.keys((await store.read()).previewCheckins).length, 1);
   assert.equal(adminUsage(await store.read()).summary.points,0);
   assert.equal((await click(official,'ou_owner','outside',before)).ok,true);
-  await Promise.all([click(official,'ou_member','c',before),click(official,'ou_member','d',before)]);
+  await Promise.all([click(official,'ou_member','c',before),click(firstReminder,'ou_member','d',before)]);
   assert.equal((await click(official,'ou_member','c',before)).duplicate,true);
   await click(official,'ou_member','e',after);
   await click(official,'ou_member','f',after,'my_checkin_points');
