@@ -77,7 +77,16 @@ test('two environments use existing grant and persistence endpoints, no environm
   for(const id of ['a-prd','b-prd']){
     assert.equal((await direct.call('agentos_environment_open',{request:JSON.stringify({environmentId:id}),website:false})).state,'tools');
     await assert.rejects(()=>direct.call('agentos_environment_open',{request:'{}',website:false}),/Close/);
-    await assert.rejects(()=>direct.call('agentos_environment_tool',{tool:'continue_environment',arguments:'{}'}),/explicitly/);
+    for(const invalid of [
+      '{',
+      JSON.stringify({purpose:'Continue using the current database'}),
+      JSON.stringify({environmentId:id,queryId:'investigate',parameters:['same source']}),
+    ]){
+      const rejected=await direct.call('agentos_environment_tool',{tool:'continue_environment',arguments:invalid});
+      assert.equal(rejected.state,'tools');
+      assert.equal(rejected.error.code,'CONTINUATION_INPUT');
+      assert.equal(rejected.executed,false);
+    }
     await direct.call('agentos_environment_tool',{tool:'schema',arguments:'{}',summary:'read'});
     assert.equal((await direct.call('agentos_environment_close',{summary:'saved',complete:true})).state,'saved');
   }

@@ -16,7 +16,7 @@ const str={type:'string'};
 export const investigationDynamicTools=[
   {type:'function',name:'agentos_source_history',description:'读取本题固定仓库的历史、提交或独立分支。query为原sourceHistoryQuery JSON；沿用固定SHA和范围核验，不结束调查。',inputSchema:objectSchema({query:str})},
   {type:'function',name:'agentos_environment_open',description:'申请本题已授权的数据库/网页/日志/平台只读工具。request为environmentQuery或websiteQuery的JSON；website标明网页申请。只创建工具执行器，不创建另一个模型。先结束当前环境，再打开另一来源。',inputSchema:objectSchema({request:str,website:{type:'boolean'}})},
-  {type:'function',name:'agentos_environment_tool',description:'在当前环境直接调用返回目录中的一个工具。arguments为JSON对象字符串，summary是工具目的。现有批量工具可减少往返；结果直接返回当前调查会话。',inputSchema:objectSchema({tool:str,arguments:str,summary:str})},
+  {type:'function',name:'agentos_environment_tool',description:'在当前环境直接调用返回目录中的一个工具。arguments为JSON对象字符串，summary是工具目的。留在当前来源时直接选schema、select等具体工具；continue_environment仅交接到明确选定的下一数据源。',inputSchema:objectSchema({tool:str,arguments:str,summary:str})},
   {type:'function',name:'agentos_environment_close',description:'保存当前来源的证据、独立核验和文件收据。complete只表示本来源步骤完成，不表示整个用户问题完成。缺扫码/审批时保存等待状态。',inputSchema:objectSchema({summary:str,complete:{type:'boolean'}})},
 ];
 
@@ -113,10 +113,14 @@ export class InvestigationDirectTools {
     }
     if(!this.channel)throw new Error('No authorized environment is open');
     if(name==='agentos_environment_tool') {
-      const parameters=parse(args.arguments);
       if(args.tool==='finish')return this.call('agentos_environment_close',{summary:args.summary,complete:args.complete===true});
       if(args.tool==='continue_environment'){
-        if(typeof parameters.environmentId!=='string'||typeof parameters.queryId!=='string'||!Array.isArray(parameters.parameters)||!parameters.parameters.length||parameters.parameters.some(x=>typeof x!=='string'))throw new Error('Use an explicitly selected authorized environmentId, queryId and parameters');
+        let parameters;
+        try{parameters=parse(args.arguments);}catch{parameters={};}
+        if(!validEnvironmentContinuationArguments(parameters)||parameters.environmentId===this.job.environmentAccess?.environmentId){
+          return {state:'tools',executed:false,error:{code:'CONTINUATION_INPUT',
+            message:'当前只读来源仍开启，已有证据可直接沿用。继续查询当前库时请从现有工具目录选择具体查询工具。只有确需切换到目录中另一个已授权数据库时，才提供该目标的 environmentId、queryId 和非空字符串数组 parameters。'}};
+        }
         // The published inner catalog offers this alias. Let its existing validator
         // save current evidence, then issue the next normal host-approved grant.
         const saved=await this.observe(await this.channel.choose({...args,complete:false}));
@@ -124,6 +128,7 @@ export class InvestigationDirectTools {
         const next=await this.call('agentos_environment_open',{request:JSON.stringify(saved.result.nextEnvironmentQuery),website:false});
         return {...next,previousSource:saved};
       }
+      parse(args.arguments);
       return this.observe(await this.channel.choose({...args,complete:false}));
     }
     if(name==='agentos_environment_close')return this.observe(await this.channel.choose({tool:'finish',arguments:'{}',summary:args.summary,complete:args.complete===true}));
@@ -144,4 +149,9 @@ export class InvestigationDirectTools {
     this.closed=true;
     if(this.channel){await this.channel.stop();await this.running;this.channel=null;}
   }
+}
+
+function validEnvironmentContinuationArguments({environmentId,queryId,parameters}){
+  return typeof environmentId==='string'&&Boolean(environmentId.trim())&&typeof queryId==='string'&&Boolean(queryId.trim())
+    &&Array.isArray(parameters)&&parameters.length>0&&parameters.every(value=>typeof value==='string'&&value.trim());
 }
