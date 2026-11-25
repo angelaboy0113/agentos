@@ -1012,7 +1012,7 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
       body:'<header><span class="brand-mark" style="display:inline-block;width:20px;height:20px;background-image:url(/assets/'+logo+')"></span><img '+(n?'class="default-logo" ':'')+'src="/assets/'+logo+'"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="green"/></svg></header>'
         +'<button style="padding:8px 20px;background:'+color+'">查询</button>'
         + '<nav><a>渠道经营复盘</a><span class="user-info">示例用户名</span></nav><div class="ant-collapse-header">例外处理</div>'
-        + (n ? '<table><tr><th>分配金额</th></tr><tr><td id="business">AA123456</td></tr></table>'
+        + (n ? '<table><tr><th>分配金额</th></tr><tr><td id="business">AA123456</td></tr><tr><td>BB222222</td></tr></table>'
           : '<label for="budget">预算来源：</label><input id="budget" value="DEMO-PRIVATE"><div id="business">AA123456</div>')}));
     await page.goto(url);
     const capture = () => website.screenshot({page,job},{url,targetText:'查询'});
@@ -1071,11 +1071,17 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
       await assert.rejects(producePrdPrototype(dataDir,job,JSON.stringify(existingRecipe),{
         generate:async()=>assert.fail('Must protect existing rows before calling image editor'),
       }), /覆盖现有表格行/);
-      const shifts=[{...area,height:height*2,dy:height}];
+      const body=snapshot.designLayout.tableBodies[0];
+      assert(body?.height>=height*2-.002);
+      await assert.rejects(producePrdPrototype(dataDir,job,JSON.stringify({...existingRecipe,
+        shifts:[{...area,height:body.height+.02,dy:height}],
+      }),{generate:async()=>assert.fail('Must reject overflow before generating')}), /越过原表格滚动容器/);
+      const pitch=snapshot.designLayout.tableRows[1].y-y;
+      const shifts=[{...area,height:body.y+body.height-y,dy:pitch}];
       const shifted=await producePrdPrototype(dataDir,job,JSON.stringify({...existingRecipe,shifts}),{
         generate:async()=>{await editor.screenshot({path:modelOutput});return {file:modelOutput,root:dataDir,threadId:'test-row-shift',model:'gpt-image-2'};},
       });
-      const rowIntact=await page.evaluate(async ({images,row})=>{
+      const rowIntact=await page.evaluate(async ({images,row,pitch})=>{
         const pixels=async (bytes,offset)=>{
           const img=new Image();img.src='data:image/png;base64,'+bytes;await img.decode();
           const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
@@ -1083,10 +1089,18 @@ test('PRD keeps a separate screenshot and places each prototype under its own re
           return ctx.getImageData(Math.round(row.x*img.width),Math.round((row.y+offset)*img.height),
             Math.round(row.width*img.width),Math.round(row.height*img.height)).data;
         };
-        const [a,b]=await Promise.all([pixels(images[0],0),pixels(images[1],row.height)]);
+        const [a,b]=await Promise.all([pixels(images[0],0),pixels(images[1],pitch)]);
         return a.every((value,index)=>value===b[index]);
-      },{images:[base.toString('base64'),shifted.bytes.toString('base64')],row});
+      },{images:[base.toString('base64'),shifted.bytes.toString('base64')],row,pitch});
       assert(rowIntact);
+    }
+    if (!n) {
+      const partial=await producePrdPrototype(dataDir,job,JSON.stringify({
+        mode:'existing-page',prototypeKey:key,referenceId,prompt:'只展示提示',
+        areas:[{x:.35,y:.5,width:.2,height:.1}],
+        focusCrop:{x:.25,y:.4,width:.5,height:.3},
+      }),{generate:async()=>({file:modelOutput,root:dataDir,threadId:'test-local-prompt'})});
+      assert.deepEqual([partial.bytes.readUInt32BE(16),partial.bytes.readUInt32BE(20)],[180,66]);
     }
     await assert.rejects(producePrdPrototype(dataDir,job,JSON.stringify({
       mode:'new-page',prototypeKey:key,referenceId,prompt:'测试控件裁切',

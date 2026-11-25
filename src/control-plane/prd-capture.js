@@ -6,15 +6,28 @@ export function prdCaptureTarget(element, scope) {
   if (!box.width || !box.height || box.right <= 0 || box.bottom <= 0
     || box.left >= innerWidth || box.top >= innerHeight || getComputedStyle(element).visibility !== 'visible') return null;
   const overlay = element.closest(dialog+','+feedback);
+  if (scope === 'auto' && !overlay) {
+    const hit = document.elementFromPoint(
+      Math.min(innerWidth-1,Math.max(0,box.left+box.width/2)),
+      Math.min(innerHeight-1,Math.max(0,box.top+box.height/2)),
+    );
+    if (hit?.closest(dialog+','+feedback)) return null;
+  }
   const region = scope === 'page' ? null : overlay ??
     (scope === 'region' ? element.closest('form,fieldset,[role="group"],.ant-form-item,.el-form-item,[data-prd-section],section,li,[role="menuitem"],button,[role="button"]') ?? element : null);
   if (!region) return {kind:'page'};
   const r = region.getBoundingClientRect();
-  const x = Math.floor(Math.max(0,r.left)), y = Math.floor(Math.max(0,r.top));
-  const width = Math.ceil(Math.min(innerWidth,r.right))-x, height = Math.ceil(Math.min(innerHeight,r.bottom))-y;
+  const kind = region.matches(dialog)?'dialog':region.matches(feedback)?'feedback':'region';
+  const inset = kind === 'dialog' ? 12 : kind === 'feedback' ? 8 : 0;
+  const x = Math.floor(Math.max(0,r.left-inset)), y = Math.floor(Math.max(0,r.top-inset));
+  const right = Math.ceil(Math.min(innerWidth,r.right+inset)), bottom = Math.ceil(Math.min(innerHeight,r.bottom+inset));
   const clipped = r.left < -1 || r.top < -1 || r.right > innerWidth+1 || r.bottom > innerHeight+1;
-  return {kind:region.matches(dialog)?'dialog':region.matches(feedback)?'feedback':'region',
-    rect:{x,y,width,height},clipped};
+  const rect = {x,y,width:right-x,height:bottom-y};
+  const frame = kind === 'dialog' ? {
+    x:Math.max(x,Math.floor(r.left)), y:Math.max(y,Math.floor(r.top)),
+    right:Math.min(right,Math.ceil(r.right)), bottom:Math.min(bottom,Math.ceil(r.bottom)),
+  } : null;
+  return {kind,rect,clipped,...(frame ? {frame}: {})};
 }
 
 export function localizePrdLayout(layout, capture) {
@@ -30,10 +43,23 @@ export function localizePrdLayout(layout, capture) {
       width:region.width*layout.viewportWidth,height:region.height*layout.viewportHeight});
     return item?[{x:item.x/width,y:item.y/height,width:item.width/width,height:item.height/height}]:[];
   });
+  const frameRegions = [];
+  if (capture.frame) {
+    const f=capture.frame, edge=2;
+    const left=Math.min(x+width,f.x+edge), right=Math.max(x,f.right-edge);
+    const top=Math.min(y+height,f.y+edge), bottom=Math.max(y,f.bottom-edge);
+    const sides=[
+      [x,y,width,top-y], [x,bottom,width,y+height-bottom],
+      [x,top,left-x,bottom-top], [right,top,x+width-right,bottom-top],
+    ];
+    for (const [ax,ay,aw,ah] of sides) {
+      if (aw>0&&ah>0) frameRegions.push({x:(ax-x)/width,y:(ay-y)/height,width:aw/width,height:ah/height});
+    }
+  }
   return {...layout,viewportWidth:width,viewportHeight:height,
     sections:layout.sections.map(position).filter(Boolean),controls:layout.controls.map(position).filter(Boolean),
     brandRegions:normalized(layout.brandRegions),actionRegions:normalized(layout.actionRegions),
-    tableRows:normalized(layout.tableRows)};
+    tableRows:normalized(layout.tableRows),tableBodies:normalized(layout.tableBodies),sectionEdges:normalized(layout.sectionEdges),frameRegions};
 }
 
 // Runs in the page. Preserve native UI ink for semantic chrome and known static copy.
@@ -67,7 +93,11 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       return header.contains(document.elementFromPoint(x,y));
     });
   });
-  const rowCells=new Map();
+  const rowCells=new Map(), tableRows=[], bodyRects=new Map();
+  const intersect = (a,b) => {
+    const x=Math.max(a.x,b.x), y=Math.max(a.y,b.y);
+    return {x,y,width:Math.min(a.x+a.width,b.x+b.width)-x,height:Math.min(a.y+a.height,b.y+b.height)-y};
+  };
   let visibleRows=0;
   for(const grid of grids){
     const headers=[...grid.querySelectorAll(headerSelector)].map(el=>el.textContent.trim());
@@ -76,6 +106,25 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       const cells=[...row.children].filter(cell=>cell.matches(cellSelector));
       if(!cells.length||cells.length===1&&headers.length>1&&Number(cells[0].getAttribute('colspan')??cells[0].getAttribute('aria-colspan'))>1)continue;
       if(!cells.some(cell=>cell.textContent.trim()&&!/^(?:暂无数据|没有数据|无数据|No data|No results)$/i.test(cell.textContent.trim())))continue;
+      const parent = row.closest('tbody,[role="rowgroup"]') ?? grid;
+      let body = bodyRects.get(parent);
+      if (!body) {
+        body = intersect(bounds(parent),bounds(grid));
+        for (let node=parent.parentElement;node;node=node.parentElement) {
+          const {overflowX,overflowY}=getComputedStyle(node);
+          const clipped = /^(?:auto|scroll|hidden|clip)$/;
+          if (!clipped.test(overflowX)&&!clipped.test(overflowY)) continue;
+          const r = node.getBoundingClientRect();
+          const x = clipped.test(overflowX) ? r.left+node.clientLeft : body.x;
+          const y = clipped.test(overflowY) ? r.top+node.clientTop : body.y;
+          body = intersect(body,{x,y,width:clipped.test(overflowX)?node.clientWidth:body.width,
+            height:clipped.test(overflowY)?node.clientHeight:body.height});
+        }
+        bodyRects.set(parent,body);
+      }
+      const rowBox=clip(intersect(bounds(row),body));
+      if (!rowBox) continue;
+      tableRows.push(rowBox);
       visibleRows++;
       let column=0;
       for(const cell of cells){
@@ -87,7 +136,16 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
     }
   }
   const tableCapture={tables:grids.length,visibleRows,sampleFields:0,preservedStates:0};
-  const tableRows=[...new Set([...rowCells.keys()].map(cell=>cell.closest(rowSelector)))].map(row=>clip(bounds(row))).filter(Boolean);
+  const tableBodies=[...bodyRects.values()].map(clip).filter(Boolean);
+  const sectionEdges = [...document.querySelectorAll('hr,.el-collapse-item__header,.ant-collapse-header,.panel-title,[class$="-section-title"]')]
+    .flatMap(element=>{
+      const box=bounds(element), style=getComputedStyle(element);
+      if (!visible(box)||style.visibility!=='visible') return [];
+      const widths=[parseFloat(style.borderTopWidth),parseFloat(style.borderBottomWidth)];
+      if (element.matches('hr')) return [clip(box)].filter(Boolean);
+      return widths.flatMap((height,index)=>height>0&&height<=6
+        ?[clip({...box,y:index?box.y+box.height-height:box.y,height})].filter(Boolean):[]);
+    });
   const states=new Set(('启用 停用 已启用 已停用 有效 无效 待审核 待审批 审批中 审核中 待执行 执行中 进行中 已执行 已审核 已审批 已发布 已批准 已生效 未生效 未开始 已完成 未完成 待提交 草稿 已提交 已驳回 已拒绝 已关闭 已取消 已撤销 已过期 已结束 已上账 待上账 部分上账 全部上账 关闭上账 未上账 已匹配 未匹配 可申请 已结案 活跃 非活跃 不活跃 Active Inactive Pending Approved Rejected Completed Draft Open Closed').split(' '));
   const sampleValue=({header,number})=>{
     const code=String(number).padStart(3,'0');
@@ -288,5 +346,5 @@ export function describePrdCapture({ attribute, secretSelector, brandedLabels })
       const hit = document.elementFromPoint((region.x+region.width/2)*innerWidth,(region.y+region.height/2)*innerHeight);
       return element.contains(hit) ? [region] : [];
     });
-  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,actionRegions,tableRows,samples,tableCapture};
+  return {viewportWidth:innerWidth,viewportHeight:innerHeight,sections,controls,placeholders,assets,glyphs,backgrounds,brandRegions,actionRegions,tableRows,tableBodies,sectionEdges,samples,tableCapture};
 }

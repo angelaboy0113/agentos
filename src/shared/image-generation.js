@@ -74,6 +74,9 @@ export async function readPrdDesignReference(dataDir,job,referenceId){
    return {path:file,sha256:digest,kind:'website-design-reference',
     ...(scope?{subjectProjectId:scope.projectId}:{}),
     ...(receipt.item.captureScope?{captureScope:receipt.item.captureScope}:{}),
+    ...(receipt.item.tableBodies?.length?{tableBodies:receipt.item.tableBodies}:{}),
+    ...(receipt.item.sectionEdges?.length?{sectionEdges:receipt.item.sectionEdges}:{}),
+    ...(receipt.item.frameRegions?.length?{frameRegions:receipt.item.frameRegions}:{}),
     ...(receipt.item.tableRows?.length?{tableRows:receipt.item.tableRows}:{}),
     ...(receipt.item.actionRegions?.length?{actionRegions:receipt.item.actionRegions}:{}),
     ...(receipt.item.brandRegions?.length?{brandRegions:receipt.item.brandRegions}:{})};

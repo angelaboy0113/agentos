@@ -143,8 +143,8 @@ test('PRD selects a complete dialog or feedback region, preserving static copy a
  const capture=(targetText,scope)=>browser.screenshot({page,job},{url,targetText,...(scope?{scope}:{})});
  const modal=await capture('点击上传');
  assert.equal(modal.designReference.captureScope,'dialog');
- assert.equal(modal.designLayout.viewportWidth,432);
- assert.equal(modal.designLayout.viewportHeight,262);
+ assert.equal(modal.designLayout.viewportWidth,456);
+ assert.equal(modal.designLayout.viewportHeight,286);
  for(const copy of ['批量调整','将文件拖到此处，或','点击上传','仅允许导入.xls,.xlsx格式文件。','取消','确定'])
   assert(modal.designLayout.controls.some(control=>control.text===copy),copy);
  assert(!modal.designLayout.controls.some(control=>control.text==='系统管理'));
@@ -152,7 +152,8 @@ test('PRD selects a complete dialog or feedback region, preserving static copy a
  assert(modal.designLayout.actionRegions.every(box=>box.x+box.width<=1&&box.y+box.height<=1));
  const {readFile}=await import('node:fs/promises');
  const png=await readFile(path.join(dir,'website-evidence',job.id,modal.designReference.name));
- assert.deepEqual([png.readUInt32BE(16),png.readUInt32BE(20)],[432,262]);
+ assert.deepEqual([png.readUInt32BE(16),png.readUInt32BE(20)],[456,286]);
+ assert.equal(modal.designReference.frameRegions.length,4);
  assert(!JSON.stringify(modal).includes('hidden-business-value'));
  assert.equal((await capture('导入成功')).designReference.captureScope,'feedback');
  const section=await capture('申请材料','region');

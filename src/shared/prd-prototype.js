@@ -56,6 +56,17 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
   const contains = (a,b) => a.x<=b.x+0.002 && a.y<=b.y+0.002
     && a.x+a.width>=b.x+b.width-0.002 && a.y+a.height>=b.y+b.height-0.002;
   const rows = reference.tableRows ?? [];
+  const bodies = reference.tableBodies ?? [];
+  const frame = reference.frameRegions ?? [];
+  const sectionEdges = existing ? reference.sectionEdges ?? [] : [];
+  const focus = spec.focusCrop;
+  if (focus !== undefined && (!nativeEdit || !existing || !withinScreenshot(focus) ||
+    shifts.length || areas.some(area=>!contains(focus,area)))) {
+    throw layoutError('focusCrop 仅用于无顺移的现有页面局部原型，必须在真实截图内并包含所有改动区');
+  }
+  if (nativeEdit && areas.some(area=>frame.some(region=>intersects(region,area)))) {
+    throw layoutError('改动区触碰弹窗外框或留边，请把编辑区缩到实际弹窗内容内');
+  }
   const editableRows = spec.editableRows ?? [];
   if (nativeEdit && !existing && shifts.length) throw layoutError('新页面设计不需要顺移已有页面行');
   if (nativeEdit && existing) {
@@ -64,8 +75,21 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
     }
     if(shifts.some((shift,index)=>shifts.slice(0,index).some(other=>intersects(shift,other))
       ||areas.some(area=>intersects(shift,area)&&!contains({...shift,height:shift.dy},area))
-      ||(reference.brandRegions??[]).some(brand=>intersects(shift,brand)))) {
+      ||[...(reference.brandRegions??[]),...frame].some(region=>intersects(shift,region)))) {
       throw layoutError('顺移区不能覆盖品牌、另一顺移区或新行之外的改动；新增内容仅绘入腾出的区域');
+    }
+    if (shifts.some(shift=>sectionEdges.some(edge=>intersects(shift,edge) &&
+      !contains({...shift,height:shift.height-shift.dy},edge)))) {
+      throw layoutError('顺移区切到原有分隔线，请保留整条分隔线或连同原区块完整移动');
+    }
+    if (shifts.some(shift=>bodies.some(body=>intersects(shift,body)) &&
+      !bodies.some(body=>contains(body,shift)))) {
+      throw layoutError('顺移区越过原表格滚动容器，请按 designLayout.tableBodies 的真实边界放置新增行');
+    }
+    if (shifts.some(shift=>rows.some(row=>intersects(shift,row) &&
+      [shift.y,shift.y+shift.height-shift.dy,shift.y+shift.height].some(edge=>
+        edge>row.y+.002&&edge<row.y+row.height-.002)))) {
+      throw layoutError('顺移边界切到表格行中间，请按实际完整行边界选择起止和位移');
     }
     if (areas.some(area=>rows.some((row,index)=>intersects(area,row)&&!editableRows.includes(index)
       && !shifts.some(shift=>contains({...shift,height:shift.dy},area)&&contains(shift,row))))) {
@@ -79,14 +103,17 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
     || editableActions.some(index => !Number.isSafeInteger(index) || !existingActions[index]))) {
     throw layoutError('editableActions 只可填写确实要修改的现有按钮在 designLayout.actionRegions 的下标');
   }
-  const protectedRegions = (reference.brandRegions??[]).concat(nativeEdit
+  const stationaryEdges = sectionEdges.filter(edge=>!shifts.some(shift=>contains(shift,edge)));
+  const protectedRegions = [...(reference.brandRegions??[]),...frame,...stationaryEdges].concat(nativeEdit
     ? existingActions.filter((region,index)=>!editableActions.includes(index)&&!shifts.some(shift=>contains(shift,region))) : []);
   const firstEdit = nativeEdit ? [
     'Edit the attached real UI screenshot in place. Preserve its aspect ratio, viewport framing, branding and layout outside the edit rectangles.',
     'Inside the edit rectangles preserve all unchanged components, exact labels, alignment, colors, row heights, button styles and layout seen in the screenshot.',
     'Reuse the visible reference controls for new fields, rows or actions. Keep visible workflow states and existing terminology. Leave masked fields and records masked; do not reconstruct them.',
     'For a standalone button, short notice or other discrete control, leave breathing room inside its rectangle so the final composite keeps every glyph, border and rounded corner.',
-    'If the requirement calls for a new page, adapt the reference page structure in the rectangles rather than redesigning the application shell.',
+    'Keep every edited widget inside its existing panel; do not draw duplicate dividers, clipped rows, or contents across a scrollbar, the container edge, or pagination.',
+    'For a new page, adapt the reference components. Set the active menu, tab, breadcrumb and page heading to the same new page name. Do not retain a previous page name in active chrome.',
+    'For a small dialog or status prompt, keep all borders visible; never extend it into the adjacent footer, controls or section.',
     'Return one full edited screenshot with no margins, captions, split panels, or annotations. The allowed rectangles use x, y, width and height as fractions of the screenshot.',
     JSON.stringify(visibleRegions),
     spec.prompt,
@@ -101,7 +128,7 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
     const context = await browser.newContext({ acceptDownloads: false });
     await context.route('**/*', r => r.abort());
     const page = await context.newPage();
-    const output = await page.evaluate(async ({ original, proposal, areas, shifts, nativeEdit, brandRegions }) => {
+    const output = await page.evaluate(async ({ original, proposal, areas, shifts, nativeEdit, brandRegions, focus }) => {
       async function load(src) {
         const picture = new Image();
         picture.src = src;
@@ -158,6 +185,14 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
               ||crowded(height,i=>changed(0,i))||crowded(height,i=>changed(width-1,i)))
               throw Error(`第 ${index+1} 个控件改动贴到裁切边缘，请留出边距再生成`);
           }
+        }
+        if (focus) {
+          const left=Math.round(focus.x*w), top=Math.round(focus.y*h);
+          const width=Math.round((focus.x+focus.width)*w)-left, height=Math.round((focus.y+focus.height)*h)-top;
+          if (width<8||height<8) throw Error('局部输出区域太小');
+          const cropped=document.createElement('canvas');cropped.width=width;cropped.height=height;
+          cropped.getContext('2d').drawImage(canvas,left,top,width,height,0,0,width,height);
+          return cropped.toDataURL().split(',')[1];
         }
         return canvas.toDataURL().split(',')[1];
       }
@@ -230,15 +265,16 @@ export async function producePrdPrototype(dataDir, job, content, options = {}) {
       });
       return canvas.toDataURL().split(',')[1];
     }, { original:encode(base), proposal:proposed && encode(proposed.bytes), areas, shifts, nativeEdit,
-      brandRegions:protectedRegions.filter(withinScreenshot) });
+      brandRegions:protectedRegions.filter(withinScreenshot),focus });
     bytes = Buffer.from(output,'base64');
   } catch (error) {
-    const detail=error.message.match(/(?:生图比例与底图不一致[^\r\n]*|菜单顺移区域太小|第 \d+ 个[^\r\n]+|标注文字超出改动区域)/)?.[0];
+    const detail=error.message.match(/(?:生图比例与底图不一致[^\r\n]*|菜单顺移区域太小|局部输出区域太小|第 \d+ 个[^\r\n]+|标注文字超出改动区域)/)?.[0];
     if (detail) throw layoutError(`原型「${spec.prototypeKey??spec.mode}」：${detail}`);
     throw error;
   } finally {
     await browser.close();
   }
   return { bytes, provenance: { ...provenance, provider:nativeEdit?'prd-native-image-edit':'prd-screenshot-composite',sha256:hash(bytes),
+    ...(focus ? {focusCrop:focus} : {}),
     ...(proposed ? { proposedImage:proposed.provenance } : {}) } };
 }
