@@ -114,6 +114,8 @@ test('durable long handoff chains survive context compaction and reach the final
  const saved=await new JsonStore(file).getJob(id);assert.equal(saved.events.filter(e=>e.type==='continuous_environment_completed'&&e.timing?.toolMs===2).length,10);assert.ok(saved.events.filter(e=>e.timing).every(e=>e.timing.untrusted===undefined));assert.equal(saved.environmentHandoffResults.length,10);assert.equal(saved.context.filter(x=>x.kind==='analysis_turn').length,1);
  const prompt=await buildPrompt(saved,{}, {instruction:'read only',metadata:{}},source.sourceSync,[],source.workspace);
  for(let i=0;i<10;i++)assert.ok(prompt.includes('distinct-evidence-'+i));
+ assert.match(prompt,/同环境只读业务页面或查询会代查下游/);
+ assert.match(prompt,/未返回、查无记录或下游异常均不能当作零/);
  assert.equal(continuationSourceResult(saved),null);
 });
 
