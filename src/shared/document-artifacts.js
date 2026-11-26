@@ -107,20 +107,28 @@ async function encodeNative(dataDir,job,request){
  const bytes=['html','csv','json','txt','md','svg'].includes(format)?await encode(format,artifact.bytes.toString('utf8')):artifact.bytes;
  return {bytes,request:{...request,nativeSource:{sha256:artifact.sha256,...(source?{buildScript:source.bytes.toString('utf8'),buildScriptSha256:source.sha256}:{})}}};
 }
+export async function writeVerifiedDocument(directory,job,request,bytes,contentAudit,extraReceipt={}){
+ const id='report-'+randomUUID(),filename=id+'.'+request.format;
+ const item={id,filename,format:request.format,kind:'document',title:request.title,contentType:documentMime[request.format],bytes:bytes.length,sha256:hash(bytes),rowCount:0,complete:true};
+ const receipt={version:2,kind:'document',status:'verified',file:item,coverage:{rowCount:0},binding:{jobId:job.id,projectId:job.projectId,profile:job.originProfile??job.agentProfile,questionId:job.questionId,sourceEnvironment:job.sourceEnvironment??null},purpose:request.purpose,contentAudit,businessVerification:'结构和实际文件核验不等于业务金额核验；业务结论沿用任务独立证据与handoff门控',request,...extraReceipt};
+ const body=Buffer.from(JSON.stringify(receipt)),target=path.join(directory,filename);
+ await writeFile(target,bytes,{mode:0o600,flag:'wx'});
+ try{await writeFile(path.join(directory,id+'.verification.json'),body,{mode:0o600,flag:'wx'});}
+ catch(error){await rm(target);throw error;}
+ return {...item,verificationHash:hash(body)};
+}
 export async function createDocuments(dataDir,job,requests,options={}){
  if(requests==null)return [];
  if(!Array.isArray(requests)||!requests.length)fail('documentRequests需要非空数组或null');
  const directory=await documentDirectory(dataDir,job.id),files=[];
- try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'?(job.prd?.auto?await producePrdPrototype(dataDir,job,request.content,options):!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes),id='report-'+randomUUID(),filename=id+'.'+request.format;if(request.format==='png')audit.generation=image?.provenance.provider??'explicit-html-screenshot';
- const item={id,filename,format:request.format,kind:'document',title:request.title,contentType:documentMime[request.format],bytes:bytes.length,sha256:hash(bytes),rowCount:0,complete:true};
+ try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'?(job.prd?.auto?await producePrdPrototype(dataDir,job,request.content,options):!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes);if(request.format==='png')audit.generation=image?.provenance.provider??'explicit-html-screenshot';
  const {officePreview}=await import('./office-preview.js');const preview=await officePreview(bytes,request.format,directory);if(preview)audit.preview=preview;
  if(request.worksheetAudit){
   if(!native)await verifyWorkbookCells(bytes,parse(request.content).sheets);
   audit.worksheets=request.worksheetAudit;
   audit.actualCellsVerified=true;
  }
- const receipt={version:2,kind:'document',status:'verified',file:item,coverage:{rowCount:0},binding:{jobId:job.id,projectId:job.projectId,profile:job.originProfile??job.agentProfile,questionId:job.questionId,sourceEnvironment:job.sourceEnvironment??null},purpose:request.purpose,contentAudit:audit,businessVerification:'结构和实际文件核验不等于业务金额核验；业务结论沿用任务独立证据与handoff门控',request};
- const body=Buffer.from(JSON.stringify(receipt));await writeFile(path.join(directory,filename),bytes,{mode:0o600,flag:'wx'});await writeFile(path.join(directory,id+'.verification.json'),body,{mode:0o600,flag:'wx'});item.verificationHash=hash(body);files.push(item);
+ files.push(await writeVerifiedDocument(directory,job,request,bytes,audit));
  }return files;}catch(e){for(const f of files)for(const n of [f.filename,f.id+'.verification.json'])await rm(path.join(directory,n),{force:true});throw e;}
 }
 export async function documentInputText(dataDir,jobId,item){

@@ -21,9 +21,14 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  if(section==='summary'&&offset!==0)fail('summary只有摘要预览，不支持行偏移；逐行读取请使用section=rows并沿nextOffset分页');
  if(requestedColumns!==undefined&&section!=='rows')fail('columns选择仅适用于section=rows的实际文件单元格');
  const sourceJobId=item.sourceJobId??job.id;
- const verified=await reportFile(dataDir,sourceJobId,item);
- const receipt=JSON.parse(await readFile(path.join(path.dirname(verified.file),item.id+'.verification.json'),'utf8'));
- if(item.kind==='document'){const {officePreviewEvidence}=await import('./office-preview.js');const preview=await officePreviewEvidence(verified.content,item.format,path.dirname(verified.file),item.id,receipt.contentAudit?.preview);return {status:'verified',binding:{sourceJobId,fileId:item.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:0},contentAudit:{...receipt.contentAudit,...(preview?{preview}:{})},purpose:receipt.purpose,format:item.format,note:receipt.businessVerification};}
+ const verified=await reportFile(dataDir,sourceJobId,item,{includeReceipt:true});
+ const {receipt}=verified;
+ if(item.kind==='document'){
+  const workbook=receipt.workbookRevision?await (await import('./workbook-revision.js')).inspectWorkbookRevision(dataDir,sourceJobId,item,verified):null;
+  const {officePreviewEvidence}=await import('./office-preview.js');
+  const preview=await officePreviewEvidence(verified.content,item.format,path.dirname(verified.file),item.id,receipt.contentAudit?.preview);
+  return {status:'verified',binding:{sourceJobId,fileId:item.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:0},contentAudit:{...receipt.contentAudit,...(preview?{preview}:{})},purpose:receipt.purpose,format:item.format,note:receipt.businessVerification,...workbook};
+ }
  if(receipt.revision)return (await import('./report-revision.js')).inspectRevision(dataDir,job,item,receipt,{fileId,section,offset,limit,columns:requestedColumns});
  const directory=path.dirname(verified.file),datasetRoot=path.join(directory,'datasets');
  if((await lstat(datasetRoot)).isSymbolicLink())fail('报表数据集目录不能是符号链接');

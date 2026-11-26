@@ -469,7 +469,7 @@ export class ConversationService {
         archivedQuestionHistory:'此前任务明细已归档。原问题与已交付内容只用于识别追问对象；当前状态或新证据须发起新调查。'
       } : {}),
       deliveredFiles:{files:attachments.filter(a=>a.source?.kind==='delivered-report').map(({id,filename,source})=>({attachmentId:id,filename,sourceJobId:source.sourceJobId,sourceEnvironment:source.sourceEnvironment,sha256:source.sha256,deliveredAt:source.deliveredAt})),unavailable:deliveredFiles.unavailable,
-        rule:'这些文件来自本问题链的实际交付，或当前附件与同群同助手公开交付文件逐字节一致；不是当前数据库。文件问题或修改必须创建只读analysis并携带对应attachmentId，Runner会下载完整原文件；不要让用户重传，不以历史文字或前三行猜全表。只做选列/改表头/筛选/排序时可用revise_report_file生成新核验CSV，不重新查询数据库；新增字段用import_task_input导入原键、完整in_set补查，再append_report_columns关联并显式格式化，不刷新旧列；新金额或业务口径另按原权限核验。'} ,
+        rule:'这些文件来自本问题链的实际交付，或当前附件与同群同助手公开交付文件逐字节一致；不是当前数据库。文件问题或修改必须创建只读analysis并携带对应attachmentId，Runner会下载完整原文件；不要让用户重传，不以历史文字或前三行猜全表。只做选列/改表头/筛选/排序时可用revise_report_file生成同格式核验CSV/XLSX，多工作表选实际数据页，不重新查询数据库；新增字段用import_task_input导入原键、完整in_set补查，再append_report_columns关联并显式格式化，不刷新旧列；新金额或业务口径另按原权限核验。'} ,
       currentActor: { senderId: turn.senderId, profile: turn.profile },
       environmentCatalog: routingCatalog(catalog(await loadEnvironments(), projectId)),
       role: turn.role, administrator: isAdministrator(projects, turn),

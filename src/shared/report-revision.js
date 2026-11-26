@@ -5,6 +5,10 @@ import {reportFile} from './report-files.js';
 
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const fail=message=>{throw Object.assign(new Error(message),{code:'REPORT_INPUT'});};
+export function revisableReportFormat(item){
+ if(item?.kind==='document')return item.format==='xlsx'&&item.filename?.endsWith('.xlsx')?'xlsx':null;
+ return item?.filename?.endsWith('.csv')?'csv':null;
+}
 const plain=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const keys=(x,allowed)=>plain(x)&&Object.keys(x).every(k=>allowed.includes(k));
 // Strict RFC4180 cells, including embedded newlines, BOM, duplicates and empty strings.
@@ -28,7 +32,7 @@ export function reportCsv(bytes){
 const cell=v=>'"'+String(v).replaceAll('"','""')+'"';
 export const encodeReportCsv=(headers,rows)=>Buffer.from('\uFEFF'+[headers,...rows].map(r=>r.map(cell).join(',')).join('\r\n')+'\r\n');
 const encode=encodeReportCsv;
-export function projectReport(input,args){
+export function projectReport(input,args,{typed=false}={}){
  if(!keys(args,['attachmentId','columns','annotations','filters','orderBy','requirement'])||typeof args.requirement!=='string'||!args.requirement.trim())fail('明确本次文件修改要求，不能执行任意代码或修改单元格数值');
  const projected=args.columns??input.headers.map(from=>({from,label:from}));
  if(args.annotations!==undefined&&(!Array.isArray(args.annotations)||args.annotations.some(a=>!keys(a,['label','constant']))))fail('annotations须为明确的备注列名/文字数组');
@@ -36,9 +40,11 @@ export function projectReport(input,args){
  const annotation=c=>c?.kind==='annotation';
  if(!Array.isArray(columns)||!columns.length||columns.some(c=>!keys(c,['from','label','kind','constant'])||typeof c.label!=='string'||!c.label.trim()||/^[\s\uFEFF]*[=+@-]/.test(c.label)||(annotation(c)?c.from!==undefined||typeof c.constant!=='string'||!c.constant||/^[\s\uFEFF]*[=+@-]/.test(c.constant)||input.headers.includes(c.label)||!args.requirement.includes(c.label)||!args.requirement.includes(c.constant):c.kind!==undefined||c.constant!==undefined||!input.headers.includes(c.from)))||new Set(columns.map(c=>c.label)).size!==columns.length)fail('列须为原文件字段或用户明确给出的新文本备注；不覆盖原列、不执行公式，表头唯一');
  const filters=args.filters??[],order=args.orderBy??[];
- if(!Array.isArray(filters)||filters.some(f=>!keys(f,['column','op','value'])||!input.headers.includes(f.column)||!['eq','ne'].includes(f.op)||typeof f.value!=='string'))fail('筛选只接受实际列和明确的字符串eq/ne，不猜测日期或数字');
+ const scalar=value=>typeof value==='string'||typed&&(value===null||typeof value==='boolean'||Number.isFinite(value));
+ if(!Array.isArray(filters)||filters.some(f=>!keys(f,['column','op','value'])||!input.headers.includes(f.column)||!['eq','ne'].includes(f.op)||!scalar(f.value)))fail('筛选只接受实际列与显式类型的eq/ne；CSV值必须是字符串');
  if(!Array.isArray(order)||order.some(o=>!keys(o,['column','direction'])||!input.headers.includes(o.column)||!['asc','desc'].includes(o.direction)))fail('排序只接受实际列和asc/desc，按原字符串排序');
  const index=new Map(input.headers.map((c,i)=>[c,i]));
+ if(typed&&order.some(o=>input.rows.some(row=>typeof row[index.get(o.column)]!=='string')))fail('工作簿排序仅支持文本列，不能猜测空值、数字或日期的排序规则');
  const selected=input.rows.filter(r=>filters.every(f=>f.op==='eq'?r[index.get(f.column)]===f.value:r[index.get(f.column)]!==f.value));
  selected.sort((a,b)=>{for(const o of order){const x=a[index.get(o.column)],y=b[index.get(o.column)];if(x!==y)return(x<y?-1:1)*(o.direction==='asc'?1:-1);}return 0;});
  return {headers:columns.map(c=>c.label),rows:selected.map(r=>columns.map(c=>c.kind==='annotation'?c.constant:r[index.get(c.from)])),recipe:{columns,filters,orderBy:order,requirement:args.requirement}};
@@ -52,10 +58,20 @@ export async function reviseReportFile(dataDir,job,attachment,args){
  if(!/^[A-Za-z0-9_-]{1,100}$/.test(job.id??''))fail('任务输出标识无效');
  if(s?.kind!=='delivered-report'||attachment.id!==args.attachmentId||s.projectId!==job.projectId||s.chatId!==job.chatId||s.originProfile!==job.originProfile)fail('文件不属于当前任务身份/项目/群');
  if(s.sourceEnvironment&&s.sourceEnvironment!==job.sourceEnvironment)fail('原文件环境与当前任务不同；保留原环境接续文件修改，不能改标签冒充其它环境数据');
+ const format=revisableReportFormat(s.report);
+ if(!format)fail('文件修订只支持已核验的数据 CSV 或 XLSX');
+ if(s.sha256!==undefined&&s.sha256!==s.report.sha256)fail('原文件摘要与登记不一致');
+ if(format==='xlsx')return (await import('./workbook-revision.js')).reviseWorkbook(dataDir,job,s,args);
  // Recompute the original evidence, including any preceding file revision.
  const {inspectReport}=await import('./report-inspection.js');
  await inspectReport(dataDir,{id:job.id,reportFiles:[{...s.report,sourceJobId:s.sourceJobId}]},{fileId:s.report.id});
- const source=await reportFile(dataDir,s.sourceJobId,s.report),input=reportCsv(source.content),output=projectReport(input,args);
+ const source=await reportFile(dataDir,s.sourceJobId,s.report);
+ let input;
+ try{input=reportCsv(source.content);}catch(error){
+  if(error.code!=='ERR_ENCODING_INVALID_ENCODED_DATA')throw error;
+  fail('原文件不是有效的 UTF-8 CSV');
+ }
+ const output=projectReport(input,args);
  if(input.rows.length!==s.report.rowCount)fail('原文件实际行数与登记不一致');
  const id='report-'+randomUUID(),filename=id+'.csv',bytes=encode(output.headers,output.rows);
  const originalReceipt=JSON.parse(await readFile(path.join(path.dirname(source.file),s.report.id+'.verification.json'),'utf8'));

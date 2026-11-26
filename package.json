@@ -1,6 +1,6 @@
 {
   "name": "angel-agent-os",
-  "version": "1.155.22",
+  "version": "1.155.23",
   "description": "A Feishu-driven local AgentOS that coordinates role-based Codex development workflows.",
   "private": true,
   "repository": {
