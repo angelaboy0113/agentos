@@ -4,7 +4,7 @@ import {extendDimension} from '../shared/dimension-extension.js';
 import {datasetHash,datasetBytes} from '../shared/dataset-json.js';
 import {buildWindowDataset} from '../shared/window-dataset.js';
 import {summarizeDataset,percentage,divide} from '../shared/dataset-summary.js';
-import {transformDataset} from '../shared/dataset-transform.js';
+import {streamDatasetTransform,transformDataset} from '../shared/dataset-transform.js';
 import {buildRelationalDataset} from '../shared/dataset-relation.js';
 import {deploymentEvidence} from '../shared/deployment-evidence.js';
 import {queryEvidenceIdentity} from '../shared/query-evidence.js';
@@ -139,6 +139,7 @@ export class ReportDatasets {
   try{saved=await this.storage.get(ref,{range:{offset,limit},allowPartial});}
   catch{throw new ReportInputError('数据集范围、文件或摘要校验失败；先调用list_datasets核对本任务已有成果，必要时重新取数。');}
   await this.check();
+  this.sourceScopes.set(ref,saved.scope);
   if(saved.storedRowCount>this.maxRows)throw new ReportInputError('恢复数据集超过当前授权行数上限');
   return {...saved.data,rowCount:saved.storedRowCount,readAt:saved.readAt,snapshotId:saved.snapshotId};
  }
@@ -181,11 +182,43 @@ export class ReportDatasets {
   await this.check();if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
   return {datasetRef:ref,complete:true,rowCount:data.rows.length,columns:data.columns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'按完整来源整理并保存配方；仍须核验范围、文件及原要求'};
  }
+ async openTransformRows(ref){
+  await this.check();
+  let source;
+  try{source=await this.storage.openRows(ref,{check:()=>this.check()});}
+  catch{throw new ReportInputError('来源数据集文件或授权范围无法核验，请用list_datasets确认任务已保存的引用');}
+  if(source.rowCount>this.maxRows)throw new ReportInputError('恢复数据集超过当前授权行数上限');
+  this.sourceScopes.set(ref,source.scope);
+  return source;
+ }
  async transform(args){
-  await this.check();const base=await this.restore(args.datasetRef);if(base)await this.verifyDerived(base);
-  const data=transformDataset(args,base),ref='dataset-'+randomUUID();
-  await this.check();if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
-  return {datasetRef:ref,complete:true,rowCount:data.rows.length,columns:data.columns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'按完整来源整理并保存配方；仍须核验范围、文件及原要求'};
+  await this.check();
+  const ref='dataset-'+randomUUID();
+  let data,samples=[],dataHash;
+  if(this.storage&&!args.hierarchy){
+   const base=await this.openTransformRows(args.datasetRef);
+   await this.verifyDerived(base.data,{ref:args.datasetRef,rowStream:base.rows});
+   const transform=streamDatasetTransform(args,base.data,base.rows());
+   const write=async function*(rows,previewRows){
+    let bytes=0;
+    for await(const row of rows){
+     if(bytes<8000&&samples.length<previewRows){
+      bytes+=Buffer.byteLength(JSON.stringify(row));
+      if(bytes<=8000)samples.push(row);
+     }
+     yield row;
+    }
+   };
+   const saved=await this.storage.saveRows(ref,write(transform.rows(),this.previewRows),transform.finish);
+   data=saved.data;dataHash=saved.dataHash;
+  }else{
+   const base=await this.restore(args.datasetRef);if(base)await this.verifyDerived(base);
+   data=transformDataset(args,base);
+   if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);
+   this.remember(ref,data);samples=preview(data.rows,this.previewRows);
+  }
+  await this.check();
+  return {datasetRef:ref,...(dataHash?{dataHash}:{}),complete:true,rowCount:data.derivation.audit.outputCount,columns:data.columns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:samples,stage:'按完整来源整理并保存配方；仍须核验范围、文件及原要求'};
  }
  async extendDimension(args){
   await this.check();const base=await this.restore(args.datasetRef);if(base)await this.verifyDerived(base);
@@ -236,9 +269,9 @@ export class ReportDatasets {
   if(this.storage)await this.storage.save(ref,data,data.snapshotId,data.readAt);await this.check();this.remember(ref,data);
   return {datasetRef:ref,dataHash:hash(data),complete:true,rowCount:data.rows.length,columns:data.columns,numericColumns:data.numericColumns,readAt:data.readAt,snapshotId:data.snapshotId,audit:data.derivation.audit,preview:preview(data.rows,this.previewRows),stage:'完整主对象的所有显式窗口已一次去重统计，保留零发生组；仍需独立核验与原问题审阅'};
  }
- async verifyDerived(data,validation={}){await verifyPeriodDataset(data,ref=>this.restore(ref),Object.assign(validation,{check:()=>this.check(),maxRows:this.maxRows}));}
- async rawEvidence(data,column,validation={}){
-  await this.verifyDerived(data,validation);
+ async verifyDerived(data,validation={}){await verifyPeriodDataset(data,ref=>this.restore(ref),Object.assign(validation,{check:()=>this.check(),maxRows:this.maxRows,openRows:this.storage?ref=>this.openTransformRows(ref):undefined}));}
+ async rawEvidence(data,column,validation={},ref){
+  await this.verifyDerived(data,ref?{...validation,ref}:validation);
   if(data.derivation?.kind==='window_counts'){
    const proof=await this.windowEvidence(data,column,validation);return proof.ids.length===1?proof.ids[0]:proof.ids.length?hash(proof.ids):null;
   }
@@ -250,7 +283,13 @@ export class ReportDatasets {
    const proof=await this.windowEvidence(data,column,validation);return proof.ids.length===1?proof.ids[0]:proof.ids.length?hash(proof.ids):null;
   }
   if(data.derivation?.kind==='dimension_extension')return null;
-  if(['dataset_transform','random_sample'].includes(data.derivation?.kind))return this.rawEvidence(await this.restore(data.derivation.args.datasetRef),column,validation);
+  if(['dataset_transform','random_sample'].includes(data.derivation?.kind)){
+   const sourceRef=data.derivation.args.datasetRef;
+   if(this.storage&&validation.state?.done.has(sourceRef)){
+    return this.rawEvidence((await this.openTransformRows(sourceRef)).data,column,validation,sourceRef);
+   }
+   return this.rawEvidence(await this.restore(sourceRef),column,validation);
+  }
   if(data.derivation?.kind==='dataset_relation'){
    const p=data.derivation.provenance[column];return p?this.rawEvidence(await this.restore(p.datasetRef),p.column,validation):null;
   }
@@ -260,38 +299,42 @@ export class ReportDatasets {
   }
   return queryEvidenceIdentity(data);
  }
+ async describeEvidence(ref){
+  if(!this.storage)return this.restore(ref);
+  return this.readDatasetRange(ref,0,0);
+ }
  async windowEvidence(data,column,validation={}){
   const d=data.derivation;
   if(d?.kind==='window_counts'){
    const refs=column===(d.args.denominatorColumn??'population_count')?[d.args.populationRef]:d.args.sources.map(s=>s.datasetRef),ids=[];
-   for(const ref of refs){const p=await this.windowEvidence(await this.restore(ref),column,validation);ids.push(...p.ids);}
+   for(const ref of refs){const p=await this.windowEvidence(await this.describeEvidence(ref),column,validation);ids.push(...p.ids);}
    return {window:true,ids:[...new Set(ids)].sort()};
   }
   if(d?.kind==='dataset_summary'){
-   const a=d.args.aggregates.find(a=>a.as===column),base=await this.restore(d.args.datasetRef);
+   const a=d.args.aggregates.find(a=>a.as===column),base=await this.describeEvidence(d.args.datasetRef);
    if(a?.op==='count')return {window:false,ids:await this.rowEvidence(base)};
    const fields=a?(a.op==='weighted_sum'?[a.column,a.weightColumn]:[a.column]):d.args.groupColumns.includes(column)?[column]:[];
    const proofs=await Promise.all(fields.map(c=>this.windowEvidence(base,c,validation)));
    return {window:proofs.some(p=>p.window),ids:[...new Set(proofs.flatMap(p=>p.ids))].sort()};
   }
-  if(d?.kind==='dataset_transform')return this.windowEvidence(await this.restore(d.args.datasetRef),column,validation);
-  if(d?.kind==='dataset_relation'){const p=d.provenance[column],proof=p?await this.windowEvidence(await this.restore(p.datasetRef),p.column,validation):{window:false,ids:[]};return {...proof,ids:p?[...new Set([...proof.ids,...await this.rowEvidence(data)])].sort():[]};}
-  if(d?.kind==='period_grid'){const p=d.provenance[column]??{datasetRef:d.args.populationRef,column};return this.windowEvidence(await this.restore(p.datasetRef),p.column,validation);}
-  if(d?.kind==='left_lookup'){const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column)),field=lookup?.fields.find(f=>f.as===column);return this.windowEvidence(await this.restore(lookup?.datasetRef??d.datasetRef),field?.column??column,validation);}
+  if(d?.kind==='dataset_transform')return this.windowEvidence(await this.describeEvidence(d.args.datasetRef),column,validation);
+  if(d?.kind==='dataset_relation'){const p=d.provenance[column],proof=p?await this.windowEvidence(await this.describeEvidence(p.datasetRef),p.column,validation):{window:false,ids:[]};return {...proof,ids:p?[...new Set([...proof.ids,...await this.rowEvidence(data)])].sort():[]};}
+  if(d?.kind==='period_grid'){const p=d.provenance[column]??{datasetRef:d.args.populationRef,column};return this.windowEvidence(await this.describeEvidence(p.datasetRef),p.column,validation);}
+  if(d?.kind==='left_lookup'){const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column)),field=lookup?.fields.find(f=>f.as===column);return this.windowEvidence(await this.describeEvidence(lookup?.datasetRef??d.datasetRef),field?.column??column,validation);}
   const id=queryEvidenceIdentity(data);return {window:false,ids:id?[id]:[]};
  }
  async rowEvidence(data,visited=new Set()){
-  const ids=[];for(const ref of datasetDependencies(data)){if(visited.has(ref))continue;visited.add(ref);ids.push(...await this.rowEvidence(await this.restore(ref),visited));}
+  const ids=[];for(const ref of datasetDependencies(data)){if(visited.has(ref))continue;visited.add(ref);ids.push(...await this.rowEvidence(await this.describeEvidence(ref),visited));}
   const own=queryEvidenceIdentity(data);if(own)ids.push(own);return [...new Set(ids)].sort();
  }
  async windowField(data,column){
   const d=data.derivation;if(!d)return null;
   if(d.kind==='window_counts'){const w=d.args.windows.find(w=>w.percentageColumn===column);return w?{count:w.countColumn,denominator:d.args.denominatorColumn??'population_count',precision:w.precision??2,zeroDenominator:w.zeroDenominator??'empty'}:null;}
-  if(['dataset_summary','dataset_transform'].includes(d.kind))return this.windowField(await this.restore(d.args.datasetRef),column);
-  if(d.kind==='dataset_relation'){const p=d.provenance[column];return p?this.windowField(await this.restore(p.datasetRef),p.column):null;}
+  if(['dataset_summary','dataset_transform'].includes(d.kind))return this.windowField(await this.describeEvidence(d.args.datasetRef),column);
+  if(d.kind==='dataset_relation'){const p=d.provenance[column];return p?this.windowField(await this.describeEvidence(p.datasetRef),p.column):null;}
   if(d.kind==='left_lookup'){
-   const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column));if(!lookup)return this.windowField(await this.restore(d.datasetRef),column);
-   const original=lookup.fields.find(f=>f.as===column).column,w=await this.windowField(await this.restore(lookup.datasetRef),original);
+   const lookup=d.lookups.find(l=>l.fields.some(f=>f.as===column));if(!lookup)return this.windowField(await this.describeEvidence(d.datasetRef),column);
+   const original=lookup.fields.find(f=>f.as===column).column,w=await this.windowField(await this.describeEvidence(lookup.datasetRef),original);
    return w?{...w,count:lookup.fields.find(f=>f.column===w.count)?.as,denominator:lookup.fields.find(f=>f.column===w.denominator)?.as}:null;
   }return null;
  }
@@ -383,7 +426,7 @@ export class ReportDatasets {
   const graph=new Map(),visiting=new Set();
   const visit=async(ref,depth=0)=>{
    if(graph.has(ref))return;if(visiting.has(ref))throw new ReportInputError('报表来源图循环，不能安全集中刷新');
-   visiting.add(ref);const d=await this.restore(ref);if(!d?.complete)throw new ReportInputError('刷新来源不完整');
+   visiting.add(ref);const d=await this.describeEvidence(ref);if(!d?.complete)throw new ReportInputError('刷新来源不完整');
    if(d.derivation?.kind==='random_sample')throw new ReportInputError('随机样本刷新须从新范围重新抽样');
    if(d.reportDraft){for(const source of d.reportDraft.sources)await visit(source.datasetRef,depth+1);if(d.reportDraft.population)await visit(d.reportDraft.population.datasetRef,depth+1);}
    else if(['dataset_summary','dataset_transform','dimension_extension'].includes(d.derivation?.kind)){await visit(d.derivation.args.datasetRef,depth+1);}
@@ -430,8 +473,8 @@ export class ReportDatasets {
   if(samplePopulation&&(!/(?:抽样|随机|random|sample)/i.test(this.originalQuestion)||population.derivation.args.keyColumn!==args.populationKey))throw new ReportInputError('随机样本仅可验收用户明确要求的抽样，并使用保存的抽样键');
   const periodPopulation=population?.derivation?.kind==='period_grid'&&population.derivation.args.sources.length===0;
   let populationBase=periodPopulation?await this.restore(population.derivation.args.populationRef):population;
-  const populationVisited=new Set();while(['dataset_summary','dataset_transform','dataset_relation','dimension_extension','random_sample'].includes(populationBase?.derivation?.kind)){const ref=populationBase.derivation.args.datasetRef;if(populationVisited.has(ref))throw new ReportInputError('范围依赖循环');populationVisited.add(ref);populationBase=await this.restore(ref);}
-  if(!population?.complete||population.reportDraft||!(populationBase?.queryHash&&populationBase.queryDefinition||[1,2].includes(populationBase?.inputEvidence?.version)&&populationBase.inputEvidence.kind==='native-cloud-sheet'&&populationBase.inputEvidence.rowKey===args.populationKey&&populationBase.inputEvidence.rowCount===populationBase.rows.length)||!population.columns.includes(args.populationKey))throw new ReportInputError('完整对象范围必须来自独立原始查询数据集，不能拿草稿自身当覆盖证明；期间覆盖请从原始对象集合单独period_dataset，sources=[]，populationKey使用其period_key；inspect_dataset的finalization.populationCandidates和populationPlans可定位已有来源及范围，不需重查整套数据');
+  const populationVisited=new Set();while(['dataset_summary','dataset_transform','dataset_relation','dimension_extension','random_sample'].includes(populationBase?.derivation?.kind)){const ref=populationBase.derivation.args.datasetRef;if(populationVisited.has(ref))throw new ReportInputError('范围依赖循环');populationVisited.add(ref);populationBase=await this.describeEvidence(ref);}
+  if(!population?.complete||population.reportDraft||!(populationBase?.queryHash&&populationBase.queryDefinition||[1,2].includes(populationBase?.inputEvidence?.version)&&populationBase.inputEvidence.kind==='native-cloud-sheet'&&populationBase.inputEvidence.rowKey===args.populationKey&&populationBase.inputEvidence.rowCount===(populationBase.rowCount??populationBase.rows.length))||!population.columns.includes(args.populationKey))throw new ReportInputError('完整对象范围必须来自独立原始查询数据集，不能拿草稿自身当覆盖证明；期间覆盖请从原始对象集合单独period_dataset，sources=[]，populationKey使用其period_key；inspect_dataset的finalization.populationCandidates和populationPlans可定位已有来源及范围，不需重查整套数据');
   const expected=uniqueKeys(population,args.populationKey);
   if(!Array.isArray(draft.keys)||draft.keys.length!==data.rows.length||new Set(draft.keys).size!==draft.keys.length||draft.keys.some(k=>typeof k!=='string'||!k))throw new ReportInputError('草稿缺少完整内部主键索引；重新生成草稿后核验');
   const actual=new Set(draft.keys),missing=[...expected].filter(k=>!actual.has(k)),extra=[...actual].filter(k=>!expected.has(k));

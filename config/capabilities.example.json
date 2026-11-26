@@ -52,6 +52,7 @@
   "transform_dataset": {
     "datasetRef": "REPLACE_WITH_COMPLETE_DATASET_REF",
     "keyColumn": "object_id",
+    "keepColumns": ["object_id", "full_path"],
     "scopeEvidence": "REPLACE_WITH_VERIFIED_SCOPE_RULE",
     "filters": [
       {

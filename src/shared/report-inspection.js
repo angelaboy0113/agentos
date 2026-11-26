@@ -54,21 +54,25 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
  const columns=draft.columns.map((c,i)=>({label:c.label,value:c.value,definition:receipt.columnRules[i].definition,evidence:receipt.columnRules[i].evidence}));
  const sourceList=[...sources].map(([name,d])=>({name,datasetRef:d.datasetRef,keyColumn:d.keyColumn,columns:d.columns,rowCount:d.rows.length,readAt:d.readAt,queryDefinition:d.queryDefinition??null,inputEvidence:d.inputEvidence??null,derivation:d.derivation??null}));
  const population=await storage.get(receipt.coverage.populationRef),fileKeys=new Set(draft.keys),comparisons=[],visited=new Set();
- const describe=(ref,key,d)=>({datasetRef:ref,keyColumn:key,rowCount:d.rows.length,inputEvidence:d.inputEvidence??null,queryDefinition:d.queryDefinition?{sql:d.queryDefinition.sql.slice(0,1400),params:d.queryDefinition.params.slice(0,20)}:null});
+ const describe=(ref,key,d)=>({datasetRef:ref,keyColumn:key,rowCount:d.rowCount??d.rows.length,inputEvidence:d.inputEvidence??null,queryDefinition:d.queryDefinition?{sql:d.queryDefinition.sql.slice(0,1400),params:d.queryDefinition.params.slice(0,20)}:null});
  const compareScope=async(ref,key,include=false)=>{
   const identity=ref+':'+key,traversed=visited.has(identity);if(traversed&&(!include||comparisons.some(c=>c.datasetRef===ref&&c.keyColumn===key)))return;visited.add(identity);
-  const saved=await storage.get(ref),d=saved.data,derivation=d.derivation;
+  const saved=await storage.openRows(ref),d=saved.data,derivation=d.derivation;
   if(!d.columns.includes(key))fail('范围依赖主键不存在');
-  const values=d.rows.map(r=>r[key]),keys=new Set(values),unique=keys.size===values.length&&!keys.has(null)&&!keys.has('');
-  if(unique&&include){const onlyReference=[...keys].filter(k=>!fileKeys.has(k)),onlyFile=[...fileKeys].filter(k=>!keys.has(k));comparisons.push({...describe(ref,key,d),onlyReferenceCount:onlyReference.length,onlyFileCount:onlyFile.length,onlyReferencePreview:onlyReference.slice(0,3).map(k=>String(k).slice(0,80)),onlyFilePreview:onlyFile.slice(0,3).map(k=>String(k).slice(0,80))});}
+  const keys=new Set();for await(const row of saved.rows())keys.add(row[key]);
+  const unique=keys.size===saved.rowCount&&!keys.has(null)&&!keys.has('');
+  if(unique&&include){const onlyReference=[...keys].filter(k=>!fileKeys.has(k)),onlyFile=[...fileKeys].filter(k=>!keys.has(k));comparisons.push({...describe(ref,key,{...d,rowCount:saved.rowCount}),onlyReferenceCount:onlyReference.length,onlyFileCount:onlyFile.length,onlyReferencePreview:onlyReference.slice(0,3).map(k=>String(k).slice(0,80)),onlyFilePreview:onlyFile.slice(0,3).map(k=>String(k).slice(0,80))});}
   if(traversed)return;
   if(['dataset_transform','dimension_extension'].includes(derivation?.kind)&&key===derivation.args.keyColumn)await compareScope(derivation.args.datasetRef,key,true);
   if(derivation?.kind==='left_lookup'&&key===derivation.keyColumn){await compareScope(derivation.datasetRef,key);for(const lookup of derivation.lookups.filter(l=>l.sourceColumn===key))await compareScope(lookup.datasetRef,lookup.targetColumn,true);}
  };
  await compareScope(receipt.coverage.populationRef,receipt.coverage.populationKey,true);for(const source of draft.sources)await compareScope(source.datasetRef,source.keyColumn);
  const loadPeriodSource=async ref=>{const saved=await storage.get(ref);return {...saved.data,readAt:saved.readAt,snapshotId:saved.snapshotId};};
- await verifyPeriodDataset(await loadPeriodSource(receipt.coverage.populationRef),loadPeriodSource);
- for(const source of draft.sources)await verifyPeriodDataset(await loadPeriodSource(source.datasetRef),loadPeriodSource);
+ const validation={openRows:ref=>storage.openRows(ref)};
+ for(const ref of new Set([receipt.coverage.populationRef,...draft.sources.map(source=>source.datasetRef)])){
+  const saved=await validation.openRows(ref);
+  await verifyPeriodDataset(saved.data,loadPeriodSource,{...validation,state:validation.state??={visiting:new Set(),done:new Set()},ref,rowStream:saved.rows});
+ }
  const populationAudit={selected:{...describe(receipt.coverage.populationRef,receipt.coverage.populationKey,population.data),scopeEvidence:receipt.scopeEvidence,...(population.data.derivation?.kind==='random_sample'?{sampling:population.data.derivation.audit}:{})},comparisons,note:'这些是实际来源与主键直接关联的完整集合，不自动等于应纳入的业务范围。逐项对照原问题和源码确定全集/子集，不能把有金额记录自动当全部对象，也不能因有零金额而排除对象；多层组织维度可能本来不属于同一全集。差异须明确审阅，不因名称相似猜测。'};
  const checks=receipt.totals??[];
  const binding={fileId:item.id,sourceJobId,datasetRef:bound.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:item.rowCount};
