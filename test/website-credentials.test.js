@@ -102,6 +102,29 @@ test('credential command parser requires both account and password',()=>{
   assert.deepEqual(parseWebsiteCredentialMessage('账号 alice 密码 pwd'),{intent:true,username:'alice',password:'pwd'});
 });
 
+test('login and password procedure questions bypass both credential intake modes', async()=>{
+ const questions=[
+  '请问正式环境中龙天下系统审计账号密码重置路径在哪里，具体操作流程是什么',
+  '账号忘了，密码怎么重置？',
+  '账号密码重置教程',
+  '网页登录入口在哪里？',
+  '请问如何登录网站并重置账号密码',
+  'Where is the username and password reset page?',
+ ];
+ for(const question of questions)for(const allowLoose of [false,true]){
+  assert.equal(parseWebsiteCredentialMessage(question,{allowLoose}),null,question);
+ }
+ const service=new WebsiteCredentialService({store:{read:async()=>threadedState()},feishu:{reply(){throw Error('unexpected credential reply');}},websiteBrowser:{}},
+  {load:async()=>({environments:{site:environment}}),save(){throw Error('unexpected credential save');}});
+ for(const context of [{},{root_id:'root-one'}]){
+  assert.equal(await service.handle({chat_type:'group',chat_id:'group',agent_profile:'owner',sender_id:'ou_admin',content:questions[0],...context}),null);
+ }
+ assert.ok(parseWebsiteCredentialMessage('请问可以帮我登录网站吗？账号：alice 密码：synthetic-only!'));
+ assert.ok(parseWebsiteCredentialMessage('网页登录 账号 alice 密码 synthetic-only! 怎么继续'));
+ assert.equal(parseWebsiteCredentialMessage('alice / synthetic-only?',{allowLoose:true}).password,'synthetic-only?');
+ assert.equal(parseWebsiteCredentialMessage('网页登录 账号：alice').invalid,true);
+});
+
 test('automatic recovery reads only the current application credential reference and never returns secret values',async()=>{
  const reads=[],submits=[],service=new WebsiteCredentialService({websiteBrowser:{loginStatusFor:async()=>({pageReady:false}),submitCredentials:async(job,e,cred)=>{submits.push([e.projectId,e.tier,e.credentialRef,cred.username]);return {authenticated:true,loginState:'ready',password:cred.password};}}},{read:async ref=>{reads.push(ref);return {username:ref,password:'synthetic-password'};}});
  const first=await service.recoverLogin(job,{...environment,projectId:'one',tier:'prd',credentialRef:'one-prd'}),second=await service.recoverLogin(job,{...environment,projectId:'two',tier:'uat',credentialRef:'two-sit'});assert.deepEqual(reads,['one-prd','two-sit']);assert.equal(submits[0][3],'one-prd');assert.equal(submits[1][3],'two-sit');assert.doesNotMatch(JSON.stringify([first,second]),/synthetic-password|username/);

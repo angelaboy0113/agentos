@@ -14,6 +14,8 @@ export async function recoverWebsiteToolLogin(context,job,environment,result){
 
 const command = /(?:网站登录|登录网站|网页登录)/i;
 const marker = /(?:网址|地址|账号|用户名|密码|(?<![A-Za-z0-9_-])(?:url|user(?:name)?|password|passwd))\s*[:：=]?\s*/ig;
+const inquiry = /请问|怎么|怎样|如何|什么|哪[里儿个]|入口|路径|步骤|流程|操作方法|教程|指引|[？?]\s*$|\b(?:how|where|what)\b/i;
+const passwordQuestionStart = /^(?:该?(?:怎么|如何|怎样)|在哪里|重置(?:入口|路径|流程|步骤|教程)|(?:reset\s+(?:page|path|steps|procedure)|how\b|where\b))/i;
 
 const cleanValue = (value) => String(value ?? '').trim().replace(/^[`'"“”‘’,，;；]+|[`'"“”‘’,，;；]+$/g, '').trim();
 
@@ -40,6 +42,17 @@ export function parseWebsiteCredentialMessage(value, { allowLoose = false } = {}
     const field = fields[index];
     const valueText = cleanValue(text.slice(field.start, fields[index + 1]?.marker ?? text.length));
     if (valueText && result[field.name] == null) result[field.name] = valueText;
+  }
+  if (inquiry.test(text)) {
+    const passwordIsLabeled = fields.some(field => field.name === 'password' && /[:：=]/.test(field.key));
+    const usernameIsLabeled = fields.some(field => field.name === 'username' && /[:：=]/.test(field.key));
+    const explicitPair = passwordIsLabeled && usernameIsLabeled && result.username && result.password;
+    const suppliedPassword = result.password && !passwordQuestionStart.test(result.password) &&
+      (passwordIsLabeled || result.username && /^[A-Za-z0-9_.@+\-]+$/.test(result.username) && !/^(?:and|or|the)$/i.test(result.username));
+    // A punctuation character in a password does not turn a short, bound
+    // credential reply into an ordinary question.
+    const loose = allowLoose && text.match(/^[A-Za-z0-9_.@+\-]+(?:\s*[/／|｜,，;；]\s*|\s+)(\S+)$/);
+    if (!explicitPair && !suppliedPassword && !(loose && !passwordQuestionStart.test(loose[1]))) return null;
   }
   if (!result.url) { const found = text.match(/https?:\/\/[^\s]+/i)?.[0]; if (found) result.url = found; }
   if (allowLoose && (!result.username || !result.password)) {
