@@ -190,3 +190,27 @@ test('Feishu adapter checks a current internal participant before join and rejec
   assert.equal(await transport.document(session,'标题',sections,audience,state,async () => {}),settings.documentOrigin+'/docx/token');
   assert.equal(requests.filter(r => r[0] === 'api' && r[1] === 'POST').length,1);
 });
+
+test('an empty unbound event window is retried with a later upper bound', async t => {
+  const windows = [];
+  const {pilot,clock} = await fixture(t,{
+    lookup:async () => inMeeting, details:async () => inMeeting, join:async () => {},
+    reply:async () => {},
+    events:async (_,window) => {
+      windows.push(structuredClone(window));
+      return windows.length === 1 ? {events:[]} : {
+        meeting:{id:meetingId,status:'ongoing'},
+        events:[speech('first','开始正式讨论',baseTime+15_000)],
+      };
+    },
+  });
+  await pilot.handle(event,{agent,content:'记录会议 '+number});
+  await Promise.all(pilot.inFlight.values());
+  clock(baseTime+5000);
+  await step(pilot);
+  clock(baseTime+65_000);
+  await step(pilot);
+  assert.equal(windows[0].start,windows[1].start);
+  assert.ok(windows[1].end>windows[0].end);
+  assert.equal([...pilot.sessions.values()][0].sentences.first.text,'开始正式讨论');
+});

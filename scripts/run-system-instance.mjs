@@ -31,6 +31,11 @@ for (const name of ['runtime', 'systems']) {
   if (!inside(await realpath(bundle), target)) throw new Error('实例目录存在越界符号链接');
 }
 const configDir = path.join(program, 'config');
+const meetingPilotFile = await realpath(path.join(runtime, 'meeting-pilot.local.json')).catch(error => {
+  if (error.code === 'ENOENT') return null;
+  throw error;
+});
+if (meetingPilotFile && !inside(await realpath(runtime), meetingPilotFile)) throw Error('Meeting pilot configuration must stay inside its instance');
 const projects = await loadProjects(path.join(configDir, 'projects.local.json'));
 const { agents } = await loadAgents(path.join(configDir, 'agents.local.json'));
 if (!Object.keys(agents).length) throw new Error('没有已发布并完成接入的系统助手，拒绝启动');
@@ -54,6 +59,7 @@ if (pending.length) throw new Error('接入尚未完成，拒绝连接事件或�
 for (const key of Object.keys(process.env)) if (/^(AGENTOS_|FEISHU_|LARKSUITE_CLI_CONFIG_DIR$)/.test(key)) delete process.env[key];
 Object.assign(process.env, {
   ...officeEnvironment,
+  ...(meetingPilotFile ? { AGENTOS_MEETING_PILOT_FILE: meetingPilotFile } : {}),
   AGENTOS_ANALYSIS_ENGINE: analysisEngine,
   AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_ARCHIVE_HISTORY: instance.archiveHistory === true ? '1' : '0', AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),

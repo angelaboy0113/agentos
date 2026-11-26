@@ -14,7 +14,7 @@
 
 ## 部署配置
 
-将 [配置示例](../config/meeting-pilot.example.json) 复制到私有部署目录。填写现有 TPM 机器人 profile、它在试点群已绑定的项目 ID、飞书群 open chat ID 和团队飞书文档域名。试点群须已启用 PRD 工作台。设置 `AGENTOS_MEETING_PILOT_FILE` 为配置文件的绝对路径，配置验证完毕后改为 `enabled: true` 并按现有实例流程重启。无此环境变量或配置明确关闭时，试点不运行。当前只注册一个 profile 和群。
+将 [配置示例](../config/meeting-pilot.example.json) 复制到私有部署目录。填写现有 TPM 机器人 profile、它在试点群已绑定的项目 ID、飞书群 open chat ID 和团队飞书文档域名。试点群须已启用 PRD 工作台。独立实例将配置保存到本实例的 `runtime/meeting-pilot.local.json`，启动器自动选用此文件。直接启动控制面时，可以将 `AGENTOS_MEETING_PILOT_FILE` 指向私有配置文件的绝对路径。配置验证完毕后改为 `enabled: true` 并按现有实例流程重启。配置缺失或明确关闭时，试点不运行。当前只注册一个 profile 和群。
 
 需要用同一个飞书应用身份实测会议号查询、会议详情（含当前参会人）、机器人入会和转写读取。飞书会议读取接口使用本应用的 open ID 和会议信息权限，通常会提示 `vc:meeting:readonly` 或对应的细粒度权限。私聊须覆盖普通群成员。飞书在线交付额外要求文档创建、正文读写、权限核验及协作者更新能力。组织密级策略导致写入失败时，纪要会尝试私发文件。初稿需要飞书文档才能接入现有 PRD 工作台。
 

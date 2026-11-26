@@ -339,7 +339,9 @@ export class MeetingPilot {
         }
       }
     } catch (error) {
-      if (error.meetingCode === 'meeting_event_cursor_invalid') item.window = null;
+      // An empty time window may omit meeting identity entirely. Keep the last verified
+      // watermark and extend the next request to include speech that arrives afterward.
+      if (['meeting_event_cursor_invalid','meeting_event_unverified'].includes(error.meetingCode)) item.window = null;
       const details = await this.transport.details(item.meetingId).catch(() => null);
       const end = timestamp(details?.end_time) ?? item.endedAt;
       if (details?.status === 3 && !item.endedAt && end) {
