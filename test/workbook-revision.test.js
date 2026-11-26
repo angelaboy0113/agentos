@@ -54,6 +54,8 @@ test('the authorized revision tool filters workbooks without a DB connection and
  const revised=await tools.run('revise_report_file',args);
  assert.equal(revised.changed,true);
  assert.equal(revised.exportFile.format,'xlsx');
+ const samePhase=await tools.run('inspect_report',{fileId:revised.exportFile.id});
+ assert.equal(samePhase.calculationAudit.checkedRows,2);
  const workbook=new ExcelJS.Workbook();
  await workbook.xlsx.load((await reportFile(root,job.id,revised.exportFile)).content);
  assert.deepEqual(workbook.worksheets.map(ws=>ws.name),sheetNames);

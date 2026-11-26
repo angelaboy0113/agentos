@@ -336,7 +336,7 @@ export async function createEnvironmentTools(e, q, cred, adapters = {}) {
           if(!adapters.readTaskInput)throw new ReportInputError('当前任务文件读取入口不可用');
           const bytes=await adapters.readTaskInput(attachment.id);
           if(createHash('sha256').update(bytes).digest('hex')!==attachment.source?.sha256)throw new ReportInputError('原文件内容与登记摘要不一致');
-          const result=await reviseReportFile(adapters.dataDir,adapters.reportJob,attachment,args);await adapters.authorize?.();return result;
+          const result=await reviseReportFile(adapters.dataDir,adapters.reportJob,attachment,args);await adapters.authorize?.();return registerReport(result);
         }
         if (e.kind === 'nacos') {
           if (tool === 'connection') { const v = JSON.parse(await nacos('/v1/auth/login', {}, true)); if (typeof v.accessToken !== 'string' || !v.accessToken) throw new Error('Nacos 认证未成功'); token = v.accessToken; return { stage: 'Nacos 网络与登录成功', databaseConnection: '尚未测试，需要独立只读数据库入口' }; }
