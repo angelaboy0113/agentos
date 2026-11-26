@@ -91,6 +91,18 @@ export class LarkCliFeishuClient {
 
   async replyFile(messageId,file,options={}){
     await mkdir(path.join(this.cwd,'reports'),{recursive:true,mode:0o700});
+    if (options.privateStaging && options.privateRecipient) {
+      const cwd = await mkdtemp(path.join(this.cwd, 'private-file-'));
+      const relative = path.basename(file);
+      try {
+        await copyFile(file, path.join(cwd, relative));
+        return await runLarkCli(['im', '+messages-send', '--as', 'bot', '--user-id', options.privateRecipient,
+          '--file', relative, '--idempotency-key', larkIdempotencyKey(options.idempotencyKey), '--json'],
+        {cwd, cliEntry:this.cliEntry, profile:options.profile, timeoutMs:30000+Math.ceil((await stat(file)).size/64000)*1000});
+      } finally {
+        await rm(cwd, {recursive:true, force:true});
+      }
+    }
     const relative=path.join('reports',path.basename(file));
     await copyFile(file,path.join(this.cwd,relative));
     return runLarkCli(['im',options.privateRecipient?'+messages-send':'+messages-reply','--as','bot',...(options.privateRecipient?['--user-id',options.privateRecipient]:['--message-id',messageId]),'--file',relative,

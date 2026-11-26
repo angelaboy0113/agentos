@@ -1,3 +1,4 @@
+import { MeetingPilot, loadMeetingPilot } from './meeting-pilot.js';
 import { screenshotAvailable } from '../shared/browser-tool-input.js';
 import { PrdWorkspace, loadPrdWorkspace } from './prd-workspace.js';
 import {RemoteLoginQr} from './remote-login-qr.js';
@@ -120,6 +121,12 @@ export async function createControlPlane(overrides = {}) {
   const conversations = new ConversationService(context, { ...await loadConversationSettings(config.conversationFile), memorySettings: await loadMemorySettings(config.memoryFile), ...overrides.conversationOptions, decide: overrides.conversationResponder });
   context.conversations = conversations;
   context.prd = new PrdWorkspace(context, overrides.prdSettings ?? await loadPrdWorkspace(config), overrides.prdDependencies);
+  const meetingSettings = await loadMeetingPilot(config);
+  if (meetingSettings) {
+    if (!context.prd.chatIds.has(meetingSettings.chatId)) throw Error('Meeting pilot requires an existing PRD group');
+    context.meetings = new MeetingPilot(context,meetingSettings);
+    await context.meetings.ready;
+  }
   context.withdrawals=new WithdrawalWatcher(context);
   const receptionPolicy=await loadReceptionPolicy(config.receptionFile);store.receptionPolicy=receptionPolicy;context.reception=new ReceptionService(context,receptionPolicy,overrides.receptionOptions);
   context.retention = new HistoryRetention(context);
@@ -143,6 +150,7 @@ export async function createControlPlane(overrides = {}) {
     cards.start();context.longNotices.start();context.reception.start();
     context.websiteEvidence.retry().catch(()=>console.error('[website-evidence] recovery unavailable'));
     context.prd.publisher.start();
+    context.meetings?.start();
     context.prd.resumeDraftImports().catch(() => console.error('[prd] Draft intake recovery failed'));
     context.prd.refreshOpenForms().catch(() => console.error('[prd] Card form refresh failed'));
     context.reports.recover().catch(()=>console.error('[report] recovery unavailable'));
@@ -153,7 +161,7 @@ export async function createControlPlane(overrides = {}) {
   server.once('close', () => {
     context.memoryAdmission.stop?.();
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
-    void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.checkinQueue.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.prd.publisher.close(),context.successStickers.close(),context.websiteEvidence.close(), context.remoteLoginQr.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
+    void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.checkinQueue.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.prd.publisher.close(),context.meetings?.close(),context.successStickers.close(),context.websiteEvidence.close(), context.remoteLoginQr.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
   return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
 }
@@ -708,8 +716,11 @@ export async function handleLarkCliEvent(context, event) {
     if (!response) return { ignored: true, reason: 'casual_topic_no_reply' };
     return context.conversations.enqueueCasualReply({...event, message_id:messageId, agent_role:role}, response);
   }
+  const addressedContent = prdAddressed ? stripMentions(event.content, event.mentions) : '';
+  const meeting = prdAddressed ? await context.meetings?.handle({...event,message_id:messageId}, {agent, content:addressedContent}) : null;
+  if (meeting) return meeting;
   const prd = prdAddressed ? await context.prd?.handle({...event,message_id:messageId}, {agent, addressed:true,
-    content:stripMentions(event.content, event.mentions)}) : null;
+    content:addressedContent}) : null;
   if (prd) return prd;
   const reception=await context.reception?.observe(event,agent);if(reception)return reception;
   // Group-only system assistants must route the addressee before credential

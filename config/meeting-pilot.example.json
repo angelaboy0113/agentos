@@ -1,0 +1,7 @@
+{
+  "enabled": false,
+  "profile": "YOUR_TPM_BOT_PROFILE",
+  "projectId": "YOUR_TPM_PROJECT_ID",
+  "chatId": "oc_YOUR_PRD_GROUP_ID",
+  "documentOrigin": "https://your-tenant.feishu.cn"
+}

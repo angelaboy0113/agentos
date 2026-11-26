@@ -11,6 +11,7 @@ export function controlConfig(overrides = {}) {
     host: overrides.host ?? process.env.AGENTOS_HOST ?? '127.0.0.1',
     port: Number(overrides.port ?? process.env.AGENTOS_PORT ?? 8787),
     dataDir,
+    meetingPilotFile: overrides.meetingPilotFile ?? process.env.AGENTOS_MEETING_PILOT_FILE ?? null,
     retentionDays: Number(overrides.retentionDays ?? process.env.AGENTOS_RETENTION_DAYS ?? 0),
     archiveHistory: overrides.archiveHistory ?? process.env.AGENTOS_ARCHIVE_HISTORY === '1',
     runtimeDir: overrides.runtimeDir ?? process.env.AGENTOS_RUNTIME_DIR ?? null,
