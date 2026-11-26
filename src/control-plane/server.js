@@ -1027,8 +1027,11 @@ async function validateSourceDocumentFiles(dataDir,job,result){
   if(file.kind==='document')files.push(...await validateReportFiles(dataDir,job.id,[file]));
   else{
    const prior=job.reportFiles?.find(f=>f.id===file.id&&f.sha256===file.sha256&&f.verificationHash===file.verificationHash);
-   if(!prior)throw new Error('Source results cannot introduce an unregistered database report');
-   files.push(...await validateReportFiles(dataDir,prior.sourceJobId??job.id,[prior]));
+   if(!prior){
+    const {validateNewCsvArtifact}=await import('../shared/verified-csv-artifact.js');
+    await validateNewCsvArtifact(dataDir,job,file);
+   }
+   files.push(...await validateReportFiles(dataDir,prior?.sourceJobId??job.id,[prior??file]));
   }
  }
  return files;

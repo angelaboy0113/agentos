@@ -29,6 +29,7 @@ async function inspectBoundReport(dataDir,job,{fileId,section='summary',offset=0
   const preview=await officePreviewEvidence(verified.content,item.format,path.dirname(verified.file),item.id,receipt.contentAudit?.preview);
   return {status:'verified',binding:{sourceJobId,fileId:item.id,sha256:item.sha256,verificationHash:item.verificationHash,rowCount:0},contentAudit:{...receipt.contentAudit,...(preview?{preview}:{})},purpose:receipt.purpose,format:item.format,note:receipt.businessVerification,...workbook};
  }
+ if(receipt.csvArtifact)return (await import('./verified-csv-artifact.js')).inspectVerifiedCsvArtifact(dataDir,job,item,verified,{section,offset,limit,columns:requestedColumns});
  if(receipt.revision)return (await import('./report-revision.js')).inspectRevision(dataDir,job,item,receipt,{fileId,section,offset,limit,columns:requestedColumns});
  const directory=path.dirname(verified.file),datasetRoot=path.join(directory,'datasets');
  if((await lstat(datasetRoot)).isSymbolicLink())fail('报表数据集目录不能是符号链接');

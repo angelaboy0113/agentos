@@ -52,9 +52,9 @@ export async function documentDirectory(dataDir,jobId){
  for(const name of ['exports',jobId]){const next=path.join(dir,name);try{const s=await lstat(next);if(!s.isDirectory()||s.isSymbolicLink())fail('输出目录不能是链接或文件');}catch(e){if(e.code!=='ENOENT')throw e;await mkdir(next,{mode:0o700,recursive:true});}const after=await lstat(next);if(!after.isDirectory()||after.isSymbolicLink()||await realpath(next)!==next)fail('输出目录边界变化');dir=next;}return dir;
 }
 async function resolveDocumentRequest(dataDir,job,request){
- if(!['xlsx','csv'].includes(request.format))return request;
+ if(request.format!=='xlsx')return request;
  if(typeof request.content!=='string'){if(job.tabularDelivery)fail('业务XLSX文件引用需在JSON内容中声明sheets逐表来源；不限制工作表数量，原金额和范围仍需独立核验');return request;}
- const spec=request.format==='xlsx'?parse(request.content):null;
+ const spec=parse(request.content);
  if(spec?.sourceReportId&&spec?.sheets)fail('单表sourceReportId与多表sheets不能同时指定；请逐表声明，避免丢失工作表');
  const sheets=spec?.sourceReportId?[{name:spec.sheetName??'核验数据',sourceReportId:spec.sourceReportId}]:spec?.sheets;
  if(!Array.isArray(sheets)||!sheets.some(x=>x?.sourceReportId)){if(job.tabularDelivery)fail('业务报表需已有核验CSV的逐表sourceReportId，不能跳过独立金额与范围核验');return request;}
@@ -121,7 +121,14 @@ export async function createDocuments(dataDir,job,requests,options={}){
  if(requests==null)return [];
  if(!Array.isArray(requests)||!requests.length)fail('documentRequests需要非空数组或null');
  const directory=await documentDirectory(dataDir,job.id),files=[];
- try{for(const originalRequest of requests){let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'?(job.prd?.auto?await producePrdPrototype(dataDir,job,request.content,options):!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes);if(request.format==='png')audit.generation=image?.provenance.provider??'explicit-html-screenshot';
+ try{for(const originalRequest of requests){
+ if(originalRequest.format==='csv'&&job.tabularDelivery){
+  text(originalRequest.title);text(originalRequest.purpose);
+  const {createVerifiedCsvArtifact}=await import('./verified-csv-artifact.js');
+  files.push(await createVerifiedCsvArtifact(dataDir,directory,job,originalRequest));
+  continue;
+ }
+ let request=await resolveDocumentRequest(dataDir,job,originalRequest);if(!documentFormats.includes(request.format))fail('不支持的格式；需安装并验证对应渲染器');text(request.title);text(request.purpose);const image=request.format==='png'?(job.prd?.auto?await producePrdPrototype(dataDir,job,request.content,options):!htmlImageRequested(job)?await generateNativeImage(dataDir,job,request.content,options):null):null;const native=!image&&typeof request.content==='object'?await encodeNative(dataDir,job,request):null;if(native)request=native.request;if(image)request={...request,imageGeneration:image.provenance};const bytes=image?.bytes??native?.bytes??await encode(request.format,text(request.content)),audit=await inspectDocumentBytes(request.format,bytes);if(request.format==='png')audit.generation=image?.provenance.provider??'explicit-html-screenshot';
  const {officePreview}=await import('./office-preview.js');const preview=await officePreview(bytes,request.format,directory);if(preview)audit.preview=preview;
  if(request.worksheetAudit){
   if(!native)await verifyWorkbookCells(bytes,parse(request.content).sheets);
