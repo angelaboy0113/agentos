@@ -121,6 +121,7 @@ test('login and password procedure questions bypass both credential intake modes
  }
  assert.ok(parseWebsiteCredentialMessage('请问可以帮我登录网站吗？账号：alice 密码：synthetic-only!'));
  assert.ok(parseWebsiteCredentialMessage('网页登录 账号 alice 密码 synthetic-only! 怎么继续'));
+ assert.equal(parseWebsiteCredentialMessage('账号 测试用户名 密码 测试值?').password,'测试值?');
  assert.equal(parseWebsiteCredentialMessage('alice / synthetic-only?',{allowLoose:true}).password,'synthetic-only?');
  assert.equal(parseWebsiteCredentialMessage('网页登录 账号：alice').invalid,true);
 });
