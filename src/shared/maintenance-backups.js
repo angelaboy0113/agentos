@@ -57,7 +57,7 @@ export function inactiveRecordFingerprint(group,value){
 export function maintenanceBusy(state,context={}){
  const inert=(group,key,value)=>{const expected=context.maintenanceInert?.[group]?.[key];return typeof expected==='string'&&expected===inactiveRecordFingerprint(group,value);};
  if((state.jobs??[]).some(j=>['queued','running','cancelling'].includes(j.status))||(state.conversations??[]).some(c=>['queued','thinking','decided','ready'].includes(c.status)))return true;
- if(context.reception?.running||context.controlReceipts?.pending?.size||(typeof context.adminUsageExports==='number'?context.adminUsageExports:context.adminUsageExports?.size))return true;
+ if(context.reception?.running||context.botReadPilot?.active.size||context.controlReceipts?.pending?.size||(typeof context.adminUsageExports==='number'?context.adminUsageExports:context.adminUsageExports?.size))return true;
  if(['reports','websiteEvidence','successStickers'].some(k=>context[k]?.workers?.size))return true;
  if(context.cards?.workers?.size&&[...context.cards.workers.keys()].some(k=>!state.cardMessages?.[k]||!inert('cardMessages',k,state.cardMessages[k])))return true;
  if(Object.entries(state.receptionInbox??{}).some(([key,e])=>!inert('receptionInbox',key,e)&&['queued','reminding','diagnosing'].includes(e.status))||Object.entries(state.recoveryEvents??{}).some(([key,e])=>!inert('recoveryEvents',key,e)&&['queued','diagnosing'].includes(e.status)))return true;

@@ -1,3 +1,5 @@
+import {readFile} from 'node:fs/promises';
+import { BotReadPilot, validateBotReadPilot } from './bot-read-pilot.js';
 import { MeetingPilot, loadMeetingPilot } from './meeting-pilot.js';
 import { screenshotAvailable } from '../shared/browser-tool-input.js';
 import { PrdWorkspace, loadPrdWorkspace } from './prd-workspace.js';
@@ -88,6 +90,11 @@ export async function createControlPlane(overrides = {}) {
   const isolated = new WebsiteBrowser(config.dataDir,undefined,authorizeBrowser);
   const context = { config, projects, agents, store, feishu, adminSessionToken: randomBytes(32).toString('base64url'),
     websiteBrowser: overrides.websiteBrowser ?? (browserMode === 'shared-chrome' ? routePrdWebsiteBrowser(new SharedChromeBrowser(authorizeBrowser),isolated) : isolated) };
+  if(process.env.AGENTOS_BOT_READ_PILOT_FILE){
+    if(config.feishu.transport!=='lark-cli')throw new Error('机器人只读试点需要飞书CLI');
+    const pilot=validateBotReadPilot(JSON.parse(await readFile(process.env.AGENTOS_BOT_READ_PILOT_FILE,'utf8')),{agents,projects});
+    context.botReadPilot=new BotReadPilot(pilot,{dataDir:config.dataDir,feishu});
+  }
   context.runnerConcurrency=overrides.runnerConcurrency??Number(process.env.AGENTOS_RUNNER_CONCURRENCY??3);
   if(!Number.isInteger(context.runnerConcurrency)||context.runnerConcurrency<1||context.runnerConcurrency>8)throw Error('Invalid global Runner concurrency');
   context.memoryAdmission=overrides.memoryAdmission??new MemoryAdmission(process.env.AGENTOS_MEMORY_ADMISSION_MIB?{treeBudgetMiB:Number(process.env.AGENTOS_MEMORY_ADMISSION_MIB)}:{});
@@ -159,11 +166,12 @@ export async function createControlPlane(overrides = {}) {
     conversations.start().catch((error) => console.error('[conversation-start]', error.message));
   });
   server.once('close', () => {
+    context.botReadPilot?.stop();
     context.memoryAdmission.stop?.();
     context.capacityRecoveryStopped=true;clearInterval(context.capacityRecoveryTimer);
     void Promise.allSettled([context.withdrawals.close(),context.deliveryMaintenance.close(),context.checkinQueue.close(),context.reception.close(),context.longNotices.close(),context.retention.stop(),context.backupMaintenance.stop(), conversations.stop(), cards.stop(), context.reports.close(),context.prd.publisher.close(),context.meetings?.close(),context.successStickers.close(),context.websiteEvidence.close(), context.remoteLoginQr.close(), context.websiteBrowser.close()]).then(()=>context.knowledge.close());
   });
-  return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers };
+  return { server, config, projects, agents, store, conversations, cards, reception:context.reception, successStickers:context.successStickers,botReadPilot:context.botReadPilot };
 }
 
 export async function repairStaleTerminalQuestionCards(context) {
@@ -306,7 +314,7 @@ async function route(context) {
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, adminUsageExports:context.adminUsageExports??0, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
-      conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running),
+      conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running||context.botReadPilot?.active.size),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {enabled:context.backupMaintenance.enabled??false,lastRun:context.backupMaintenance.lastRun},
       controlRequestProtocol: CONTROL_PROTOCOL, stateReadPolicy:'lazy-json-transaction-v2', stateProjectionPolicy:'detached-select-singleflight-v1',stateReads:store.readMetrics,memoryAdmission:context.memoryAdmission.check(),processMemory:{rssBytes:process.memoryUsage().rss,heapUsedBytes:process.memoryUsage().heapUsed,heapTotalBytes:process.memoryUsage().heapTotal,heapLimitBytes:getHeapStatistics().heap_size_limit,externalBytes:process.memoryUsage().external,arrayBuffersBytes:process.memoryUsage().arrayBuffers}, pendingControlRequests:context.controlReceipts.pending.size+(context.remoteLoginQr?.workers?.size??0), stateTransaction:store.lastTransaction??null,

@@ -65,7 +65,10 @@ export class EditedMentionWatcher {
           }
           this.seen.set(key,{hash,lastSeenAt:Date.now()});
         }
-        if(!this.stopped)this.baselined.add(chat);
+        if(!this.stopped){
+          await this.source.config.botReadPilot?.observe(rows,chat,this.source.config.profile);
+          this.baselined.add(chat);
+        }
       } catch(error) { failures.push({chat,code:/(?:230027|230073|99991672)/.exec(String(error?.message))?.[0]??null,reason:'消息补查不可用：请核对机器人读取群消息权限、群成员身份或接口返回；未切换用户身份。'}); }
     }
     for(const [key,value] of this.seen)if(Date.now()-value.lastSeenAt>this.lookbackMinutes*60000)this.seen.delete(key);

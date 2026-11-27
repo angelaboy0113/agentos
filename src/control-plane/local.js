@@ -45,6 +45,7 @@ async function main() {
     reception: app.reception.policy,
     receptionOwners: projects.humanIdentities?.[app.reception.policy.humanId]??{},
     editedMentions: (await loadConversationSettings(config.conversationFile)).editedMentions,
+    botReadPilot: app.botReadPilot,
     watchedChatIds: [...new Set([...Object.keys(projects.chatProjectMap ?? {}), ...Object.keys(projects.chatProfileProjectMap ?? {})])].filter(id=>!projects.retiredChatIds?.includes(id)),
     cliEntry: config.feishu.cliEntry,
     larkConfigFile: process.env.AGENTOS_LARK_CONFIG_FILE,
@@ -61,6 +62,7 @@ async function main() {
   const localRunners = createRunnerPool(localRunnerConfig);
   const runnerRunning = Promise.all(localRunners.map((runner) => runner.start()));
   const stop = () => {
+    app.botReadPilot?.stop();
     for (const { source } of eventSources) source.stop();
     for (const runner of localRunners) runner.stop();
     server.close();

@@ -36,6 +36,11 @@ const meetingPilotFile = await realpath(path.join(runtime, 'meeting-pilot.local.
   throw error;
 });
 if (meetingPilotFile && !inside(await realpath(runtime), meetingPilotFile)) throw Error('Meeting pilot configuration must stay inside its instance');
+const botReadPilotFile = await realpath(path.join(runtime, 'bot-read-pilot.local.json')).catch(error => {
+  if (error.code === 'ENOENT') return null;
+  throw error;
+});
+if (botReadPilotFile && !inside(await realpath(runtime), botReadPilotFile)) throw Error('Bot read pilot configuration must stay inside its instance');
 const projects = await loadProjects(path.join(configDir, 'projects.local.json'));
 const { agents } = await loadAgents(path.join(configDir, 'agents.local.json'));
 if (!Object.keys(agents).length) throw new Error('没有已发布并完成接入的系统助手，拒绝启动');
@@ -60,6 +65,7 @@ for (const key of Object.keys(process.env)) if (/^(AGENTOS_|FEISHU_|LARKSUITE_CL
 Object.assign(process.env, {
   ...officeEnvironment,
   ...(meetingPilotFile ? { AGENTOS_MEETING_PILOT_FILE: meetingPilotFile } : {}),
+  ...(botReadPilotFile ? { AGENTOS_BOT_READ_PILOT_FILE: botReadPilotFile } : {}),
   AGENTOS_ANALYSIS_ENGINE: analysisEngine,
   AGENTOS_RETENTION_DAYS: String(instance.retentionDays ?? 30), AGENTOS_ARCHIVE_HISTORY: instance.archiveHistory === true ? '1' : '0', AGENTOS_RUNTIME_DIR: runtime, AGENTOS_LOG_DIR: path.join(runtime, 'logs'),
   AGENTOS_HOST: '127.0.0.1', AGENTOS_PORT: String(instance.port),
