@@ -28,16 +28,34 @@ export async function loadMeetingPilot(config) {
   const value = JSON.parse(await readFile(file, 'utf8'));
   if (!value.enabled) return null;
   const origin = new URL(value.documentOrigin);
-  if (!/^[\w-]+$/.test(value.profile ?? '') || !/^oc_[A-Za-z0-9]+$/.test(value.chatId ?? '')
-    || !/^[\w-]+$/.test(value.projectId ?? '') || origin.origin !== value.documentOrigin
+  if (!/^oc_[A-Za-z0-9]+$/.test(value.chatId ?? '')
+    || (value.allSystemAssistants !== true && (!/^[\w-]+$/.test(value.profile ?? '') || !/^[\w-]+$/.test(value.projectId ?? '')))
+    || origin.origin !== value.documentOrigin
     || origin.protocol !== 'https:' || !/\.(?:feishu\.cn|larksuite\.com)$/.test(origin.hostname)) {
     throw Error('Invalid AgentOS meeting pilot settings');
   }
   return value;
 }
 
+export function meetingSettingsForAssistants(context, settings) {
+  if (settings.allSystemAssistants !== true) return [settings];
+  return Object.values(context.agents.agents ?? {})
+    .filter(agent => agent.systemAssistant && agent.profile && agent.appId
+      && (!agent.allowedChatIds || agent.allowedChatIds.includes(settings.chatId)))
+    .flatMap(({profile}) => {
+      const projectId = context.projects.chatProfileProjectMap?.[settings.chatId]?.[profile];
+      return projectId ? [{chatId:settings.chatId, documentOrigin:settings.documentOrigin, profile, projectId}] : [];
+    });
+}
+
 function command(text) {
-  const record = text.trim().match(/^(?:记录会议|入会记录)\s+(.+)$/);
+  const input = text.trim();
+  const numberOnly = input.match(/^会议号\s*[:：]?\s*([0-9\s]+)$/);
+  if (numberOnly) {
+    const number = numberOnly[1].replace(/\s/g, '');
+    return /^\d{9}$/.test(number) ? {number} : {invalid:true};
+  }
+  const record = input.match(/^(?:记录会议|入会记录)\s+(.+)$/);
   if (record) {
     const number = record[1].replace(/\s/g, '');
     if (/^\d{9}$/.test(number)) return {number};
@@ -48,7 +66,7 @@ function command(text) {
     } catch {}
     return {invalid:true};
   }
-  const publish = text.trim().match(/^发布会议初稿\s+(mtg-[0-9a-f]{16})$/);
+  const publish = input.match(/^发布会议初稿\s+(mtg-[0-9a-f]{16})$/);
   return publish && {publish:publish[1]};
 }
 

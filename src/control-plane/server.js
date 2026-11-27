@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import { BotReadPilot, validateBotReadPilot } from './bot-read-pilot.js';
-import { MeetingPilot, loadMeetingPilot } from './meeting-pilot.js';
+import { MeetingPilot, loadMeetingPilot, meetingSettingsForAssistants } from './meeting-pilot.js';
 import { screenshotAvailable } from '../shared/browser-tool-input.js';
 import { PrdWorkspace, loadPrdWorkspace } from './prd-workspace.js';
 import {RemoteLoginQr} from './remote-login-qr.js';
@@ -131,8 +131,16 @@ export async function createControlPlane(overrides = {}) {
   const meetingSettings = await loadMeetingPilot(config);
   if (meetingSettings) {
     if (!context.prd.chatIds.has(meetingSettings.chatId)) throw Error('Meeting pilot requires an existing PRD group');
-    context.meetings = new MeetingPilot(context,meetingSettings);
-    await context.meetings.ready;
+    const pilots = new Map(meetingSettingsForAssistants(context, meetingSettings)
+      .map(settings => [settings.profile, new MeetingPilot(context, settings)]));
+    if (!pilots.size) throw Error('Meeting pilot requires at least one group-bound system assistant');
+    await Promise.all([...pilots.values()].map(pilot => pilot.ready));
+    context.meetings = {
+      profiles: [...pilots.keys()],
+      handle: (event, options) => pilots.get(event.agent_profile)?.handle(event, options),
+      start: () => { for (const pilot of pilots.values()) pilot.start(); },
+      close: () => Promise.allSettled([...pilots.values()].map(pilot => pilot.close())),
+    };
   }
   context.withdrawals=new WithdrawalWatcher(context);
   const receptionPolicy=await loadReceptionPolicy(config.receptionFile);store.receptionPolicy=receptionPolicy;context.reception=new ReceptionService(context,receptionPolicy,overrides.receptionOptions);
@@ -314,6 +322,7 @@ async function route(context) {
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { ok: true, adminUsageExports:context.adminUsageExports??0, service: 'agentos-control-plane', conversationEngine: 'codex', conversationProtocol: 3,
+      meetingAssistants:context.meetings?.profiles ?? [],
       conversationScope: 'question-profile-project-v2',receptionProtocol:context.reception?.enabled?'durable-topic-reception-v1':'disabled',receptionBusy:Boolean(context.reception?.running||context.botReadPilot?.active.size),
       questionCards: context.conversations.questionCards, environmentAccessPolicy: 'scoped-read-auto-v2',
       investigationConvergence: 'evidence-progress-v1', stateStorage: 'bounded-context-json-v1', historyRetention: { ...context.retention.policy, lastRun: context.retention.lastRun }, backupMaintenance: {enabled:context.backupMaintenance.enabled??false,lastRun:context.backupMaintenance.lastRun},

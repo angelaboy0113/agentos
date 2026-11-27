@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { MeetingPilot } from '../src/control-plane/meeting-pilot.js';
+import { MeetingPilot, meetingSettingsForAssistants } from '../src/control-plane/meeting-pilot.js';
 import { createMeetingTransport, meetingError } from '../src/control-plane/meeting-transport.js';
 import { handleLarkCliEvent } from '../src/control-plane/server.js';
 
@@ -46,6 +46,22 @@ async function fixture(t, transport, model = {summarizeMeeting:async () => outpu
   return {pilot,make,context,clock};
 }
 
+test('all-assistant mode selects only assistants mapped and allowed in the meeting group', () => {
+  const context = {
+    agents:{agents:{
+      pilot:agent,
+      sales:{...agent,profile:'sales',appId:'cli_sales',allowedChatIds:['oc_pilot']},
+      other:{...agent,profile:'other',appId:'cli_other',allowedChatIds:['oc_other']},
+      unbound:{...agent,profile:'unbound',appId:'cli_unbound'},
+      internal:{profile:'internal',appId:'cli_internal'},
+    }},
+    projects:{chatProfileProjectMap:{oc_pilot:{pilot:'tpm',sales:'shop',other:'other',internal:'admin'}}},
+  };
+  const routes = meetingSettingsForAssistants(context, {...settings,allSystemAssistants:true});
+  assert.deepEqual(routes.map(({profile,projectId}) => [profile,projectId]), [['pilot','tpm'],['sales','shop']]);
+  assert.deepEqual(meetingSettingsForAssistants(context,settings),[settings]);
+});
+
 test('a new member joins once, resumes recorded pages on restart and publishes only the reviewed requirements', async t => {
   let joins = 0;
   const replies = [];
@@ -82,7 +98,7 @@ test('a new member joins once, resumes recorded pages on restart and publishes o
   const input = {...event,content:'记录会议 123 456 789'};
   assert.equal(await pilot.handle({...input,agent_profile:'other'},{agent,content:input.content}),null);
   const receive = () => handleLarkCliEvent(context,input);
-  const requests = await Promise.all([receive(),receive()]);
+  const requests = await Promise.all([receive(),handleLarkCliEvent(context,{...input,content:'会议号：123 456 789'})]);
   assert.deepEqual(requests.map(x => x.meetingPilot).sort(),['accepted','duplicate']);
   await Promise.all(pilot.inFlight.values());
   assert.equal(joins,1);
